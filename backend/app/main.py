@@ -1,10 +1,13 @@
-import logging
+# Actualización para app/main.py
+
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import time
 
 from app.api.v1 import auth, documents, search, admin, tenants
+from app.api.docs import router as docs_router  # Importar el router de documentación
 from app.core.config import settings
 from app.core.logging import setup_logging
 
@@ -12,11 +15,62 @@ from app.core.logging import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Crear aplicación FastAPI
+# Crear aplicación FastAPI con metadatos mejorados
 app = FastAPI(
     title=settings.SERVER_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    description="""
+    # Sistema de Gestión Documental con Búsqueda Semántica
+    
+    Esta API permite gestionar documentos, realizar búsquedas semánticas y chatear con tus documentos.
+    
+    ## Características principales:
+    
+    * **Gestión de documentos**: Sube, descarga, categoriza y elimina documentos
+    * **Búsqueda semántica**: Encuentra documentos por similitud conceptual
+    * **Procesamiento inteligente**: Extracción de texto, generación de resúmenes y sugerencia de etiquetas
+    * **Multi-tenant**: Aislamiento de datos por organización
+    * **Autenticación segura**: JWT para todas las operaciones
+    
+    Para más información, consulta el [repositorio del proyecto](https://github.com/tuorganizacion/doc-management).
+    """,
+    version="1.0.0",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url=None,  # Desactivamos la ruta por defecto de Swagger
+    redoc_url=None,  # Desactivamos la ruta por defecto de ReDoc
+    openapi_tags=[
+        {
+            "name": "auth",
+            "description": "Operaciones de autenticación y gestión de usuarios"
+        },
+        {
+            "name": "documents",
+            "description": "Gestión y procesamiento de documentos"
+        },
+        {
+            "name": "search",
+            "description": "Búsqueda semántica y consultas basadas en documentos"
+        },
+        {
+            "name": "chat",
+            "description": "Interacción conversacional con los documentos"
+        },
+        {
+            "name": "admin",
+            "description": "Operaciones administrativas (solo superusuarios)"
+        },
+        {
+            "name": "tenants",
+            "description": "Gestión de organizaciones (tenants)"
+        },
+        {
+            "name": "storage",
+            "description": "Operaciones de almacenamiento directo"
+        }
+    ]
 )
+
+# Configurar archivos estáticos (logos, favicons, etc.)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Configurar CORS
 if settings.BACKEND_CORS_ORIGINS:
@@ -50,6 +104,13 @@ async def log_requests(request: Request, call_next):
     )
     
     return response
+
+# Incluir router de documentación personalizada
+app.include_router(
+    docs_router,
+    prefix=settings.API_V1_STR,
+    tags=["documentation"]
+)
 
 # Rutas de la API v1
 app.include_router(
