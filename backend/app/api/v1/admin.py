@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Optional, Any
+from typing import Dict, List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session
