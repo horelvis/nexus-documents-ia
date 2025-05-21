@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-
+from fastapi.openapi.utils import get_openapi
 import time
 from app.api.v1 import auth, documents, search, admin, tenants
 from app.api.docs import router as docs_router  # Importar el router de documentación
@@ -69,6 +69,24 @@ app = FastAPI(
         }
     ]
 )
+
+# Definir una función personalizada para generar el esquema OpenAPI
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    # Establecer explícitamente la versión de OpenAPI
+    openapi_schema["openapi"] = "3.0.2"
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+# Asignar la función personalizada
+app.openapi = custom_openapi
 
 # Configurar archivos estáticos (logos, favicons, etc.)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
