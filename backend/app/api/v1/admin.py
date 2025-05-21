@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -5,7 +6,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.api.dependencies import get_current_active_superuser
-from app.db.database import get_db
+from app.db.database import SessionLocal, get_db
 from app.db.models import User, Tenant, Document
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.auth_service import AuthService
@@ -290,3 +291,97 @@ async def initialize_ollama_model(
             status_code=500,
             detail=f"Error al interactuar con Ollama: {str(e)}"
         )
+
+@router.get("/stats/document-activity", response_model=Dict[str, Any])
+def get_document_activity_stats(
+    time_period_days: int = Query(30, ge=1, le=365),
+    current_user = Depends(get_current_admin_user)
+):
+    """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
+    db = SessionLocal()
+    try:
+        tenant_id = str(current_user.tenant_id)
+        cutoff_date = datetime.now() - timedelta(days=time_period_days)
+        
+        # Estadísticas generales
+        general_stats = db.query(
+            func.count(document_views.c.id).label("total_views"),
+            func.count(func.distinct(document_views.c.document_id)).label("documents_viewed"),
+            func.count(func.distinct(document_views.c.user_id)).label("active_users")
+        ).filter(
+            document_views.c.tenant_id == tenant_id,
+            document_views.c.viewed_at >= cutoff_date
+        ).first()
+        
+        # Formatos más populares
+        top_formats = db.query(
+            Document.format,
+            func.count(document_views.c.id).label("view_count")
+        ).join(
+            document_views, Document.id == document_views.c.document_id
+        ).filter(
+            document_views.c.tenant_id == tenant_id,
+            document_views.c.viewed_at >= cutoff_date
+        ).group_by(
+            Document.format
+        ).order_by(
+            desc("view_count")
+        ).limit(5).all()
+        
+        # Usuarios más activos
+        top_users = db.query(
+            User.id,
+            User.email,
+            User.name,
+            func.count(document_views.c.id).label("view_count")
+        ).join(
+            document_views, User.id == document_views.c.user_id
+        ).filter(
+            document_views.c.tenant_id == tenant_id,
+            document_views.c.viewed_at >= cutoff_date
+        ).group_by(
+            User.id
+        ).order_by(
+            desc("view_count")
+        ).limit(5).all()
+        
+        # Documentos más consultados
+        top_queried_docs = db.query(
+            Document.id,
+            Document.title,
+            DocumentMetrics.query_count
+        ).join(
+            DocumentMetrics, Document.id == DocumentMetrics.document_id
+        ).filter(
+            Document.tenant_id == tenant_id,
+            DocumentMetrics.query_count > 0,
+            Document.is_deleted == False
+        ).order_by(
+            desc(DocumentMetrics.query_count)
+        ).limit(5).all()
+        
+        # Formatear resultados
+        return {
+            "general": {
+                "total_views": general_stats.total_views if general_stats else 0,
+                "documents_viewed": general_stats.documents_viewed if general_stats else 0,
+                "active_users": general_stats.active_users if general_stats else 0,
+            },
+            "top_formats": [{"format": f[0], "count": f[1]} for f in top_formats],
+            "top_users": [{
+                "id": u[0],
+                "email": u[1],
+                "name": u[2],
+                "view_count": u[3]
+            } for u in top_users],
+            "top_queried_docs": [{
+                "id": d[0],
+                "title": d[1],
+                "query_count": d[2]
+            } for d in top_queried_docs]
+        }
+    except Exception as e:
+        logger.error(f"Error al obtener estadísticas de actividad: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+    finally:
+        db.close()

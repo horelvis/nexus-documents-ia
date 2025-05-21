@@ -113,3 +113,4 @@ class UploadRequest(BaseModel):
     filename: str
     content_type: str
     size: int
+
