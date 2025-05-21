@@ -18,6 +18,18 @@ document_tags = Table(
     Column("tag_id", Integer, ForeignKey("tags.id"))
 )
 
+# Tabla de asociación para las lecturas de documentos
+document_views = Table(
+    "document_views",
+    Base.metadata,
+    Column("id", String, primary_key=True, default=lambda: str(uuid.uuid4())),
+    Column("user_id", String, ForeignKey("users.id"), nullable=False),
+    Column("document_id", String, ForeignKey("documents.id"), nullable=False),
+    Column("viewed_at", DateTime, default=func.now(), nullable=False),
+    Column("view_duration_seconds", Integer, nullable=True),
+    Column("is_complete_view", Boolean, default=False),
+    Column("tenant_id", String, ForeignKey("tenants.id"), nullable=False),
+)
 
 class User(Base):
     __tablename__ = "users"
@@ -144,19 +156,6 @@ class Tag(Base):
     # Relaciones
     tenant = relationship("Tenant")
     documents = relationship("Document", secondary=document_tags, back_populates="tags")
-
-# Tabla de asociación para las lecturas de documentos
-document_views = Table(
-    "document_views",
-    Base.metadata,
-    Column("id", String, primary_key=True, default=lambda: str(uuid.uuid4())),
-    Column("user_id", String, ForeignKey("users.id"), nullable=False),
-    Column("document_id", String, ForeignKey("documents.id"), nullable=False),
-    Column("viewed_at", DateTime, default=func.now(), nullable=False),
-    Column("view_duration_seconds", Integer, nullable=True),
-    Column("is_complete_view", Boolean, default=False),
-    Column("tenant_id", String, ForeignKey("tenants.id"), nullable=False),
-)
 
 
 # Tabla para métricas de documentos
