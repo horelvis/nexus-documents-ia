@@ -10,8 +10,6 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 
-Base = declarative_base()
-
 # Tabla de asociación para relaciones many-to-many
 document_tags = Table(
     "document_tags",
