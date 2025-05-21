@@ -5,7 +5,8 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from app.db.session import SessionLocal
 from app.db.models import Document, document_views, User
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, desc
+
 import logging
 
 logger = logging.getLogger(__name__)

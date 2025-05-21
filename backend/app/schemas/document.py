@@ -3,7 +3,7 @@ from typing import List, Optional, Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-
+from app.core.config import settings  # Añadir importación
 
 # Esquemas Base
 class TagBase(BaseModel):
@@ -112,5 +112,14 @@ class SignedUrlResponse(BaseModel):
 class UploadRequest(BaseModel):
     filename: str
     content_type: str
-    size: int
+    size: int = Field(..., gt=0, lt=settings.MAX_UPLOAD_SIZE)
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "filename": "example.pdf",
+                "content_type": "application/pdf",
+                "size": 1024000
+            }
+        }
 

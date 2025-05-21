@@ -91,7 +91,21 @@ async def download_openapi_spec(
         routes=request.app.routes,
     )
     
-    from fastapi.responses import JSONResponse
+    # Filtrar información sensible
+    # Eliminar rutas internas o endpoints sensibles que no deberían exponerse
+    if "paths" in openapi_schema:
+        # Filtrar rutas con patrones específicos
+        filtered_paths = {}
+        sensitive_patterns = ["/internal/", "/health", "/metrics"]
+        
+        for path, methods in openapi_schema["paths"].items():
+            # Omitir rutas sensibles
+            if any(pattern in path for pattern in sensitive_patterns):
+                continue
+            filtered_paths[path] = methods
+        
+        openapi_schema["paths"] = filtered_paths
+    
     resp = JSONResponse(content=openapi_schema)
     resp.headers["Content-Disposition"] = "attachment; filename=openapi-schema.json"
     return resp

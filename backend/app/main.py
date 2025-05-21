@@ -1,11 +1,12 @@
 # Actualización para app/main.py
 
+import logging
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-import time
 
+import time
 from app.api.v1 import auth, documents, search, admin, tenants
 from app.api.docs import router as docs_router  # Importar el router de documentación
 from app.core.config import settings

@@ -37,7 +37,7 @@ class VectorService:
         
         # Inicializar la colección si no existe
         self._init_collection()
-    
+
     def _init_collection(self):
         """Inicializa la colección en Qdrant si no existe"""
         try:
@@ -57,11 +57,30 @@ class VectorService:
                 logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente")
             else:
                 logger.info(f"Usando colección Qdrant existente '{self.collection_name}'")
-                
+                    
+        except UnexpectedResponse as e:
+            # Puede ser un error porque la colección no existe
+            if "Collection not found" in str(e):
+                try:
+                    logger.warning(f"Colección no encontrada, intentando crearla: {str(e)}")
+                    self.client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=models.VectorParams(
+                            size=self.embedding_dim,
+                            distance=models.Distance.COSINE
+                        )
+                    )
+                    logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente")
+                except Exception as inner_e:
+                    logger.exception(f"Error al crear colección Qdrant: {str(inner_e)}")
+                    raise
+            else:
+                logger.exception(f"Error inesperado con Qdrant: {str(e)}")
+                raise
         except Exception as e:
             logger.exception(f"Error inicializando colección Qdrant: {str(e)}")
             raise
-    
+
     def add_document_vectors(
         self, 
         doc_id: str, 

@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional, Set
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import Document, DocumentChunk
+from app.services.document_tracking_service import DocumentTrackingService
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
 
@@ -167,13 +168,25 @@ class SearchService:
             if not search_results:
                 return {"answer": "No encontré información relevante para responder a tu pregunta en los documentos disponibles."}
             
-            # Extraer texto de los chunks relevantes para formar el contexto
+           # Extraer texto de los chunks relevantes para formar el contexto
             context_chunks = []
+            document_ids_used = set()  # Conjunto para rastrear documentos usados
             
             for result in search_results:
                 chunk_text = result['metadata'].get('chunk_text', '')
+                doc_id = result['metadata'].get('doc_id')
+                
                 if chunk_text:
                     context_chunks.append(chunk_text)
+                    
+                # Registrar el documento usado si tiene ID
+                if doc_id:
+                    document_ids_used.add(doc_id)
+            
+            # Registrar las consultas para cada documento utilizado
+            tracking_service = DocumentTrackingService(tenant_id=self.tenant_id, user_id=None)
+            for doc_id in document_ids_used:
+                tracking_service.record_document_query(doc_id)
             
             # Unir el contexto
             context = "\n\n".join(context_chunks)
@@ -182,7 +195,7 @@ class SearchService:
             answer = self.llm_service.answer_question(question, context)
             
             return {"answer": answer}
-            
+
         except Exception as e:
             logger.exception(f"Error answering question: {str(e)}")
             return {"answer": f"Lo siento, ocurrió un error al procesar tu pregunta: {str(e)}"}

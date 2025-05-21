@@ -3,6 +3,7 @@ from typing import List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func, desc  # Añadir importaciones necesarias
 from uuid import UUID
 
 from app.api.dependencies import get_current_active_superuser
@@ -11,6 +12,7 @@ from app.db.models import User, Tenant, Document
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.auth_service import AuthService
 from app.services.document_service import DocumentService
+from app.db.models import document_views, Document, DocumentMetrics, User
 
 router = APIRouter()
 
@@ -293,9 +295,9 @@ async def initialize_ollama_model(
         )
 
 @router.get("/stats/document-activity", response_model=Dict[str, Any])
-def get_document_activity_stats(
+async def get_document_activity_stats(
     time_period_days: int = Query(30, ge=1, le=365),
-    current_user = Depends(get_current_admin_user)
+    current_user = Depends(get_current_active_superuser)
 ):
     """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
     db = SessionLocal()

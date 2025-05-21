@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from app.services.document_insights_service import DocumentInsightsService
 from app.db.models import Document, DocumentMetrics, User, Tenant
 from datetime import datetime, timedelta
-
+from sqlalchemy.sql import func, desc  # Añadir importaciones necesarias
 # Fixtures
 @pytest.fixture
 def mock_db_session():

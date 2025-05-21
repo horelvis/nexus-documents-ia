@@ -2,9 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from traitlets import Float
-
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -117,7 +115,7 @@ class Document(Base):
         # Factor de recencia: favorece documentos vistos recientemente
         recency_factor = 1.0
         if self.metrics.last_viewed_at:
-            days_since_view = (func.now() - self.metrics.last_viewed_at).days
+            days_since_view = (datetime.now() - self.metrics.last_viewed_at).days
             if days_since_view < 30:  # Documentos vistos en el último mes
                 recency_factor = 1 + ((30 - days_since_view) / 30) * recency_weight
         
@@ -162,13 +160,14 @@ document_views = Table(
     Column("tenant_id", String, ForeignKey("tenants.id"), nullable=False),
 )
 
+
 # Tabla para métricas de documentos
 class DocumentMetrics(Base):
     __tablename__ = "document_metrics"
     
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
-    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     
     view_count = Column(Integer, default=0)
     download_count = Column(Integer, default=0)

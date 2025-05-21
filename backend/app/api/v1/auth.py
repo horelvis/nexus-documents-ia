@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.post("/login/access-token", response_model=Token)
-def login_access_token(
+async def login_access_token(
     db: Session = Depends(get_db),
     form_data: OAuth2PasswordRequestForm = Depends()
 ) -> Any:
@@ -51,7 +51,7 @@ def login_access_token(
 
 
 @router.post("/register", response_model=User)
-def register_user(
+async def register_user(
     user_in: UserCreate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -69,7 +69,7 @@ def register_user(
 
 
 @router.get("/me", response_model=User)
-def read_users_me(
+async def read_users_me(
     current_user = Depends(AuthService.get_current_user),
 ) -> Any:
     """
