@@ -7,7 +7,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
-    curl \  # Añadido curl para healthchecks
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Verificar que uvicorn está instalado
 RUN pip show uvicorn || pip install uvicorn
+
 
 # Copiar código fuente
 COPY . .
