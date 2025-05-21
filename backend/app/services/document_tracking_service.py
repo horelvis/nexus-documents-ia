@@ -1,7 +1,7 @@
 # app/services/document_tracking_service.py
 
+from app.db.database import SessionLocal
 from sqlalchemy.sql import func
-from app.db.session import SessionLocal
 from app.db.models import Document, document_views, DocumentMetrics
 from datetime import datetime
 import uuid
