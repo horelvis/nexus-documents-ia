@@ -1,4 +1,5 @@
 import os
+from app.db.base_class import Base
 import pytest
 from typing import Dict, Generator
 from fastapi.testclient import TestClient
@@ -8,7 +9,7 @@ import uuid
 from datetime import datetime
 
 from app.main import app
-from app.db.database import Base, get_db
+from app.db.database import  get_db
 from app.core.security import get_password_hash
 from app.db.models import User, Tenant, Document, Tag, DocumentChunk
 from app.services.auth_service import AuthService
