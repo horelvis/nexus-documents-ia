@@ -109,12 +109,12 @@ run_with_spinner() {
     
     # Ejecutar comando en background
     eval "$command" > "$log_file" 2>&1 &
-    local pid=$!
+    pid=$!
     
     # Mostrar spinner mientras se ejecuta
-    local i=0
+    i=0
     while kill -0 $pid 2>/dev/null; do
-        local spin_char="${SPINNER:$((i%10)):1}"
+        spin_char="${SPINNER:$((i%10)):1}"
         printf "${YELLOW}[%s]${NC}" "$spin_char"
         sleep 0.1
         printf "\b\b\b"
@@ -123,7 +123,7 @@ run_with_spinner() {
     
     # Esperar a que termine y obtener código de salida
     wait $pid
-    local exit_code=$?
+    exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         printf "${GREEN}%s${NC}\n" "$CHECK"
