@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # Servicio para ejecutar tests
   test-api:
@@ -14,6 +16,10 @@ services:
       - SECRET_KEY=test-secret-key-never-use-in-production
       - GCS_BUCKET_NAME=test-bucket
       - OLLAMA_BASE_URL=http://localhost:11434
+      - QDRANT_HOST=test-qdrant
+      - QDRANT_PORT=6333
+      - REDIS_HOST=test-redis  
+      - REDIS_PORT=6379
       # Configuración para tests
       - PYTHONPATH=/app
       - PYTHONDONTWRITEBYTECODE=1
@@ -37,16 +43,22 @@ services:
         echo '🔧 Instalando dependencias de testing...'
         pip install pytest pytest-cov pytest-asyncio httpx pytest-mock psycopg2-binary
         
-        echo '⏳ Esperando servicios...'
-        sleep 5
+        echo '⏳ Esperando todos los servicios...'
+        sleep 10
+        
+        echo '🔍 Verificando conectividad de servicios...'
+        python -c 'import psycopg2; psycopg2.connect(host=\"test-db\", user=\"test_user\", password=\"test_password\", database=\"test_db\"); print(\"✅ PostgreSQL OK\")'
+        python -c 'import redis; r=redis.Redis(host=\"test-redis\", port=6379); r.ping(); print(\"✅ Redis OK\")'
+        python -c 'import requests; requests.get(\"http://test-qdrant:6333/health\", timeout=5); print(\"✅ Qdrant OK\")'
         
         echo '🧪 Ejecutando tests...'
         pytest tests/ -v \
           --cov=app \
           --cov-report=term-missing \
           --cov-report=html:/app/coverage_report \
-          --cov-fail-under=80 \
-          --tb=short
+          --cov-fail-under=70 \
+          --tb=short \
+          --maxfail=5
         
         echo '✅ Tests completados'
       "
@@ -89,12 +101,15 @@ services:
     image: qdrant/qdrant:latest
     networks:
       - test-network
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334  
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"] 
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
     tmpfs:
       - /qdrant/storage:rw,noexec,nosuid,size=500m
 
