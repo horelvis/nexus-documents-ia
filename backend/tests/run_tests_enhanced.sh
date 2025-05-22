@@ -69,8 +69,6 @@ show_header() {
     echo "│  Uso: ./run_tests_enhanced.sh [--simple|-s]                                 │"
     echo "╰──────────────────────────────────────────────────────────────────────────────╯"
     echo -e "${NC}"
-}────────────────────────────────────────────────────────────────╯\n"
-    printf "${NC}\n"
 }
 
 # Función para mostrar progreso visual
