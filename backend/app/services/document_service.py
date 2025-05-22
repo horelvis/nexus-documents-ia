@@ -10,10 +10,12 @@ from docx import Document as DocxDocument
 import csv
 import openpyxl
 import chardet
+from sqlalchemy.orm import Session # Added import
 
 from app.core.config import settings
 from app.db.models import Document, DocumentChunk, Tag
 from app.db.database import get_db
+from app.schemas.enums import IndexingStatus # Import the new Enum
 from app.services.storage_service import StorageService
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
@@ -37,149 +39,221 @@ class DocumentService:
         self.storage_service = StorageService(tenant_id)
         self.embedding_service = EmbeddingService(tenant_id)
         self.llm_service = LLMService()
+
+    async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]: # Corrected return type
+        """
+        Validates the uploaded file, checks its extension and size.
+        Returns the file extension, its contents as bytes, and its size.
+        """
+        if not file:
+            raise HTTPException(status_code=400, detail="Archivo no proporcionado")
+
+        contents = await file.read()
+        await file.seek(0) 
+
+        file_size = len(contents)
+        file_ext = os.path.splitext(filename)[1][1:].lower() if "." in filename else ""
+
+        if not file_ext or file_ext not in settings.ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tipo de archivo no permitido. Permitidos: {', '.join(settings.ALLOWED_EXTENSIONS)}"
+            )
+        
+        if file_size == 0:
+             raise HTTPException(status_code=400, detail="El archivo está vacío.")
+
+        if file_size > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tamaño de archivo excede el límite de {settings.MAX_UPLOAD_SIZE // (1024*1024)}MB"
+            )
+        
+        return file_ext, contents, file_size
+
+    def _create_document_record(
+        self, 
+        db: Session, 
+        title: str, 
+        description: Optional[str], 
+        filename: str, 
+        file_ext: str, 
+        file_size: int, 
+        tags: Optional[List[str]]
+    ) -> Document:
+        """
+        Creates the Document ORM object, generates doc_id, constructs file_path,
+        and handles tags. Adds to session but does not commit.
+        """
+        doc_id = str(uuid.uuid4())
+        file_path = f"documents/{doc_id}/{filename}"
+
+        db_document = Document(
+            id=doc_id,
+            title=title,
+            description=description or "",
+            filename=filename,
+            file_path=file_path,
+            file_type=file_ext,
+            file_size=file_size,
+            tenant_id=self.tenant_id,
+            created_by=self.user_id,
+            indexed=IndexingStatus.PROCESSING  # Use Enum here
+        )
+
+        if tags:
+            for tag_name in tags:
+                if tag_name:
+                    tag = db.query(Tag).filter(
+                        Tag.name == tag_name,
+                        Tag.tenant_id == self.tenant_id
+                    ).first()
+                    if not tag:
+                        tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                        db.add(tag)
+                        # Flushing here is optional if tag ID isn't immediately needed
+                        # or if cascading relationships handle it.
+                        # For simplicity, let's assume we might want tag.id for something later,
+                        # or to ensure it exists before associating.
+                        db.flush() 
+                    db_document.tags.append(tag)
+        
+        db.add(db_document)
+        db.flush() # Flush to get db_document.id if needed before commit, and to process tags.
+        db.refresh(db_document) # Refresh to get all populated fields, including relationships.
+        return db_document
+
+    def _upload_file_to_storage(
+        self, 
+        file_contents: bytes, 
+        file_path: str, 
+        doc_id: str, 
+        title: str, 
+        file_ext: str  # Changed from content_type to file_ext for consistency
+    ):
+        """
+        Uploads the file content to the storage service.
+        """
+        file_obj = io.BytesIO(file_contents)
+        storage_metadata = {
+            "doc_id": doc_id,
+            "title": title,
+            "content_type": f"application/{file_ext}" # Construct content_type here
+        }
+        
+        upload_success = self.storage_service.upload_file(
+            file=file_obj,
+            object_name=file_path,
+            metadata=storage_metadata
+        )
+        
+        if not upload_success:
+            # This generic exception will be caught by the main process_document handler
+            raise Exception("Failed to store document file in cloud storage.")
+
+    def _extract_and_index_text(
+        self, 
+        db: Session, 
+        db_document: Document, 
+        file_contents: bytes, 
+        file_ext: str, 
+        title: str # title is part of db_document, but passed for consistency if metadata needs it
+    ):
+        """
+        Extracts text, creates chunks, generates embeddings, and updates 
+        the document's indexed status. Adds to session but does not commit.
+        """
+        file_obj_for_text = io.BytesIO(file_contents)
+        document_text = self._extract_text(file_obj_for_text, file_ext)
+        
+        if document_text:
+            chunks_data = self.embedding_service.chunk_text(document_text)
+            for i, chunk_data in enumerate(chunks_data):
+                chunk = DocumentChunk(
+                    document_id=db_document.id, # Use ID from db_document
+                    chunk_index=i,
+                    content=chunk_data["text"]
+                )
+                db.add(chunk)
+            
+            # Ensure all chunks are flushed to get their IDs if needed by add_document, though typically not.
+            db.flush() 
+
+            indexing_success = self.embedding_service.add_document(
+                doc_id=str(db_document.id), # Ensure it's a string
+                text=document_text,
+                metadata={
+                    "doc_id": str(db_document.id),
+                    "title": title, # or db_document.title
+                    "file_type": file_ext, # or db_document.file_type
+                    "tenant_id": self.tenant_id
+                }
+            )
+            db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR # Use Enum here
+        else:
+            db_document.indexed = IndexingStatus.INDEXING_ERROR # Use Enum here
+        
+        # The calling function (process_document) will handle db.commit()
     
     async def process_document(
         self, 
+        db: Session, 
         file: UploadFile, 
         title: str,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Procesa un documento: lo almacena, extrae texto, genera embeddings y lo indexa.
-        
-        Args:
-            file: Objeto de archivo
-            title: Título del documento
-            description: Descripción del documento
-            tags: Lista de etiquetas
-            
-        Returns:
-            Información del documento procesado
+        Procesa un documento: lo valida, crea el registro en BD, lo almacena en GCS, 
+        extrae texto, genera embeddings y lo indexa.
         """
-        db = next(get_db())
-        
         try:
-            # Validar el archivo
-            if not file:
-                raise HTTPException(status_code=400, detail="Archivo no proporcionado")
-            
             filename = file.filename
-            file_size = 0  # Se calculará después
-            
-            # Obtener el tipo de archivo
-            file_ext = os.path.splitext(filename)[1][1:].lower() if "." in filename else ""
-            if not file_ext or file_ext not in settings.ALLOWED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Tipo de archivo no permitido. Permitidos: {', '.join(settings.ALLOWED_EXTENSIONS)}"
-                )
-            
-            # Generar ID único para el documento
-            doc_id = str(uuid.uuid4())
-            
-            # Definir ruta en el almacenamiento
-            file_path = f"documents/{doc_id}/{filename}"
-            
-            # Leer contenido del archivo para procesamiento
-            contents = await file.read()
-            file_size = len(contents)
-            
-            if file_size > settings.MAX_UPLOAD_SIZE:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Tamaño de archivo excede el límite de {settings.MAX_UPLOAD_SIZE // (1024*1024)}MB"
-                )
-            
-            # Crear registro en la base de datos
-            db_document = Document(
-                id=doc_id,
+            # 1. Validate file
+            file_ext, file_contents, file_size = await self._validate_file(file, filename)
+
+            # 2. Create document record in DB (without committing yet)
+            # Note: _create_document_record is synchronous, which is fine as it's CPU-bound (UUID, ORM object creation)
+            # and the db.flush() is an I/O operation but typically very fast within a transaction.
+            db_document = self._create_document_record(
+                db=db,
                 title=title,
-                description=description or "",
+                description=description,
                 filename=filename,
-                file_path=file_path,
-                file_type=file_ext,
+                file_ext=file_ext,
                 file_size=file_size,
-                tenant_id=self.tenant_id,
-                created_by=self.user_id,
-                indexed=0  # No indexado aún
+                tags=tags
             )
             
-            # Añadir etiquetas
-            if tags:
-                for tag_name in tags:
-                    if tag_name:
-                        # Buscar etiqueta existente o crear nueva
-                        tag = db.query(Tag).filter(
-                            Tag.name == tag_name,
-                            Tag.tenant_id == self.tenant_id
-                        ).first()
-                        
-                        if not tag:
-                            tag = Tag(name=tag_name, tenant_id=self.tenant_id)
-                            db.add(tag)
-                            db.flush()  # Para obtener el ID
-                        
-                        db_document.tags.append(tag)
+            # Use properties from db_document for consistency
+            doc_id_str = str(db_document.id)
+            file_path_str = db_document.file_path
+
+            # 3. Upload file to storage
+            # _upload_file_to_storage is synchronous (io.BytesIO is memory ops, storage_service.upload might be async if it used httpx.AsyncClient, but example implies it's sync)
+            self._upload_file_to_storage(
+                file_contents=file_contents,
+                file_path=file_path_str,
+                doc_id=doc_id_str,
+                title=db_document.title, # Use title from db_document
+                file_ext=db_document.file_type # Use file_type from db_document
+            )
+
+            # 4. Extract text and index (updates db_document.indexed, adds chunks to session)
+            # _extract_and_index_text is synchronous
+            self._extract_and_index_text(
+                db=db,
+                db_document=db_document,
+                file_contents=file_contents,
+                file_ext=db_document.file_type, # Use file_type from db_document
+                title=db_document.title # Use title from db_document
+            )
             
-            db.add(db_document)
+            # 5. Commit all DB changes
             db.commit()
-            db.refresh(db_document)
+            db.refresh(db_document) # Refresh to get final state after commit (e.g. updated_at)
             
-            # Subir archivo al almacenamiento
-            file_obj = io.BytesIO(contents)
-            storage_metadata = {
-                "doc_id": doc_id,
-                "title": title,
-                "content_type": f"application/{file_ext}"
-            }
-            
-            upload_success = self.storage_service.upload_file(
-                file=file_obj,
-                object_name=file_path,
-                metadata=storage_metadata
-            )
-            
-            if not upload_success:
-                raise Exception("Failed to store document file")
-            
-            # Extraer texto del documento
-            file_obj.seek(0)  # Rebobinar para lectura
-            document_text = self._extract_text(file_obj, file_ext)
-            
-            # Actualizar documento con estado de indexación
-            if document_text:
-                # Dividir en chunks y guardar
-                chunks_data = self.embedding_service.chunk_text(document_text)
-                
-                for i, chunk_data in enumerate(chunks_data):
-                    chunk = DocumentChunk(
-                        document_id=doc_id,
-                        chunk_index=i,
-                        content=chunk_data["text"]
-                    )
-                    db.add(chunk)
-                
-                # Generar embeddings e indexar
-                indexing_success = self.embedding_service.add_document(
-                    doc_id=doc_id,
-                    text=document_text,
-                    metadata={
-                        "doc_id": doc_id,
-                        "title": title,
-                        "file_type": file_ext,
-                        "tenant_id": self.tenant_id
-                    }
-                )
-                
-                # Actualizar estado de indexación
-                db_document.indexed = 1 if indexing_success else 2  # 1: indexado, 2: error
-                db.commit()
-            else:
-                db_document.indexed = 2  # Error: no se pudo extraer texto
-                db.commit()
-            
-            # Formatear respuesta
+            # 6. Format and return response
             return {
                 "id": str(db_document.id),
                 "title": db_document.title,
@@ -189,16 +263,17 @@ class DocumentService:
                 "file_size": db_document.file_size,
                 "indexed": db_document.indexed,
                 "created_at": db_document.created_at.isoformat(),
-                "tags": [tag.name for tag in db_document.tags]
+                "tags": [tag.name for tag in db_document.tags] # Assuming tags are loaded by refresh
             }
             
-        except HTTPException as http_exc:
+        except HTTPException: # Re-raise HTTPException directly
             db.rollback()
-            raise http_exc
-        except Exception as e:
+            raise
+        except Exception as e: # Catch other exceptions, log and raise a generic 500
             db.rollback()
-            logger.exception(f"Error processing document: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+            logger.exception(f"Error processing document (orchestration): {str(e)}")
+            # Use a more specific detail if possible, or the generic one from previous refactoring
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the document.")
     
     def _extract_text(self, file: BinaryIO, file_type: str) -> str:
         """
@@ -316,6 +391,7 @@ class DocumentService:
     
     def get_documents(
         self, 
+        db: "Session", # Added db: Session
         page: int = 1, 
         per_page: int = 10, 
         tags: List[str] = None, 
@@ -326,6 +402,7 @@ class DocumentService:
         Obtiene lista paginada de documentos con filtros opcionales.
         
         Args:
+            db: SQLAlchemy Session
             page: Número de página
             per_page: Documentos por página
             tags: Lista de etiquetas para filtrar
@@ -335,7 +412,7 @@ class DocumentService:
         Returns:
             Diccionario con documentos y metadatos de paginación
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             query = db.query(Document).filter(Document.tenant_id == self.tenant_id)
@@ -350,14 +427,16 @@ class DocumentService:
                     from_date = datetime.datetime.fromisoformat(date_from)
                     query = query.filter(Document.created_at >= from_date)
                 except ValueError:
-                    logger.warning(f"Invalid date_from format: {date_from}")
+                    # logger.warning(f"Invalid date_from format: {date_from}")
+                    raise HTTPException(status_code=400, detail="Invalid date format provided for 'date_from'. Please use ISO format.")
             
             if date_to:
                 try:
                     to_date = datetime.datetime.fromisoformat(date_to)
                     query = query.filter(Document.created_at <= to_date)
                 except ValueError:
-                    logger.warning(f"Invalid date_to format: {date_to}")
+                    # logger.warning(f"Invalid date_to format: {date_to}")
+                    raise HTTPException(status_code=400, detail="Invalid date format provided for 'date_to'. Please use ISO format.")
             
             # Contar total
             total = query.count()
@@ -396,19 +475,20 @@ class DocumentService:
             
         except Exception as e:
             logger.exception(f"Error getting documents: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving documents.")
     
-    def get_document(self, doc_id: str) -> Dict[str, Any]:
+    def get_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Obtiene información detallada de un documento.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             
         Returns:
             Diccionario con información del documento
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -456,19 +536,20 @@ class DocumentService:
             raise
         except Exception as e:
             logger.exception(f"Error getting document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error retrieving document: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving the document.")
     
-    def delete_document(self, doc_id: str) -> Dict[str, Any]:
+    def delete_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Elimina un documento y todos sus datos asociados.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             
         Returns:
             Mensaje de confirmación
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -496,19 +577,20 @@ class DocumentService:
         except Exception as e:
             db.rollback()
             logger.exception(f"Error deleting document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the document.")
     
-    def generate_summary(self, doc_id: str) -> Dict[str, str]:
+    def generate_summary(self, db: "Session", doc_id: str) -> Dict[str, str]: # Added db: Session
         """
         Genera un resumen del documento utilizando el LLM.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             
         Returns:
             Texto del resumen
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             # Verificar acceso al documento
@@ -547,20 +629,21 @@ class DocumentService:
             raise
         except Exception as e:
             logger.exception(f"Error generating summary for document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error generating summary: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the summary.")
     
-    def add_tag(self, doc_id: str, tag_name: str) -> Dict[str, str]:
+    def add_tag(self, db: "Session", doc_id: str, tag_name: str) -> Dict[str, str]: # Added db: Session
         """
         Añade una etiqueta a un documento.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             tag_name: Nombre de la etiqueta
             
         Returns:
             Mensaje de confirmación
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -597,20 +680,21 @@ class DocumentService:
         except Exception as e:
             db.rollback()
             logger.exception(f"Error adding tag to document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error adding tag: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while adding the tag.")
     
-    def remove_tag(self, doc_id: str, tag_name: str) -> Dict[str, str]:
+    def remove_tag(self, db: "Session", doc_id: str, tag_name: str) -> Dict[str, str]: # Added db: Session
         """
         Elimina una etiqueta de un documento.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             tag_name: Nombre de la etiqueta
             
         Returns:
             Mensaje de confirmación
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -643,19 +727,20 @@ class DocumentService:
         except Exception as e:
             db.rollback()
             logger.exception(f"Error removing tag from document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error removing tag: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while removing the tag.")
     
-    def get_signed_download_url(self, doc_id: str) -> Dict[str, Any]:
+    def get_signed_download_url(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Genera una URL firmada para descargar un documento.
         
         Args:
+            db: SQLAlchemy Session
             doc_id: ID del documento
             
         Returns:
             URL firmada y fecha de expiración
         """
-        db = next(get_db())
+        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -681,7 +766,7 @@ class DocumentService:
             raise
         except Exception as e:
             logger.exception(f"Error generating signed URL for document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error generating download URL: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the download URL.")
     
     def get_signed_upload_url(self, filename: str, content_type: str) -> Dict[str, Any]:
         """
@@ -726,4 +811,4 @@ class DocumentService:
             raise
         except Exception as e:
             logger.exception(f"Error generating signed upload URL: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error generating upload URL: {str(e)}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the upload URL.")

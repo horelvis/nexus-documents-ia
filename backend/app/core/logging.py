@@ -18,6 +18,8 @@ def setup_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),  # Salida a consola
+            # File-based logging. In containerized environments, logging to stdout (StreamHandler above) is often preferred.
+            # This FileHandler can be made optional or configurable based on deployment strategy.
             logging.FileHandler(log_dir / "app.log")  # Archivo de log
         ]
     )

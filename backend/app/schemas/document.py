@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 from app.core.config import settings  # Añadir importación
+from .enums import IndexingStatus # Import the new Enum
 
 # Esquemas Base
 class TagBase(BaseModel):
@@ -62,7 +63,7 @@ class Document(DocumentBase):
     file_size: int
     tenant_id: UUID
     created_by: UUID
-    indexed: int
+    indexed: int  # Corresponds to IndexingStatus enum
     created_at: datetime
     updated_at: datetime
     tags: List[Tag] = []

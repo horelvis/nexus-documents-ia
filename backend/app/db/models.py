@@ -78,7 +78,7 @@ class Document(Base):
     file_size = Column(Integer, nullable=False)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    indexed = Column(Integer, default=0)  # 0: no indexado, 1: indexado, 2: error
+    indexed = Column(Integer, default=0)  # See IndexingStatus enum in app.schemas.enums
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     

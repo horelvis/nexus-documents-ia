@@ -31,6 +31,7 @@ async def list_documents(
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return document_service.get_documents(
+        db=db, # Added db=db
         page=page,
         per_page=per_page,
         tags=tags,
@@ -58,6 +59,7 @@ async def create_document(
     
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.process_document(
+        db=db, # Added db=db
         file=file,
         title=title,
         description=description,
@@ -92,7 +94,7 @@ async def get_document(
     Obtiene detalles de un documento específico.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_document(doc_id=doc_id)
+    return document_service.get_document(db=db, doc_id=doc_id) # Added db=db
 
 
 @router.get("/{doc_id}/download-url", response_model=SignedUrlResponse)
@@ -106,7 +108,7 @@ async def get_download_url(
     Genera una URL firmada para descargar un documento específico.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_signed_download_url(doc_id=doc_id)
+    return document_service.get_signed_download_url(db=db, doc_id=doc_id) # Added db=db
 
 
 @router.delete("/{doc_id}", response_model=dict)
@@ -120,7 +122,7 @@ async def delete_document(
     Elimina un documento y sus datos asociados.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.delete_document(doc_id=doc_id)
+    return document_service.delete_document(db=db, doc_id=doc_id) # Added db=db
 
 
 @router.get("/{doc_id}/summary", response_model=dict)
@@ -134,7 +136,7 @@ async def get_document_summary(
     Genera un resumen del documento utilizando LLM.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.generate_summary(doc_id=doc_id)
+    return document_service.generate_summary(db=db, doc_id=doc_id) # Added db=db
 
 
 @router.post("/{doc_id}/tag", response_model=dict)
@@ -149,7 +151,7 @@ async def add_document_tag(
     Añade una etiqueta a un documento.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.add_tag(doc_id=doc_id, tag_name=tag)
+    return document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Added db=db
 
 
 @router.delete("/{doc_id}/tag/{tag_name}", response_model=dict)
@@ -164,4 +166,4 @@ async def remove_document_tag(
     Elimina una etiqueta de un documento.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.remove_tag(doc_id=doc_id, tag_name=tag_name)
+    return document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Added db=db
