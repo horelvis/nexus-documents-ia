@@ -236,7 +236,7 @@ show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
-echo -e "\n ${CYAN} Construyendo imágenes Docker ${NC} "
+show_spinner "Construyendo imágenes Docker"
 
 # Mostrar progreso de construcción
 docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/build.log 2>&1 &
