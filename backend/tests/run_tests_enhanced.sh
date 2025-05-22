@@ -246,9 +246,9 @@ build_pid=$!
 delay=0.1
 spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 while kill -0 $build_pid 2>/dev/null; do
-    local temp=${spinstr#?}
+    temp=${spinstr#?}
     printf "${YELLOW}[%c]${NC}" "$spinstr"
-    local spinstr=$temp${spinstr%"$temp"}
+    spinstr=$temp${spinstr%"$temp"}
     sleep $delay
     printf "\b\b\b"
 done
