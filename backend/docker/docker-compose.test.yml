@@ -1,0 +1,107 @@
+services:
+  # Servicio para ejecutar tests
+  test-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      # Variables específicas para testing
+      - POSTGRES_SERVER=test-db
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - POSTGRES_DB=test_db
+      - TESTING=true
+      - SECRET_KEY=test-secret-key-never-use-in-production
+      - GCS_BUCKET_NAME=test-bucket
+      - OLLAMA_BASE_URL=http://localhost:11434
+      # Configuración para tests
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      test-db:
+        condition: service_healthy
+      test-redis:
+        condition: service_healthy
+      test-qdrant:
+        condition: service_healthy
+    networks:
+      - test-network
+    volumes:
+      # Montar solo lo necesario para tests
+      - ../tests:/app/tests:ro
+      - ../app:/app/app:ro
+      - test_coverage:/app/coverage_report
+    command: |
+      bash -c "
+        echo '🔧 Instalando dependencias de testing...'
+        pip install pytest pytest-cov pytest-asyncio httpx pytest-mock psycopg2-binary
+        
+        echo '⏳ Esperando servicios...'
+        sleep 5
+        
+        echo '🧪 Ejecutando tests...'
+        pytest tests/ -v \
+          --cov=app \
+          --cov-report=term-missing \
+          --cov-report=html:/app/coverage_report \
+          --cov-fail-under=80 \
+          --tb=short
+        
+        echo '✅ Tests completados'
+      "
+
+  # Base de datos PostgreSQL para tests
+  test-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    tmpfs:
+      # Base de datos en memoria para máxima velocidad
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=1g
+
+  # Redis para tests
+  test-redis:
+    image: redis:alpine
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    tmpfs:
+      - /data:rw,noexec,nosuid,size=100m
+
+  # Qdrant para tests
+  test-qdrant:
+    image: qdrant/qdrant:latest
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    tmpfs:
+      - /qdrant/storage:rw,noexec,nosuid,size=500m
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test_coverage:
+    driver: local

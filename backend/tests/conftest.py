@@ -1,50 +1,68 @@
 import os
-from app.db.base_class import Base
 import pytest
 from typing import Dict, Generator
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 import uuid
 from datetime import datetime
 
 from app.main import app
-from app.db.database import get_db
-
+from app.db.database import Base, get_db
 from app.core.security import get_password_hash
 from app.db.models import User, Tenant, Document, Tag, DocumentChunk
 from app.services.auth_service import AuthService
 
-# Crear base de datos en memoria para tests
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool
-)
+# Configuración de base de datos para tests usando PostgreSQL
+TESTING = os.getenv("TESTING", "false").lower() == "true"
+
+if TESTING:
+    # Usar PostgreSQL para tests (igual que producción)
+    POSTGRES_SERVER = os.getenv("POSTGRES_SERVER", "test-db")
+    POSTGRES_USER = os.getenv("POSTGRES_USER", "test_user")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "test_password")
+    POSTGRES_DB = os.getenv("POSTGRES_DB", "test_db")
+    
+    SQLALCHEMY_DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_SERVER}/{POSTGRES_DB}"
+else:
+    # Fallback para desarrollo local
+    SQLALCHEMY_DATABASE_URL = "postgresql://test_user:test_password@localhost:5432/test_db"
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Fixture para crear la base de datos
 @pytest.fixture(scope="function")
 def db():
-    # Crear tablas
+    """
+    Crea una sesión de base de datos para cada test.
+    Se revierten todos los cambios al final del test.
+    """
+    # Crear todas las tablas
     Base.metadata.create_all(bind=engine)
     
-    # Crear sesión
-    db = TestingSessionLocal()
+    # Crear conexión y transacción
+    connection = engine.connect()
+    transaction = connection.begin()
+    
+    # Crear sesión ligada a la transacción
+    session = TestingSessionLocal(bind=connection)
+    
     try:
-        yield db
+        yield session
     finally:
-        db.close()
+        session.close()
+        # Revertir todos los cambios
+        transaction.rollback()
+        connection.close()
         
-    # Limpiar tablas después de cada test
+    # Limpiar todas las tablas después de cada test
     Base.metadata.drop_all(bind=engine)
 
 # Fixture para el cliente de pruebas
 @pytest.fixture(scope="function")
 def client(db):
-    # Dependencia de base de datos override
+    """Cliente de pruebas con base de datos mockeada"""
     def override_get_db():
         try:
             yield db
@@ -64,6 +82,7 @@ def client(db):
 # Fixture para crear un tenant de prueba
 @pytest.fixture(scope="function")
 def test_tenant(db):
+    """Crea un tenant de prueba"""
     tenant_id = uuid.uuid4()
     tenant = Tenant(
         id=tenant_id,
@@ -82,6 +101,7 @@ def test_tenant(db):
 # Fixture para crear un usuario normal
 @pytest.fixture(scope="function")
 def test_user(db, test_tenant):
+    """Crea un usuario normal de prueba"""
     user_id = uuid.uuid4()
     user = User(
         id=user_id,
@@ -102,6 +122,7 @@ def test_user(db, test_tenant):
 # Fixture para crear un usuario administrador
 @pytest.fixture(scope="function")
 def test_superuser(db, test_tenant):
+    """Crea un usuario administrador de prueba"""
     user_id = uuid.uuid4()
     user = User(
         id=user_id,
@@ -122,6 +143,7 @@ def test_superuser(db, test_tenant):
 # Fixture para obtener token de usuario normal
 @pytest.fixture(scope="function")
 def normal_user_token_headers(test_user):
+    """Headers de autorización para usuario normal"""
     token = AuthService.create_access_token(
         subject=str(test_user.id),
         tenant_id=str(test_user.tenant_id)
@@ -131,6 +153,7 @@ def normal_user_token_headers(test_user):
 # Fixture para obtener token de administrador
 @pytest.fixture(scope="function")
 def superuser_token_headers(test_superuser):
+    """Headers de autorización para administrador"""
     token = AuthService.create_access_token(
         subject=str(test_superuser.id),
         tenant_id=str(test_superuser.tenant_id)
@@ -140,6 +163,7 @@ def superuser_token_headers(test_superuser):
 # Fixture para crear tags de prueba
 @pytest.fixture(scope="function")
 def test_tags(db, test_tenant):
+    """Crea tags de prueba"""
     tags = []
     for name in ["test-tag1", "test-tag2", "test-tag3"]:
         tag = Tag(name=name, tenant_id=test_tenant.id)
@@ -155,6 +179,7 @@ def test_tags(db, test_tenant):
 # Fixture para crear documentos de prueba
 @pytest.fixture(scope="function")
 def test_documents(db, test_user, test_tenant, test_tags):
+    """Crea documentos de prueba"""
     documents = []
     
     for i in range(3):
@@ -199,6 +224,7 @@ def test_documents(db, test_user, test_tenant, test_tags):
 # Mock para el servicio LLM
 @pytest.fixture(scope="function")
 def mock_llm_service(monkeypatch):
+    """Mock del servicio LLM para tests"""
     class MockLLMService:
         def _call_ollama_api(self, prompt, system_prompt=None, temperature=0.5, max_tokens=1000, stream=False):
             return "This is a mock response from the LLM service."
@@ -233,6 +259,7 @@ def mock_llm_service(monkeypatch):
 # Mock para el servicio de almacenamiento
 @pytest.fixture(scope="function")
 def mock_storage_service(monkeypatch):
+    """Mock del servicio de almacenamiento para tests"""
     class MockStorageService:
         def __init__(self, tenant_id=None):
             self.tenant_id = tenant_id or "test-tenant"
@@ -271,6 +298,7 @@ def mock_storage_service(monkeypatch):
 # Mock para el servicio de embeddings
 @pytest.fixture(scope="function")
 def mock_embedding_service(monkeypatch):
+    """Mock del servicio de embeddings para tests"""
     import numpy as np
     
     class MockEmbeddingService:
@@ -321,6 +349,7 @@ def mock_embedding_service(monkeypatch):
 # Mock para el servicio vectorial
 @pytest.fixture(scope="function")
 def mock_vector_service(monkeypatch):
+    """Mock del servicio vectorial para tests"""
     import numpy as np
     
     class MockVectorService:
