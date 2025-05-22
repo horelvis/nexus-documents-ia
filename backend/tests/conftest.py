@@ -177,6 +177,49 @@ def test_tags(db, test_tenant):
     
     return tags
 
+@pytest.fixture(scope="function")
+def sample_document_views(db, test_user, test_documents, test_tenant):
+    """Crea vistas de documentos de prueba"""
+    from app.db.models import document_views
+    from datetime import datetime
+    import uuid
+    
+    # Insertar algunas vistas de documentos
+    for i, doc in enumerate(test_documents[:2]):  # Solo para los primeros 2 documentos
+        for j in range(i + 1):  # Diferentes números de vistas
+            db.execute(
+                document_views.insert().values(
+                    id=uuid.uuid4(),  # UUID en lugar de string
+                    user_id=test_user.id,  # Ya es UUID
+                    document_id=doc.id,  # Ya es UUID
+                    tenant_id=test_tenant.id,  # Ya es UUID
+                    viewed_at=datetime.utcnow(),
+                    view_duration_seconds=30 + (j * 10),
+                    is_complete_view=j % 2 == 0
+                )
+            )
+    
+    db.commit()
+    return True
+
+# También actualizar las funciones auxiliares si las hay
+def create_test_document_view(db, user_id, document_id, tenant_id):
+    """Función auxiliar para crear vista de documento en tests"""
+    from app.db.models import document_views
+    import uuid
+    
+    return db.execute(
+        document_views.insert().values(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            document_id=document_id,
+            tenant_id=tenant_id,
+            viewed_at=datetime.utcnow(),
+            view_duration_seconds=45,
+            is_complete_view=True
+        )
+    )
+
 # Fixture para crear documentos de prueba
 @pytest.fixture(scope="function")
 def test_documents(db, test_user, test_tenant, test_tags):

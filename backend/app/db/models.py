@@ -19,16 +19,17 @@ document_tags = Table(
 )
 
 # Tabla de asociación para las lecturas de documentos
+# CORRECCIÓN: Cambiar tipos String por UUID(as_uuid=True) para compatibilidad
 document_views = Table(
     "document_views",
     Base.metadata,
-    Column("id", String, primary_key=True, default=lambda: str(uuid.uuid4())),
-    Column("user_id", String, ForeignKey("users.id"), nullable=False),
-    Column("document_id", String, ForeignKey("documents.id"), nullable=False),
+    Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),  # Cambio: UUID en lugar de String
+    Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), nullable=False),  # Cambio: UUID en lugar de String
+    Column("document_id", UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False),  # Cambio: UUID en lugar de String
     Column("viewed_at", DateTime, default=func.now(), nullable=False),
     Column("view_duration_seconds", Integer, nullable=True),
     Column("is_complete_view", Boolean, default=False),
-    Column("tenant_id", String, ForeignKey("tenants.id"), nullable=False),
+    Column("tenant_id", UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False),  # Cambio: UUID en lugar de String
 )
 
 class User(Base):

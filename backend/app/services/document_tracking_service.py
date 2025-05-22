@@ -1,7 +1,6 @@
 # app/services/document_tracking_service.py
 
 from app.db.database import SessionLocal
-from sqlalchemy.sql import func
 from app.db.models import Document, document_views, DocumentMetrics
 from datetime import datetime
 import uuid
@@ -22,13 +21,14 @@ class DocumentTrackingService:
         
         try:
             # Registrar la vista en document_views
-            view_id = str(uuid.uuid4())
+            # CORRECCIÓN: Usar uuid.uuid4() directamente en lugar de str(uuid.uuid4())
+            view_id = uuid.uuid4()  # Cambio: UUID en lugar de String
             self.db.execute(
                 document_views.insert().values(
                     id=view_id,
-                    user_id=self.user_id,
-                    document_id=document_id,
-                    tenant_id=self.tenant_id,
+                    user_id=uuid.UUID(self.user_id) if isinstance(self.user_id, str) else self.user_id,  # Asegurar UUID
+                    document_id=uuid.UUID(document_id) if isinstance(document_id, str) else document_id,  # Asegurar UUID
+                    tenant_id=uuid.UUID(self.tenant_id) if isinstance(self.tenant_id, str) else self.tenant_id,  # Asegurar UUID
                     viewed_at=datetime.now(),
                     view_duration_seconds=view_duration,
                     is_complete_view=is_complete
