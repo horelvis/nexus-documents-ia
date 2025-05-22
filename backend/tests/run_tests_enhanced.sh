@@ -31,43 +31,45 @@ SPINNER="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 # Función para logging mejorado
 log() {
-    printf "${BLUE}[%s]${NC} %s\n" "$(date +'%H:%M:%S')" "$1"
+    echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $1"
 }
 
 success() {
-    printf "${GREEN}%s %s${NC}\n" "$CHECK" "$1"
+    echo -e "${GREEN}${CHECK} $1${NC}"
 }
 
 error() {
-    printf "${RED}%s %s${NC}\n" "$CROSS" "$1"
+    echo -e "${RED}${CROSS} $1${NC}"
 }
 
 warning() {
-    printf "${YELLOW}%s %s${NC}\n" "$WARNING" "$1"
+    echo -e "${YELLOW}${WARNING} $1${NC}"
 }
 
 # Función para mostrar título mejorado
 show_header() {
     clear
-    printf "${CYAN}${BOLD}\n"
-    printf "╭──────────────────────────────────────────────────────────────────────────────╮\n"
-    printf "│                          🧪 SUITE DE TESTS BACKEND 🧪                          │\n"
-    printf "│                                                                              │\n"
+    echo -e "${CYAN}${BOLD}"
+    echo "╭──────────────────────────────────────────────────────────────────────────────╮"
+    echo "│                          🧪 SUITE DE TESTS BACKEND 🧪                          │"
+    echo "│                                                                              │"
     
     if [[ "$COMPOSE_FILE" == *"simple"* ]]; then
-        printf "│  • Modo: SIMPLE (sin Qdrant)                                                │\n"
-        printf "│  • Servicios: API, PostgreSQL, Redis                                        │\n"
+        echo "│  • Modo: SIMPLE (sin Qdrant)                                                │"
+        echo "│  • Servicios: API, PostgreSQL, Redis                                        │"
     else
-        printf "│  • Modo: COMPLETO                                                           │\n"
-        printf "│  • Servicios: API, PostgreSQL, Redis, Qdrant                               │\n"
+        echo "│  • Modo: COMPLETO                                                           │"
+        echo "│  • Servicios: API, PostgreSQL, Redis, Qdrant                               │"
     fi
     
-    printf "│  • Base de datos: PostgreSQL (temporal)                                     │\n"
-    printf "│  • Reportes: Cobertura HTML + Terminal                                      │\n"
-    printf "│  • Timeout: 15 minutos máximo                                               │\n"
-    printf "│                                                                              │\n"
-    printf "│  Uso: ./run_tests_enhanced.sh [--simple|-s]                                 │\n"
-    printf "╰──────────────────────────────────────────────────────────────────────────────╯\n"
+    echo "│  • Base de datos: PostgreSQL (temporal)                                     │"
+    echo "│  • Reportes: Cobertura HTML + Terminal                                      │"
+    echo "│  • Timeout: 15 minutos máximo                                               │"
+    echo "│                                                                              │"
+    echo "│  Uso: ./run_tests_enhanced.sh [--simple|-s]                                 │"
+    echo "╰──────────────────────────────────────────────────────────────────────────────╯"
+    echo -e "${NC}"
+}────────────────────────────────────────────────────────────────╯\n"
     printf "${NC}\n"
 }
 
@@ -77,7 +79,7 @@ show_step() {
     local step_name="$2"
     local emoji="$3"
     
-    printf "\n${BOLD}${CYAN}%s Paso %d: %s${NC}\n" "$emoji" "$step_num" "$step_name"
+    printf "\n ${BOLD}${CYAN}%s Paso %d: %s${NC}\n" "$emoji" "$step_num" "$step_name"
     printf "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
 
@@ -180,7 +182,7 @@ show_final_stats() {
     local duration=$1
     local exit_code=$2
     
-    printf "\n${WHITE}${BOLD}╭─ ESTADÍSTICAS FINALES ─────────────────────────────────────────────────────╮${NC}\n"
+    printf "\n ${WHITE}${BOLD}╭─ ESTADÍSTICAS FINALES ─────────────────────────────────────────────────────╮${NC}\n"
     
     if [ $exit_code -eq 0 ]; then
         printf "${WHITE}│ %s Status: ${GREEN}${BOLD}ÉXITO${NC}\n" "$CHECK"
@@ -222,7 +224,7 @@ fi
 show_header
 
 # Configurar limpieza
-trap 'cleanup; echo -e "\n${YELLOW}${WARNING} Tests interrumpidos por el usuario${NC}"; exit 1' INT TERM
+trap 'cleanup; echo -e "\n ${YELLOW}${WARNING} Tests interrumpidos por el usuario${NC}"; exit 1' INT TERM
 
 # Variables
 export TESTING=true
@@ -230,12 +232,12 @@ export COMPOSE_PROJECT_NAME="backend_tests"
 start_time=$(date +%s)
 
 # Paso 1: Limpieza
-echo -e "\n${YELLOW}${GEAR} Fase 1: Limpieza de contenedores anteriores${NC}"
+echo -e "\n ${YELLOW}${GEAR} Fase 1: Limpieza de contenedores anteriores${NC}"
 cleanup > /dev/null 2>&1
 show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
-echo -e "\n${PURPLE}${GEAR} Fase 2: Construcción de imágenes${NC}"
+echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes${NC}"
 echo -n "${CYAN}Construyendo imágenes Docker${NC} "
 
 # Mostrar progreso de construcción
@@ -243,12 +245,12 @@ docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/buil
 build_pid=$!
 
 # Spinner personalizado para construcción
-delay=0.1
-spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+local delay=0.1
+local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 while kill -0 $build_pid 2>/dev/null; do
-    temp=${spinstr#?}
+    local temp=${spinstr#?}
     printf "${YELLOW}[%c]${NC}" "$spinstr"
-    spinstr=$temp${spinstr%"$temp"}
+    local spinstr=$temp${spinstr%"$temp"}
     sleep $delay
     printf "\b\b\b"
 done
@@ -265,13 +267,13 @@ else
 fi
 
 # Paso 3: Ejecución de tests
-echo -e "\n${CYAN}${ROCKET} Fase 3: Ejecutando tests${NC}"
+echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Ejecutar tests con salida en tiempo real
 timeout 600s docker compose -f ../docker/docker-compose.test.yml up \
     --abort-on-container-exit --exit-code-from test-api 2>&1 | \
-    tee /tmp/test_output.log | colorize_output
+    tee /tmp/test_output.log | colorize_pytest_output
 
 exit_code=${PIPESTATUS[0]}
 end_time=$(date +%s)
@@ -284,7 +286,7 @@ show_final_stats $duration $exit_code
 
 # Procesar resultados
 if [ $exit_code -eq 0 ]; then
-    echo -e "\n${GREEN}${CHECK} ¡Tests completados exitosamente!${NC}"
+    echo -e "\n ${GREEN}${CHECK} ¡Tests completados exitosamente!${NC}"
     
     # Copiar reportes de cobertura
     if docker volume ls | grep -q "backend_tests_test_coverage"; then
@@ -296,7 +298,7 @@ if [ $exit_code -eq 0 ]; then
     fi
     
 else
-    echo -e "\n${RED}${CROSS} Tests fallaron${NC}"
+    echo -e "\n ${RED}${CROSS} Tests fallaron${NC}"
     
     if [ $exit_code -eq 124 ]; then
         echo -e "${YELLOW}${WARNING} Terminados por timeout (10 minutos)${NC}"
@@ -304,7 +306,7 @@ else
     
     # Mostrar errores más relevantes
     if [ -f "/tmp/test_output.log" ]; then
-        echo -e "\n${RED}🔍 Errores encontrados:${NC}"
+        echo -e "\n ${RED}🔍 Errores encontrados:${NC}"
         grep -i -E "(error|failed|exception)" /tmp/test_output.log | tail -5 | while read line; do
             echo -e "${RED}  → $line${NC}"
         done
@@ -312,7 +314,7 @@ else
 fi
 
 # Limpieza final
-echo -e "\n${YELLOW}${GEAR} Limpieza final...${NC}"
+echo -e "\n ${YELLOW}${GEAR} Limpieza final...${NC}"
 cleanup
 
 # Limpiar archivos temporales
