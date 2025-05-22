@@ -3,17 +3,17 @@ from typing import Dict, List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func, desc  # Añadir importaciones necesarias
+from sqlalchemy.sql import func, desc
 from uuid import UUID
+import logging
 
-from app.api.dependencies import get_current_active_superuser
-from app.db.database import SessionLocal, get_db
-from app.db.models import User, Tenant, Document
+from app.api.dependencies import get_current_active_superuser, get_db
+from app.db.models import User, Tenant, Document, DocumentMetrics, document_views
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.auth_service import AuthService
 from app.services.document_service import DocumentService
-from app.db.models import document_views, Document, DocumentMetrics, User
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -172,7 +172,6 @@ async def list_all_documents(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     tenant_id: Optional[UUID] = None,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -215,14 +214,12 @@ async def get_system_stats(
     error_documents = db.query(Document).filter(Document.indexed == 2).count()
     
     # Calcular tamaño total de almacenamiento
-    storage_size = db.query(Document.file_size).with_entities(
-        db.func.sum(Document.file_size)
-    ).scalar() or 0
+    storage_size = db.query(func.sum(Document.file_size)).scalar() or 0
     
     # Contar documentos por tipo
     doc_types = db.query(
         Document.file_type, 
-        db.func.count(Document.id)
+        func.count(Document.id)
     ).group_by(Document.file_type).all()
     
     doc_type_stats = {
@@ -254,7 +251,6 @@ async def get_system_stats(
 @router.post("/init-ollama-model", response_model=dict)
 async def initialize_ollama_model(
     model_name: str = Body(..., embed=True),
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -294,13 +290,14 @@ async def initialize_ollama_model(
             detail=f"Error al interactuar con Ollama: {str(e)}"
         )
 
+
 @router.get("/stats/document-activity", response_model=Dict[str, Any])
 async def get_document_activity_stats(
     time_period_days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
     current_user = Depends(get_current_active_superuser)
 ):
     """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
-    db = SessionLocal()
     try:
         tenant_id = str(current_user.tenant_id)
         cutoff_date = datetime.now() - timedelta(days=time_period_days)
@@ -317,7 +314,7 @@ async def get_document_activity_stats(
         
         # Formatos más populares
         top_formats = db.query(
-            Document.format,
+            Document.file_type,
             func.count(document_views.c.id).label("view_count")
         ).join(
             document_views, Document.id == document_views.c.document_id
@@ -325,7 +322,7 @@ async def get_document_activity_stats(
             document_views.c.tenant_id == tenant_id,
             document_views.c.viewed_at >= cutoff_date
         ).group_by(
-            Document.format
+            Document.file_type
         ).order_by(
             desc("view_count")
         ).limit(5).all()
@@ -334,7 +331,7 @@ async def get_document_activity_stats(
         top_users = db.query(
             User.id,
             User.email,
-            User.name,
+            User.full_name,
             func.count(document_views.c.id).label("view_count")
         ).join(
             document_views, User.id == document_views.c.user_id
@@ -356,8 +353,7 @@ async def get_document_activity_stats(
             DocumentMetrics, Document.id == DocumentMetrics.document_id
         ).filter(
             Document.tenant_id == tenant_id,
-            DocumentMetrics.query_count > 0,
-            Document.is_deleted == False
+            DocumentMetrics.query_count > 0
         ).order_by(
             desc(DocumentMetrics.query_count)
         ).limit(5).all()
@@ -385,5 +381,3 @@ async def get_document_activity_stats(
     except Exception as e:
         logger.error(f"Error al obtener estadísticas de actividad: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
-    finally:
-        db.close()
