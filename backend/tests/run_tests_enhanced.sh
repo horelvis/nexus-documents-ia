@@ -243,8 +243,8 @@ docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/buil
 build_pid=$!
 
 # Spinner personalizado para construcción
-local delay=0.1
-local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+delay=0.1
+spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 while kill -0 $build_pid 2>/dev/null; do
     local temp=${spinstr#?}
     printf "${YELLOW}[%c]${NC}" "$spinstr"
