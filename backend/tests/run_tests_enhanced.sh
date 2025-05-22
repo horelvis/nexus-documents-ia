@@ -135,7 +135,7 @@ run_with_spinner() {
 }
 
 # Función para colorear output de pytest mejorado
-colorize_output() {
+colorize_pytest_output() {
     while IFS= read -r line; do
         case "$line" in
             *"FAILED"*|*"ERROR"*|*"failed"*|*"error"*)
@@ -271,7 +271,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 # Ejecutar tests con salida en tiempo real
 timeout 600s docker compose -f ../docker/docker-compose.test.yml up \
     --abort-on-container-exit --exit-code-from test-api 2>&1 | \
-    tee /tmp/test_output.log | colorize_pytest_output
+    tee /tmp/test_output.log | colorize_output
 
 exit_code=${PIPESTATUS[0]}
 end_time=$(date +%s)
