@@ -135,7 +135,7 @@ run_with_spinner() {
 }
 
 # Función para colorear output de pytest mejorado
-colorize_output() {
+colorize_pytest_output() {
     while IFS= read -r line; do
         case "$line" in
             *"FAILED"*|*"ERROR"*|*"failed"*|*"error"*)
