@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Script avanzado para ejecutar tests con indicadores visuales mejorados
-# Incluye barras de progreso, spinners y salida en tiempo real con colores
+# Versión corregida con mejor manejo de colores y output
 
 set -e
 
-# Colores y símbolos
+# Colores y símbolos corregidos
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,6 +13,7 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 # Símbolos Unicode
@@ -26,124 +27,168 @@ DATABASE="🗄️"
 TEST_TUBE="🧪"
 CHART="📊"
 CLOCK="⏱️"
+SPINNER="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-# Función para mostrar título con borde
-show_title() {
-    local title="$1"
-    local width=80
-    local padding=$(( (width - ${#title} - 2) / 2 ))
-    
-    echo -e "${BLUE}╭$(printf '─%.0s' $(seq 1 $((width-2))))╮${NC}"
-    printf "${BLUE}│%*s%s%*s│${NC}\n" $padding "" "$title" $padding ""
-    echo -e "${BLUE}╰$(printf '─%.0s' $(seq 1 $((width-2))))╯${NC}"
+# Función para logging mejorado
+log() {
+    printf "${BLUE}[%s]${NC} %s\n" "$(date +'%H:%M:%S')" "$1"
 }
 
-# Función para mostrar spinner animado
+success() {
+    printf "${GREEN}%s %s${NC}\n" "$CHECK" "$1"
+}
+
+error() {
+    printf "${RED}%s %s${NC}\n" "$CROSS" "$1"
+}
+
+warning() {
+    printf "${YELLOW}%s %s${NC}\n" "$WARNING" "$1"
+}
+
+# Función para mostrar título mejorado
+show_header() {
+    clear
+    printf "${CYAN}${BOLD}\n"
+    printf "╭──────────────────────────────────────────────────────────────────────────────╮\n"
+    printf "│                          🧪 SUITE DE TESTS BACKEND 🧪                          │\n"
+    printf "│                                                                              │\n"
+    printf "│  • Base de datos: PostgreSQL (temporal)                                     │\n"
+    printf "│  • Servicios: API, Redis, Qdrant                                            │\n"
+    printf "│  • Reportes: Cobertura HTML + Terminal                                      │\n"
+    printf "│  • Timeout: 15 minutos máximo                                               │\n"
+    printf "╰──────────────────────────────────────────────────────────────────────────────╯\n"
+    printf "${NC}\n"
+}
+
+# Función para mostrar progreso visual
+show_step() {
+    local step_num="$1"
+    local step_name="$2"
+    local emoji="$3"
+    
+    printf "\n${BOLD}${CYAN}%s Paso %d: %s${NC}\n" "$emoji" "$step_num" "$step_name"
+    printf "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+}
+
+# Función para mostrar spinner mejorado
 show_spinner() {
-    local message=$1
+    local message="$1"
+    local duration="$2"
     local delay=0.1
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     
-    echo -n "${CYAN}${message}${NC} "
+    printf "${CYAN}%s${NC} " "$message"
     
-    # Mostrar spinner por un tiempo fijo o hasta que se complete la operación anterior
-    for i in {1..30}; do
-        local temp=${spinstr#?}
-        printf "${YELLOW}[%c]${NC}" "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
+    for ((i=0; i<duration*10; i++)); do
+        local spin_char="${SPINNER:$((i%10)):1}"
+        printf "${YELLOW}[%s]${NC}" "$spin_char"
         sleep $delay
         printf "\b\b\b"
     done
     
-    printf "${GREEN}${CHECK}${NC}\n"
+    printf "${GREEN}%s${NC}\n" "$CHECK"
 }
 
-# Función para mostrar barra de progreso
-show_progress_bar() {
-    local progress=$1
-    local total=$2
-    local width=50
-    local percentage=$((progress * 100 / total))
-    local filled=$((progress * width / total))
-    local empty=$((width - filled))
+# Función para ejecutar comando con spinner
+run_with_spinner() {
+    local message="$1"
+    local command="$2"
+    local log_file="$3"
     
-    printf "\r${WHITE}Progress: ${BLUE}["
-    printf "%*s" $filled | tr ' ' '█'
-    printf "%*s" $empty | tr ' ' '░'
-    printf "] %d%%${NC}" $percentage
+    printf "${CYAN}%s${NC} " "$message"
+    
+    # Ejecutar comando en background
+    eval "$command" > "$log_file" 2>&1 &
+    local pid=$!
+    
+    # Mostrar spinner mientras se ejecuta
+    local i=0
+    while kill -0 $pid 2>/dev/null; do
+        local spin_char="${SPINNER:$((i%10)):1}"
+        printf "${YELLOW}[%s]${NC}" "$spin_char"
+        sleep 0.1
+        printf "\b\b\b"
+        ((i++))
+    done
+    
+    # Esperar a que termine y obtener código de salida
+    wait $pid
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        printf "${GREEN}%s${NC}\n" "$CHECK"
+    else
+        printf "${RED}%s${NC}\n" "$CROSS"
+    fi
+    
+    return $exit_code
 }
 
-# Función para parsear y colorear logs de pytest
-colorize_pytest_output() {
+# Función para colorear output de pytest mejorado
+colorize_output() {
     while IFS= read -r line; do
         case "$line" in
             *"FAILED"*|*"ERROR"*|*"failed"*|*"error"*)
-                echo -e "${RED}${CROSS} $line${NC}"
+                printf "${RED}%s %s${NC}\n" "$CROSS" "$line"
                 ;;
             *"PASSED"*|*"passed"*|*" ok "*|*"OK"*)
-                echo -e "${GREEN}${CHECK} $line${NC}"
+                printf "${GREEN}%s %s${NC}\n" "$CHECK" "$line"
                 ;;
             *"WARNING"*|*"warning"*|*"WARN"*)
-                echo -e "${YELLOW}${WARNING} $line${NC}"
+                printf "${YELLOW}%s %s${NC}\n" "$WARNING" "$line"
                 ;;
-            *"test_"*|*"::test"*|*"pytest"*|*"collecting"*)
-                echo -e "${CYAN}${TEST_TUBE} $line${NC}"
+            *"test_"*|*"::test"*)
+                printf "${CYAN}%s %s${NC}\n" "$TEST_TUBE" "$line"
                 ;;
             *"Installing"*|*"Collecting"*|*"pip install"*)
-                echo -e "${PURPLE}📦 $line${NC}"
+                printf "${PURPLE}📦 %s${NC}\n" "$line"
                 ;;
             *"coverage"*|*"cov-report"*)
-                echo -e "${GREEN}${CHART} $line${NC}"
+                printf "${GREEN}%s %s${NC}\n" "$CHART" "$line"
                 ;;
             *"Health check"*|*"healthy"*|*"ready"*)
-                echo -e "${GREEN}💚 $line${NC}"
+                printf "${GREEN}💚 %s${NC}\n" "$line"
                 ;;
-            *"Waiting"*|*"waiting"*|*"Starting"*)
-                echo -e "${YELLOW}${CLOCK} $line${NC}"
+            *"waiting"*|*"Starting"*|*"Waiting"*)
+                printf "${YELLOW}%s %s${NC}\n" "$CLOCK" "$line"
                 ;;
-            *"="*"="*)
-                # Separadores de pytest
-                echo -e "${BLUE}$line${NC}"
-                ;;
-            *"short test summary"*|*"FAILURES"*|*"ERRORS"*)
-                echo -e "${WHITE}${line}${NC}"
+            *"="*"="*|*"-"*"-"*)
+                printf "${BLUE}%s${NC}\n" "$line"
                 ;;
             "")
-                # Línea vacía
                 echo
                 ;;
             *)
-                echo "$line"
+                printf "%s\n" "$line"
                 ;;
         esac
     done
 }
 
-# Función para mostrar estadísticas finales
+# Función para mostrar estadísticas finales mejorada
 show_final_stats() {
     local duration=$1
     local exit_code=$2
     
-    echo -e "\n${WHITE}╭─ Estadísticas Finales $(printf '─%.0s' $(seq 1 50))╮${NC}"
-    echo -e "${WHITE}│${NC}"
+    printf "\n${WHITE}${BOLD}╭─ ESTADÍSTICAS FINALES ─────────────────────────────────────────────────────╮${NC}\n"
     
     if [ $exit_code -eq 0 ]; then
-        echo -e "${WHITE}│ ${GREEN}${CHECK} Status: ÉXITO${NC}"
+        printf "${WHITE}│ %s Status: ${GREEN}${BOLD}ÉXITO${NC}\n" "$CHECK"
     else
-        echo -e "${WHITE}│ ${RED}${CROSS} Status: FALLO${NC}"
+        printf "${WHITE}│ %s Status: ${RED}${BOLD}FALLO${NC}\n" "$CROSS"
     fi
     
-    echo -e "${WHITE}│ ${CLOCK} Duración: ${duration}s${NC}"
-    echo -e "${WHITE}│ ${DATABASE} Base de datos: PostgreSQL (temporal)${NC}"
-    echo -e "${WHITE}│ ${GEAR} Servicios: API, DB, Redis, Qdrant${NC}"
+    printf "${WHITE}│ %s Duración: %dm %ds${NC}\n" "$CLOCK" $((duration/60)) $((duration%60))
+    printf "${WHITE}│ %s Base de datos: PostgreSQL (temporal)${NC}\n" "$DATABASE"
+    printf "${WHITE}│ %s Servicios: API, DB, Redis, Qdrant${NC}\n" "$GEAR"
     
     # Mostrar información de cobertura si existe
     if [ -f "coverage_report/index.html" ]; then
-        echo -e "${WHITE}│ ${CHART} Cobertura: coverage_report/index.html${NC}"
+        printf "${WHITE}│ %s Cobertura: coverage_report/index.html${NC}\n" "$CHART"
     fi
     
-    echo -e "${WHITE}│${NC}"
-    echo -e "${WHITE}╰$(printf '─%.0s' $(seq 1 70))╯${NC}"
+    printf "${WHITE}│ %s Logs: /tmp/test_output.log${NC}\n" "$INFO"
+    printf "${WHITE}╰────────────────────────────────────────────────────────────────────────────╯${NC}\n"
 }
 
 # Función de limpieza
