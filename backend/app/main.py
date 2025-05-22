@@ -7,7 +7,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 import time
-from app.api.v1 import auth, documents, search, admin, tenants
+# Updated imports to use routers from app.api.v1.__init__
+from app.api.v1 import (
+    admin_router,
+    auth_router,
+    documents_router,
+    search_router,
+    tenants_router
+)
 from app.api.docs import router as docs_router  # Importar el router de documentación
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -133,31 +140,31 @@ app.include_router(
 
 # Rutas de la API v1
 app.include_router(
-    auth.router,
+    auth_router, # Use the imported router instance directly
     prefix=f"{settings.API_V1_STR}/auth",
     tags=["auth"]
 )
 
 app.include_router(
-    documents.router,
+    documents_router,
     prefix=f"{settings.API_V1_STR}/documents",
     tags=["documents"]
 )
 
 app.include_router(
-    search.router,
+    search_router,
     prefix=f"{settings.API_V1_STR}/search",
     tags=["search"]
 )
 
 app.include_router(
-    admin.router,
+    admin_router,
     prefix=f"{settings.API_V1_STR}/admin",
     tags=["admin"]
 )
 
 app.include_router(
-    tenants.router,
+    tenants_router,
     prefix=f"{settings.API_V1_STR}/tenants",
     tags=["tenants"]
 )
