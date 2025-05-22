@@ -40,19 +40,21 @@ show_title() {
 
 # Función para mostrar spinner animado
 show_spinner() {
-    local pid=$1
-    local message=$2
+    local message=$1
     local delay=0.1
     local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     
     echo -n "${CYAN}${message}${NC} "
-    while kill -0 $pid 2>/dev/null; do
+    
+    # Mostrar spinner por un tiempo fijo o hasta que se complete la operación anterior
+    for i in {1..30}; do
         local temp=${spinstr#?}
         printf "${YELLOW}[%c]${NC}" "$spinstr"
         local spinstr=$temp${spinstr%"$temp"}
         sleep $delay
         printf "\b\b\b"
     done
+    
     printf "${GREEN}${CHECK}${NC}\n"
 }
 
@@ -175,17 +177,37 @@ start_time=$(date +%s)
 
 # Paso 1: Limpieza
 echo -e "\n${YELLOW}${GEAR} Fase 1: Limpieza de contenedores anteriores${NC}"
-cleanup &
-show_spinner $! "Limpiando recursos anteriores"
+cleanup > /dev/null 2>&1
+show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n${PURPLE}${GEAR} Fase 2: Construcción de imágenes${NC}"
-docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/build.log 2>&1 &
-show_spinner $! "Construyendo imágenes Docker"
+echo -n "${CYAN}Construyendo imágenes Docker${NC} "
 
-if [ $? -ne 0 ]; then
+# Mostrar progreso de construcción
+docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/build.log 2>&1 &
+build_pid=$!
+
+# Spinner personalizado para construcción
+local delay=0.1
+local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+while kill -0 $build_pid 2>/dev/null; do
+    local temp=${spinstr#?}
+    printf "${YELLOW}[%c]${NC}" "$spinstr"
+    local spinstr=$temp${spinstr%"$temp"}
+    sleep $delay
+    printf "\b\b\b"
+done
+
+wait $build_pid
+build_exit_code=$?
+
+if [ $build_exit_code -ne 0 ]; then
+    printf "${RED}${CROSS}${NC}\n"
     echo -e "${RED}${CROSS} Error en la construcción. Ver /tmp/build.log${NC}"
     exit 1
+else
+    printf "${GREEN}${CHECK}${NC}\n"
 fi
 
 # Paso 3: Ejecución de tests
