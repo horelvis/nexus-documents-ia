@@ -82,27 +82,182 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Ejecutar tests
-log "🚀 Ejecutando tests..."
+# Función para mostrar spinner mientras espera
+show_spinner() {
+    local pid=$1
+    local delay=0.1
+    local spinstr='|/-\'
+    echo -n " "
+    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "    \b\b\b\b"
+}
+
+# Función para mostrar logs en tiempo real con colores
+follow_logs() {
+    local compose_file=$1
+    local service=$2
+    
+    # Mostrar logs del servicio con colores
+    docker compose -f "$compose_file" logs -f "$service" 2>&1 | while IFS= read -r line; do
+        case "$line" in
+            *"ERROR"*|*"FAILED"*|*"FAIL"*)
+                echo -e "${RED}$line${NC}"
+                ;;
+            *"PASSED"*|*"OK"*|*"SUCCESS"*)
+                echo -e "${GREEN}$line${NC}"
+                ;;
+            *"WARNING"*|*"WARN"*)
+                echo -e "${YELLOW}$line${NC}"
+                ;;
+            *"pytest"*|*"test_"*|*"::test"*)
+                echo -e "${BLUE}$line${NC}"
+                ;;
+            *"Installing"*|*"Collecting"*)
+                echo -e "${YELLOW}$line${NC}"
+                ;;
+            *)
+                echo "$line"
+                ;;
+        esac
+    done
+}
+
+# Función para mostrar progreso con barra
+show_progress() {
+    local current=0
+    local total=100
+    local width=50
+    local percentage=0
+    
+    while [ $current -le $total ]; do
+        percentage=$((current * 100 / total))
+        filled=$((current * width / total))
+        
+        printf "\r${BLUE}Progreso: ["
+        printf "%*s" $filled | tr ' ' '='
+        printf "%*s" $((width - filled)) | tr ' ' '-'
+        printf "] %d%% ${NC}" $percentage
+        
+        sleep 0.5
+        current=$((current + 2))
+        
+        # Salir si el proceso padre ya no existe
+        if ! kill -0 $ 2>/dev/null; then
+            break
+        fi
+    done
+    echo
+}
+
+# Ejecutar tests con mejor feedback visual
+log "🚀 Iniciando tests con PostgreSQL..."
 start_time=$(date +%s)
 
-# Ejecutar con timeout para evitar que se cuelgue
-timeout 600s docker compose -f ../docker/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-api
+# Verificar que los servicios están arrancando
+log "📡 Verificando servicios..."
+
+# Iniciar docker compose en background
+docker compose -f ../docker/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-api > /tmp/test_output.log 2>&1 &
+compose_pid=$!
+
+# Mostrar progreso mientras arranca
+echo -n "${YELLOW}⏳ Esperando servicios"
+for i in {1..10}; do
+    echo -n "."
+    sleep 1
+    # Verificar si ya terminó
+    if ! kill -0 $compose_pid 2>/dev/null; then
+        break
+    fi
+done
+echo -e " listo!${NC}"
+
+# Mostrar logs en tiempo real
+log "📋 Mostrando progreso de tests en tiempo real:"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+# Seguir logs del contenedor de tests
+timeout 600s docker compose -f ../docker/docker-compose.test.yml logs -f test-api 2>&1 | while IFS= read -r line; do
+    case "$line" in
+        *"FAILED"*|*"ERROR"*|*"failed"*)
+            echo -e "${RED}❌ $line${NC}"
+            ;;
+        *"PASSED"*|*"passed"*|*" ok "*)
+            echo -e "${GREEN}✅ $line${NC}"
+            ;;
+        *"WARNING"*|*"warning"*)
+            echo -e "${YELLOW}⚠️  $line${NC}"
+            ;;
+        *"test_"*|*"::test"*|*"pytest"*)
+            echo -e "${BLUE}🧪 $line${NC}"
+            ;;
+        *"Installing"*|*"Collecting"*|*"pip install"*)
+            echo -e "${YELLOW}📦 $line${NC}"
+            ;;
+        *"Esperando"*|*"waiting"*|*"ready"*)
+            echo -e "${BLUE}⏳ $line${NC}"
+            ;;
+        *"coverage"*|*"cov"*)
+            echo -e "${GREEN}📊 $line${NC}"
+            ;;
+        *"="*)
+            # Líneas con iguales suelen ser separadores de pytest
+            echo -e "${BLUE}$line${NC}"
+            ;;
+        "")
+            # Línea vacía, no mostrar nada
+            ;;
+        *)
+            echo "$line"
+            ;;
+    esac
+done &
+
+# Esperar a que termine el proceso
+wait $compose_pid
 
 # Capturar código de salida
 exit_code=$?
 end_time=$(date +%s)
 duration=$((end_time - start_time))
 
-# Mostrar resultados
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+# Mostrar resultados con estadísticas
 if [ $exit_code -eq 0 ]; then
     success "Tests completados exitosamente en ${duration}s"
+    
+    # Mostrar resumen si está disponible
+    if [ -f "/tmp/test_output.log" ]; then
+        echo -e "\n${BLUE}📈 Resumen de tests:${NC}"
+        grep -E "(passed|failed|error|warning)" /tmp/test_output.log | tail -5 | while read line; do
+            case "$line" in
+                *"failed"*|*"error"*)
+                    echo -e "${RED}  $line${NC}"
+                    ;;
+                *"passed"*)
+                    echo -e "${GREEN}  $line${NC}"
+                    ;;
+                *)
+                    echo -e "${BLUE}  $line${NC}"
+                    ;;
+            esac
+        done
+    fi
     
     # Copiar reportes de cobertura si existen
     if docker volume ls | grep -q "backend_tests_test_coverage"; then
         log "📊 Copiando reporte de cobertura..."
-        docker run --rm -v backend_tests_test_coverage:/source -v $(pwd)/coverage_report:/dest alpine cp -r /source/. /dest/
-        success "Reporte de cobertura disponible en coverage_report/index.html"
+        docker run --rm -v backend_tests_test_coverage:/source -v $(pwd)/coverage_report:/dest alpine cp -r /source/. /dest/ 2>/dev/null || true
+        if [ -f "coverage_report/index.html" ]; then
+            success "Reporte de cobertura disponible en coverage_report/index.html"
+        fi
     fi
     
 else
@@ -113,11 +268,27 @@ else
     fi
     
     # Mostrar logs de servicios para debugging
-    warning "Mostrando logs de servicios para debugging:"
-    docker compose -f ../docker/docker-compose.test.yml logs test-db | tail -20
-    docker compose -f ../docker/docker-compose.test.yml logs test-redis | tail -10
-    docker compose -f ../docker/docker-compose.test.yml logs test-qdrant | tail -10
+    warning "Últimos logs de servicios para debugging:"
+    echo -e "${YELLOW}--- Base de Datos ---${NC}"
+    docker compose -f ../docker/docker-compose.test.yml logs --tail=10 test-db 2>/dev/null || echo "No se pudieron obtener logs de test-db"
+    
+    echo -e "${YELLOW}--- Redis ---${NC}"
+    docker compose -f ../docker/docker-compose.test.yml logs --tail=5 test-redis 2>/dev/null || echo "No se pudieron obtener logs de test-redis"
+    
+    echo -e "${YELLOW}--- Qdrant ---${NC}"
+    docker compose -f ../docker/docker-compose.test.yml logs --tail=5 test-qdrant 2>/dev/null || echo "No se pudieron obtener logs de test-qdrant"
+    
+    # Mostrar últimos errores del log principal
+    if [ -f "/tmp/test_output.log" ]; then
+        echo -e "\n${RED}🔍 Últimos errores encontrados:${NC}"
+        grep -i -E "(error|failed|exception)" /tmp/test_output.log | tail -10 | while read line; do
+            echo -e "${RED}  $line${NC}"
+        done
+    fi
 fi
+
+# Limpiar archivo temporal
+rm -f /tmp/test_output.log
 
 # La limpieza se hace automáticamente en EXIT trap
 
