@@ -230,25 +230,25 @@ export COMPOSE_PROJECT_NAME="backend_tests"
 start_time=$(date +%s)
 
 # Paso 1: Limpieza
-echo -e "\n ${YELLOW}${GEAR} Fase 1: Limpieza de contenedores anteriores${NC}"
+echo -e "\n ${YELLOW}${GEAR} Fase 1: Limpieza de contenedores anteriores ${NC}"
 cleanup > /dev/null 2>&1
 show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
-echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes${NC}"
-echo -n "${CYAN}Construyendo imágenes Docker${NC} "
+echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
+echo -n "${CYAN} Construyendo imágenes Docker ${NC} "
 
 # Mostrar progreso de construcción
 docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/build.log 2>&1 &
 build_pid=$!
 
 # Spinner personalizado para construcción
-local delay=0.1
-local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+delay=0.1
+spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 while kill -0 $build_pid 2>/dev/null; do
-    local temp=${spinstr#?}
+    temp=${spinstr#?}
     printf "${YELLOW}[%c]${NC}" "$spinstr"
-    local spinstr=$temp${spinstr%"$temp"}
+    spinstr=$temp${spinstr%"$temp"}
     sleep $delay
     printf "\b\b\b"
 done
