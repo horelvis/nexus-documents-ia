@@ -53,10 +53,20 @@ show_header() {
     printf "╭──────────────────────────────────────────────────────────────────────────────╮\n"
     printf "│                          🧪 SUITE DE TESTS BACKEND 🧪                          │\n"
     printf "│                                                                              │\n"
+    
+    if [[ "$COMPOSE_FILE" == *"simple"* ]]; then
+        printf "│  • Modo: SIMPLE (sin Qdrant)                                                │\n"
+        printf "│  • Servicios: API, PostgreSQL, Redis                                        │\n"
+    else
+        printf "│  • Modo: COMPLETO                                                           │\n"
+        printf "│  • Servicios: API, PostgreSQL, Redis, Qdrant                               │\n"
+    fi
+    
     printf "│  • Base de datos: PostgreSQL (temporal)                                     │\n"
-    printf "│  • Servicios: API, Redis, Qdrant                                            │\n"
     printf "│  • Reportes: Cobertura HTML + Terminal                                      │\n"
     printf "│  • Timeout: 15 minutos máximo                                               │\n"
+    printf "│                                                                              │\n"
+    printf "│  Uso: ./run_tests_enhanced.sh [--simple|-s]                                 │\n"
     printf "╰──────────────────────────────────────────────────────────────────────────────╯\n"
     printf "${NC}\n"
 }
@@ -208,9 +218,8 @@ if [ ! -f "../docker/docker-compose.test.yml" ]; then
     exit 1
 fi
 
-# Mostrar título
-clear
-show_title "🧪 SUITE DE TESTS BACKEND 🧪"
+# Mostrar header
+show_header
 
 # Configurar limpieza
 trap 'cleanup; echo -e "\n${YELLOW}${WARNING} Tests interrumpidos por el usuario${NC}"; exit 1' INT TERM
