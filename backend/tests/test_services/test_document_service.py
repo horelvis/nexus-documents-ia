@@ -1,12 +1,228 @@
 import pytest
 import io
-from uuid import uuid4
-from fastapi import UploadFile
+from uuid import uuid4, UUID
+from fastapi import UploadFile, HTTPException
 from datetime import datetime
+from unittest.mock import MagicMock, AsyncMock, patch
+
+from sqlalchemy.orm import Session
 
 from app.services.document_service import DocumentService
-from app.db.models import Document, DocumentChunk, Tag
+from app.db.models import Document, Tag # Removed DocumentChunk as it's not directly used by these tests
+from app.schemas.enums import IndexingStatus
+from app.core.config import settings
 
+
+# --- Fixtures for DocumentService tests ---
+@pytest.fixture
+def mock_db_session():
+    """Provides a MagicMock for the SQLAlchemy Session."""
+    session = MagicMock(spec=Session)
+    # Mock the query chain
+    session.query.return_value.filter.return_value.first.return_value = None
+    return session
+
+@pytest.fixture
+def document_service_instance(mock_db_session, test_tenant): # Added test_tenant for tenant_id
+    """Provides a DocumentService instance with mocked dependencies."""
+    # Mock dependencies of DocumentService if they are called by the methods under test
+    # For _validate_file and _create_document_record, storage_service, embedding_service, llm_service
+    # are not directly called.
+    service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(uuid4()))
+    # If these services were used, you would mock them:
+    # service.storage_service = MagicMock()
+    # service.embedding_service = MagicMock()
+    # service.llm_service = MagicMock()
+    return service
+
+# --- Tests for _validate_file ---
+
+@pytest.mark.asyncio
+async def test_validate_file_success(document_service_instance):
+    mock_file_content = b"This is a test file."
+    mock_upload_file = AsyncMock(spec=UploadFile)
+    mock_upload_file.filename = "test.pdf"
+    mock_upload_file.read = AsyncMock(return_value=mock_file_content)
+    mock_upload_file.seek = AsyncMock() # Mock seek if it's called
+
+    # Ensure 'pdf' is in ALLOWED_EXTENSIONS
+    original_allowed_extensions = settings.ALLOWED_EXTENSIONS
+    settings.ALLOWED_EXTENSIONS = ["pdf", "txt"]
+    
+    file_ext, contents, file_size = await document_service_instance._validate_file(mock_upload_file, "test.pdf")
+    
+    assert file_ext == "pdf"
+    assert contents == mock_file_content
+    assert file_size == len(mock_file_content)
+    mock_upload_file.read.assert_called_once()
+    
+    settings.ALLOWED_EXTENSIONS = original_allowed_extensions # Reset
+
+@pytest.mark.asyncio
+async def test_validate_file_invalid_extension(document_service_instance):
+    mock_upload_file = AsyncMock(spec=UploadFile)
+    mock_upload_file.filename = "test.exe"
+    mock_upload_file.read = AsyncMock(return_value=b"some content")
+    mock_upload_file.seek = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await document_service_instance._validate_file(mock_upload_file, "test.exe")
+    assert exc_info.value.status_code == 400
+    assert "Tipo de archivo no permitido" in exc_info.value.detail
+
+@pytest.mark.asyncio
+async def test_validate_file_too_large(document_service_instance):
+    mock_file_content = b"a" * (settings.MAX_UPLOAD_SIZE + 1)
+    mock_upload_file = AsyncMock(spec=UploadFile)
+    mock_upload_file.filename = "large_file.txt"
+    mock_upload_file.read = AsyncMock(return_value=mock_file_content)
+    mock_upload_file.seek = AsyncMock()
+
+    original_allowed_extensions = settings.ALLOWED_EXTENSIONS
+    settings.ALLOWED_EXTENSIONS = ["txt"] # Ensure txt is allowed for this test
+
+    with pytest.raises(HTTPException) as exc_info:
+        await document_service_instance._validate_file(mock_upload_file, "large_file.txt")
+    assert exc_info.value.status_code == 400
+    assert "Tamaño de archivo excede el límite" in exc_info.value.detail
+
+    settings.ALLOWED_EXTENSIONS = original_allowed_extensions
+
+@pytest.mark.asyncio
+async def test_validate_file_empty(document_service_instance):
+    mock_upload_file = AsyncMock(spec=UploadFile)
+    mock_upload_file.filename = "empty.txt"
+    mock_upload_file.read = AsyncMock(return_value=b"") # Empty content
+    mock_upload_file.seek = AsyncMock()
+    
+    original_allowed_extensions = settings.ALLOWED_EXTENSIONS
+    settings.ALLOWED_EXTENSIONS = ["txt"]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await document_service_instance._validate_file(mock_upload_file, "empty.txt")
+    assert exc_info.value.status_code == 400
+    assert "El archivo está vacío" in exc_info.value.detail
+
+    settings.ALLOWED_EXTENSIONS = original_allowed_extensions
+
+# --- Tests for _create_document_record ---
+
+def test_create_document_record_success(document_service_instance, mock_db_session):
+    title = "Test Document"
+    description = "A document for testing"
+    filename = "test_doc.pdf"
+    file_ext = "pdf"
+    file_size = 1024
+    tags_input = ["tag1", "new_tag"] # tag1 exists, new_tag does not
+
+    # Mock Tag query: tag1 exists, new_tag does not
+    existing_tag_obj = Tag(id=1, name="tag1", tenant_id=document_service_instance.tenant_id)
+    
+    def mock_tag_query_logic(model):
+        if model == Tag:
+            filter_mock = MagicMock()
+            def first_side_effect():
+                # This part needs to be dynamic based on the filter's criteria,
+                # which is tricky with a simple side_effect list.
+                # For simplicity, we assume the filter check is for 'name' and 'tenant_id'.
+                # This mock is simplified; a more robust mock would inspect the filter arguments.
+                # Let's simulate based on the tag name passed to filter.
+                # This requires knowing how filter is called, which is inside the method.
+                # A more advanced mock might use a callback for side_effect.
+                current_call_args = filter_mock.call_args
+                if current_call_args and "name='tag1'" in str(current_call_args): # Simplified check
+                     return existing_tag_obj
+                return None # For "new_tag"
+            
+            filter_mock.first.side_effect = first_side_effect 
+            # This is a bit of a hack; ideally, you'd inspect the actual filter arguments.
+            # A better way is to set side_effect on filter().first() based on a list of expected calls.
+            # For this example, let's assume two calls to first(), one for "tag1", one for "new_tag".
+            mock_db_session.query(Tag).filter().first.side_effect = [
+                existing_tag_obj, # For "tag1"
+                None              # For "new_tag"
+            ]
+            return filter_mock
+        return MagicMock() # Default for other queries
+        
+    mock_db_session.query.side_effect = mock_tag_query_logic
+
+
+    db_document = document_service_instance._create_document_record(
+        db=mock_db_session,
+        title=title,
+        description=description,
+        filename=filename,
+        file_ext=file_ext,
+        file_size=file_size,
+        tags=tags_input
+    )
+
+    assert isinstance(db_document, Document)
+    assert db_document.title == title
+    assert db_document.description == description
+    assert db_document.filename == filename
+    assert db_document.file_type == file_ext
+    assert db_document.file_size == file_size
+    assert db_document.tenant_id == UUID(document_service_instance.tenant_id)
+    assert db_document.created_by == UUID(document_service_instance.user_id)
+    assert db_document.indexed == IndexingStatus.PROCESSING
+    assert filename in db_document.file_path
+    assert str(db_document.id) in db_document.file_path
+    
+    # Check tags
+    assert len(db_document.tags) == 2
+    # Order might not be guaranteed, so check names
+    tag_names_in_doc = sorted([tag.name for tag in db_document.tags])
+    assert tag_names_in_doc == sorted(["tag1", "new_tag"])
+
+    # Check db calls
+    # mock_db_session.add.assert_any_call(db_document) # Document is added
+    # One add for the new_tag, one for the document itself
+    assert mock_db_session.add.call_count >= 2 # At least document and new tag
+    
+    # Check that a new Tag object was created for "new_tag"
+    added_objects = [call.args[0] for call in mock_db_session.add.call_args_list]
+    assert any(isinstance(obj, Document) and obj.title == title for obj in added_objects)
+    assert any(isinstance(obj, Tag) and obj.name == "new_tag" for obj in added_objects)
+
+
+    mock_db_session.flush.assert_called()
+    mock_db_session.refresh.assert_called_with(db_document)
+
+
+def test_create_document_record_no_tags(document_service_instance, mock_db_session):
+    title = "No Tags Doc"
+    # ... other params ...
+
+    db_document = document_service_instance._create_document_record(
+        db=mock_db_session,
+        title=title,
+        description=None,
+        filename="notags.txt",
+        file_ext="txt",
+        file_size=100,
+        tags=[] # No tags
+    )
+
+    assert isinstance(db_document, Document)
+    assert db_document.title == title
+    assert len(db_document.tags) == 0
+    
+    # Assert that db.add was called for the document, but not for any new tags
+    # (unless Tag query was still made and returned None)
+    mock_db_session.query(Tag).filter().first.assert_not_called() # No tag lookups if tags list is empty
+    
+    # Check that only the document was added
+    added_objects = [call.args[0] for call in mock_db_session.add.call_args_list]
+    assert any(isinstance(obj, Document) and obj.title == title for obj in added_objects)
+    assert not any(isinstance(obj, Tag) for obj in added_objects)
+
+    mock_db_session.flush.assert_called_once() # Only document related flush
+    mock_db_session.refresh.assert_called_once_with(db_document)
+
+
+# --- Keep existing tests and update them if needed ---
 
 def test_get_documents(db, test_documents, test_tenant):
     """Prueba para obtener lista de documentos"""
