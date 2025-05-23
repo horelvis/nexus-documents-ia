@@ -49,10 +49,10 @@ class StorageService:
             self.bucket = self.client.get_bucket(self.bucket_name)
         except Exception as e:
             logger.info(f"Bucket {self.bucket_name} no encontrado, creando...")
-            # Crear bucket con ubicación us-central1
+            # Crear bucket con ubicación europe-west1
             self.bucket = self.client.create_bucket(
                 self.bucket_name, 
-                location="us-central1"
+                location="europe-west1"
             )
             logger.info(f"Bucket {self.bucket_name} creado exitosamente")
     

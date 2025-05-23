@@ -56,12 +56,13 @@ class Settings(BaseSettings):
     GCS_BUCKET_NAME: str
     GCS_CREDENTIALS: Optional[str] = None
     GCS_PROJECT_ID: Optional[str] = None
+    GCS_REGION: str = "europe-west1"  # Región por defecto
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
     
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama2"  # Modelo por defecto
+    OLLAMA_MODEL: str = "gemma3:27b-it-qat"  # Modelo por defecto
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto

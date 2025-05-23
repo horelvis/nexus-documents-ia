@@ -23,6 +23,11 @@ services:
       - PYTHONPATH=/app
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - TESTING=true
+      - GCS_PROJECT_ID=tu-project-id
+      - GCS_BUCKET_NAME=test-docs-eu  # ← Nombre que indique región
+      - GCS_CREDENTIALS=/app/test-credentials.json
+      - GCS_REGION=europe-west1  # ← Agregar variable de región
     depends_on:
       test-db:
         condition: service_healthy
