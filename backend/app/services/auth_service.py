@@ -167,9 +167,9 @@ class AuthService:
         db: Session,
         email: str,
         password: str,
-        full_name: Optional[str] = None,
+        tenant_id: str,
         is_superuser: bool = False,
-        tenant_id: Optional[str] = None
+        full_name: Optional[str] = None
     ) -> User:
         """
         Crea un nuevo usuario.
@@ -180,7 +180,7 @@ class AuthService:
             password: Contraseña en texto plano
             full_name: Nombre completo (opcional)
             is_superuser: Si el usuario es superusuario
-            tenant_id: ID del tenant (opcional, usa el default si no se proporciona)
+            tenant_id: ID del tenant
             
         Returns:
             Usuario creado
@@ -196,25 +196,24 @@ class AuthService:
                 detail="Email already registered"
             )
         
-        # Usar tenant_id proporcionado o el default
-        tenant_id = tenant_id or settings.DEFAULT_TENANT
-        
-        # Verificar si el tenant existe
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if not tenant:
-            # Usar el tenant default si existe
-            tenant = db.query(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT).first()
+        try:
+            tenant_uuid = uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
             
             if not tenant:
-                # Crear tenant default si no existe
+                # Crear tenant si no existe
                 tenant = Tenant(
-                    id=uuid.uuid4(),
-                    name=settings.DEFAULT_TENANT,
-                    description="Default tenant",
-                    bucket_name=f"{settings.GCS_BUCKET_NAME}-{settings.DEFAULT_TENANT}"
+                    id=tenant_uuid,
+                    name=f"tenant-{str(tenant_uuid)[:8]}",
+                    description="Auto-created tenant",
+                    bucket_name=f"{settings.GCS_BUCKET_NAME}-{str(tenant_uuid)[:8]}",
+                    is_active=True
                 )
                 db.add(tenant)
                 db.flush()
+                
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid tenant ID format")
         
         # Crear usuario
         user = User(
