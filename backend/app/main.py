@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 import time
+
 # Updated imports to use routers from app.api.v1.__init__
 from app.api.v1 import (
     admin_router,
@@ -140,7 +141,7 @@ app.include_router(
 
 # Rutas de la API v1
 app.include_router(
-    auth_router, # Use the imported router instance directly
+    auth_router,
     prefix=f"{settings.API_V1_STR}/auth",
     tags=["auth"]
 )
@@ -157,6 +158,7 @@ app.include_router(
     tags=["search"]
 )
 
+# ✅ AGREGADO: Router de admin que faltaba
 app.include_router(
     admin_router,
     prefix=f"{settings.API_V1_STR}/admin",
@@ -180,7 +182,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.exception(f"Unhandled exception: {str(exc)}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error"} # Changed to generic message
+        content={"detail": "Internal server error"}
     )
 
 if __name__ == "__main__":
