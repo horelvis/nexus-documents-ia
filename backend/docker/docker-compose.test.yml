@@ -34,7 +34,7 @@ services:
       test-redis:
         condition: service_healthy
       test-qdrant:
-        condition: service_healthy # Changed from service_started
+        condition: service_started # Esta línea ha sido cambiada
     networks:
       - test-network
     volumes:
