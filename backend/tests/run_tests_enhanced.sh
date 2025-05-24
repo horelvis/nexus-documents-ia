@@ -319,10 +319,18 @@ else
     
     # Mostrar errores más relevantes
     if [ -f "/tmp/test_output.log" ]; then
-        echo -e "\n ${RED}🔍 Errores encontrados:${NC}"
-        grep -i -E "(error|failed|exception)" /tmp/test_output.log | tail -5 | while read line; do
-            echo -e "${RED}  → $line${NC}"
-        done
+        if grep -q "^=========================== FAILURES ===========================" /tmp/test_output.log; then
+            echo -e "\n ${RED}🔍 Detalles de los Fallos (pytest FAILURES sección):${NC}"
+            sed -n '/^=========================== FAILURES ===========================$/,/^========================= short test summary info =========================/ { /^========================= short test summary info =========================/!p; }' /tmp/test_output.log | while IFS= read -r line; do
+                echo -e "${RED}  $line${NC}" # Coloreado simple de todo el bloque
+            done
+        else
+            # Fallback al método anterior si no hay sección de FAILURES detallada
+            echo -e "\n ${RED}🔍 Errores encontrados (resumen simple de /tmp/test_output.log):${NC}"
+            grep -i -E "(error|failed|exception)" /tmp/test_output.log | tail -15 | while IFS= read -r line; do # Show a bit more for simple summary
+                echo -e "${RED}  → $line${NC}"
+            done
+        fi
     fi
 fi
 
