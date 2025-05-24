@@ -98,10 +98,10 @@ services:
       - "6333:6333" # Expose Qdrant HTTP port for potential direct access/debugging
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s # Give Qdrant some time to start up before healthchecks begin
+      interval: 10s       # Aumentado de 5s
+      timeout: 5s         # Aumentado de 3s
+      retries: 6          # Aumentado de 5
+      start_period: 20s   # Aumentado de 10s
     tmpfs:
       - /qdrant/storage:rw,noexec,nosuid,size=500m
 
