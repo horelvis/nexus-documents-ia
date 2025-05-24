@@ -54,14 +54,15 @@ show_header() {
     echo "│                          🧪 SUITE DE TESTS BACKEND 🧪                          │"
     echo "│                                                                              │"
     
-    if [[ "$COMPOSE_FILE" == *"simple"* ]]; then
+    if [ "$MODE" == "SIMPLE" ]; then
         echo "│  • Modo: SIMPLE (sin Qdrant)                                                │"
         echo "│  • Servicios: API, PostgreSQL, Redis                                        │"
-    else
+    else # FULL mode
         echo "│  • Modo: COMPLETO                                                           │"
         echo "│  • Servicios: API, PostgreSQL, Redis, Qdrant                               │"
     fi
     
+    echo "│  • Archivo Compose: $COMPOSE_FILE                                           │"
     echo "│  • Base de datos: PostgreSQL (temporal)                                     │"
     echo "│  • Reportes: Cobertura HTML + Terminal                                      │"
     echo "│  • Timeout: 15 minutos máximo                                               │"
@@ -190,7 +191,11 @@ show_final_stats() {
     
     printf "${WHITE}│ %s Duración: %dm %ds${NC}\n" "$CLOCK" $((duration/60)) $((duration%60))
     printf "${WHITE}│ %s Base de datos: PostgreSQL (temporal)${NC}\n" "$DATABASE"
-    printf "${WHITE}│ %s Servicios: API, DB, Redis, Qdrant${NC}\n" "$GEAR"
+    if [ "$MODE" == "SIMPLE" ]; then
+        printf "${WHITE}│ %s Servicios: API, DB, Redis${NC}\n" "$GEAR"
+    else # FULL mode
+        printf "${WHITE}│ %s Servicios: API, DB, Redis, Qdrant${NC}\n" "$GEAR"
+    fi
     
     # Mostrar información de cobertura si existe
     if [ -f "coverage_report/index.html" ]; then
@@ -203,9 +208,30 @@ show_final_stats() {
 
 # Función de limpieza
 cleanup() {
-    docker compose -f ../docker/docker-compose.test.yml down -v --remove-orphans 2>/dev/null || true
+    # $COMPOSE_FILE se establece después del parseo de argumentos,
+    # pero cleanup puede ser llamado por trap antes.
+    # Usaremos el archivo por defecto si COMPOSE_FILE no está seteado aún.
+    local current_compose_file=${COMPOSE_FILE:-../docker/docker-compose.test.yml}
+    log "Limpiando recursos usando $current_compose_file..."
+    docker compose -f "$current_compose_file" down -v --remove-orphans 2>/dev/null || true
     docker system prune -f --filter "label=test" 2>/dev/null || true
 }
+
+# Parseo de argumentos para modo Simple/Full
+MODE="FULL" # Por defecto, modo completo
+if [[ "$1" == "--simple" || "$1" == "-s" ]]; then
+    MODE="SIMPLE"
+fi
+
+# Definición de archivos Docker Compose
+COMPOSE_FILE_FULL="../docker/docker-compose.test.yml"
+COMPOSE_FILE_SIMPLE="../docker/docker-compose.test.simple.yml" # Este archivo debe ser creado por el usuario
+
+if [ "$MODE" == "SIMPLE" ]; then
+    COMPOSE_FILE=$COMPOSE_FILE_SIMPLE
+else
+    COMPOSE_FILE=$COMPOSE_FILE_FULL
+fi
 
 # Verificaciones iniciales
 if [ ! -f "conftest.py" ]; then
@@ -213,12 +239,17 @@ if [ ! -f "conftest.py" ]; then
     exit 1
 fi
 
-if [ ! -f "../docker/docker-compose.test.yml" ]; then
-    echo -e "${RED}${CROSS} Error: No se encontró ../docker/docker-compose.test.yml${NC}"
+# Verificar que existe el docker-compose.test.yml apropiado
+if [ ! -f "$COMPOSE_FILE" ]; then
+    error "No se encontró el archivo Docker Compose: $COMPOSE_FILE"
+    if [ "$MODE" == "SIMPLE" ]; then
+        warning "Para el modo SIMPLE, necesitas crear $COMPOSE_FILE_SIMPLE."
+        warning "Puedes copiar $COMPOSE_FILE_FULL y eliminar el servicio 'test-qdrant' y su 'depends_on' en 'test-api'."
+    fi
     exit 1
 fi
 
-# Mostrar header
+# Mostrar header (ahora que MODE y COMPOSE_FILE están definidos)
 show_header
 
 # Configurar limpieza
@@ -236,44 +267,28 @@ show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
-show_spinner "Construyendo imágenes Docker"
-
-# Mostrar progreso de construcción
-docker compose -f ../docker/docker-compose.test.yml build --no-cache > /tmp/build.log 2>&1 &
-build_pid=$!
-
-# Spinner personalizado para construcción
-delay=0.1
-spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-while kill -0 $build_pid 2>/dev/null; do
-    temp=${spinstr#?}
-    printf "${YELLOW}[%c]${NC}" "$spinstr"
-    spinstr=$temp${spinstr%"$temp"}
-    sleep $delay
-    printf "\b\b\b"
-done
-
-wait $build_pid
+run_with_spinner "Construyendo imágenes Docker (usando $COMPOSE_FILE)..." \
+                 "docker compose -f $COMPOSE_FILE build --no-cache" \
+                 "/tmp/build.log"
 build_exit_code=$?
 
 if [ $build_exit_code -ne 0 ]; then
-    printf "${RED}${CROSS}${NC}\n"
     echo -e "${RED}${CROSS} Error en la construcción. Ver /tmp/build.log${NC}"
+    cat /tmp/build.log # Mostrar logs de error de construcción
     exit 1
-else
-    printf "${GREEN}${CHECK}${NC}\n"
 fi
 
 # Paso 3: Ejecución de tests
-echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests${NC}"
+echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests (usando $COMPOSE_FILE)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Ejecutar tests con salida en tiempo real
-timeout 600s docker compose -f ../docker/docker-compose.test.yml up \
+# El comando de pytest dentro de docker-compose.test.yml ya tiene --durations=10
+timeout 900s docker compose -f "$COMPOSE_FILE" up \
     --abort-on-container-exit --exit-code-from test-api 2>&1 | \
     tee /tmp/test_output.log | colorize_pytest_output
 
-exit_code=${PIPESTATUS[0]}
+exit_code=${PIPESTATUS[0]} # Captura el código de salida de 'docker compose up' (el primer comando en el pipe)
 end_time=$(date +%s)
 duration=$((end_time - start_time))
 
