@@ -162,7 +162,9 @@ start_time=$(date +%s)
 # Verificar que los servicios están arrancando
 log "📡 Verificando servicios..."
 
-# Iniciar docker compose en background
+# Iniciar docker compose en background. 
+# Esta es la línea clave que inicia los servicios de prueba (DB, Redis, Qdrant) y ejecuta pytest 
+# dentro del contenedor 'test-api'. La salida de pytest se redirige a /tmp/test_output.log.
 docker compose -f ../docker/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-api > /tmp/test_output.log 2>&1 &
 compose_pid=$!
 
@@ -234,15 +236,21 @@ if [ $exit_code -eq 0 ]; then
     success "Tests completados exitosamente en ${duration}s"
     
     # Mostrar resumen si está disponible
+    # El archivo /tmp/test_output.log contiene la salida completa de pytest,
+    # incluyendo el informe de las pruebas más lentas (--durations=10).
+    # Aquí se muestra un breve resumen de los resultados generales.
     if [ -f "/tmp/test_output.log" ]; then
-        echo -e "\n${BLUE}📈 Resumen de tests:${NC}"
-        grep -E "(passed|failed|error|warning)" /tmp/test_output.log | tail -5 | while read line; do
+        echo -e "\n${BLUE}📈 Resumen de tests (últimas líneas de /tmp/test_output.log):${NC}"
+        grep -E "(passed|failed|error|warning|slowest reported)" /tmp/test_output.log | tail -n 20 | while read line; do # Show more lines to potentially include duration summary
             case "$line" in
                 *"failed"*|*"error"*)
                     echo -e "${RED}  $line${NC}"
                     ;;
                 *"passed"*)
                     echo -e "${GREEN}  $line${NC}"
+                    ;;
+                *"slowest reported"*) # Highlight slowest test summary
+                    echo -e "${YELLOW}  $line${NC}"
                     ;;
                 *)
                     echo -e "${BLUE}  $line${NC}"
@@ -254,9 +262,11 @@ if [ $exit_code -eq 0 ]; then
     # Copiar reportes de cobertura si existen
     if docker volume ls | grep -q "backend_tests_test_coverage"; then
         log "📊 Copiando reporte de cobertura..."
-        docker run --rm -v backend_tests_test_coverage:/source -v $(pwd)/coverage_report:/dest alpine cp -r /source/. /dest/ 2>/dev/null || true
-        if [ -f "coverage_report/index.html" ]; then
-            success "Reporte de cobertura disponible en coverage_report/index.html"
+        # El script se ejecuta desde backend/tests/, por lo que $(pwd) es /app/backend/tests
+        # El reporte se copia a /app/backend/tests/coverage_report/
+        docker run --rm -v backend_tests_test_coverage:/source -v "$(pwd)/coverage_report":/dest alpine cp -r /source/. /dest/ 2>/dev/null || true
+        if [ -f "coverage_report/index.html" ]; then # This path is relative to where the script is run
+            success "Reporte de cobertura disponible en $(pwd)/coverage_report/index.html"
         fi
     fi
     

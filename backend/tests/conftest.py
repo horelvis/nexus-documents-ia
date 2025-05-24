@@ -36,61 +36,83 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 print(f"🔍 Modelos registrados: {list(Base.metadata.tables.keys())}")
 
-# Fixture para crear la base de datos
-@pytest.fixture(scope="function")
-def db():
+# Session-scoped fixture for initial database setup (once per session)
+@pytest.fixture(scope="session")
+def _session_scoped_db_setup():
     """
-    Crea una sesión de base de datos para cada test.
-    SOLUCIÓN: Usar una sesión simple SIN transacciones que interfieran.
+    Sets up the database schema once per test session.
+    Drops all tables and recreates them.
     """
-    print("🔧 Setting up test database...")
-    
-    # PASO 1: Crear todas las tablas de forma limpia
+    print("🚀 SESSION START: Setting up database schema...")
     try:
-        print("🧹 Cleaning and creating fresh tables...")
+        print("🧹 Cleaning and creating fresh tables for the session...")
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
-        
+
         # Verificar que las tablas se crearon
         with engine.connect() as verify_conn:
             result = verify_conn.execute(text("""
-                SELECT table_name FROM information_schema.tables 
+                SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' ORDER BY table_name
             """))
             created_tables = [row[0] for row in result.fetchall()]
-            print(f"✅ Tables confirmed: {created_tables}")
-            
+            print(f"✅ SESSION: Tables confirmed: {created_tables}")
+
             if 'users' not in created_tables or 'tenants' not in created_tables:
-                raise Exception(f"❌ Required tables missing! Found: {created_tables}")
-                
+                raise Exception(f"❌ SESSION: Required tables missing! Found: {created_tables}")
+        print("✅ SESSION: Database schema created successfully.")
     except Exception as e:
-        print(f"❌ FATAL ERROR creating tables: {e}")
+        print(f"❌ SESSION FATAL ERROR creating tables: {e}")
         raise
-    
-    # PASO 2: Crear sesión simple (SIN transacciones complejas)
-    session = TestingSessionLocal()
-    
+
+    yield # Control returns here after all tests in the session are done
+
+    print("🌙 SESSION END: Cleaning up database schema...")
     try:
-        # Test simple para verificar que la sesión funciona
-        test_count = session.execute(text("SELECT COUNT(*) FROM users")).scalar()
-        print(f"✅ Database session working (users: {test_count})")
-        
-        yield session
-        
+        Base.metadata.drop_all(bind=engine)
+        print("✅ SESSION: Database schema cleaned successfully.")
     except Exception as e:
-        print(f"❌ Error in database session: {e}")
-        session.rollback()
+        print(f"⚠️ SESSION Warning during cleanup: {e}")
+
+
+# Function-scoped fixture for database session with transaction management
+@pytest.fixture(scope="function")
+def db(_session_scoped_db_setup):
+    """
+    Provides a transactional database session for each test function.
+    Rolls back the transaction after the test.
+    """
+    print("🏁 TEST START: Creating transactional database session...")
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = TestingSessionLocal(bind=connection)
+
+    # # Optional: Verify connection with a simple query if needed
+    # try:
+    #     user_count = session.execute(text("SELECT COUNT(*) FROM users")).scalar()
+    #     print(f"✅ TEST: Database session working (initial users: {user_count})")
+    # except Exception as e:
+    #     print(f"❌ TEST: Error verifying session: {e}")
+    #     transaction.rollback()
+    #     connection.close()
+    #     raise
+
+    try:
+        yield session
+    except Exception as e:
+        print(f"❌ TEST: Error during test execution with database session: {e}")
+        # No explicit session.rollback() needed here as the outer transaction.rollback() handles it.
         raise
     finally:
-        print("🧹 Cleaning up session...")
-        session.close()
-        
-        # Limpiar al final
+        print("🔚 TEST END: Rolling back transaction and closing session...")
         try:
-            Base.metadata.drop_all(bind=engine)
-            print("✅ Database cleaned")
+            session.close()  # Close the session
+            transaction.rollback()  # Rollback the transaction
+            connection.close()  # Close the connection
+            print("✅ TEST: Transaction rolled back, session and connection closed.")
         except Exception as e:
-            print(f"⚠️ Warning during cleanup: {e}")
+            print(f"⚠️ TEST Warning during cleanup: {e}")
+
 
 # Fixture para el cliente de pruebas
 @pytest.fixture(scope="function")
