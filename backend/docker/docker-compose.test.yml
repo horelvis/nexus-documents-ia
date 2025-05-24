@@ -34,7 +34,7 @@ services:
       test-redis:
         condition: service_healthy
       test-qdrant:
-        condition: service_healthy # Changed from service_started
+        condition: service_started # Esta línea ha sido cambiada
     networks:
       - test-network
     volumes:
@@ -97,7 +97,7 @@ services:
     ports:
       - "6333:6333" # Expose Qdrant HTTP port for potential direct access/debugging
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget --spider --quiet -T 5 http://localhost:6333/healthz || exit 1"]
       interval: 10s       # Aumentado de 5s
       timeout: 5s         # Aumentado de 3s
       retries: 6          # Aumentado de 5
