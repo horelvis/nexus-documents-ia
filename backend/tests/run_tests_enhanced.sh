@@ -105,12 +105,36 @@ run_with_spinner() {
     local message="$1"
     local command="$2"
     local log_file="$3"
+    local initial_errexit_status=$(set +o | grep errexit) # Guardar estado original de errexit
+    set +e # Desactivar errexit para esta función
+
+    echo "[DEBUG run_with_spinner] Mensaje: '$message'"
+    echo "[DEBUG run_with_spinner] Comando: '$command'"
+    echo "[DEBUG run_with_spinner] Archivo de Log: '$log_file'"
     
     printf "${CYAN}%s${NC} " "$message"
     
     # Ejecutar comando en background
     eval "$command" > "$log_file" 2>&1 &
     pid=$!
+
+    # Verificar si el proceso background se lanzó correctamente
+    if ! kill -0 $pid 2>/dev/null; then
+        printf "${RED}%s${NC}
+" "$CROSS" # Imprimir la X roja
+        # Usar 'log' y los colores definidos, no directamente echo con colores aquí
+        log "${RED}Fallo crítico al iniciar el comando en background: $command ${NC}"
+        log "${RED}Verifica $log_file para más detalles.${NC}"
+        if [ -f "$log_file" ] && [ -s "$log_file" ]; then # Verificar también que no esté vacío
+            cat "$log_file" # Mostrar el log directamente
+        fi
+        # Restaurar errexit antes de salir de la función si falla aquí
+        if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
+            set -e
+        fi
+        return 1 # Retornar un código de error inmediatamente
+    fi
+    echo "[DEBUG run_with_spinner] PID del comando en background: $pid"
     
     # Mostrar spinner mientras se ejecuta
     i=0
@@ -125,6 +149,7 @@ run_with_spinner() {
     # Esperar a que termine y obtener código de salida
     wait $pid
     exit_code=$?
+    echo "[DEBUG run_with_spinner] 'wait \$pid' completado. Código de salida capturado: $exit_code"
     
     if [ $exit_code -eq 0 ]; then
         printf "${GREEN}%s${NC}\n" "$CHECK"
@@ -132,6 +157,11 @@ run_with_spinner() {
         printf "${RED}%s${NC}\n" "$CROSS"
     fi
     
+    echo "[DEBUG run_with_spinner] Retornando: $exit_code"
+    # Restaurar el estado original de errexit
+    if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
+        set -e
+    fi
     return $exit_code
 }
 
@@ -267,16 +297,33 @@ show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
-run_with_spinner "Construyendo imágenes Docker (usando $COMPOSE_FILE)..." \
-                 "docker compose -f $COMPOSE_FILE build --no-cache" \
-                 "/tmp/build.log"
-build_exit_code=$?
+set -x # Activar Debug de Shell (Temporalmente para esta fase)
 
-if [ $build_exit_code -ne 0 ]; then
-    echo -e "${RED}${CROSS} Error en la construcción. Ver /tmp/build.log${NC}"
-    cat /tmp/build.log # Mostrar logs de error de construcción
-    exit 1
+spinner_message="Construyendo imágenes Docker (usando $COMPOSE_FILE)..."
+build_log_file="/tmp/build.log"
+
+# Limpiar log anterior si existe
+rm -f "$build_log_file"
+
+echo "[DEBUG MainScript] Llamando a run_with_spinner para construcción. COMPOSE_FILE=$COMPOSE_FILE"
+
+if run_with_spinner "$spinner_message" "docker compose -f \"$COMPOSE_FILE\" build --no-cache" "$build_log_file"; then
+    echo "[DEBUG MainScript] run_with_spinner para construcción retornó éxito."
+    success "Construcción de imágenes Docker completada."
+else
+    build_exit_code_after_spinner=$? 
+    echo "[DEBUG MainScript] run_with_spinner para construcción retornó fallo con código: $build_exit_code_after_spinner."
+    error "Error en la construcción de imágenes (código de salida: $build_exit_code_after_spinner). Revisa $build_log_file para detalles."
+    if [ -f "$build_log_file" ] && [ -s "$build_log_file" ]; then
+        echo -e "${RED}" # Iniciar color rojo para el log
+        cat "$build_log_file"
+        echo -e "${NC}" # Resetear color
+    else
+        warning "No se encontró el archivo de log $build_log_file o está vacío."
+    fi
+    exit 1 # Salir del script principal
 fi
+set +x # Desactivar Debug de Shell
 
 # Paso 3: Ejecución de tests
 echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests (usando $COMPOSE_FILE)${NC}"
