@@ -28,6 +28,8 @@ TEST_TUBE="🧪"
 CHART="📊"
 CLOCK="⏱️"
 SPINNER="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+MAGNIFIER="🔍"
+SEPARATOR="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Función para logging mejorado
 log() {
@@ -44,6 +46,10 @@ error() {
 
 warning() {
     echo -e "${YELLOW}${WARNING} $1${NC}"
+}
+
+info() {
+    echo -e "${BLUE}${INFO} $1${NC}"
 }
 
 # Función para mostrar título mejorado
@@ -441,46 +447,114 @@ show_final_stats $duration $exit_code
 
 # Procesar resultados
 if [ $exit_code -eq 0 ]; then
-    echo -e "\n ${GREEN}${CHECK} ¡Tests completados exitosamente!${NC}"
+    echo -e "\n${GREEN}${CHECK} ¡Tests completados exitosamente en ${duration}s!${NC}"
     
     # Copiar reportes de cobertura
     if docker volume ls | grep -q "backend_tests_test_coverage"; then
-        echo -e "${CHART} Copiando reporte de cobertura..."
+        info "Copiando reporte de cobertura..."
+        
+        # Crear directorio de destino si no existe
+        mkdir -p "$(pwd)/coverage_report"
+        
+        # Copiar reportes desde el volumen
         docker run --rm \
             -v backend_tests_test_coverage:/source \
-            -v $(pwd)/coverage_report:/dest \
+            -v "$(pwd)/coverage_report":/dest \
             alpine cp -r /source/. /dest/ 2>/dev/null || true
+            
+        if [ -f "coverage_report/index.html" ]; then
+            success "Reporte de cobertura disponible en $(pwd)/coverage_report/index.html"
+        else
+            warning "No se pudo copiar el reporte de cobertura"
+        fi
+    fi
+    
+    # Mostrar tests más lentos si están disponibles
+    if [ -f "$LOG_FILE" ]; then
+        if grep -q "slowest durations" "$LOG_FILE"; then
+            echo -e "\n${YELLOW}${CLOCK} Tests más lentos:${NC}"
+            sed -n '/slowest durations/,/= .* passed/p' "$LOG_FILE" | head -n -1 | tail -n +2 | while IFS= read -r line; do
+                echo -e "${YELLOW}  $line${NC}"
+            done
+        fi
     fi
     
 else
-    echo -e "\n ${RED}${CROSS} Tests fallaron${NC}"
+    echo -e "\n${RED}${CROSS} Tests fallaron (código de salida: $exit_code)${NC}"
     
     if [ $exit_code -eq 124 ]; then
-        echo -e "${YELLOW}${WARNING} Terminados por timeout (10 minutos)${NC}"
+        echo -e "${YELLOW}${WARNING} Tests terminados por timeout ($TIMEOUT_MINUTES minutos)${NC}"
     fi
     
     # Mostrar errores más relevantes
-    if [ -f "/tmp/test_output.log" ]; then
-        if grep -q "^=========================== FAILURES ===========================" /tmp/test_output.log; then
-            echo -e "\n ${RED}🔍 Detalles de los Fallos (pytest FAILURES sección):${NC}"
-            sed -n '/^=========================== FAILURES ===========================$/,/^========================= short test summary info =========================/ { /^========================= short test summary info =========================/!p; }' /tmp/test_output.log | while IFS= read -r line; do
-                echo -e "${RED}  $line${NC}" # Coloreado simple de todo el bloque
+    if [ -f "$LOG_FILE" ]; then
+        # Intentar extraer sección de fallos de pytest
+        if grep -q "^=========================== FAILURES ===========================" "$LOG_FILE"; then
+            echo -e "\n${RED}${MAGNIFIER} Detalles de los fallos (sección FAILURES de pytest):${NC}"
+            show_separator
+            sed -n '/^=========================== FAILURES ===========================$/,/^========================= short test summary info =========================/ { /^========================= short test summary info =========================/!p; }' "$LOG_FILE" | while IFS= read -r line; do
+                echo -e "${RED}  $line${NC}"
+            done
+            show_separator
+            
+            # Mostrar también el resumen corto
+            echo -e "\n${RED}${MAGNIFIER} Resumen de fallos:${NC}"
+            sed -n '/^========================= short test summary info =========================$/,/^=/ { /^=/!p; }' "$LOG_FILE" | while IFS= read -r line; do
+                echo -e "${RED}  $line${NC}"
             done
         else
-            # Fallback al método anterior si no hay sección de FAILURES detallada
-            echo -e "\n ${RED}🔍 Errores encontrados (resumen simple de /tmp/test_output.log):${NC}"
-            grep -i -E "(error|failed|exception)" /tmp/test_output.log | tail -15 | while IFS= read -r line; do # Show a bit more for simple summary
+            # Si no hay sección de FAILURES, mostrar errores genéricos
+            echo -e "\n${RED}${MAGNIFIER} Errores encontrados:${NC}"
+            show_separator
+            grep -i -E "(error|failed|exception|traceback)" "$LOG_FILE" | tail -20 | while IFS= read -r line; do
                 echo -e "${RED}  → $line${NC}"
             done
+            show_separator
+        fi
+        
+        # Mostrar logs de servicios para debugging
+        echo -e "\n${YELLOW}${INFO} Logs de servicios para debugging:${NC}"
+        
+        echo -e "${YELLOW}--- Base de Datos ---${NC}"
+        docker compose -f "$COMPOSE_FILE" logs --tail=10 test-db 2>/dev/null || echo "No se pudieron obtener logs de test-db"
+        
+        echo -e "${YELLOW}--- Redis ---${NC}"
+        docker compose -f "$COMPOSE_FILE" logs --tail=5 test-redis 2>/dev/null || echo "No se pudieron obtener logs de test-redis"
+        
+        if [ "$MODE" == "FULL" ]; then
+            echo -e "${YELLOW}--- Qdrant ---${NC}"
+            docker compose -f "$COMPOSE_FILE" logs --tail=5 test-qdrant 2>/dev/null || echo "No se pudieron obtener logs de test-qdrant"
         fi
     fi
 fi
 
-# Limpieza final
-echo -e "\n ${YELLOW}${GEAR} Limpieza final...${NC}"
-cleanup
+# Fase 5: Limpieza final
+show_step 5 "Limpieza final" "$GEAR"
 
-# Limpiar archivos temporales
-rm -f /tmp/test_output.log /tmp/build.log
+if [ "$KEEP_CONTAINERS" == "true" ]; then
+    warning "Omitiendo limpieza final (--keep fue especificado)"
+    info "Para limpiar manualmente, ejecuta: docker compose -f $COMPOSE_FILE down -v --remove-orphans"
+else
+    info "Limpiando recursos..."
+    cleanup
+    
+    # Mensaje sobre logs
+    if [ -f "$LOG_FILE" ]; then
+        info "Los logs de la ejecución están disponibles en: $LOG_FILE"
+    fi
+    
+    # No eliminar logs si estamos en modo debug
+    if [ "$DEBUG_MODE" != "true" ]; then
+        # Limpiar archivos temporales solo si no estamos en modo debug
+        if [ "$exit_code" -eq 0 ]; then
+            # Si los tests fueron exitosos, podemos limpiar los logs
+            rm -f "$BUILD_LOG_FILE"
+        fi
+    else
+        info "Modo debug activado: conservando archivos de log"
+    fi
+fi
+
+echo -e "\n${CYAN}${BOLD}Ejecución de tests completada en ${duration}s con código de salida: $exit_code${NC}"
 
 exit $exit_code
