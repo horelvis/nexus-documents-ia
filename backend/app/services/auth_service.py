@@ -121,8 +121,8 @@ class AuthService:
         
         if not user:
             print(f'User not found with id: {user_id}')
-            users = db.query(User).all()
-            print(f'Total users: {users.count()}')
+            total_users = db.query(User).count()
+            print(f'Total users: {total_users}')
             for user in users:
                 print(user)
 
