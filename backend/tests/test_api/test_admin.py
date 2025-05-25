@@ -5,6 +5,8 @@ from uuid import uuid4
 def test_list_users(client, test_user, test_superuser, superuser_token_headers):
     """Prueba para listar usuarios (solo admin)"""
     # Debug: Verificar que el superuser tiene permisos
+    
+    print(f"DEBUG - test_user ID: {test_user.id}")
     print(f"DEBUG - Superuser ID: {test_superuser.id}")
     print(f"DEBUG - Is superuser: {test_superuser.is_superuser}")
     print(f"DEBUG - Token headers: {superuser_token_headers}")

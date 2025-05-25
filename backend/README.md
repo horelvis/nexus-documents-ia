@@ -101,7 +101,7 @@ backend/
    SECRET_KEY=super-secret-key-change-this-in-production
    ACCESS_TOKEN_EXPIRE_MINUTES=10080  # 7 días
    SERVER_NAME=Document Management API
-   SERVER_HOST=https://api.example.com
+   SERVER_HOST=http://localhost:8000
    BACKEND_CORS_ORIGINS=["http://localhost:3000", "http://localhost:8000", "https://app.example.com"]
    
    # PostgreSQL
