@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
-from app.db.session import SessionLocal
+from app.db.database import get_db
 from app.db.models import Document, document_views, User
 from sqlalchemy.sql import func, desc
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class DocumentRecommender:
     def __init__(self, tenant_id):
         self.tenant_id = tenant_id
-        self.db = SessionLocal()
+        self.db = get_db()
     
     def __del__(self):
         self.db.close()

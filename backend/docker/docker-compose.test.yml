@@ -49,7 +49,7 @@ services:
       sleep 10 &&
       echo '✅ Servicios listos' &&
       echo '🧪 Ejecutando tests...' &&
-      pytest tests/test_api/test_admin.py::test_list_users -v --durations=10 --cov=app --cov-report=term-missing --cov-report=html:/app/coverage_report --cov-fail-under=70 --tb=short --maxfail=5 &&
+      pytest tests -v --durations=10 --cov=app --cov-report=term-missing --cov-report=html:/app/coverage_report --cov-fail-under=70 --tb=short --maxfail=5 &&
       echo '✅ Tests completados'
       "
 

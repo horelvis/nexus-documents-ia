@@ -9,7 +9,7 @@ from app.core.config import settings
 
 
 def get_current_user(
-    db = Depends(get_db),
+    db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
 ) -> User:
     """

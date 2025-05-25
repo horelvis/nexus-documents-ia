@@ -2,7 +2,7 @@
 
 from app.ml.document_recommender import DocumentRecommender
 from sqlalchemy.sql import func, desc
-from app.db.session import SessionLocal
+from app.db.database import get_db
 from app.db.models import Document, document_views, DocumentMetrics, User
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -12,7 +12,7 @@ class DocumentInsightsService:
     def __init__(self, tenant_id, user_id=None):
         self.tenant_id = tenant_id
         self.user_id = user_id
-        self.db = SessionLocal()
+        self.db = get_db()
     
     def __del__(self):
         self.db.close()
