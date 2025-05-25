@@ -2,21 +2,10 @@ from typing import Generator, Optional
 
 from fastapi import Depends, HTTPException, status, Header
 
-from app.db.database import SessionLocal
+from app.db.database import get_db
 from app.db.models import User
 from app.services.auth_service import AuthService, oauth2_scheme
 from app.core.config import settings
-
-
-def get_db() -> Generator:
-    """
-    Crea una nueva sesión de base de datos para cada solicitud.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def get_current_user(
