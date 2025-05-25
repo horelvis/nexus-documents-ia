@@ -114,18 +114,18 @@ class AuthService:
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        user_id = UUID(token_data.sub)  # 👈 convierte sub a UUID
+        user_id = uuid.UUID(token_data.sub)  # 👈 convierte sub a UUID
         user = db.query(User).filter(User.id == user_id).first()
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found"
             )
             
         if not user.is_active:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Inactive user"
             )
             
