@@ -1,3 +1,4 @@
+from doctest import DebugRunner
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
@@ -113,8 +114,8 @@ class AuthService:
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-            
-        user = db.query(User).filter(User.id == token_data.sub).first()
+        user_id = UUID(token_data.sub)  # 👈 convierte sub a UUID
+        user = db.query(User).filter(User.id == user_id).first()
         
         if not user:
             raise HTTPException(

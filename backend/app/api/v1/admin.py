@@ -28,6 +28,7 @@ async def list_users(
     """
     Lista todos los usuarios del sistema (solo administradores).
     """
+    print(f"DEBUG - Current user: {current_user}")  # Agrega este print para depuración
     query = db.query(User)
     
     if tenant_id:
