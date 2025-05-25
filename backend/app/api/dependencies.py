@@ -6,6 +6,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.services.auth_service import AuthService, oauth2_scheme
 from app.core.config import settings
+from sqlalchemy.orm import Session
 
 
 def get_current_user(

@@ -12,6 +12,7 @@ from app.db.models import User, Tenant, Document, DocumentMetrics, document_view
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.auth_service import AuthService
 from app.services.document_service import DocumentService
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
