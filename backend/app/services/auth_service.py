@@ -115,13 +115,21 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         user_id = uuid.UUID(token_data.sub)  # 👈 convierte sub a UUID
+        print(f'from token_data.sub user_id : {user_id}')
+
         user = db.query(User).filter(User.id == user_id).first()
         
         if not user:
+            print(f'User not found with id: {user_id}')
+            users = db.query(User).all()
+            for user in users:
+                print(user)
+                
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found"
             )
+
             
         if not user.is_active:
             raise HTTPException(
