@@ -105,12 +105,36 @@ run_with_spinner() {
     local message="$1"
     local command="$2"
     local log_file="$3"
+    local initial_errexit_status=$(set +o | grep errexit) # Guardar estado original de errexit
+    set +e # Desactivar errexit para esta función
+
+    echo "[DEBUG run_with_spinner] Mensaje: '$message'"
+    echo "[DEBUG run_with_spinner] Comando: '$command'"
+    echo "[DEBUG run_with_spinner] Archivo de Log: '$log_file'"
     
     printf "${CYAN}%s${NC} " "$message"
     
     # Ejecutar comando en background
     eval "$command" > "$log_file" 2>&1 &
     pid=$!
+
+    # Verificar si el proceso background se lanzó correctamente
+    if ! kill -0 $pid 2>/dev/null; then
+        printf "${RED}%s${NC}
+" "$CROSS" # Imprimir la X roja
+        # Usar 'log' y los colores definidos, no directamente echo con colores aquí
+        log "${RED}Fallo crítico al iniciar el comando en background: $command ${NC}"
+        log "${RED}Verifica $log_file para más detalles.${NC}"
+        if [ -f "$log_file" ] && [ -s "$log_file" ]; then # Verificar también que no esté vacío
+            cat "$log_file" # Mostrar el log directamente
+        fi
+        # Restaurar errexit antes de salir de la función si falla aquí
+        if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
+            set -e
+        fi
+        return 1 # Retornar un código de error inmediatamente
+    fi
+    echo "[DEBUG run_with_spinner] PID del comando en background: $pid"
     
     # Mostrar spinner mientras se ejecuta
     i=0
@@ -125,6 +149,7 @@ run_with_spinner() {
     # Esperar a que termine y obtener código de salida
     wait $pid
     exit_code=$?
+    echo "[DEBUG run_with_spinner] 'wait \$pid' completado. Código de salida capturado: $exit_code"
     
     if [ $exit_code -eq 0 ]; then
         printf "${GREEN}%s${NC}\n" "$CHECK"
@@ -132,6 +157,11 @@ run_with_spinner() {
         printf "${RED}%s${NC}\n" "$CROSS"
     fi
     
+    echo "[DEBUG run_with_spinner] Retornando: $exit_code"
+    # Restaurar el estado original de errexit
+    if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
+        set -e
+    fi
     return $exit_code
 }
 
@@ -217,15 +247,64 @@ cleanup() {
     docker system prune -f --filter "label=test" 2>/dev/null || true
 }
 
-# Parseo de argumentos para modo Simple/Full
-MODE="FULL" # Por defecto, modo completo
-if [[ "$1" == "--simple" || "$1" == "-s" ]]; then
-    MODE="SIMPLE"
-fi
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIGURACIÓN INICIAL Y PARSEO DE ARGUMENTOS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Valores por defecto
+MODE="FULL"
+DEBUG_MODE="false"
+KEEP_CONTAINERS="false"
+TIMEOUT_MINUTES=15
+LOG_DIR="/tmp"
+BUILD_LOG_FILE="$LOG_DIR/build.log"
+LOG_FILE="$LOG_DIR/test_output.log"
+
+# Parseo de argumentos mejorado
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --simple|-s)
+            MODE="SIMPLE"
+            shift
+            ;;
+        --debug|-d)
+            DEBUG_MODE="true"
+            shift
+            ;;
+        --keep|-k)
+            KEEP_CONTAINERS="true"
+            shift
+            ;;
+        --timeout|-t)
+            if [[ "$2" =~ ^[0-9]+$ ]]; then
+                TIMEOUT_MINUTES="$2"
+                shift 2
+            else
+                error "El argumento --timeout requiere un número entero"
+                exit 1
+            fi
+            ;;
+        --help|-h)
+            echo -e "${CYAN}${BOLD}Uso: ./run_tests_enhanced.sh [OPCIONES]${NC}"
+            echo -e "Opciones:"
+            echo -e "  ${GREEN}--simple, -s${NC}      Ejecutar en modo simple (sin Qdrant)"
+            echo -e "  ${GREEN}--debug, -d${NC}       Activar modo debug (más información)"
+            echo -e "  ${GREEN}--keep, -k${NC}        Mantener contenedores después de terminar"
+            echo -e "  ${GREEN}--timeout, -t NUM${NC} Establecer timeout en minutos (default: 15)"
+            echo -e "  ${GREEN}--help, -h${NC}        Mostrar esta ayuda"
+            exit 0
+            ;;
+        *)
+            error "Opción desconocida: $1"
+            echo "Usa --help para ver las opciones disponibles"
+            exit 1
+            ;;
+    esac
+done
 
 # Definición de archivos Docker Compose
 COMPOSE_FILE_FULL="../docker/docker-compose.test.yml"
-COMPOSE_FILE_SIMPLE="../docker/docker-compose.test.simple.yml" # Este archivo debe ser creado por el usuario
+COMPOSE_FILE_SIMPLE="../docker/docker-compose.test.simple.yml"
 
 if [ "$MODE" == "SIMPLE" ]; then
     COMPOSE_FILE=$COMPOSE_FILE_SIMPLE
@@ -233,9 +312,19 @@ else
     COMPOSE_FILE=$COMPOSE_FILE_FULL
 fi
 
-# Verificaciones iniciales
+# Crear directorio de logs si no existe
+mkdir -p "$LOG_DIR"
+
+# Limpiar logs anteriores
+rm -f "$BUILD_LOG_FILE" "$LOG_FILE"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VERIFICACIONES INICIALES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Verificar que estamos en el directorio correcto
 if [ ! -f "conftest.py" ]; then
-    echo -e "${RED}${CROSS} Error: No se encontró conftest.py. Ejecuta desde backend/tests/${NC}"
+    error "No se encontró conftest.py. Ejecuta desde backend/tests/"
     exit 1
 fi
 
@@ -249,13 +338,29 @@ if [ ! -f "$COMPOSE_FILE" ]; then
     exit 1
 fi
 
+# Verificar Docker y Docker Compose
+if ! command -v docker &> /dev/null; then
+    error "Docker no está instalado o no está en el PATH"
+    exit 1
+fi
+
+if ! docker info &> /dev/null; then
+    error "El servicio Docker no está en ejecución o no tienes permisos suficientes"
+    exit 1
+fi
+
+if ! docker compose version &> /dev/null; then
+    error "Docker Compose no está instalado o no está en el PATH"
+    exit 1
+fi
+
 # Mostrar header (ahora que MODE y COMPOSE_FILE están definidos)
 show_header
 
-# Configurar limpieza
+# Configurar limpieza al salir o al interrumpir
 trap 'cleanup; echo -e "\n ${YELLOW}${WARNING} Tests interrumpidos por el usuario${NC}"; exit 1' INT TERM
 
-# Variables
+# Variables de entorno para tests
 export TESTING=true
 export COMPOSE_PROJECT_NAME="backend_tests"
 start_time=$(date +%s)
@@ -267,16 +372,33 @@ show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
-run_with_spinner "Construyendo imágenes Docker (usando $COMPOSE_FILE)..." \
-                 "docker compose -f $COMPOSE_FILE build --no-cache" \
-                 "/tmp/build.log"
-build_exit_code=$?
+set -x # Activar Debug de Shell (Temporalmente para esta fase)
 
-if [ $build_exit_code -ne 0 ]; then
-    echo -e "${RED}${CROSS} Error en la construcción. Ver /tmp/build.log${NC}"
-    cat /tmp/build.log # Mostrar logs de error de construcción
-    exit 1
+spinner_message="Construyendo imágenes Docker (usando $COMPOSE_FILE)..."
+build_log_file="/tmp/build.log"
+
+# Limpiar log anterior si existe
+rm -f "$build_log_file"
+
+echo "[DEBUG MainScript] Llamando a run_with_spinner para construcción. COMPOSE_FILE=$COMPOSE_FILE"
+
+if run_with_spinner "$spinner_message" "docker compose -f \"$COMPOSE_FILE\" build --no-cache" "$build_log_file"; then
+    echo "[DEBUG MainScript] run_with_spinner para construcción retornó éxito."
+    success "Construcción de imágenes Docker completada."
+else
+    build_exit_code_after_spinner=$? 
+    echo "[DEBUG MainScript] run_with_spinner para construcción retornó fallo con código: $build_exit_code_after_spinner."
+    error "Error en la construcción de imágenes (código de salida: $build_exit_code_after_spinner). Revisa $build_log_file para detalles."
+    if [ -f "$build_log_file" ] && [ -s "$build_log_file" ]; then
+        echo -e "${RED}" # Iniciar color rojo para el log
+        cat "$build_log_file"
+        echo -e "${NC}" # Resetear color
+    else
+        warning "No se encontró el archivo de log $build_log_file o está vacío."
+    fi
+    exit 1 # Salir del script principal
 fi
+set +x # Desactivar Debug de Shell
 
 # Paso 3: Ejecución de tests
 echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests (usando $COMPOSE_FILE)${NC}"
