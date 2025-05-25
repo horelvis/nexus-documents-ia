@@ -122,9 +122,10 @@ class AuthService:
         if not user:
             print(f'User not found with id: {user_id}')
             users = db.query(User).all()
+            print(f'Total users: {users.count()}')
             for user in users:
                 print(user)
-                
+
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found"
