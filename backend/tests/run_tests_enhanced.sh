@@ -100,17 +100,22 @@ show_spinner() {
     printf "${GREEN}%s${NC}\n" "$CHECK"
 }
 
-# Función para ejecutar comando con spinner
+# Función para ejecutar comando con spinner y manejo de errores mejorado
 run_with_spinner() {
     local message="$1"
     local command="$2"
     local log_file="$3"
     local initial_errexit_status=$(set +o | grep errexit) # Guardar estado original de errexit
+    local initial_xtrace_status=$(set +o | grep xtrace)   # Guardar estado original de xtrace
+    
     set +e # Desactivar errexit para esta función
+    set +x # Desactivar xtrace (debug) dentro de esta función para evitar spam
 
-    echo "[DEBUG run_with_spinner] Mensaje: '$message'"
-    echo "[DEBUG run_with_spinner] Comando: '$command'"
-    echo "[DEBUG run_with_spinner] Archivo de Log: '$log_file'"
+    if [ "$DEBUG_MODE" == "true" ]; then
+        echo "[DEBUG run_with_spinner] Mensaje: '$message'"
+        echo "[DEBUG run_with_spinner] Comando: '$command'"
+        echo "[DEBUG run_with_spinner] Archivo de Log: '$log_file'"
+    fi
     
     printf "${CYAN}%s${NC} " "$message"
     
@@ -120,21 +125,26 @@ run_with_spinner() {
 
     # Verificar si el proceso background se lanzó correctamente
     if ! kill -0 $pid 2>/dev/null; then
-        printf "${RED}%s${NC}
-" "$CROSS" # Imprimir la X roja
-        # Usar 'log' y los colores definidos, no directamente echo con colores aquí
+        printf "${RED}%s${NC}\n" "$CROSS"
         log "${RED}Fallo crítico al iniciar el comando en background: $command ${NC}"
         log "${RED}Verifica $log_file para más detalles.${NC}"
-        if [ -f "$log_file" ] && [ -s "$log_file" ]; then # Verificar también que no esté vacío
-            cat "$log_file" # Mostrar el log directamente
+        if [ -f "$log_file" ] && [ -s "$log_file" ]; then
+            cat "$log_file"
         fi
         # Restaurar errexit antes de salir de la función si falla aquí
         if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
             set -e
         fi
-        return 1 # Retornar un código de error inmediatamente
+        # Restaurar xtrace si estaba activado
+        if [[ "$initial_xtrace_status" == *"xtrace"*on* ]]; then
+            set -x
+        fi
+        return 1
     fi
-    echo "[DEBUG run_with_spinner] PID del comando en background: $pid"
+    
+    if [ "$DEBUG_MODE" == "true" ]; then
+        echo "[DEBUG run_with_spinner] PID del comando en background: $pid"
+    fi
     
     # Mostrar spinner mientras se ejecuta
     i=0
@@ -149,7 +159,10 @@ run_with_spinner() {
     # Esperar a que termine y obtener código de salida
     wait $pid
     exit_code=$?
-    echo "[DEBUG run_with_spinner] 'wait \$pid' completado. Código de salida capturado: $exit_code"
+    
+    if [ "$DEBUG_MODE" == "true" ]; then
+        echo "[DEBUG run_with_spinner] 'wait \$pid' completado. Código de salida capturado: $exit_code"
+    fi
     
     if [ $exit_code -eq 0 ]; then
         printf "${GREEN}%s${NC}\n" "$CHECK"
@@ -157,10 +170,17 @@ run_with_spinner() {
         printf "${RED}%s${NC}\n" "$CROSS"
     fi
     
-    echo "[DEBUG run_with_spinner] Retornando: $exit_code"
+    if [ "$DEBUG_MODE" == "true" ]; then
+        echo "[DEBUG run_with_spinner] Retornando: $exit_code"
+    fi
+    
     # Restaurar el estado original de errexit
     if [[ "$initial_errexit_status" == *"errexit"*on* ]]; then
         set -e
+    fi
+    # Restaurar xtrace si estaba activado
+    if [[ "$initial_xtrace_status" == *"xtrace"*on* ]]; then
+        set -x
     fi
     return $exit_code
 }
@@ -372,33 +392,33 @@ show_spinner "Limpiando recursos anteriores"
 
 # Paso 2: Construcción
 echo -e "\n ${PURPLE}${GEAR} Fase 2: Construcción de imágenes ${NC}"
-set -x # Activar Debug de Shell (Temporalmente para esta fase)
+show_step 2 "Construcción de imágenes Docker" "$GEAR"
+
+# Activar modo debug si está habilitado
+if [ "$DEBUG_MODE" == "true" ]; then
+    set -x
+fi
 
 spinner_message="Construyendo imágenes Docker (usando $COMPOSE_FILE)..."
-build_log_file="/tmp/build.log"
 
-# Limpiar log anterior si existe
-rm -f "$build_log_file"
-
-echo "[DEBUG MainScript] Llamando a run_with_spinner para construcción. COMPOSE_FILE=$COMPOSE_FILE"
-
-if run_with_spinner "$spinner_message" "docker compose -f \"$COMPOSE_FILE\" build --no-cache" "$build_log_file"; then
-    echo "[DEBUG MainScript] run_with_spinner para construcción retornó éxito."
-    success "Construcción de imágenes Docker completada."
+# Nota: run_with_spinner desactiva temporalmente el modo debug para evitar spam
+if run_with_spinner "$spinner_message" "docker compose -f \"$COMPOSE_FILE\" build --no-cache" "$BUILD_LOG_FILE"; then
+    success "Construcción de imágenes Docker completada exitosamente."
 else
-    build_exit_code_after_spinner=$? 
-    echo "[DEBUG MainScript] run_with_spinner para construcción retornó fallo con código: $build_exit_code_after_spinner."
-    error "Error en la construcción de imágenes (código de salida: $build_exit_code_after_spinner). Revisa $build_log_file para detalles."
-    if [ -f "$build_log_file" ] && [ -s "$build_log_file" ]; then
-        echo -e "${RED}" # Iniciar color rojo para el log
-        cat "$build_log_file"
-        echo -e "${NC}" # Resetear color
+    build_exit_code=$?
+    error "Error en la construcción de imágenes (código de salida: $build_exit_code)."
+    
+    if [ -f "$BUILD_LOG_FILE" ] && [ -s "$BUILD_LOG_FILE" ]; then
+        echo -e "\n${RED}${MAGNIFIER} Detalles del error de construcción:${NC}"
+        echo -e "${RED}${SEPARATOR}${NC}"
+        cat "$BUILD_LOG_FILE"
+        echo -e "${RED}${SEPARATOR}${NC}"
     else
-        warning "No se encontró el archivo de log $build_log_file o está vacío."
+        warning "No se encontró el archivo de log $BUILD_LOG_FILE o está vacío."
     fi
-    exit 1 # Salir del script principal
+    
+    exit 1
 fi
-set +x # Desactivar Debug de Shell
 
 # Paso 3: Ejecución de tests
 echo -e "\n ${CYAN}${ROCKET} Fase 3: Ejecutando tests (usando $COMPOSE_FILE)${NC}"
