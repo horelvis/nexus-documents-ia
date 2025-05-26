@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Tenants
     MULTI_TENANT: bool = True
     DEFAULT_TENANT: str = "default"
+
+    # Temporary API Key for basic auth during development
+    API_KEY: str = "your_secret_api_key_here" # Default value, should be overridden by env var
     
     class Config:
         case_sensitive = True
