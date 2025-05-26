@@ -18,6 +18,7 @@ model User {
   id           String        @id @default(cuid())
   email        String        @unique
   username     String?       @unique
+  clerkUserId  String?       @unique // Added Clerk User ID
   image        UserImage?
   customerId   String?       @unique
   subscription Subscription?

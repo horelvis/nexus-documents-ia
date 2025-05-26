@@ -12,15 +12,16 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
-  data,
 } from '@remix-run/react'
 import { useChangeLanguage } from 'remix-i18next/react'
 import { AuthenticityTokenProvider } from 'remix-utils/csrf/react'
 import { HoneypotProvider } from 'remix-utils/honeypot/react'
-import { authenticator } from '#app/modules/auth/auth.server'
+// Old auth system (authenticator, prisma direct user fetch) is being replaced by Clerk.
+// Remove or comment out imports related to the old auth system if they are no longer needed.
+// import { authenticator } from '#app/modules/auth/auth.server' 
+// import { prisma } from '#app/utils/db.server'
 import { useNonce } from '#app/utils/hooks/use-nonce'
 import { getHints } from '#app/utils/hooks/use-hints'
-import { prisma } from '#app/utils/db.server'
 import { getTheme, useTheme } from '#app/utils/hooks/use-theme'
 import { getToastSession } from '#app/utils/toast.server'
 import { csrf } from '#app/utils/csrf.server'
@@ -30,20 +31,25 @@ import { siteConfig } from '#app/utils/constants/brand'
 import { useToast } from '#app/components/toaster'
 import { Toaster } from '#app/components/ui/sonner'
 import { ClientHintCheck } from '#app/components/misc/client-hints'
-import { GenericErrorBoundary } from '#app/components/misc/error-boundary'
+// GenericErrorBoundary might be replaced or supplemented by ClerkCatchBoundary
+// import { GenericErrorBoundary } from '#app/components/misc/error-boundary' 
 import i18nServer, { localeCookie } from '#app/modules/i18n/i18n.server'
+
+// Clerk imports
+import { ClerkApp, ClerkCatchBoundary } from '@clerk/remix'
+import { rootAuthLoader } from '@clerk/remix/ssr.server'
+import { ENV } from '#app/utils/env.server' // Your ENV object
 
 import RootCSS from './root.css?url'
 
 export const handle = { i18n: ['translation'] }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  // `data` will now include properties from rootAuthLoader and your custom data
+  const title = data?.siteConfig?.siteTitle || siteConfig.siteTitle;
   return [
-    { title: data ? `${siteConfig.siteTitle}` : `Error | ${siteConfig.siteTitle}` },
-    {
-      name: 'description',
-      content: siteConfig.siteDescription,
-    },
+    { title: title },
+    { name: 'description', content: siteConfig.siteDescription },
   ]
 }
 
@@ -51,30 +57,40 @@ export const links: LinksFunction = () => {
   return [{ rel: 'stylesheet', href: RootCSS }]
 }
 
-export type LoaderData = Exclude<
-  Awaited<ReturnType<typeof loader>>,
-  Response | TypedResponse<unknown>
->
+export type LoaderData = Awaited<ReturnType<typeof loader>>;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const sessionUser = await authenticator.isAuthenticated(request)
-  const user = sessionUser?.id
-    ? await prisma.user.findUnique({
-        where: { id: sessionUser?.id },
-        include: {
-          image: { select: { id: true } },
-          roles: { select: { name: true } },
-        },
-      })
-    : null
+// New loader function using Clerk's rootAuthLoader
+export const loader = async (args: LoaderFunctionArgs) => {
+  return rootAuthLoader(args, async ({ request }) => {
+    // This inner callback is for server-side configuration and data loading.
+    // It runs AFTER Clerk has handled initial auth state.
+    // You can access auth state here using getAuth(args).
+    const { CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY } = ENV;
 
-  const locale = await i18nServer.getLocale(request)
-  const { toast, headers: toastHeaders } = await getToastSession(request)
-  const [csrfToken, csrfCookieHeader] = await csrf.commitToken()
+    // Load your application-specific data here.
+    // This data will be merged with Clerk's auth state.
+    const locale = await i18nServer.getLocale(request);
+    const { toast, headers: toastHeaders } = await getToastSession(request);
+    const [csrfToken, csrfCookieHeader] = await csrf.commitToken();
+    
+    // You might want to fetch additional user profile information from your local DB
+    // using the Clerk user ID if needed. Example:
+    // const { userId: clerkUserId } = await getAuth(args);
+    // let localUser = null;
+    // if (clerkUserId) {
+    //   localUser = await prisma.user.findUnique({ where: { clerkUserId } });
+    // }
 
-  return data(
-    {
-      user,
+    return {
+      // Clerk keys for server-side functions.
+      // publishableKey is often not needed here if it's in ENV for client-side.
+      // secretKey is crucial for server-side.
+      // However, rootAuthLoader typically infers these from ENV if set up correctly.
+      // The main purpose here is to return *additional* data.
+      // Let's ensure ENV for client is passed if needed.
+      ENV: { CLERK_PUBLISHABLE_KEY }, // Only what's safe for client
+      
+      // Your application-specific data:
       locale,
       toast,
       csrfToken,
@@ -85,17 +101,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
         path: new URL(request.url).pathname,
         userPrefs: { theme: getTheme(request) },
       },
-    } as const,
-    {
-      headers: combineHeaders(
+      siteConfig: { siteTitle: siteConfig.siteTitle }, // Example: pass site title
+      // localUser, // Your local user profile data
+      
+      // IMPORTANT: Any headers you need to set on the response
+      // must be returned in a `responseHeaders` object.
+      // `rootAuthLoader` will merge these with its own headers.
+      responseHeaders: combineHeaders(
         { 'Set-Cookie': await localeCookie.serialize(locale) },
         toastHeaders,
         csrfCookieHeader ? { 'Set-Cookie': csrfCookieHeader } : null,
       ),
-    },
-  )
-}
+    };
+  }, { loadUser: true }); // loadUser: true will fetch user data via Clerk
+};
 
+// Document component remains the same
 function Document({
   children,
   nonce,
@@ -132,42 +153,32 @@ function Document({
   )
 }
 
-export default function AppWithProviders() {
-  const { locale, toast, csrfToken, honeypotProps } = useLoaderData<typeof loader>()
+// App component wrapped with ClerkApp
+export default function App() {
+  const data = useLoaderData<typeof loader>(); // Data from the new Clerk-aware loader
+  const nonce = useNonce();
+  const theme = useTheme();
 
-  const nonce = useNonce()
-  const theme = useTheme()
+  // Update i18n instance language
+  useChangeLanguage(data.locale);
 
-  // Updates the i18n instance language.
-  useChangeLanguage(locale)
-
-  // Renders toast (if any).
-  useToast(toast)
-
-  return (
-    <Document nonce={nonce} theme={theme} lang={locale ?? 'en'}>
-      <AuthenticityTokenProvider token={csrfToken}>
-        <HoneypotProvider {...honeypotProps}>
-          <Outlet />
-        </HoneypotProvider>
-      </AuthenticityTokenProvider>
-    </Document>
-  )
-}
-
-export function ErrorBoundary() {
-  const nonce = useNonce()
-  const theme = useTheme()
+  // Render toast (if any)
+  useToast(data.toast);
 
   return (
-    <Document nonce={nonce} theme={theme}>
-      <GenericErrorBoundary
-        statusHandlers={{
-          403: ({ error }) => (
-            <p>You are not allowed to do that: {error?.data.message}</p>
-          ),
-        }}
-      />
-    </Document>
-  )
+    // ClerkApp provides Clerk context and handles auth state
+    <ClerkApp loader={data} ClerkCatchBoundary={CatchBoundary}>
+      <Document nonce={nonce} theme={theme} lang={data.locale ?? 'en'}>
+        {/* CSRF and Honeypot providers are kept, using data from the loader */}
+        <AuthenticityTokenProvider token={data.csrfToken}>
+          <HoneypotProvider {...data.honeypotProps}>
+            <Outlet />
+          </HoneypotProvider>
+        </AuthenticityTokenProvider>
+      </Document>
+    </ClerkApp>
+  );
 }
+
+// Use ClerkCatchBoundary for the root error boundary
+export const CatchBoundary = ClerkCatchBoundary;
