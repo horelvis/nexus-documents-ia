@@ -13,6 +13,10 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string(),
   STRIPE_WEBHOOK_ENDPOINT: z.string().optional(),
   HONEYPOT_ENCRYPTION_SEED: z.string().optional(),
+  // Clerk Environment Variables
+  CLERK_PUBLISHABLE_KEY: z.string().min(1, 'CLERK_PUBLISHABLE_KEY is required'),
+  CLERK_SECRET_KEY: z.string().min(1, 'CLERK_SECRET_KEY is required'),
+  CLERK_WEBHOOK_SECRET: z.string().min(1, 'CLERK_WEBHOOK_SECRET is required'),
 })
 
 declare global {
