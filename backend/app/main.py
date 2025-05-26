@@ -7,25 +7,35 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 import time
-
-# Updated imports to use routers from app.api.v1.__init__
-from app.api.v1 import (
-    admin_router,
-    auth_router,
-    documents_router,
-    search_router,
-    tenants_router
-)
+from app.api.api import api_router as v1_api_router # Import the central v1 router
 from app.api.docs import router as docs_router  # Importar el router de documentación
 from app.core.config import settings
 from app.core.logging import setup_logging
+
+from contextlib import asynccontextmanager
+from prisma import Prisma
 
 # Configurar logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# Global Prisma Client instance
+db_client = Prisma(auto_register=True) # auto_register=True for Pydantic models
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Connect to Prisma
+    logger.info("Connecting to Prisma database...")
+    await db_client.connect()
+    yield
+    # Shutdown: Disconnect from Prisma
+    logger.info("Disconnecting from Prisma database...")
+    if db_client.is_connected():
+        await db_client.disconnect()
+
 # Crear aplicación FastAPI con metadatos mejorados
 app = FastAPI(
+    lifespan=lifespan, # Add lifespan handler
     title=settings.SERVER_NAME,
     description="""
     # Sistema de Gestión Documental con Búsqueda Semántica
@@ -139,37 +149,8 @@ app.include_router(
     tags=["documentation"]
 )
 
-# Rutas de la API v1
-app.include_router(
-    auth_router,
-    prefix=f"{settings.API_V1_STR}/auth",
-    tags=["auth"]
-)
-
-app.include_router(
-    documents_router,
-    prefix=f"{settings.API_V1_STR}/documents",
-    tags=["documents"]
-)
-
-app.include_router(
-    search_router,
-    prefix=f"{settings.API_V1_STR}/search",
-    tags=["search"]
-)
-
-# ✅ AGREGADO: Router de admin que faltaba
-app.include_router(
-    admin_router,
-    prefix=f"{settings.API_V1_STR}/admin",
-    tags=["admin"]
-)
-
-app.include_router(
-    tenants_router,
-    prefix=f"{settings.API_V1_STR}/tenants",
-    tags=["tenants"]
-)
+# Include the central v1 API router
+app.include_router(v1_api_router, prefix=settings.API_V1_STR)
 
 # Ruta de estado
 @app.get("/health", tags=["health"])

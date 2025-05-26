@@ -1,339 +1,79 @@
-import os
 import pytest
-from typing import Generator
+import asyncio
+from unittest.mock import MagicMock, AsyncMock
+
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-import uuid
-from datetime import datetime
+from app.main import app, db_client as global_prisma_client  # Import your FastAPI app and the global prisma client
+from app.api.dependencies import get_prisma_db # Import the dependency we want to override
 
-# CRITICAL: Import all models to register with Base.metadata
-from app.db.base_class import Base
-from app.db.models import User, Tenant, Document, Tag, DocumentChunk
+# Fixture to provide a mocked Prisma client instance for unit tests or direct use
+@pytest.fixture(scope="function")
+def mock_prisma_client():
+    mock_client = MagicMock(spec=global_prisma_client) # Use spec from the actual client for better mocking
+    
+    # Mock specific model methods if needed, e.g., for user repository tests
+    # These can be further customized in individual tests
+    mock_client.user = MagicMock()
+    mock_client.user.find_unique = AsyncMock()
+    mock_client.user.find_first = AsyncMock()
+    mock_client.user.create = AsyncMock()
+    mock_client.user.update = AsyncMock()
+    mock_client.user.delete = AsyncMock()
 
-from app.main import app
-from app.db.database import get_db
-from app.core.security import get_password_hash
-from app.services.auth_service import AuthService
+    mock_client.tenant = MagicMock()
+    mock_client.tenant.find_unique = AsyncMock()
+    mock_client.tenant.create = AsyncMock()
+    mock_client.tenant.find_many = AsyncMock()
+    
+    mock_client.subscription = MagicMock()
+    mock_client.subscription.find_unique = AsyncMock()
+    mock_client.subscription.create = AsyncMock()
 
-# Configuración de base de datos para tests
-TESTING = os.getenv("TESTING", "false").lower() == "true"
+    # Mock connect/disconnect if they are explicitly called in the code being tested
+    # (though for lifespan events, this might not be directly tested this way)
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.is_connected = MagicMock(return_value=True) # Assume connected
 
-if TESTING:
-    POSTGRES_SERVER = os.getenv("POSTGRES_SERVER", "test-db")
-    POSTGRES_USER = os.getenv("POSTGRES_USER", "test_user")
-    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "test_password")
-    POSTGRES_DB = os.getenv("POSTGRES_DB", "test_db")
-    SQLALCHEMY_DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_SERVER}/{POSTGRES_DB}"
-else:
-    SQLALCHEMY_DATABASE_URL = "postgresql://test_user:test_password@localhost:5432/test_db"
+    return mock_client
 
-print(f"🔧 Test DB URL: {SQLALCHEMY_DATABASE_URL}")
+# Fixture to provide a TestClient for integration tests, with Prisma dependency overridden
+@pytest.fixture(scope="function")
+def test_app_client(mock_prisma_client: MagicMock): # Depends on the mock_prisma_client fixture
+    
+    # This function will override the original get_prisma_db dependency
+    async def override_get_prisma_db():
+        # Ensure the mock client itself is awaitable if the dependency is an async generator
+        # However, our get_prisma_db is an async function returning the client directly.
+        return mock_prisma_client
 
-# Crear engine
-engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, echo=False)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    # Apply the override to the FastAPI app
+    app.dependency_overrides[get_prisma_db] = override_get_prisma_db
+    
+    # Create a TestClient instance for the app
+    with TestClient(app) as client:
+        yield client # Provide the client to the test
 
-print(f"🔍 Modelos registrados: {list(Base.metadata.tables.keys())}")
+    # Clean up the override after the test
+    app.dependency_overrides.clear()
 
-# Session-scoped fixture for initial database setup (once per session)
+
+# This is needed if you have any 'async def' test functions directly
+# and are not using something like pytest-asyncio's auto mode.
+# However, with pytest-asyncio, this might not be strictly necessary
+# if it's configured to handle async fixtures and tests automatically.
 @pytest.fixture(scope="session")
-def _session_scoped_db_setup():
-    """
-    Sets up the database schema once per test session.
-    Drops all tables and recreates them.
-    """
-    print("🚀 SESSION START: Setting up database schema...")
+def event_loop():
+    # Set the policy to prevent "Event loop is closed" error on Windows
+    # if sys.platform == "win32":
+    #     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
+    # For pytest-asyncio, the default event loop policy is usually sufficient.
+    # If specific policy changes are needed, they can be done here.
+    # The primary purpose is to ensure an event loop is available for the session.
     try:
-        print("🧹 Cleaning and creating fresh tables for the session...")
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-
-        # Verificar que las tablas se crearon
-        with engine.connect() as verify_conn:
-            result = verify_conn.execute(text("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public' ORDER BY table_name
-            """))
-            created_tables = [row[0] for row in result.fetchall()]
-            print(f"✅ SESSION: Tables confirmed: {created_tables}")
-
-            if 'users' not in created_tables or 'tenants' not in created_tables:
-                raise Exception(f"❌ SESSION: Required tables missing! Found: {created_tables}")
-        print("✅ SESSION: Database schema created successfully.")
-    except Exception as e:
-        print(f"❌ SESSION FATAL ERROR creating tables: {e}")
-        raise
-
-    yield # Control returns here after all tests in the session are done
-
-    print("🌙 SESSION END: Cleaning up database schema...")
-    try:
-        Base.metadata.drop_all(bind=engine)
-        print("✅ SESSION: Database schema cleaned successfully.")
-    except Exception as e:
-        print(f"⚠️ SESSION Warning during cleanup: {e}")
-
-
-# Function-scoped fixture for database session with transaction management
-@pytest.fixture(scope="function")
-def db(_session_scoped_db_setup):
-    """
-    Provides a transactional database session for each test function.
-    Rolls back the transaction after the test.
-    """
-    print("🏁 TEST START: Creating transactional database session...")
-    connection = engine.connect()
-    transaction = connection.begin()
-    session = TestingSessionLocal(bind=connection)
-
-    # # Optional: Verify connection with a simple query if needed
-    # try:
-    #     user_count = session.execute(text("SELECT COUNT(*) FROM users")).scalar()
-    #     print(f"✅ TEST: Database session working (initial users: {user_count})")
-    # except Exception as e:
-    #     print(f"❌ TEST: Error verifying session: {e}")
-    #     transaction.rollback()
-    #     connection.close()
-    #     raise
-
-    try:
-        yield session
-    except Exception as e:
-        print(f"❌ TEST: Error during test execution with database session: {e}")
-        # No explicit session.rollback() needed here as the outer transaction.rollback() handles it.
-        raise
+        loop = asyncio.get_event_loop_policy().new_event_loop()
+        asyncio.set_event_loop(loop)
+        yield loop
     finally:
-        print("🔚 TEST END: Rolling back transaction and closing session...")
-        try:
-            session.close()  # Close the session
-            transaction.rollback()  # Rollback the transaction
-            connection.close()  # Close the connection
-            print("✅ TEST: Transaction rolled back, session and connection closed.")
-        except Exception as e:
-            print(f"⚠️ TEST Warning during cleanup: {e}")
-
-
-# Fixture para el cliente de pruebas
-@pytest.fixture(scope="function")
-def client(db):
-    """Cliente de pruebas con base de datos mockeada"""
-    def override_get_db():
-        try:
-            yield db
-        finally:
-            pass
-    
-    app.dependency_overrides[get_db] = override_get_db
-    
-    with TestClient(app) as c:
-        print("🔧 Test client ready")
-        yield c
-    
-    app.dependency_overrides = {}
-
-# Fixture para crear un tenant de prueba
-@pytest.fixture(scope="function")
-def test_tenant(db):
-    """Crea un tenant de prueba"""
-    print("🔧 Creating test tenant...")
-    
-    tenant_id = uuid.uuid4()
-    tenant = Tenant(
-        id=tenant_id,
-        name="test-tenant",
-        description="Tenant for testing",
-        bucket_name="test-bucket",
-        is_active=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db.add(tenant)
-    db.commit()
-    db.refresh(tenant)
-    print(f"✅ Tenant created: {tenant.name} ({tenant.id})")
-    return tenant
-
-# Fixture para crear un usuario normal
-@pytest.fixture(scope="function")
-def test_user(db, test_tenant):
-    """Crea un usuario normal de prueba"""
-    print("🔧 Creating test user...")
-    
-    user_id = uuid.uuid4()
-    user = User(
-        id=user_id,
-        email="test@example.com",
-        hashed_password=get_password_hash("password"),
-        full_name="Test User",
-        is_active=True,
-        is_superuser=False,
-        tenant_id=test_tenant.id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    print(f"✅ User created: {user.email} (superuser: {user.is_superuser})")
-    return user
-
-# Fixture para crear un usuario administrador
-@pytest.fixture(scope="function")
-def test_superuser(db, test_tenant):
-    """Crea un usuario administrador de prueba"""
-    print("🔧 Creating test superuser...")
-    
-    user_id = uuid.uuid4()
-    user = User(
-        id=user_id,
-        email="admin@example.com",
-        hashed_password=get_password_hash("adminpassword"),
-        full_name="Admin User",
-        is_active=True,
-        is_superuser=True,  # ✅ CRITICAL
-        tenant_id=test_tenant.id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
-    )
-    
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    print(f"✅ Superuser created: {user.email} (superuser: {user.is_superuser})")
-    return user
-
-# Fixture para obtener token de usuario normal
-@pytest.fixture(scope="function")
-def normal_user_token_headers(test_user):
-    """Headers de autorización para usuario normal"""
-    token = AuthService.create_access_token(
-        subject=str(test_user.id),
-        tenant_id=str(test_user.tenant_id)
-    )
-    return {"Authorization": f"Bearer {token}"}
-
-# Fixture para obtener token de administrador
-@pytest.fixture(scope="function")
-def superuser_token_headers(test_superuser):
-    """Headers de autorización para administrador"""
-    token = AuthService.create_access_token(
-        subject=str(test_superuser.id),
-        tenant_id=str(test_superuser.tenant_id)
-    )
-    return {"Authorization": f"Bearer {token}"}
-
-# Fixture para crear tags de prueba
-@pytest.fixture(scope="function")
-def test_tags(db, test_tenant):
-    """Crea tags de prueba"""
-    tags = []
-    for name in ["test-tag1", "test-tag2", "test-tag3"]:
-        tag = Tag(name=name, tenant_id=test_tenant.id)
-        db.add(tag)
-        tags.append(tag)
-    
-    db.commit()
-    for tag in tags:
-        db.refresh(tag)
-    
-    return tags
-
-# Fixture para crear documentos de prueba
-@pytest.fixture(scope="function")
-def test_documents(db, test_user, test_tenant, test_tags):
-    """Crea documentos de prueba"""
-    documents = []
-    
-    for i in range(3):
-        doc_id = uuid.uuid4()
-        document = Document(
-            id=doc_id,
-            title=f"Test Document {i+1}",
-            description=f"Description for test document {i+1}",
-            filename=f"test_document_{i+1}.txt",
-            file_path=f"documents/{doc_id}/test_document_{i+1}.txt",
-            file_type="txt",
-            file_size=1000,
-            tenant_id=test_tenant.id,
-            created_by=test_user.id,
-            indexed=1,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        
-        for tag in test_tags[:2]:
-            document.tags.append(tag)
-        
-        for j in range(2):
-            chunk = DocumentChunk(
-                document_id=doc_id,
-                chunk_index=j,
-                content=f"Content for document {i+1}, chunk {j+1}"
-            )
-            db.add(chunk)
-        
-        documents.append(document)
-        db.add(document)
-    
-    db.commit()
-    for doc in documents:
-        db.refresh(doc)
-    
-    return documents
-
-# Mock fixtures simplificados
-@pytest.fixture(scope="function")
-def mock_llm_service(monkeypatch):
-    """Mock del servicio LLM para tests"""
-    class MockLLMService:
-        def summarize_text(self, text, max_length=500):
-            return "This is a mock summary of the text."
-        def suggest_tags(self, text, num_tags=5):
-            return ["tag1", "tag2", "tag3", "tag4", "tag5"]
-        def answer_question(self, question, context):
-            return f"Mock answer to the question: {question}"
-    
-    from app.services import llm_service
-    monkeypatch.setattr(llm_service, "LLMService", MockLLMService)
-    return MockLLMService()
-
-@pytest.fixture(scope="function")
-def mock_storage_service(monkeypatch):
-    """Mock del servicio de almacenamiento para tests"""
-    class MockStorageService:
-        def __init__(self, tenant_id=None):
-            self.tenant_id = tenant_id or "test-tenant"
-        def upload_file(self, file, object_name, metadata=None):
-            return True
-        def delete_file(self, object_name):
-            return True
-        def generate_download_signed_url(self, object_name, expiration=None):
-            from datetime import datetime, timedelta
-            expires_at = datetime.now() + timedelta(minutes=5)
-            return f"https://mock-storage.example.com/download/{object_name}", expires_at
-    
-    from app.services import storage_service
-    monkeypatch.setattr(storage_service, "StorageService", MockStorageService)
-    return MockStorageService()
-
-@pytest.fixture(scope="function")
-def mock_embedding_service(monkeypatch):
-    """Mock del servicio de embeddings para tests"""
-    class MockEmbeddingService:
-        def __init__(self, tenant_id=None):
-            self.tenant_id = tenant_id or "test-tenant"
-        def chunk_text(self, text):
-            return [{"text": f"Chunk {i}", "metadata": {"is_paragraph_boundary": True}} for i in range(1, 4)]
-        def add_document(self, doc_id, text, metadata):
-            return True
-        def search(self, query, limit=5, filters=None):
-            return [{"score": 0.9, "metadata": {"doc_id": "doc-1", "chunk_text": "Mock chunk"}}]
-        def delete_document(self, doc_id):
-            return True
-    
-    from app.services import embedding_service
-    monkeypatch.setattr(embedding_service, "EmbeddingService", MockEmbeddingService)
-    return MockEmbeddingService()
+        loop.close()

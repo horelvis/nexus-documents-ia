@@ -14,19 +14,15 @@ import { getZodConstraint, parseWithZod } from '@conform-to/zod'
 import { getFormProps, getInputProps, useForm } from '@conform-to/react'
 import { Loader2 } from 'lucide-react'
 import { requireSessionUser } from '#app/modules/auth/auth.server'
-import {
-  createCustomer,
-  createFreeSubscription,
-} from '#app/modules/stripe/queries.server'
 import { prisma } from '#app/utils/db.server'
 import { validateCSRF } from '#app/utils/csrf.server'
 import { checkHoneypot } from '#app/utils/honeypot.server'
 import { useIsPending } from '#app/utils/misc'
 import { ERRORS } from '#app/utils/constants/errors'
 import { ROUTE_PATH as LOGIN_PATH } from '#app/routes/auth+/login'
+import { ROUTE_PATH as ONBOARDING_PLAN_PATH } from '#app/routes/onboarding+/plan' // Actual import
 import { Input } from '#app/components/ui/input'
 import { Button } from '#app/components/ui/button'
-import { ROUTE_PATH as DASHBOARD_PATH } from '#app/routes/dashboard+/_layout'
 
 export const ROUTE_PATH = '/onboarding/username' as const
 
@@ -77,13 +73,8 @@ export async function action({ request }: ActionFunctionArgs) {
     )
   }
   await prisma.user.update({ where: { id: sessionUser.id }, data: { username } })
-  await createCustomer({ userId: sessionUser.id })
-  const subscription = await prisma.subscription.findUnique({
-    where: { userId: sessionUser.id },
-  })
-  if (!subscription) await createFreeSubscription({ userId: sessionUser.id, request })
 
-  return redirect(DASHBOARD_PATH)
+  return redirect(ONBOARDING_PLAN_PATH)
 }
 
 export default function OnboardingUsername() {
