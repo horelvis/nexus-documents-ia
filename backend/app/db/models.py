@@ -2,13 +2,28 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from sqlalchemy.sql import func
 from app.db.base_class import Base
+
+# Intermediary Tables for Many-to-Many relationships
+user_roles = Table(
+    "user_roles",
+    Base.metadata,
+    Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True),
+    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True)
+)
+
+role_permissions = Table(
+    "role_permissions",
+    Base.metadata,
+    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
+    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True)
+)
 
 # Tabla de asociación para relaciones many-to-many
 document_tags = Table(
@@ -39,6 +54,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
+    clerk_user_id = Column(String, nullable=True, unique=True)  # New field
     is_active = Column(Boolean(), default=True)
     is_superuser = Column(Boolean(), default=False)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
@@ -47,6 +63,98 @@ class User(Base):
     
     # Relaciones
     tenant = relationship("Tenant", back_populates="users")
+    image = relationship("UserImage", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    roles = relationship("Role", secondary=user_roles, back_populates="users")
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+class UserImage(Base):
+    __tablename__ = "user_images"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
+    alt_text = Column(String, nullable=True)
+    content_type = Column(String, nullable=False)
+    blob = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="image")
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    users = relationship("User", secondary=user_roles, back_populates="roles")
+    permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity = Column(String, nullable=False)  # e.g., 'document', 'user', 'tenant'
+    action = Column(String, nullable=False)  # e.g., 'create', 'read', 'update', 'delete'
+    access = Column(String, nullable=False)  # e.g., 'own', 'tenant', 'all'
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    roles = relationship("Role", secondary=role_permissions, back_populates="permissions")
+
+    __table_args__ = (UniqueConstraint('action', 'entity', 'access', name='uq_action_entity_access'),)
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    prices = relationship("Price", back_populates="plan", cascade="all, delete-orphan")
+    subscriptions = relationship("Subscription", back_populates="plan")
+
+
+class Price(Base):
+    __tablename__ = "prices"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False)
+    amount = Column(Integer, nullable=False)  # Amount in cents
+    currency = Column(String, nullable=False)  # e.g., 'usd', 'eur'
+    interval = Column(String, nullable=False)  # e.g., 'month', 'year'
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    plan = relationship("Plan", back_populates="prices")
+    subscriptions = relationship("Subscription", back_populates="price")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False)
+    price_id = Column(UUID(as_uuid=True), ForeignKey("prices.id"), nullable=False)
+    status = Column(String, nullable=False)  # e.g., 'active', 'canceled', 'past_due'
+    current_period_start = Column(DateTime, nullable=False)
+    current_period_end = Column(DateTime, nullable=False)
+    cancel_at_period_end = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="subscription")
+    plan = relationship("Plan", back_populates="subscriptions")
+    price = relationship("Price", back_populates="subscriptions")
 
 
 class Tenant(Base):

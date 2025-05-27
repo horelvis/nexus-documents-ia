@@ -33,21 +33,28 @@ def test_login_nonexistent_user(client):
 
 def test_register_user(client, test_tenant):
     """Prueba de registro de usuario"""
+    new_user_email = "newuser_clerk@example.com"
+    clerk_id_value = "clerk_test_12345"
     response = client.post(
         "/api/v1/auth/register",
         json={
-            "email": "newuser@example.com",
+            "email": new_user_email,
             "password": "newpassword",
-            "full_name": "New User",
-            "tenant_id": str(test_tenant.id)
+            "full_name": "New Clerk User",
+            "tenant_id": str(test_tenant.id),
+            "clerk_user_id": clerk_id_value
         }
     )
     assert response.status_code == 200
     content = response.json()
-    assert content["email"] == "newuser@example.com"
-    assert content["full_name"] == "New User"
+    assert content["email"] == new_user_email
+    assert content["full_name"] == "New Clerk User"
+    assert content["clerk_user_id"] == clerk_id_value
     assert content["is_active"] is True
     assert content["is_superuser"] is False
+    assert content["image"] is None
+    assert content["roles"] == []
+    assert content["subscription"] is None
 
 def test_register_existing_email(client, test_user):
     """Prueba de registro con email existente"""
@@ -73,8 +80,18 @@ def test_get_current_user(client, normal_user_token_headers):
     )
     assert response.status_code == 200
     content = response.json()
-    assert content["email"] == "test@example.com"
-    assert content["full_name"] == "Test User"
+    assert content["email"] == "test@example.com"  # Assuming test_user's email
+    assert content["full_name"] == "Test User"   # Assuming test_user's full_name
+    assert "clerk_user_id" in content  # Check for presence
+    assert "image" in content
+    assert "roles" in content
+    assert "subscription" in content
+    # Specific values for clerk_user_id, image, roles, subscription will depend
+    # on how the mock for the 'test_user' underlying normal_user_token_headers is set up.
+    # For now, checking key presence is the primary goal.
+    # Example: if test_user mock was augmented:
+    # assert content["clerk_user_id"] == "expected_clerk_id_for_test_user"
+    # assert content["roles"] == [{"id": "some_role_id", "name": "some_role", ...}]
 
 def test_access_without_token(client):
     """Prueba de acceso sin token"""

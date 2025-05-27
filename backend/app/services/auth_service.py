@@ -100,7 +100,8 @@ class AuthService:
         password: str,
         full_name: Optional[str] = None,
         tenant_id: Optional[uuid.UUID] = None, # Allow None for default tenant or if tenant creation is separate
-        is_superuser: bool = False
+        is_superuser: bool = False,
+        clerk_user_id: Optional[str] = None # New parameter
     ) -> User:
         existing_user = db.query(User).filter(User.email == email).first()
         if existing_user:
@@ -130,7 +131,8 @@ class AuthService:
             full_name=full_name,
             tenant_id=tenant_id,
             is_superuser=is_superuser,
-            is_active=True # Default to active
+            is_active=True, # Default to active
+            clerk_user_id=clerk_user_id # Add this line
         )
         db.add(new_user)
         db.commit()
