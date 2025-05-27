@@ -33,4 +33,3 @@ pytest-mock>=3.10.0
 scikit-learn
 pandas
 scipy
-prisma
