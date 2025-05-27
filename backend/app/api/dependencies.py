@@ -1,88 +1,66 @@
-from typing import Generator, Optional
+from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Header
+from sqlalchemy.orm import Session
 
-from app.db.database import get_db
-from app.db.models import User
-from app.services.auth_service import AuthService, oauth2_scheme
+from app.db.database import get_db # SQLAlchemy session
+from app.db.models import User # SQLAlchemy User model
+from app.services.auth_service import AuthService, oauth2_scheme # AuthService is now SQLAlchemy-based
 from app.core.config import settings
-from sqlalchemy.orm import Session # Keep for now if other parts of app still use it
-from fastapi.security.api_key import APIKeyHeader
-from fastapi import Security
 
-# Import Prisma client from main.py (or where it's initialized)
-from app.main import db_client as prisma_client_instance # Renamed to avoid conflict
-from prisma import Prisma
+# SQLAlchemy-based dependencies
 
-
-# Prisma DB Dependency
-async def get_prisma_db() -> Prisma:
-    if not prisma_client_instance.is_connected():
-        await prisma_client_instance.connect()
-    # Note: Connection is managed by lifespan events in main.py for the global instance.
-    # This dependency just returns the already connected (or soon to be connected) instance.
-    return prisma_client_instance
-
-
-# API Key Authentication
-api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
-
-async def verify_api_key(api_key_header_value: Optional[str] = Security(api_key_header)):
-    if not api_key_header_value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Not authenticated: X-API-KEY header missing."
-        )
-    if api_key_header_value != settings.API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Invalid API Key."
-        )
-    return True # API key is valid
-
-
-# Existing SQLAlchemy-based dependencies (to be phased out or adapted)
-def get_current_user( # This will need to be refactored to use Prisma
-    db: Session = Depends(get_db), # Still uses SQLAlchemy Session
+def get_current_user(
+    db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
-) -> User: # Returns SQLAlchemy User model
+) -> User:
     """
-    Obtiene el usuario actual autenticado. (SQLAlchemy version)
-    TODO: Refactor this to use Prisma and AuthService.get_current_user (async)
+    Gets the current authenticated user from the token.
+    Uses SQLAlchemy-based AuthService.
     """
-    # This is the old SQLAlchemy based method.
-    # The new AuthService.get_current_user is async and expects Prisma client.
-    # This dependency needs to be updated or replaced.
-    # For now, keeping it as is, but it won't work with Prisma-based AuthService.
-    # return AuthService.get_current_user(db=db, token=token)
-    # Placeholder: raise an error or return a mock, as direct call to async from sync is not good.
-    raise NotImplementedError("get_current_user dependency needs refactoring for Prisma and async AuthService.")
+    user = AuthService.get_current_user(db=db, token=token)
+    if not user:
+        # AuthService.get_current_user already raises HTTPException if token is invalid or user not found
+        # However, an additional check here can be for robustness, though likely redundant
+        # if AuthService handles all error cases.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not authenticate user from token", # Generic message if AuthService didn't raise
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
-
-def get_current_tenant_id( # This also depends on SQLAlchemy User
-    current_user: User = Depends(get_current_user), 
+def get_current_tenant_id(
+    current_user: User = Depends(get_current_user),
     x_tenant_id: Optional[str] = Header(None)
-) -> str: # Returns SQLAlchemy User model
+) -> str:
     """
-    Obtiene el ID del tenant actual.
-    
-    Si el encabezado X-Tenant-ID está presente y es válido, lo usa.
-    De lo contrario, usa el tenant del usuario actual.
+    Gets the ID of the current tenant.
+    If the X-Tenant-ID header is present and valid for a superuser, it's used.
+    Otherwise, uses the tenant of the current user.
     """
-    # En modo multi-tenant, permiso para override solo para superusuarios
-    # TODO: Refactor current_user to be Prisma User model
-    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser: # type: ignore
+    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
+        # In a multi-tenant mode, allow superusers to override tenant via header
+        # Additional validation for x_tenant_id (e.g., checking if tenant exists) could be added here.
         return x_tenant_id
     
-    # Usar tenant del usuario por defecto
-    return str(current_user.tenant_id) # type: ignore
+    return str(current_user.tenant_id)
 
-
-def get_current_active_superuser( # Depends on SQLAlchemy User
-    current_user: User = Depends(get_current_user),
-) -> User: # Returns SQLAlchemy User model
+def get_current_active_user( # This is a more specific version of get_current_user
+    current_user: User = Depends(get_current_user)
+) -> User:
     """
-    Verifica que el usuario actual tenga permisos de administrador.
+    Ensures the current user is active.
+    """
+    if not current_user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    return current_user
+
+def get_current_active_superuser(
+    current_user: User = Depends(get_current_active_user), # Depends on active user check
+) -> User:
+    """
+    Verifies that the current active user has superuser privileges.
     """
     if not current_user.is_superuser:
         raise HTTPException(
@@ -90,3 +68,6 @@ def get_current_active_superuser( # Depends on SQLAlchemy User
             detail="The user doesn't have enough privileges"
         )
     return current_user
+
+# Note: Removed get_prisma_db, api_key_header, and verify_api_key as they were Prisma-related or unused by remaining endpoints.
+# Also removed direct Prisma imports.
