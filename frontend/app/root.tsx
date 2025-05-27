@@ -36,9 +36,11 @@ import { ClientHintCheck } from '#app/components/misc/client-hints'
 import i18nServer, { localeCookie } from '#app/modules/i18n/i18n.server'
 
 // Clerk imports
-import { ClerkApp, ClerkCatchBoundary } from '@clerk/remix'
+import { ClerkApp } from '@clerk/remix' // Adjusted import
 import { rootAuthLoader } from '@clerk/remix/ssr.server'
 import { ENV } from '#app/utils/env.server' // Your ENV object
+import { useRouteError, isRouteErrorResponse } from '@remix-run/react'; // Added for ErrorBoundary
+
 
 import RootCSS from './root.css?url'
 
@@ -166,19 +168,53 @@ export default function App() {
   useToast(data.toast);
 
   return (
-    // ClerkApp provides Clerk context and handles auth state
-    <ClerkApp loader={data} ClerkCatchBoundary={CatchBoundary}>
-      <Document nonce={nonce} theme={theme} lang={data.locale ?? 'en'}>
-        {/* CSRF and Honeypot providers are kept, using data from the loader */}
-        <AuthenticityTokenProvider token={data.csrfToken}>
-          <HoneypotProvider {...data.honeypotProps}>
-            <Outlet />
-          </HoneypotProvider>
-        </AuthenticityTokenProvider>
-      </Document>
-    </ClerkApp>
+    // Document is now the root, ClerkApp HOF wraps the App component
+    <Document nonce={nonce} theme={theme} lang={data.locale ?? 'en'}>
+      {/* CSRF and Honeypot providers are kept, using data from the loader */}
+      <AuthenticityTokenProvider token={data.csrfToken}>
+        <HoneypotProvider {...data.honeypotProps}>
+          <Outlet />
+        </HoneypotProvider>
+      </AuthenticityTokenProvider>
+    </Document>
   );
 }
 
-// Use ClerkCatchBoundary for the root error boundary
-export const CatchBoundary = ClerkCatchBoundary;
+// Default export is now the App component wrapped by ClerkApp HOF
+export default ClerkApp(App);
+
+// Standard Remix ErrorBoundary
+export function ErrorBoundary() {
+  const error = useRouteError();
+  let errorTitle = "Error";
+  let errorMessage = "An unexpected error occurred.";
+
+  if (isRouteErrorResponse(error)) {
+    errorTitle = `${error.status} ${error.statusText}`;
+    errorMessage = error.data?.message || error.data || "Sorry, something went wrong.";
+  } else if (error instanceof Error) {
+    errorMessage = error.message;
+  }
+  
+  // Use a simplified HTML structure for the error page
+  return (
+    <html lang="en">
+      <head>
+        <title>{errorTitle}</title>
+        <Meta /> {/* Basic meta tags */}
+        <Links /> {/* Stylesheets */}
+      </head>
+      <body>
+        <div style={{ padding: '20px', textAlign: 'center', fontFamily: 'sans-serif' }}>
+          <h1>{errorTitle}</h1>
+          <p>{errorMessage}</p>
+          <p><a href="/">Go to Homepage</a></p>
+        </div>
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+// Old ClerkCatchBoundary export is removed
+// export const CatchBoundary = ClerkCatchBoundary;
