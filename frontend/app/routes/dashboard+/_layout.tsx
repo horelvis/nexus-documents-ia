@@ -1,9 +1,12 @@
+// frontend/app/routes/dashboard+/_layout.tsx
 import type { LoaderFunctionArgs, TypedResponse } from '@remix-run/node'
 import { Outlet, useLoaderData } from '@remix-run/react'
-import { redirect } from '@remix-run/node' // Added json
-import { getAuth } from '@clerk/remix/ssr.server' // Clerk's getAuth
+import { json, redirect } from '@remix-run/node'
+import { getAuth } from '@clerk/remix/ssr.server'
+
+import { createApiService } from '#app/utils/backend.server'
 import { ROUTE_PATH as ONBOARDING_USERNAME_PATH } from '#app/routes/onboarding+/username'
-import { ROUTE_PATH as SIGN_IN_PATH } from '#app/routes/auth+/sign-in.$.tsx' // Assuming path, adjust if needed
+import { ROUTE_PATH as SIGN_IN_PATH } from '#app/routes/auth+/sign-in.$'
 import { Navigation } from '#app/components/navigation'
 import { Header } from '#app/components/header'
 
@@ -15,74 +18,124 @@ export type LoaderData = Exclude<
 >
 
 export const loader = async (args: LoaderFunctionArgs) => {
-  const { request } = args;
-
-  const { userId, sessionId } = await getAuth(args);
+  const { request } = args
+  const { userId, sessionId } = await getAuth(args)
 
   if (!userId || !sessionId) {
-    // If no active user/session, redirect to the sign-in page.
-    const params = new URLSearchParams();
-    params.set("redirect_url", new URL(request.url).pathname);
-    return redirect(`${SIGN_IN_PATH}?${params.toString()}`);
+    const params = new URLSearchParams()
+    params.set("redirect_url", new URL(request.url).pathname)
+    return redirect(`${SIGN_IN_PATH}?${params.toString()}`)
   }
 
-  // At this point, user is authenticated with Clerk.
-  // We need to ensure this Clerk user is provisioned in our local DB
-  // and has completed any app-specific onboarding (like username selection).
+  try {
+    // Obtener información del usuario desde el backend
+    const apiService = await createApiService(args)
+    
+    // Obtener usuario actual del backend
+    const [backendUserData, backendTenantData] = await Promise.allSettled([
+      apiService.getCurrentUser(),
+      apiService.getCurrentTenant(),
+    ])
 
-  // Fetch the local user profile using clerkUserId
-  // The `clerkUser` object from `getAuth` (if `loadUser: true` in root.tsx) contains Clerk user details.
-  // Its `id` property is the Clerk User ID.
-  const localUser = clerkUser?.id ? await prisma.user.findUnique({
-    where: { clerkUserId: clerkUser.id }, // Assuming your Prisma User model has `clerkUserId`
-    include: {
-      image: { select: { id: true } }, // Keep existing includes if relevant
-      roles: { select: { name: true } },
-    },
-  }) : null;
+    let backendUser = null
+    let backendTenant = null
+    let backendConnected = false
 
-  if (!localUser) {
-    // This case should ideally be handled by webhooks creating the user.
-    // If webhook hasn't processed yet, or if there's a mismatch:
-    // Option 1: Redirect to a sync page or error.
-    // Option 2: Try to create/link user here (can be complex, webhooks are better).
-    // For now, if localUser is not found for an authenticated Clerk user,
-    // it implies an issue with user provisioning via webhooks or data consistency.
-    // Redirecting to sign-in might cause a loop if Clerk session is still active.
-    // A specific error page or a re-sync mechanism might be better.
-    // For this example, we'll throw an error or redirect to a safe page.
-    // This could also be a redirect to an onboarding step if that's the flow.
-    console.warn(`Clerk user ${clerkUser?.id} authenticated but no local user found. Redirecting to sign-in.`);
-    const params = new URLSearchParams();
-    params.set("error", "user_not_provisioned");
-    return redirect(`${SIGN_IN_PATH}?${params.toString()}`); // Or a dedicated error/sync page
+    if (backendUserData.status === 'fulfilled') {
+      backendUser = backendUserData.value
+      backendConnected = true
+    } else {
+      console.error('Error obteniendo usuario del backend:', backendUserData.reason)
+    }
+
+    if (backendTenantData.status === 'fulfilled') {
+      backendTenant = backendTenantData.value
+    }
+
+    // Si no podemos obtener el usuario del backend, pero tenemos userId de Clerk,
+    // podemos continuar con funcionalidad limitada
+    const user = backendUser || {
+      id: userId,
+      email: 'usuario@ejemplo.com', // Fallback
+      username: null,
+      full_name: null,
+      clerkUserId: userId,
+      roles: [{ name: 'user' }],
+      is_active: true,
+      tenant_id: null,
+    }
+
+    // Verificar onboarding basado en datos del backend o Clerk
+    if (backendConnected && backendUser && !backendUser.username) {
+      return redirect(ONBOARDING_USERNAME_PATH)
+    }
+
+    // Simular suscripción local para compatibilidad con componentes existentes
+    const subscription = {
+      planId: 'free', // Plan por defecto
+      status: 'active',
+    }
+
+    return json({
+      user,
+      subscription,
+      backendUser,
+      backendTenant,
+      backendConnected,
+      clerkUserId: userId,
+    })
+
+  } catch (error) {
+    console.error('Error en dashboard loader:', error)
+    
+    // En caso de error total, proporcionar datos mínimos para que la app funcione
+    return json({
+      user: {
+        id: userId,
+        email: 'usuario@ejemplo.com',
+        username: null,
+        full_name: null,
+        clerkUserId: userId,
+        roles: [{ name: 'user' }],
+        is_active: true,
+        tenant_id: null,
+      },
+      subscription: {
+        planId: 'free',
+        status: 'active',
+      },
+      backendUser: null,
+      backendTenant: null,
+      backendConnected: false,
+      clerkUserId: userId,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    })
   }
-  
-  // Check for app-specific onboarding steps, like username
-  if (!localUser.username) {
-    return redirect(ONBOARDING_USERNAME_PATH);
-  }
-
-  const subscription = await prisma.subscription.findUnique({
-    where: { userId: localUser.id }, // Use localUser.id for subscription query
-  });
-
-  // Return data including the localUser profile
-  return json({
-    user: localUser, // This is your application's User model instance
-    clerkUser, // This is Clerk's user object, pass if needed by UI
-    subscription,
-  });
-};
+}
 
 export default function Dashboard() {
-  const { user, subscription } = useLoaderData<typeof loader>() // `user` is now localUser
+  const { user, subscription, backendConnected, error } = useLoaderData<typeof loader>()
 
   return (
     <div className="flex min-h-[100vh] w-full flex-col bg-secondary dark:bg-black">
-      {/* Pass localUser to Navigation. Adjust Navigation component if it expects Clerk user object directly */}
       <Navigation user={user} planId={subscription?.planId} />
       <Header />
+      
+      {/* Indicador de estado del backend */}
+      {!backendConnected && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-yellow-700 dark:text-yellow-200">
+                <strong>Modo sin conexión:</strong> No se pudo conectar con el backend. 
+                Algunas funcionalidades pueden estar limitadas.
+                {error && ` Error: ${error}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <Outlet />
     </div>
   )

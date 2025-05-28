@@ -1,6 +1,5 @@
 import { UserButton, SignedIn, SignedOut, RedirectToSignIn } from "@clerk/remix";
 
-
 export default function TestAuth() {
   return (
     <div>

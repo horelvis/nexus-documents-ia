@@ -1,63 +1,86 @@
+// frontend/app/routes/onboarding+/_layout.tsx
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { Outlet } from '@remix-run/react'
 import { redirect, json } from '@remix-run/node'
-import { requireUser } from '#app/modules/auth/auth.server'
-import { prisma } from '#app/utils/db.server'
+import { getAuth } from '@clerk/remix/ssr.server'
+
+import { createApiService } from '#app/utils/backend.server'
 import { getDomainPathname } from '#app/utils/misc.server'
-import { PLANS } from '#app/modules/stripe/plans'
 import { ROUTE_PATH as DASHBOARD_PATH } from '#app/routes/dashboard+/_layout'
 import { ROUTE_PATH as ONBOARDING_USERNAME_PATH } from '#app/routes/onboarding+/username'
-import { ROUTE_PATH as ONBOARDING_PLAN_PATH } from '#app/routes/onboarding+/plan' // Actual import
+import { ROUTE_PATH as ONBOARDING_PLAN_PATH } from '#app/routes/onboarding+/plan'
 import { Logo } from '#app/components/logo'
 
 export const ROUTE_PATH = '/onboarding' as const
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requireUser(request)
-  const pathname = getDomainPathname(request)
-
-  const subscription = await prisma.subscription.findUnique({
-    where: { userId: user.id },
-  })
-
-  // Definition of "onboarding complete":
-  // User has a subscription record, AND
-  // (it's a non-free plan OR its status is 'active' - covering active free plans too)
-  const onboardingComplete =
-    subscription && (subscription.planId !== PLANS.FREE || subscription.status === 'active')
-
-  if (onboardingComplete) {
-    if (
-      pathname === ROUTE_PATH ||
-      pathname === ONBOARDING_USERNAME_PATH ||
-      pathname === ONBOARDING_PLAN_PATH
-    ) {
-      return redirect(DASHBOARD_PATH)
-    }
-  } else {
-    // Onboarding is not complete
-    if (pathname === ROUTE_PATH) {
-      if (!user.username) return redirect(ONBOARDING_USERNAME_PATH)
-      return redirect(ONBOARDING_PLAN_PATH) // Has username, but onboarding not complete
-    }
-
-    if (pathname === ONBOARDING_USERNAME_PATH) {
-      if (user.username) {
-        // Has username, but onboarding not complete (e.g. subscription missing/not active)
-        return redirect(ONBOARDING_PLAN_PATH)
-      }
-      // If no username, they are on the correct page.
-    }
-
-    if (pathname === ONBOARDING_PLAN_PATH) {
-      if (!user.username) {
-        return redirect(ONBOARDING_USERNAME_PATH) // Must set username first
-      }
-      // If has username and on plan page, but onboarding not complete, they are on the correct page.
-    }
+export async function loader(args : LoaderFunctionArgs) {
+  const { request } = args
+  const { userId } = await getAuth(args)
+  
+  if (!userId) {
+    return redirect('/auth/sign-in')
   }
 
-  return json({}) // No redirection needed, user is on an appropriate page or outside onboarding.
+  const pathname = getDomainPathname(request)
+
+  try {
+    // Intentar obtener información del usuario desde el backend
+    const apiService = await createApiService(args)
+    const backendUser = await apiService.getCurrentUser()
+
+    // Verificar si el onboarding está completo
+    const onboardingComplete = backendUser && backendUser.username && backendUser.tenantId
+
+    if (onboardingComplete) {
+      // Onboarding completo, redirigir al dashboard
+      if (
+        pathname === ROUTE_PATH ||
+        pathname === ONBOARDING_USERNAME_PATH ||
+        pathname === ONBOARDING_PLAN_PATH
+      ) {
+        return redirect(DASHBOARD_PATH)
+      }
+    } else {
+      // Onboarding no completo, determinar siguiente paso
+      if (pathname === ROUTE_PATH) {
+        if (!backendUser?.username) {
+          return redirect(ONBOARDING_USERNAME_PATH)
+        }
+        return redirect(ONBOARDING_PLAN_PATH)
+      }
+
+      if (pathname === ONBOARDING_USERNAME_PATH) {
+        if (backendUser?.username) {
+          return redirect(ONBOARDING_PLAN_PATH)
+        }
+        // Usuario está en la página correcta
+      }
+
+      if (pathname === ONBOARDING_PLAN_PATH) {
+        if (!backendUser?.username) {
+          return redirect(ONBOARDING_USERNAME_PATH)
+        }
+        // Usuario está en la página correcta
+      }
+    }
+
+    return json({ backendConnected: true, user: backendUser })
+
+  } catch (error) {
+    console.error('Error en onboarding loader:', error)
+    
+    // Si hay error con el backend, permitir continuar con datos mínimos
+    // pero redirigir apropiadamente basado en la ruta actual
+    if (pathname === ROUTE_PATH) {
+      return redirect(ONBOARDING_USERNAME_PATH)
+    }
+
+    return json({ 
+      backendConnected: false, 
+      user: null,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    })
+  }
 }
 
 export default function Onboarding() {

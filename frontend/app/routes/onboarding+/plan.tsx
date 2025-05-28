@@ -7,7 +7,6 @@ import { getZodConstraint, parseWithZod } from '@conform-to/zod'
 import { AuthenticityTokenInput } from 'remix-utils/csrf/react'
 import { HoneypotInputs } from 'remix-utils/honeypot/react'
 
-import { requireUser, requireSessionUser } from '#app/modules/auth/auth.server'
 import {
   PRICING_PLANS,
   PLANS,
@@ -20,7 +19,6 @@ import {
   createFreeSubscription,
   createSubscriptionCheckout,
 } from '#app/modules/stripe/queries.server'
-import { prisma } from '#app/utils/db.server'
 import { validateCSRF } from '#app/utils/csrf.server'
 import { checkHoneypot } from '#app/utils/honeypot.server'
 import { useIsPending } from '#app/utils/misc'
