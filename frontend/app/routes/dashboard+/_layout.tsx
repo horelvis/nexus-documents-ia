@@ -1,9 +1,7 @@
 import type { LoaderFunctionArgs, TypedResponse } from '@remix-run/node'
 import { Outlet, useLoaderData } from '@remix-run/react'
-import { redirect, json } from '@remix-run/node' // Added json
+import { redirect } from '@remix-run/node' // Added json
 import { getAuth } from '@clerk/remix/ssr.server' // Clerk's getAuth
-// import { requireUser } from '#app/modules/auth/auth.server' // Old auth, to be replaced
-import { prisma } from '#app/utils/db.server'
 import { ROUTE_PATH as ONBOARDING_USERNAME_PATH } from '#app/routes/onboarding+/username'
 import { ROUTE_PATH as SIGN_IN_PATH } from '#app/routes/auth+/sign-in.$.tsx' // Assuming path, adjust if needed
 import { Navigation } from '#app/components/navigation'
@@ -18,7 +16,8 @@ export type LoaderData = Exclude<
 
 export const loader = async (args: LoaderFunctionArgs) => {
   const { request } = args;
-  const { userId, sessionId, user: clerkUser } = await getAuth(args); // clerkUser is from getAuth if loadUser:true
+
+  const { userId, sessionId } = await getAuth(args);
 
   if (!userId || !sessionId) {
     // If no active user/session, redirect to the sign-in page.

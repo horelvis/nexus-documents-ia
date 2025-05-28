@@ -19,7 +19,7 @@ import { validateCSRF } from '#app/utils/csrf.server'
 import { checkHoneypot } from '#app/utils/honeypot.server'
 import { useIsPending } from '#app/utils/misc'
 import { ERRORS } from '#app/utils/constants/errors'
-import { ROUTE_PATH as LOGIN_PATH } from '#app/routes/auth+/login'
+import { AUTH_ROUTES } from '#app/utils/constants/auth'
 import { ROUTE_PATH as ONBOARDING_PLAN_PATH } from '#app/routes/onboarding+/plan' // Actual import
 import { Input } from '#app/components/ui/input'
 import { Button } from '#app/components/ui/button'
@@ -41,13 +41,13 @@ export const meta: MetaFunction = () => {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireSessionUser(request, { redirectTo: LOGIN_PATH })
+  await requireSessionUser(request, { redirectTo: AUTH_ROUTES.SIGN_IN })
   return {}
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const sessionUser = await requireSessionUser(request, {
-    redirectTo: LOGIN_PATH,
+    redirectTo: AUTH_ROUTES.SIGN_IN,
   })
 
   const clonedRequest = request.clone()

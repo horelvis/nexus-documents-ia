@@ -5,12 +5,14 @@ import { authenticator } from '#app/modules/auth/auth.server'
 import { cn } from '#app/utils/misc'
 import { useTheme } from '#app/utils/hooks/use-theme.js'
 import { siteConfig } from '#app/utils/constants/brand'
-import { ROUTE_PATH as LOGIN_PATH } from '#app/routes/auth+/login'
 import { Button, buttonVariants } from '#app/components/ui/button'
 import { ThemeSwitcherHome } from '#app/components/misc/theme-switcher'
 
 import { Logo } from '#app/components/logo'
 import ShadowPNG from '#public/images/shadow.png'
+import { AUTH_ROUTES } from '#app/utils/constants/auth.ts'
+
+const SIGN_IN_PATH = '/auth/sign-in'
 
 export const meta: MetaFunction = () => {
   return [{ title: `${siteConfig.siteTitle} - Starter Kit` }]
@@ -78,7 +80,7 @@ export default function Index() {
               />
             </svg>
           </a>
-          <Link to={LOGIN_PATH} className={cn(buttonVariants({ size: 'sm' }), 'h-8')}>
+          <Link to={AUTH_ROUTES.SIGN_IN} className={cn(buttonVariants({ size: 'sm' }), 'h-8')}>
             {user ? 'Dashboard' : 'Get Started'}
           </Link>
         </div>
@@ -389,7 +391,7 @@ export default function Index() {
               <span className="font-semibold text-primary">Production Ready.</span> Build
               your app on a solid, scalable, well-tested foundation.
             </p>
-            <Link to={LOGIN_PATH} className={buttonVariants({ size: 'sm' })}>
+            <Link to={AUTH_ROUTES.SIGN_IN} className={buttonVariants({ size: 'sm' })}>
               Get Started
             </Link>
           </div>

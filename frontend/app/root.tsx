@@ -16,10 +16,6 @@ import {
 import { useChangeLanguage } from 'remix-i18next/react'
 import { AuthenticityTokenProvider } from 'remix-utils/csrf/react'
 import { HoneypotProvider } from 'remix-utils/honeypot/react'
-// Old auth system (authenticator, prisma direct user fetch) is being replaced by Clerk.
-// Remove or comment out imports related to the old auth system if they are no longer needed.
-// import { authenticator } from '#app/modules/auth/auth.server' 
-// import { prisma } from '#app/utils/db.server'
 import { useNonce } from '#app/utils/hooks/use-nonce'
 import { getHints } from '#app/utils/hooks/use-hints'
 import { getTheme, useTheme } from '#app/utils/hooks/use-theme'
@@ -31,14 +27,11 @@ import { siteConfig } from '#app/utils/constants/brand'
 import { useToast } from '#app/components/toaster'
 import { Toaster } from '#app/components/ui/sonner'
 import { ClientHintCheck } from '#app/components/misc/client-hints'
-// GenericErrorBoundary might be replaced or supplemented by ClerkCatchBoundary
-// import { GenericErrorBoundary } from '#app/components/misc/error-boundary' 
 import i18nServer, { localeCookie } from '#app/modules/i18n/i18n.server'
 
 // Clerk imports
-import { ClerkApp } from '@clerk/remix' // Adjusted import
+import { ClerkApp, ClerkProvider } from '@clerk/remix' // Adjusted import
 import { rootAuthLoader } from '@clerk/remix/ssr.server'
-import { ENV } from '#app/utils/env.server' // Your ENV object
 import { useRouteError, isRouteErrorResponse } from '@remix-run/react'; // Added for ErrorBoundary
 
 
@@ -63,25 +56,19 @@ export type LoaderData = Awaited<ReturnType<typeof loader>>;
 
 // New loader function using Clerk's rootAuthLoader
 export const loader = async (args: LoaderFunctionArgs) => {
+
   return rootAuthLoader(args, async ({ request }) => {
     // This inner callback is for server-side configuration and data loading.
     // It runs AFTER Clerk has handled initial auth state.
     // You can access auth state here using getAuth(args).
-    const { CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY } = ENV;
-
+    const CLERK_PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY;
+    
     // Load your application-specific data here.
     // This data will be merged with Clerk's auth state.
     const locale = await i18nServer.getLocale(request);
     const { toast, headers: toastHeaders } = await getToastSession(request);
     const [csrfToken, csrfCookieHeader] = await csrf.commitToken();
-    
-    // You might want to fetch additional user profile information from your local DB
-    // using the Clerk user ID if needed. Example:
-    // const { userId: clerkUserId } = await getAuth(args);
-    // let localUser = null;
-    // if (clerkUserId) {
-    //   localUser = await prisma.user.findUnique({ where: { clerkUserId } });
-    // }
+  
 
     return {
       // Clerk keys for server-side functions.
@@ -124,7 +111,7 @@ function Document({
   nonce,
   lang = 'en',
   dir = 'ltr',
-  theme = 'light',
+  theme = 'dark',
 }: {
   children: React.ReactNode
   nonce: string
@@ -156,7 +143,7 @@ function Document({
 }
 
 // App component wrapped with ClerkApp
-export default function App() {
+export function App() {
   const data = useLoaderData<typeof loader>(); // Data from the new Clerk-aware loader
   const nonce = useNonce();
   const theme = useTheme();
@@ -173,7 +160,7 @@ export default function App() {
       {/* CSRF and Honeypot providers are kept, using data from the loader */}
       <AuthenticityTokenProvider token={data.csrfToken}>
         <HoneypotProvider {...data.honeypotProps}>
-          <Outlet />
+        <Outlet />
         </HoneypotProvider>
       </AuthenticityTokenProvider>
     </Document>
@@ -181,7 +168,13 @@ export default function App() {
 }
 
 // Default export is now the App component wrapped by ClerkApp HOF
-export default ClerkApp(App);
+export default ClerkApp( App, {
+  signInUrl: "/auth/sign-in", 
+  // You might also want related options like:
+  // signUpUrl: "/auth/sign-up", // If you have a sign-up page
+  // afterSignInUrl: "/dashboard", // Where to redirect after sign-in
+  // afterSignUpUrl: "/dashboard", // Where to redirect after sign-up
+});
 
 // Standard Remix ErrorBoundary
 export function ErrorBoundary() {
@@ -215,6 +208,3 @@ export function ErrorBoundary() {
     </html>
   );
 }
-
-// Old ClerkCatchBoundary export is removed
-// export const CatchBoundary = ClerkCatchBoundary;

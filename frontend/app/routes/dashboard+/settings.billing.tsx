@@ -16,11 +16,13 @@ import {
 import { prisma } from '#app/utils/db.server'
 import { getLocaleCurrency } from '#app/utils/misc.server'
 import { INTENTS } from '#app/utils/constants/misc'
-import { ROUTE_PATH as LOGIN_PATH } from '#app/routes/auth+/login'
+
 import { Switch } from '#app/components/ui/switch'
 import { Button } from '#app/components/ui/button'
+import { AUTH_ROUTES } from '#app/utils/constants/auth.ts'
 
 export const ROUTE_PATH = '/dashboard/settings/billing' as const
+const SIGN_IN_PATH = '/auth/sign-in'  
 
 export const meta: MetaFunction = () => {
   return [{ title: 'Remix SaaS - Billing' }]
@@ -28,7 +30,7 @@ export const meta: MetaFunction = () => {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const sessionUser = await requireSessionUser(request, {
-    redirectTo: LOGIN_PATH,
+    redirectTo: SIGN_IN_PATH,
   })
 
   const subscription = await prisma.subscription.findUnique({
@@ -41,7 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const sessionUser = await requireSessionUser(request, {
-    redirectTo: LOGIN_PATH,
+    redirectTo: AUTH_ROUTES.SIGN_IN,
   })
 
   const formData = await request.formData()
