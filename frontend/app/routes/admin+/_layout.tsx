@@ -1,8 +1,6 @@
 import type { MetaFunction, LoaderFunctionArgs, TypedResponse } from '@remix-run/node'
 import { useLoaderData } from '@remix-run/react'
 import { ShoppingBasket, ExternalLink } from 'lucide-react'
-import { requireUserWithRole } from '#app/utils/permissions.server'
-import { prisma } from '#app/utils/db.server'
 import { cn } from '#app/utils/misc.js'
 import { siteConfig } from '#app/utils/constants/brand'
 import { buttonVariants } from '#app/components/ui/button'

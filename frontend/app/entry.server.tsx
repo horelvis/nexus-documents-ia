@@ -10,6 +10,8 @@ import { initEnvs } from '#app/utils/env.server'
 import { NonceProvider } from '#app/utils/hooks/use-nonce'
 import i18nServer from '#app/modules/i18n/i18n.server'
 import * as i18n from '#app/modules/i18n/i18n'
+import { ClerkProvider } from "@clerk/remix"; // <-- Aquí está el correcto
+
 
 /**
  * Environment Variables.
@@ -63,13 +65,13 @@ export default async function handleRequest(
     let shellRendered = false
     const { pipe, abort } = renderToPipeableStream(
       <NonceProvider value={nonce}>
-        <I18nextProvider i18n={instance}>
-          <RemixServer
-            context={remixContext}
-            url={request.url}
-            abortDelay={ABORT_DELAY}
-          />
-        </I18nextProvider>
+            <I18nextProvider i18n={instance}>
+              <RemixServer
+                context={remixContext}
+                url={request.url}
+                abortDelay={ABORT_DELAY}
+              />
+            </I18nextProvider>
       </NonceProvider>,
       {
         [callbackName]: () => {

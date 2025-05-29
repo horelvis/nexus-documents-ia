@@ -1,19 +1,18 @@
-import type { Price } from '@prisma/client'
 
+// frontend/app/modules/stripe/plans.ts
 /**
- * Enumerates subscription plan names.
- * These are used as unique identifiers in both the database and Stripe dashboard.
+ * Configuración de planes de suscripción
+ * Esta configuración debe coincidir con la del backend
  */
+
 export const PLANS = {
   FREE: 'free',
   PRO: 'pro',
+  ENTERPRISE: 'enterprise',
 } as const
 
 export type Plan = (typeof PLANS)[keyof typeof PLANS]
 
-/**
- * Enumerates billing intervals for subscription plans.
- */
 export const INTERVALS = {
   MONTH: 'month',
   YEAR: 'year',
@@ -21,9 +20,6 @@ export const INTERVALS = {
 
 export type Interval = (typeof INTERVALS)[keyof typeof INTERVALS]
 
-/**
- * Enumerates supported currencies for billing.
- */
 export const CURRENCIES = {
   DEFAULT: 'usd',
   USD: 'usd',
@@ -33,19 +29,20 @@ export const CURRENCIES = {
 export type Currency = (typeof CURRENCIES)[keyof typeof CURRENCIES]
 
 /**
- * Defines the structure for each subscription plan.
- *
- * Note:
- * - Running the Prisma seed will create these plans in your Stripe Dashboard and populate the database.
- * - Each plan includes pricing details for each interval and currency.
- * - Plan IDs correspond to the Stripe plan IDs for easy identification.
- * - 'name' and 'description' fields are used in Stripe Checkout and client UI.
+ * Configuración de precios para mostrar en el frontend
+ * Los precios reales se manejan en el backend
  */
 export const PRICING_PLANS = {
   [PLANS.FREE]: {
     id: PLANS.FREE,
     name: 'Free',
-    description: 'Start with the basics, upgrade anytime.',
+    description: 'Perfect for getting started',
+    features: [
+      'Up to 10 documents',
+      'Basic AI chat',
+      'Community support',
+      '1 GB storage'
+    ],
     prices: {
       [INTERVALS.MONTH]: {
         [CURRENCIES.USD]: 0,
@@ -56,41 +53,109 @@ export const PRICING_PLANS = {
         [CURRENCIES.EUR]: 0,
       },
     },
+    popular: false,
   },
   [PLANS.PRO]: {
     id: PLANS.PRO,
     name: 'Pro',
-    description: 'Access to all features and unlimited projects.',
+    description: 'Best for professionals and small teams',
+    features: [
+      'Unlimited documents',
+      'Advanced AI chat',
+      'Priority support',
+      '10 GB storage',
+      'Advanced search',
+      'Custom integrations'
+    ],
     prices: {
       [INTERVALS.MONTH]: {
-        [CURRENCIES.USD]: 1990,
-        [CURRENCIES.EUR]: 1990,
+        [CURRENCIES.USD]: 1999, // $19.99
+        [CURRENCIES.EUR]: 1999,
       },
       [INTERVALS.YEAR]: {
-        [CURRENCIES.USD]: 19990,
-        [CURRENCIES.EUR]: 19990,
+        [CURRENCIES.USD]: 19999, // $199.99 (save ~17%)
+        [CURRENCIES.EUR]: 19999,
       },
     },
+    popular: true,
+  },
+  [PLANS.ENTERPRISE]: {
+    id: PLANS.ENTERPRISE,
+    name: 'Enterprise',
+    description: 'For large organizations with advanced needs',
+    features: [
+      'Everything in Pro',
+      'Unlimited storage',
+      'Custom AI models',
+      '24/7 phone support',
+      'SSO integration',
+      'Advanced analytics',
+      'Custom branding'
+    ],
+    prices: {
+      [INTERVALS.MONTH]: {
+        [CURRENCIES.USD]: 9999, // $99.99
+        [CURRENCIES.EUR]: 9999,
+      },
+      [INTERVALS.YEAR]: {
+        [CURRENCIES.USD]: 99999, // $999.99
+        [CURRENCIES.EUR]: 99999,
+      },
+    },
+    popular: false,
   },
 } satisfies PricingPlan
 
 /**
- * A type helper defining prices for each billing interval and currency.
+ * Utilidades para trabajar con planes
  */
+export function getPlanDisplayName(planId: string): string {
+  const plan = PRICING_PLANS[planId as Plan]
+  return plan?.name || 'Unknown Plan'
+}
+
+export function getPlanPrice(planId: string, interval: string, currency: string = CURRENCIES.USD): number {
+  const plan = PRICING_PLANS[planId as Plan]
+  return plan?.prices[interval as Interval]?.[currency as Currency] || 0
+}
+
+export function formatPrice(amount: number, currency: string = CURRENCIES.USD): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+  }).format(amount / 100)
+}
+
+export function calculateYearlySavings(planId: string, currency: string = CURRENCIES.USD): number {
+  const monthlyPrice = getPlanPrice(planId, INTERVALS.MONTH, currency)
+  const yearlyPrice = getPlanPrice(planId, INTERVALS.YEAR, currency)
+  
+  const yearlyMonthly = (monthlyPrice * 12)
+  return yearlyMonthly - yearlyPrice
+}
+
+export function getSavingsPercentage(planId: string, currency: string = CURRENCIES.USD): number {
+  const monthlyPrice = getPlanPrice(planId, INTERVALS.MONTH, currency)
+  const savings = calculateYearlySavings(planId, currency)
+  
+  if (monthlyPrice === 0) return 0
+  return Math.round((savings / (monthlyPrice * 12)) * 100)
+}
+
+// Types
 type PriceInterval<I extends Interval = Interval, C extends Currency = Currency> = {
   [interval in I]: {
-    [currency in C]: Price['amount']
+    [currency in C]: number
   }
 }
 
-/**
- * A type helper defining the structure for subscription pricing plans.
- */
 type PricingPlan<T extends Plan = Plan> = {
   [key in T]: {
     id: string
     name: string
     description: string
+    features: string[]
     prices: PriceInterval
+    popular: boolean
   }
 }

@@ -2,8 +2,6 @@
  * Permissions and Roles.
  * Implementation based on github.com/epicweb-dev/epic-stack
  */
-
-import { requireUser } from '#app/modules/auth/auth.server'
 import { userHasRole } from '#app/utils/misc'
 import { AUTH_ROUTES } from '#app/utils/constants/auth'
 

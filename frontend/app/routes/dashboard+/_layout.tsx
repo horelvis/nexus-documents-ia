@@ -5,12 +5,16 @@ import { json, redirect } from '@remix-run/node'
 import { getAuth } from '@clerk/remix/ssr.server'
 
 import { createApiService } from '#app/utils/backend.server'
+import { createStripeApiService } from '#app/services/stripe-api.server'
+import { PLANS } from '#app/modules/stripe/plans'
 import { ROUTE_PATH as ONBOARDING_USERNAME_PATH } from '#app/routes/onboarding+/username'
-import { ROUTE_PATH as SIGN_IN_PATH } from '#app/routes/auth+/sign-in.$'
+
 import { Navigation } from '#app/components/navigation'
 import { Header } from '#app/components/header'
 
 export const ROUTE_PATH = '/dashboard' as const
+export const SIGN_IN_PATH = '/auth/sign-in' as const
+
 
 export type LoaderData = Exclude<
   Awaited<ReturnType<typeof loader>>,
@@ -19,117 +23,119 @@ export type LoaderData = Exclude<
 
 export const loader = async (args: LoaderFunctionArgs) => {
   const { request } = args
-  const { userId, sessionId } = await getAuth(args)
+  const { userId } = await getAuth(args)
 
-  if (!userId || !sessionId) {
+  if (!userId) {
     const params = new URLSearchParams()
     params.set("redirect_url", new URL(request.url).pathname)
     return redirect(`${SIGN_IN_PATH}?${params.toString()}`)
   }
 
+  // Variables para tracking de estado
+  let backendConnected = false
+  let planId = PLANS.FREE
+  let isAdmin = false
+  let needsOnboarding = false
+  let error: string | null = null
+
   try {
-    // Obtener información del usuario desde el backend
+    // Intentar conectar con el backend para datos adicionales
     const apiService = await createApiService(args)
     
-    // Obtener usuario actual del backend
-    const [backendUserData, backendTenantData] = await Promise.allSettled([
+    const [userResult, stripeResult] = await Promise.allSettled([
       apiService.getCurrentUser(),
-      apiService.getCurrentTenant(),
+      createStripeApiService(args).then(service => service.getCurrentSubscription())
     ])
 
-    let backendUser = null
-    let backendTenant = null
-    let backendConnected = false
-
-    if (backendUserData.status === 'fulfilled') {
-      backendUser = backendUserData.value
+    // Procesar resultado del usuario del backend
+    if (userResult.status === 'fulfilled' && userResult.value) {
+      const backendUser = userResult.value
       backendConnected = true
+      
+      // Verificar si necesita completar onboarding
+      if (!backendUser.username) {
+        needsOnboarding = true
+      }
+      
+      // Verificar permisos de admin
+      isAdmin = backendUser.roles?.some((role: any) => role.name === 'admin') || 
+                backendUser.is_superuser || 
+                false
     } else {
-      console.error('Error obteniendo usuario del backend:', backendUserData.reason)
+      console.warn('No se pudo obtener usuario del backend:', userResult.status === 'rejected' ? userResult.reason : 'Sin datos')
     }
 
-    if (backendTenantData.status === 'fulfilled') {
-      backendTenant = backendTenantData.value
+    // Procesar resultado de suscripción
+    if (stripeResult.status === 'fulfilled' && stripeResult.value) {
+      planId = stripeResult.value.plan_id || PLANS.FREE
+    } else {
+      console.warn('No se pudo obtener suscripción:', stripeResult.status === 'rejected' ? stripeResult.reason : 'Sin datos')
     }
 
-    // Si no podemos obtener el usuario del backend, pero tenemos userId de Clerk,
-    // podemos continuar con funcionalidad limitada
-    const user = backendUser || {
-      id: userId,
-      email: 'usuario@ejemplo.com', // Fallback
-      username: null,
-      full_name: null,
-      clerkUserId: userId,
-      roles: [{ name: 'user' }],
-      is_active: true,
-      tenant_id: null,
-    }
-
-    // Verificar onboarding basado en datos del backend o Clerk
-    if (backendConnected && backendUser && !backendUser.username) {
-      return redirect(ONBOARDING_USERNAME_PATH)
-    }
-
-    // Simular suscripción local para compatibilidad con componentes existentes
-    const subscription = {
-      planId: 'free', // Plan por defecto
-      status: 'active',
-    }
-
-    return json({
-      user,
-      subscription,
-      backendUser,
-      backendTenant,
-      backendConnected,
-      clerkUserId: userId,
-    })
-
-  } catch (error) {
-    console.error('Error en dashboard loader:', error)
-    
-    // En caso de error total, proporcionar datos mínimos para que la app funcione
-    return json({
-      user: {
-        id: userId,
-        email: 'usuario@ejemplo.com',
-        username: null,
-        full_name: null,
-        clerkUserId: userId,
-        roles: [{ name: 'user' }],
-        is_active: true,
-        tenant_id: null,
-      },
-      subscription: {
-        planId: 'free',
-        status: 'active',
-      },
-      backendUser: null,
-      backendTenant: null,
-      backendConnected: false,
-      clerkUserId: userId,
-      error: error instanceof Error ? error.message : 'Error desconocido',
-    })
+  } catch (err) {
+    console.error('Error general en dashboard loader:', err)
+    error = err instanceof Error ? err.message : 'Error desconocido'
+    backendConnected = false
   }
+
+  // Redireccionar a onboarding si es necesario
+  if (needsOnboarding && backendConnected) {
+    return redirect(ONBOARDING_USERNAME_PATH)
+  }
+
+  return json({
+    planId,
+    isAdmin,
+    backendConnected,
+    clerkUserId: userId,
+    error,
+    needsOnboarding
+  })
 }
 
 export default function Dashboard() {
-  const { user, subscription, backendConnected, error } = useLoaderData<typeof loader>()
+  const { 
+    planId, 
+    isAdmin, 
+    backendConnected, 
+    error, 
+    needsOnboarding 
+  } = useLoaderData<typeof loader>()
 
   return (
     <div className="flex min-h-[100vh] w-full flex-col bg-secondary dark:bg-black">
-      <Navigation user={user} planId={subscription?.planId} />
+      {/* Navigation usando solo componentes Clerk + datos mínimos de negocio */}
+      <Navigation 
+        planId={planId}
+        isAdmin={isAdmin}
+        backendConnected={backendConnected}
+      />
+      
+      {/* Header simplificado - Clerk maneja datos de usuario */}
       <Header />
       
-      {/* Indicador de estado del backend */}
+      {/* Indicadores de estado */}
       {!backendConnected && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4">
           <div className="flex">
             <div className="ml-3">
               <p className="text-sm text-yellow-700 dark:text-yellow-200">
-                <strong>Modo sin conexión:</strong> No se pudo conectar con el backend. 
-                Algunas funcionalidades pueden estar limitadas.
-                {error && ` Error: ${error}`}
+                <strong>Modo sin conexión:</strong> Algunas funcionalidades pueden estar limitadas. 
+                La aplicación funciona con los componentes de Clerk.
+                {error && ` Error técnico: ${error}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de onboarding pendiente */}
+      {needsOnboarding && backendConnected && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 p-4">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-blue-700 dark:text-blue-200">
+                <strong>Configuración pendiente:</strong> Completa tu perfil para acceder a todas las funciones.
               </p>
             </div>
           </div>

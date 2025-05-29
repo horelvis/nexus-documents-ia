@@ -1,7 +1,4 @@
-/**
- * Learn more about CSRF protection:
- * @see https://github.com/sergiodxa/remix-utils?tab=readme-ov-file#csrf
- */
+// frontend/app/utils/csrf.server.ts - Versión optimizada
 import { createCookie } from '@remix-run/node'
 import { CSRF, CSRFError } from 'remix-utils/csrf/server'
 
