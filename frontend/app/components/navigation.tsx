@@ -141,7 +141,7 @@ export function Navigation({
           {/* UserButton de Clerk para usuarios autenticados */}
           <SignedIn>
             <UserButton 
-              afterSignOutUrl="/auth/sign-in"
+              afterSignOutUrl="/"
               appearance={{
                 elements: {
                   avatarBox: "w-8 h-8",
