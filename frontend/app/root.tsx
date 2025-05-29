@@ -1,3 +1,4 @@
+// frontend/app/root.tsx - Versión completa actualizada
 import type {
   MetaFunction,
   LinksFunction,
@@ -12,6 +13,8 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
+  useRouteError,
+  isRouteErrorResponse,
 } from '@remix-run/react'
 import { useChangeLanguage } from 'remix-i18next/react'
 import { AuthenticityTokenProvider } from 'remix-utils/csrf/react'
@@ -30,18 +33,22 @@ import { ClientHintCheck } from '#app/components/misc/client-hints'
 import i18nServer, { localeCookie } from '#app/modules/i18n/i18n.server'
 
 // Clerk imports
-import { ClerkApp, ClerkProvider } from '@clerk/remix' // Adjusted import
-import { rootAuthLoader } from '@clerk/remix/ssr.server'
-import { useRouteError, isRouteErrorResponse } from '@remix-run/react'; // Added for ErrorBoundary
+import { ClerkApp } from '@clerk/remix'
+import { rootAuthLoader, getAuth } from '@clerk/remix/ssr.server'
 
+// ✅ Imports para UserContext y servicios API
+import { UserContextProvider } from '#app/utils/hooks/use-user-context'
+import type { BackendUser } from '#app/utils/hooks/use-user-context'
+import { createApiService } from '#app/utils/backend.server'
+import { createStripeApiService } from '#app/services/stripe-api.server'
+import { PLANS } from '#app/modules/stripe/plans'
 
 import RootCSS from './root.css?url'
 
 export const handle = { i18n: ['translation'] }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  // `data` will now include properties from rootAuthLoader and your custom data
-  const title = data?.siteConfig?.siteTitle || siteConfig.siteTitle;
+  const title = data?.siteConfig?.siteTitle || siteConfig.siteTitle
   return [
     { title: title },
     { name: 'description', content: siteConfig.siteDescription },
@@ -52,34 +59,74 @@ export const links: LinksFunction = () => {
   return [{ rel: 'stylesheet', href: RootCSS }]
 }
 
-export type LoaderData = Awaited<ReturnType<typeof loader>>;
+// ✅ Tipo para el loader data actualizado
+export type LoaderData = Awaited<ReturnType<typeof loader>>
 
-// New loader function using Clerk's rootAuthLoader
+// ✅ Loader actualizado con rootAuthLoader de Clerk
 export const loader = async (args: LoaderFunctionArgs) => {
-
-  return rootAuthLoader(args, async ({ request }) => {
-    // This inner callback is for server-side configuration and data loading.
-    // It runs AFTER Clerk has handled initial auth state.
-    // You can access auth state here using getAuth(args).
-    const CLERK_PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY;
-    
-    // Load your application-specific data here.
-    // This data will be merged with Clerk's auth state.
-    const locale = await i18nServer.getLocale(request);
-    const { toast, headers: toastHeaders } = await getToastSession(request);
-    const [csrfToken, csrfCookieHeader] = await csrf.commitToken();
   
+  return rootAuthLoader(args, async ({ request }) => {
 
+    const { userId } = await getAuth(args)
+    
+    // ===== Cargar datos básicos de la app (siempre necesarios) =====
+    const locale = await i18nServer.getLocale(request)
+    const { toast, headers: toastHeaders } = await getToastSession(request)
+    const [csrfToken, csrfCookieHeader] = await csrf.commitToken()
+    
+    // ===== Preparar userData para UserContextProvider =====
+    let backendUser: BackendUser | null = null
+    let backendConnected = false
+    let planId = PLANS.FREE
+    let error: string | null = null
+
+    // Solo intentar cargar datos del backend si el usuario está autenticado
+    if (userId) {
+      try {
+        // Crear servicios API
+        const [apiService, stripeService] = await Promise.all([
+          createApiService(args),
+          createStripeApiService(args)
+        ])
+        
+        // Cargar datos del usuario y suscripción en paralelo
+        const [userResult, subscriptionResult] = await Promise.allSettled([
+          apiService.getCurrentUser(),
+          stripeService.getCurrentSubscription()
+        ])
+
+        // Procesar datos del usuario del backend
+        if (userResult.status === 'fulfilled' && userResult.value) {
+          backendUser = userResult.value as BackendUser
+          backendConnected = true
+        } else {
+          console.warn('Could not load backend user:', 
+            userResult.status === 'rejected' ? userResult.reason : 'No data')
+        }
+
+        // Procesar datos de suscripción
+        if (subscriptionResult.status === 'fulfilled' && subscriptionResult.value) {
+          planId = subscriptionResult.value.plan_id || PLANS.FREE
+        } else {
+          console.warn('Could not load subscription:', 
+            subscriptionResult.status === 'rejected' ? subscriptionResult.reason : 'No data')
+        }
+
+      } catch (err) {
+        console.error('Error loading user context data:', err)
+        error = err instanceof Error ? err.message : 'Unknown error'
+        backendConnected = false
+      }
+    }
+
+    // ===== Retornar datos para el root =====
     return {
-      // Clerk keys for server-side functions.
-      // publishableKey is often not needed here if it's in ENV for client-side.
-      // secretKey is crucial for server-side.
-      // However, rootAuthLoader typically infers these from ENV if set up correctly.
-      // The main purpose here is to return *additional* data.
-      // Let's ensure ENV for client is passed if needed.
-      ENV: { CLERK_PUBLISHABLE_KEY }, // Only what's safe for client
+      // Variables de entorno para el cliente
+      ENV: { 
+        CLERK_PUBLISHABLE_KEY: process.env.CLERK_PUBLISHABLE_KEY 
+      },
       
-      // Your application-specific data:
+      // Datos básicos de la app
       locale,
       toast,
       csrfToken,
@@ -90,22 +137,27 @@ export const loader = async (args: LoaderFunctionArgs) => {
         path: new URL(request.url).pathname,
         userPrefs: { theme: getTheme(request) },
       },
-      siteConfig: { siteTitle: siteConfig.siteTitle }, // Example: pass site title
-      // localUser, // Your local user profile data
+      siteConfig: { siteTitle: siteConfig.siteTitle },
       
-      // IMPORTANT: Any headers you need to set on the response
-      // must be returned in a `responseHeaders` object.
-      // `rootAuthLoader` will merge these with its own headers.
+      // ✅ userData para UserContextProvider
+      userData: {
+        backendUser,
+        backendConnected,
+        planId,
+        error,
+      },
+      
+      // Headers de respuesta
       responseHeaders: combineHeaders(
         { 'Set-Cookie': await localeCookie.serialize(locale) },
         toastHeaders,
         csrfCookieHeader ? { 'Set-Cookie': csrfCookieHeader } : null,
       ),
-    };
-  }, { loadUser: true }); // loadUser: true will fetch user data via Clerk
-};
+    }
+  }, { loadUser: true }) // loadUser: true carga automáticamente datos de Clerk
+}
 
-// Document component remains the same
+// Componente Document (sin cambios)
 function Document({
   children,
   nonce,
@@ -142,69 +194,105 @@ function Document({
   )
 }
 
-// App component wrapped with ClerkApp
+// ✅ Componente App actualizado con UserContextProvider
 export function App() {
-  const data = useLoaderData<typeof loader>(); // Data from the new Clerk-aware loader
-  const nonce = useNonce();
-  const theme = useTheme();
+  const data = useLoaderData<typeof loader>()
+  const nonce = useNonce()
+  const theme = useTheme()
 
-  // Update i18n instance language
-  useChangeLanguage(data.locale);
+  // Actualizar idioma de i18n
+  useChangeLanguage(data.locale)
 
-  // Render toast (if any)
-  useToast(data.toast);
+  // Mostrar toast si existe
+  useToast(data.toast)
 
   return (
-    // Document is now the root, ClerkApp HOF wraps the App component
     <Document nonce={nonce} theme={theme} lang={data.locale ?? 'en'}>
-      {/* CSRF and Honeypot providers are kept, using data from the loader */}
       <AuthenticityTokenProvider token={data.csrfToken}>
         <HoneypotProvider {...data.honeypotProps}>
-        <Outlet />
+          {/* ✅ UserContextProvider envuelve todo el contenido */}
+          <UserContextProvider userData={data.userData}>
+            <Outlet />
+          </UserContextProvider>
         </HoneypotProvider>
       </AuthenticityTokenProvider>
     </Document>
-  );
+  )
 }
 
-// Default export is now the App component wrapped by ClerkApp HOF
-export default ClerkApp( App, {
-  signInUrl: "/auth/sign-in", 
-  // You might also want related options like:
-  // signUpUrl: "/auth/sign-up", // If you have a sign-up page
-  // afterSignInUrl: "/dashboard", // Where to redirect after sign-in
-  // afterSignUpUrl: "/dashboard", // Where to redirect after sign-up
-});
+// ✅ Export default con ClerkApp HOF
+export default ClerkApp(App, {
+  signInUrl: "/auth/sign-in",
+  signUpUrl: "/auth/sign-up", 
+  afterSignInUrl: "/dashboard",
+  afterSignUpUrl: "/dashboard",
+})
 
-// Standard Remix ErrorBoundary
+// ✅ ErrorBoundary estándar
 export function ErrorBoundary() {
-  const error = useRouteError();
-  let errorTitle = "Error";
-  let errorMessage = "An unexpected error occurred.";
+  const error = useRouteError()
+  let errorTitle = "Error"
+  let errorMessage = "An unexpected error occurred."
 
   if (isRouteErrorResponse(error)) {
-    errorTitle = `${error.status} ${error.statusText}`;
-    errorMessage = error.data?.message || error.data || "Sorry, something went wrong.";
+    errorTitle = `${error.status} ${error.statusText}`
+    errorMessage = error.data?.message || error.data || "Sorry, something went wrong."
   } else if (error instanceof Error) {
-    errorMessage = error.message;
+    errorMessage = error.message
   }
   
-  // Use a simplified HTML structure for the error page
+  // Usar estructura HTML simplificada para la página de error
   return (
     <html lang="en">
       <head>
         <title>{errorTitle}</title>
-        <Meta /> {/* Basic meta tags */}
-        <Links /> {/* Stylesheets */}
+        <Meta />
+        <Links />
       </head>
       <body>
-        <div style={{ padding: '20px', textAlign: 'center', fontFamily: 'sans-serif' }}>
-          <h1>{errorTitle}</h1>
-          <p>{errorMessage}</p>
-          <p><a href="/">Go to Homepage</a></p>
+        <div style={{ 
+          padding: '20px', 
+          textAlign: 'center', 
+          fontFamily: 'sans-serif',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
+          <h1 style={{ color: '#dc2626' }}>{errorTitle}</h1>
+          <p style={{ maxWidth: '600px', margin: '20px 0' }}>{errorMessage}</p>
+          <div style={{ marginTop: '30px' }}>
+            <a 
+              href="/" 
+              style={{ 
+                padding: '10px 20px',
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '6px',
+                marginRight: '10px'
+              }}
+            >
+              Go to Homepage
+            </a>
+            <button 
+              onClick={() => window.location.reload()}
+              style={{ 
+                padding: '10px 20px',
+                backgroundColor: '#6b7280',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              Retry
+            </button>
+          </div>
         </div>
         <Scripts />
       </body>
     </html>
-  );
+  )
 }

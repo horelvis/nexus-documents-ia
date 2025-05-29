@@ -3,13 +3,13 @@
  * Add your brand details here.
  */
 export const siteConfig = {
-  siteTitle: 'Remix SaaS',
+  siteTitle: 'Nexus Document',
   siteDescription:
-    'A Lightweight, Production-Ready Remix Stack for your next SaaS Application.',
-  siteUrl: 'https://remix-saas.fly.dev',
+    'Document Management System',
+  siteUrl: 'https://nexus-document.fly.dev',
   siteImage: '/images/og-image.png',
   favicon: '/favicon.ico',
-  twitterHandle: '@remix_saas',
-  email: 'hello@remix-saas.run',
+  twitterHandle: '@nexus_document',
+  email: 'hello@nexus-document.run',
   address: '',
 }

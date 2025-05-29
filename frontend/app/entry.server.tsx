@@ -10,7 +10,6 @@ import { initEnvs } from '#app/utils/env.server'
 import { NonceProvider } from '#app/utils/hooks/use-nonce'
 import i18nServer from '#app/modules/i18n/i18n.server'
 import * as i18n from '#app/modules/i18n/i18n'
-import { ClerkProvider } from "@clerk/remix"; // <-- Aquí está el correcto
 
 
 /**

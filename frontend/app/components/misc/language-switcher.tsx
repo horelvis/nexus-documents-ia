@@ -1,4 +1,4 @@
-import { useNavigate } from '@remix-run/react'
+import { useNavigate, useLocation } from '@remix-run/react'
 import { useTranslation } from 'react-i18next'
 import { Languages } from 'lucide-react'
 import {
@@ -10,7 +10,7 @@ import {
 
 export function LanguageSwitcher() {
   const navigate = useNavigate()
-  const pathname = location.pathname.replace(/\/$/, '')
+  const pathname = useLocation().pathname.replace(/\/$/, '')
 
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage
