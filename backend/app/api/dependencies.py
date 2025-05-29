@@ -68,6 +68,3 @@ def get_current_active_superuser(
             detail="The user doesn't have enough privileges"
         )
     return current_user
-
-# Note: Removed get_prisma_db, api_key_header, and verify_api_key as they were Prisma-related or unused by remaining endpoints.
-# Also removed direct Prisma imports.

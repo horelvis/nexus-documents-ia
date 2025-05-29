@@ -13,25 +13,20 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 
 from contextlib import asynccontextmanager
-from prisma import Prisma
 
 # Configurar logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Global Prisma Client instance
-db_client = Prisma(auto_register=True) # auto_register=True for Pydantic models
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Connect to Prisma
-    logger.info("Connecting to Prisma database...")
-    await db_client.connect()
+    # Startup:
+    # Add any application startup logic here (e.g., connecting to SQLAlchemy if needed globally)
+    logger.info("Application startup...")
     yield
-    # Shutdown: Disconnect from Prisma
-    logger.info("Disconnecting from Prisma database...")
-    if db_client.is_connected():
-        await db_client.disconnect()
+    # Shutdown:
+    # Add any application shutdown logic here (e.g., closing SQLAlchemy connections)
+    logger.info("Application shutdown...")
 
 # Crear aplicación FastAPI con metadatos mejorados
 app = FastAPI(
