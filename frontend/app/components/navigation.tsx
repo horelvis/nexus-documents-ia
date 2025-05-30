@@ -1,10 +1,9 @@
 // frontend/app/components/navigation.tsx
-import { Link, useLocation } from '@remix-run/react'
+import { Link } from '@remix-run/react'
 import { 
   SignedIn, 
   SignedOut, 
   UserButton, 
-  useUser,
   SignInButton 
 } from '@clerk/remix'
 import {
@@ -15,8 +14,8 @@ import {
 import { PLANS } from '#app/modules/stripe/plans'
 import { useRequestInfo } from '#app/utils/hooks/use-request-info'
 import { cn } from '#app/utils/misc'
-import { ROUTE_PATH as ADMIN_PATH } from '#app/routes/admin+/_layout'
-import { ROUTE_PATH as DASHBOARD_PATH } from '#app/routes/dashboard+/_layout'
+// Import DASHBOARD_PATH for logo link and UserButton links
+import { ROUTE_PATH as DASHBOARD_PATH } from '#app/routes/dashboard+/_layout' 
 import { ROUTE_PATH as DASHBOARD_SETTINGS_PATH } from '#app/routes/dashboard+/settings'
 import { ROUTE_PATH as DASHBOARD_SETTINGS_BILLING_PATH } from '#app/routes/dashboard+/settings.billing'
 import { ThemeSwitcher } from '#app/components/misc/theme-switcher'
@@ -34,17 +33,9 @@ type NavigationProps = {
 export function Navigation({ 
   planId = PLANS.FREE, 
   backendConnected = true,
-  isAdmin = false 
+  isAdmin = false // This prop might be used by parent components or other elements not removed.
 }: NavigationProps) {
-  const { user } = useUser() // Solo para verificar roles si es necesario
   const requestInfo = useRequestInfo()
-  const location = useLocation()
-
-  // Estados de navegación
-  const isAdminPath = location.pathname === ADMIN_PATH
-  const isDashboardPath = location.pathname === DASHBOARD_PATH
-  const isSettingsPath = location.pathname === DASHBOARD_SETTINGS_PATH
-  const isBillingPath = location.pathname === DASHBOARD_SETTINGS_BILLING_PATH
 
   // Función para obtener el nombre del plan
   const getPlanDisplayName = (plan: string) => {
@@ -61,33 +52,27 @@ export function Navigation({
   }
 
   return (
-    <nav className="sticky top-0 z-50 flex w-full flex-col border-b border-border bg-card px-6">
-      <div className="mx-auto flex w-full max-w-screen-xl items-center justify-between py-3">
-        {/* Logo */}
-        <div className="flex h-10 items-center gap-2">
+    <header className="sticky top-0 z-50 flex w-full items-center border-b border-border bg-card px-6 h-[60px]">
+      <div className="mx-auto flex w-full max-w-screen-xl items-center justify-between">
+        {/* Logo and Plan/Status section */}
+        <div className="flex items-center gap-2">
           <Link
-            to={DASHBOARD_PATH}
+            to={DASHBOARD_PATH} // Keep logo linking to dashboard
             prefetch="intent"
-            className="flex h-10 items-center gap-1"
+            className="flex items-center gap-1"
           >
             <Logo />
           </Link>
           
-          {/* Separador visual solo cuando hay usuario */}
           <SignedIn>
             <Slash className="h-6 w-6 -rotate-12 stroke-[1.5px] text-primary/10" />
-            
-            {/* Indicadores de estado */}
             <div className="flex items-center gap-2">
-              {/* Badge del plan */}
               <Badge 
                 variant={planId === PLANS.FREE ? 'secondary' : 'default'}
                 className="text-xs"
               >
                 {getPlanDisplayName(planId)}
               </Badge>
-
-              {/* Indicador de backend offline */}
               {!backendConnected && (
                 <Badge variant="destructive" className="text-xs gap-1">
                   <AlertCircle className="h-3 w-3" />
@@ -98,9 +83,8 @@ export function Navigation({
           </SignedIn>
         </div>
 
-        {/* Acciones del usuario */}
-        <div className="flex h-10 items-center gap-3">
-          {/* Enlace a documentación */}
+        {/* User actions and other links */}
+        <div className="flex items-center gap-3">
           <a
             href="https://github.com/dev-xo/remix-saas/tree/main/docs#welcome-to-%EF%B8%8F-remix-saas-documentation"
             target="_blank"
@@ -138,7 +122,6 @@ export function Navigation({
             </div>
           </SignedOut>
 
-          {/* UserButton de Clerk para usuarios autenticados */}
           <SignedIn>
             <UserButton 
               afterSignOutUrl="/"
@@ -149,112 +132,35 @@ export function Navigation({
                   userButtonPopoverActions: "bg-card",
                   userButtonPopoverActionButton: "text-primary/80 hover:text-primary hover:bg-accent",
                   userButtonPopoverActionButtonText: "text-sm",
-                  userButtonPopoverFooter: "hidden", // Ocultar footer por defecto
+                  userButtonPopoverFooter: "hidden", 
                 },
               }}
             >
-              {/* Elementos personalizados del menú */}
+              {/* UserButton.MenuItems will be rendered here by Clerk */}
+              {/* Retaining custom links previously in UserButton.MenuItems */}
+              {/* These links are now part of the sidebar, but ThemeSwitcher and LanguageSwitcher can remain in UserButton if desired */}
+              {/* For this task, we keep them in UserButton as per original structure, though they are also in sidebar */}
               <UserButton.MenuItems>
-                {/* Enlace a configuración personalizada */}
                 <UserButton.Link 
-                  label="Configuración"
-                  labelIcon={<ThemeSwitcher userPreference={requestInfo.userPrefs.theme} triggerClass="w-4 h-4" />}
+                  label="Configuración" // This is now in sidebar, but can be a quick link here too
+                  labelIcon={<ThemeSwitcher userPreference={requestInfo.userPrefs.theme} triggerClass="w-4 h-4" />} // Example: keep theme switcher here
                   href={DASHBOARD_SETTINGS_PATH}
                 />
-                
-                {/* Enlace a facturación */}
                 <UserButton.Link 
-                  label="Facturación"
+                  label="Facturación" // This is now in sidebar
                   labelIcon="💳"
                   href={DASHBOARD_SETTINGS_BILLING_PATH}
                 />
-
-                {/* Configuración de idioma */}
                 <UserButton.Action 
-                  label="Idioma"
+                  label="Idioma" // This is now in sidebar
                   labelIcon={<LanguageSwitcher />}
-                  onClick={() => {}} // LanguageSwitcher maneja el click
+                  onClick={() => {}} // LanguageSwitcher handles its own logic
                 />
               </UserButton.MenuItems>
             </UserButton>
           </SignedIn>
         </div>
       </div>
-
-      {/* Navegación de tabs - Solo para usuarios autenticados */}
-      <SignedIn>
-        <div className="mx-auto flex w-full max-w-screen-xl items-center gap-3">
-          {/* Tab Admin (solo si es admin) */}
-          {isAdmin && (
-            <div
-              className={`flex h-12 items-center border-b-2 ${
-                isAdminPath ? 'border-primary' : 'border-transparent'
-              }`}
-            >
-              <Link
-                to={ADMIN_PATH}
-                prefetch="intent"
-                className={cn(
-                  `${buttonVariants({ variant: 'ghost', size: 'sm' })} text-primary/80`,
-                )}
-              >
-                Admin
-              </Link>
-            </div>
-          )}
-
-          {/* Tab Dashboard */}
-          <div
-            className={`flex h-12 items-center border-b-2 ${
-              isDashboardPath ? 'border-primary' : 'border-transparent'
-            }`}
-          >
-            <Link
-              to={DASHBOARD_PATH}
-              prefetch="intent"
-              className={cn(
-                `${buttonVariants({ variant: 'ghost', size: 'sm' })} text-primary/80`,
-              )}
-            >
-              Dashboard
-            </Link>
-          </div>
-
-          {/* Tab Configuración */}
-          <div
-            className={`flex h-12 items-center border-b-2 ${
-              isSettingsPath ? 'border-primary' : 'border-transparent'
-            }`}
-          >
-            <Link
-              to={DASHBOARD_SETTINGS_PATH}
-              prefetch="intent"
-              className={cn(
-                `${buttonVariants({ variant: 'ghost', size: 'sm' })} text-primary/80`,
-              )}
-            >
-              Configuración
-            </Link>
-          </div>
-
-          {/* Tab Facturación */}
-          <div
-            className={`flex h-12 items-center border-b-2 ${
-              isBillingPath ? 'border-primary' : 'border-transparent'
-            }`}
-          >
-            <Link
-              to={DASHBOARD_SETTINGS_BILLING_PATH}
-              prefetch="intent"
-              className={cn(
-                `${buttonVariants({ variant: 'ghost', size: 'sm' })} text-primary/80`,
-              )}
-            >
-              Facturación
-            </Link>
-          </div>
-        </div>
-      </SignedIn>
-    </nav>
+    </header>
   )
 }

@@ -318,7 +318,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex w-full flex-col gap-6 px-6 py-8">
+    <div className="flex w-full flex-col gap-6">
       <div className="mx-auto w-full max-w-screen-xl space-y-6">
         
         {/* Header con info de timeout */}
@@ -571,28 +571,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Footer informativo */}
-        <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
-          <CardContent className="pt-6 text-center">
-            <h3 className="text-lg font-medium text-blue-700 dark:text-blue-300 mb-2">
-              🔍 Diagnóstico de Performance
-            </h3>
-            <div className="text-sm text-blue-600 dark:text-blue-400 space-y-1">
-              <p>
-                <strong>Carga total:</strong> {loadTime}ms | 
-                <strong> Clerk timeout:</strong> {clerkTimeout ? 'SÍ' : 'NO'} | 
-                <strong> Backend:</strong> {backendConnected ? 'Conectado' : 'Offline'}
-              </p>
-              <p>
-                {error && `Error: ${error}`}
-              </p>
-              <p className="mt-2">
-                Los timeouts de Clerk (3.8s+) eran la causa de los logs de 8+ segundos. 
-                Ahora el sistema corta a 1.5s y funciona offline cuando sea necesario.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Footer informativo REMOVED */}
       </div>
     </div>
   )
