@@ -6,17 +6,6 @@ from .rbac import Role  # Forward reference for Role
 from .billing import Subscription  # Forward reference for Subscription
 
 
-class UserRead(UserBase):
-    id: uuid.UUID
-    is_active: bool
-    is_superuser: bool
-    tenant_id: uuid.UUID
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
-
 # Base schema for UserImage
 class UserImageBase(BaseModel):
     alt_text: Optional[str] = Field(None, example="User profile picture")
@@ -58,6 +47,19 @@ class UserCreate(UserBase): # Renamed from UserCreateInput
     is_superuser: bool = Field(False, example=False) # Renamed from isSuperuser
     is_active: bool = Field(True, example=True) # Renamed from isActive
 
+# Schema for reading/returning user data (response model) - now aligning with SQLAlchemy model
+class UserRead(UserBase):
+    id: uuid.UUID
+    email: EmailStr
+    full_name: Optional[str] = None
+    is_active: bool
+    is_superuser: bool
+    tenant_id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
 
 # Schema for updating a user (request model) - now aligning with SQLAlchemy model
 class UserUpdate(BaseModel): # Renamed from UserUpdateInput and using BaseModel for flexibility
