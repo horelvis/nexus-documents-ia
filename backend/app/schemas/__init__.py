@@ -1,5 +1,6 @@
 # Auth
 from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm, LoginRequest
+from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm
 from .document import (
     DocumentBase, DocumentCreate, DocumentUpdate, Document,
     DocumentChunkBase, DocumentChunkCreate, DocumentChunk,
@@ -28,6 +29,7 @@ __all__ = [
     # Auth
     "TokenResponse",
     "LoginRequest",
+    "TokenResponse",
     "TokenPayload",
     "UserAuth",
     "PasswordResetRequest",
