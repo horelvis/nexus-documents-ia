@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.database import get_db
 from app.schemas.auth import TokenResponse
-from app.schemas.user import UserCreate,User
+from app.schemas.user import UserCreate,User, UserResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter()
@@ -51,7 +51,7 @@ async def login_access_token(
     }
 
 
-@router.post("/register", response_model=User)
+@router.post("/register", response_model=UserResponse)
 async def register_user(
     user_in: UserCreate,
     db: Session = Depends(get_db),
@@ -69,7 +69,7 @@ async def register_user(
     return user
 
 
-@router.get("/me", response_model=User)
+@router.get("/me", response_model=UserResponse)
 async def read_users_me(
     current_user = Depends(AuthService.get_current_user),
 ) -> Any:
