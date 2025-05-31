@@ -57,12 +57,17 @@ async def register_user(
 ) -> Any:
     """
     Create new user without the need to be logged in.
+    Only creates regular users, not superusers.
     """
+    # Security: Force is_superuser to False for public registration
     user = AuthService.create_user(
         db=db,
         email=user_in.email,
         password=user_in.password,
         full_name=user_in.full_name,
+        is_superuser=False,  # Always False for public registration
+        tenant_id=str(user_in.tenant_id),
+        clerk_user_id=user_in.clerk_user_id
     )
     
     return user

@@ -75,7 +75,8 @@ class AuthService:
         password: str,
         full_name: Optional[str] = None,
         is_superuser: bool = False,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        clerk_user_id: Optional[str] = None
     ) -> User:
         """Crea un nuevo usuario."""
         # Si no se proporciona tenant_id, usar el tenant por defecto
@@ -105,7 +106,8 @@ class AuthService:
             hashed_password=AuthService.get_password_hash(password),
             full_name=full_name,
             is_superuser=is_superuser,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            clerk_user_id=clerk_user_id
         )
         
         db.add(db_user)
