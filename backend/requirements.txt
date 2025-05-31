@@ -23,7 +23,7 @@ python-dotenv>=1.0.0,<1.1.0
 httpx>=0.24.1,<0.25.0
 PyJWT==2.8.0
 python-jose[cryptography]==3.3.0
-stripe==4.102.0
+stripe==5.54.0
 
 # Dependencias de testing
 pytest>=7.0.0
