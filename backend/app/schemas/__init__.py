@@ -1,4 +1,5 @@
-from .auth import Token, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm
+# Auth
+from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm, LoginRequest
 from .document import (
     DocumentBase, DocumentCreate, DocumentUpdate, Document,
     DocumentChunkBase, DocumentChunkCreate, DocumentChunk,
@@ -25,7 +26,8 @@ from .billing import (
 
 __all__ = [
     # Auth
-    "Token",
+    "TokenResponse",
+    "LoginRequest",
     "TokenPayload",
     "UserAuth",
     "PasswordResetRequest",
