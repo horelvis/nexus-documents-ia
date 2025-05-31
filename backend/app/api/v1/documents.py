@@ -1,10 +1,10 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from app.api.dependencies import get_current_user, get_current_tenant_id
 from app.db.models import User
 from app.schemas.document import (
-    Document, DocumentDetail, DocumentCreate, DocumentUpdate,
+    Document, DocumentDetail,
     SignedUrlResponse, UploadRequest
 )
 from app.services.document_service import DocumentService
