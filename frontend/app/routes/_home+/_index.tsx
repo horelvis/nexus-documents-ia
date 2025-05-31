@@ -22,7 +22,7 @@ export const meta: MetaFunction = () => {
 
 export async function loader(args: LoaderFunctionArgs) {
   const { userId } = await getAuth(args)
-  return json({ user: userId ? { id: userId } : null })
+  return json({ user: userId ? { id: userId } : { id: 'anonymous' } })
 }
 
 export default function Index() {
@@ -31,7 +31,7 @@ export default function Index() {
 
   return (
     <div className="relative flex h-full w-full flex-col bg-card">
-
+      <label>Hola, {JSON.stringify(user)}</label>
       {/* Content */}
       <div className="z-10 mx-auto flex w-full max-w-screen-lg flex-col gap-4 px-6">
         {/* Hero */}

@@ -15,7 +15,7 @@ export class ApiService {
     this.getToken = config.getToken
   }
 
-  private async makeRequest<T>(
+  public async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {},
     timeoutMs: number = 5000 // ✅ FIX: Timeout por defecto muy corto

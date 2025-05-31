@@ -38,6 +38,7 @@ export async function loader(args: LoaderFunctionArgs) {
   }
 
   return json({
+    userId: userId || 'anonymous',
     planId: PLANS.FREE, // Default para páginas públicas
     isAdmin,
     backendConnected,

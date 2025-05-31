@@ -91,17 +91,14 @@ export class StripeApiServiceImpl extends ApiService implements StripeApiService
 /**
  * Factory function para crear el servicio de Stripe API
  */
-export async function createStripeApiService(args: LoaderFunctionArgs): Promise<StripeApiServiceImpl> {
-  const { getAuth } = await import('@clerk/remix/ssr.server')
-  const { userId, getToken } = getAuth(args)
-  
+export async function createStripeApiService(userId: string, token: string): Promise<StripeApiServiceImpl> {
+
   const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'http://localhost:8000'
   
   return new StripeApiServiceImpl({
     baseUrl: BACKEND_BASE_URL,
     getToken: async () => {
       try {
-        const token = await getToken()
         return token
       } catch (error) {
         console.error('Error obteniendo token de Clerk:', error)

@@ -72,7 +72,7 @@ export const loader = async (args: LoaderFunctionArgs): Promise<Response> => {
   console.log('🏗️ Dashboard Layout: Starting with Clerk timeout fix...')
   
   // ✅ STEP 1: Verificar Clerk auth CON TIMEOUT
-  const clerkResult = await timeoutClerkAuth(args, 2000) // 2 segundos máximo para Clerk
+  const clerkResult = await timeoutClerkAuth(args, 5000) // 2 segundos máximo para Clerk
   
   // Si Clerk falla completamente, redirigir a sign-in
   if (!clerkResult.userId && !clerkResult.timedOut) {

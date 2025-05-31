@@ -123,41 +123,7 @@ export function Navigation({
           </SignedOut>
 
           <SignedIn>
-            <UserButton 
-              afterSignOutUrl="/"
-              appearance={{
-                elements: {
-                  avatarBox: "w-8 h-8",
-                  userButtonPopoverCard: "bg-card border border-border",
-                  userButtonPopoverActions: "bg-card",
-                  userButtonPopoverActionButton: "text-primary/80 hover:text-primary hover:bg-accent",
-                  userButtonPopoverActionButtonText: "text-sm",
-                  userButtonPopoverFooter: "hidden", 
-                },
-              }}
-            >
-              {/* UserButton.MenuItems will be rendered here by Clerk */}
-              {/* Retaining custom links previously in UserButton.MenuItems */}
-              {/* These links are now part of the sidebar, but ThemeSwitcher and LanguageSwitcher can remain in UserButton if desired */}
-              {/* For this task, we keep them in UserButton as per original structure, though they are also in sidebar */}
-              <UserButton.MenuItems>
-                <UserButton.Link 
-                  label="Configuración" // This is now in sidebar, but can be a quick link here too
-                  labelIcon={<ThemeSwitcher userPreference={requestInfo.userPrefs.theme} triggerClass="w-4 h-4" />} // Example: keep theme switcher here
-                  href={DASHBOARD_SETTINGS_PATH}
-                />
-                <UserButton.Link 
-                  label="Facturación" // This is now in sidebar
-                  labelIcon="💳"
-                  href={DASHBOARD_SETTINGS_BILLING_PATH}
-                />
-                <UserButton.Action 
-                  label="Idioma" // This is now in sidebar
-                  labelIcon={<LanguageSwitcher />}
-                  onClick={() => {}} // LanguageSwitcher handles its own logic
-                />
-              </UserButton.MenuItems>
-            </UserButton>
+          <UserButton />
           </SignedIn>
         </div>
       </div>

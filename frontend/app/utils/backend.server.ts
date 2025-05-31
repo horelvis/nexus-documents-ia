@@ -1,6 +1,4 @@
 // frontend/app/utils/backend.server.ts - FIXED VERSION
-import { getAuth } from '@clerk/remix/ssr.server'
-import type { LoaderFunctionArgs } from '@remix-run/node'
 import { ApiService } from '#app/services/api.server'
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'http://localhost:8000'
@@ -8,9 +6,9 @@ const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'http://localhost:8000'
 /**
  * ✅ FIX: Crea una instancia del servicio API con manejo robusto de errores
  */
-export async function createApiService(args: LoaderFunctionArgs): Promise<ApiService> {
+export async function createApiService(userId: string, token: string): Promise<ApiService> {
   try {
-    const { userId, getToken } = getAuth(args)
+    
     
     // ✅ FIX: Verificar que el usuario esté autenticado
     if (!userId) {
@@ -22,7 +20,6 @@ export async function createApiService(args: LoaderFunctionArgs): Promise<ApiSer
       getToken: async () => {
         try {
           // ✅ FIX: Obtener token con manejo de errores
-          const token = await getToken()
           if (!token) {
             console.warn('No token available from Clerk')
             return null
@@ -43,8 +40,8 @@ export async function createApiService(args: LoaderFunctionArgs): Promise<ApiSer
 /**
  * ✅ FIX: Alias para usar en acciones
  */
-export async function getApiServiceForAction(args: LoaderFunctionArgs): Promise<ApiService> {
-  return createApiService(args)
+export async function getApiServiceForAction(userId: string, token: string): Promise<ApiService> {
+  return createApiService(userId, token)
 }
 
 /**
@@ -89,13 +86,13 @@ export async function checkBackendHealth(): Promise<boolean> {
 /**
  * ✅ FIX: Utilidad para crear servicios con fallback
  */
-export async function createApiServiceWithFallback(args: LoaderFunctionArgs): Promise<{
+export async function createApiServiceWithFallback(userId: string, token: string): Promise<{
   apiService: ApiService | null
   isConnected: boolean
   error?: string
 }> {
   try {
-    const apiService = await createApiService(args)
+    const apiService = await createApiService(userId, token)
     
     // ✅ FIX: Verificar conectividad
     const isConnected = await apiService.healthCheck()

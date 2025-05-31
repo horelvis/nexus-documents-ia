@@ -2,8 +2,7 @@
 import type {
   MetaFunction,
   LinksFunction,
-  LoaderFunctionArgs,
-  TypedResponse,
+  LoaderFunction
 } from '@remix-run/node'
 import type { Theme } from '#app/utils/hooks/use-theme'
 import {
@@ -63,11 +62,17 @@ export const links: LinksFunction = () => {
 export type LoaderData = Awaited<ReturnType<typeof loader>>
 
 // ✅ Loader actualizado con rootAuthLoader de Clerk
-export const loader = async (args: LoaderFunctionArgs) => {
+export const loader: LoaderFunction = (args) => {
   
   return rootAuthLoader(args, async ({ request }) => {
 
-    const { userId } = await getAuth(args)
+    const { sessionId, userId , getToken } = request.auth
+
+    const token = await getToken()
+   
+    console.log("userId", userId); // <- ¿null? 
+    console.log("sessionId", sessionId); // <- ¿null? 
+    
     
     // ===== Cargar datos básicos de la app (siempre necesarios) =====
     const locale = await i18nServer.getLocale(request)
@@ -85,8 +90,8 @@ export const loader = async (args: LoaderFunctionArgs) => {
       try {
         // Crear servicios API
         const [apiService, stripeService] = await Promise.all([
-          createApiService(args),
-          createStripeApiService(args)
+          createApiService(userId, token),
+          createStripeApiService(userId, token)
         ])
         
         // Cargar datos del usuario y suscripción en paralelo
@@ -154,7 +159,9 @@ export const loader = async (args: LoaderFunctionArgs) => {
         csrfCookieHeader ? { 'Set-Cookie': csrfCookieHeader } : null,
       ),
     }
-  }, { loadUser: true }) // loadUser: true carga automáticamente datos de Clerk
+  },  {
+    signInForceRedirectUrl: '/dashboard',
+  }) // loadUser: true carga automáticamente datos de Clerk
 }
 
 // Componente Document (sin cambios)
