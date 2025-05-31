@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.schemas.auth import Token, UserCreate, User
+from app.schemas.auth import TokenResponse, UserCreate, User
 from app.services.auth_service import AuthService
 
 router = APIRouter()
 
 
-@router.post("/login/access-token", response_model=Token)
+@router.post("/login/access-token", response_model=TokenResponse)
 async def login_access_token(
     db: Session = Depends(get_db),
     form_data: OAuth2PasswordRequestForm = Depends()
