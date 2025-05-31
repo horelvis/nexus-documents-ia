@@ -94,11 +94,21 @@ def db_session(test_db):
 @pytest.fixture
 def test_tenant(db_session):
     """Create a test tenant"""
+    # Generate unique name to avoid duplicates
+    unique_id = str(uuid.uuid4())[:8]
+    tenant_name = f"Test Tenant {unique_id}"
+    bucket_name = f"test-bucket-{unique_id}"
+    
+    # Check if tenant already exists, if so return it
+    existing_tenant = db_session.query(Tenant).filter(Tenant.name == tenant_name).first()
+    if existing_tenant:
+        return existing_tenant
+    
     tenant = Tenant(
         id=uuid.uuid4(),
-        name="Test Tenant",
-        description="A test tenant",
-        bucket_name="test-bucket",
+        name=tenant_name,
+        description=f"A test tenant {unique_id}",
+        bucket_name=bucket_name,
         is_active=True
     )
     db_session.add(tenant)
@@ -110,15 +120,25 @@ def test_tenant(db_session):
 @pytest.fixture
 def test_user(db_session, test_tenant):
     """Create a test user"""
+    # Generate unique email to avoid duplicates
+    unique_id = str(uuid.uuid4())[:8]
+    user_email = f"test-{unique_id}@example.com"
+    clerk_user_id = f"test_clerk_{unique_id}"
+    
+    # Check if user already exists, if so return it
+    existing_user = db_session.query(User).filter(User.email == user_email).first()
+    if existing_user:
+        return existing_user
+    
     user = User(
         id=uuid.uuid4(),
-        email="test@example.com",
+        email=user_email,
         hashed_password=get_password_hash("password"),
-        full_name="Test User",
+        full_name=f"Test User {unique_id}",
         is_active=True,
         is_superuser=False,
         tenant_id=test_tenant.id,
-        clerk_user_id="test_clerk_123"
+        clerk_user_id=clerk_user_id
     )
     db_session.add(user)
     db_session.commit()
@@ -129,15 +149,25 @@ def test_user(db_session, test_tenant):
 @pytest.fixture
 def test_superuser(db_session, test_tenant):
     """Create a test superuser"""
+    # Generate unique email to avoid duplicates
+    unique_id = str(uuid.uuid4())[:8]
+    admin_email = f"admin-{unique_id}@example.com"
+    clerk_user_id = f"admin_clerk_{unique_id}"
+    
+    # Check if superuser already exists, if so return it
+    existing_superuser = db_session.query(User).filter(User.email == admin_email).first()
+    if existing_superuser:
+        return existing_superuser
+    
     superuser = User(
         id=uuid.uuid4(),
-        email="admin@example.com",
+        email=admin_email,
         hashed_password=get_password_hash("password"),
-        full_name="Admin User",
+        full_name=f"Admin User {unique_id}",
         is_active=True,
         is_superuser=True,
         tenant_id=test_tenant.id,
-        clerk_user_id="admin_clerk_123"
+        clerk_user_id=clerk_user_id
     )
     db_session.add(superuser)
     db_session.commit()
