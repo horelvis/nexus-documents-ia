@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.dependencies import get_current_user, get_current_tenant_id
 from app.db.models import User
 from app.services.search_service import SearchService
+from app.schemas.document import ChatMessage
 
 router = APIRouter()
 
