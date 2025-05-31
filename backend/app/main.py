@@ -48,7 +48,7 @@ app = FastAPI(
     Para más información, consulta el [repositorio del proyecto](https://github.com/tuorganizacion/doc-management).
     """,
     version="1.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url=f"{settings.API_PREFIX}/openapi.json",
     docs_url=None,  # Desactivamos la ruta por defecto de Swagger
     redoc_url=None,  # Desactivamos la ruta por defecto de ReDoc
     openapi_tags=[
@@ -140,12 +140,12 @@ async def log_requests(request: Request, call_next):
 # Incluir router de documentación personalizada
 app.include_router(
     docs_router,
-    prefix=settings.API_V1_STR,
+    prefix=settings.API_PREFIX,
     tags=["documentation"]
 )
 
 # Include the central v1 API router
-app.include_router(v1_api_router, prefix=settings.API_V1_STR)
+app.include_router(v1_api_router, prefix=settings.API_PREFIX)
 
 # Ruta de estado
 @app.get("/health", tags=["health"])
