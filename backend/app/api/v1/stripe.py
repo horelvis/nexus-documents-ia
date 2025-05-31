@@ -6,11 +6,16 @@ import stripe
 import logging
 from typing import Dict, Any
 
-from app.api.dependencies import get_current_user, get_current_active_superuser, get_current_admin_user
+from app.api.dependencies import get_current_active_superuser
 from app.db.models import User, Subscription
 from app.db.database import get_db
 from app.core.config import settings
 from app.api.dependencies import settings
+
+# Importaciones necesarias en la parte superior del archivo
+import time
+from datetime import datetime
+from app.models.subscription import Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,7 +26,7 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 @router.post("/create-customer-portal")
 async def create_customer_portal(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: Session = Depends(get_db)
 ) -> Dict[str, str]:
     """
@@ -77,7 +82,7 @@ async def create_customer_portal(
 
 @router.get("/subscription")
 async def get_current_subscription(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -126,7 +131,7 @@ async def get_current_subscription(
 
 @router.post("/sync-subscription")
 async def sync_subscription_from_stripe(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -228,7 +233,7 @@ async def sync_subscription_from_stripe(
 # Configuración del Customer Portal (ejecutar una vez)
 @router.post("/configure-portal")
 async def configure_customer_portal(
-    current_user: User = Depends(get_current_admin_user)  # Solo admins
+    current_user: User = Depends(get_current_active_superuser)  # Solo admins
 ) -> Dict[str, str]:
     """
     Configura el Customer Portal de Stripe con nuestras opciones.
@@ -286,10 +291,3 @@ async def configure_customer_portal(
             status_code=500,
             detail=f"Error configurando portal: {str(e)}"
         )
-
-
-# Importaciones necesarias en la parte superior del archivo
-import time
-from datetime import datetime
-from app.models.subscription import Subscription
-from app.core.deps import get_current_admin_user  # Para configuración
