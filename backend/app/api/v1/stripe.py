@@ -7,15 +7,15 @@ import logging
 from typing import Dict, Any
 
 from app.api.dependencies import get_current_active_superuser
-from app.db.models import User, Subscription
+from app.db.models import User
 from app.db.database import get_db
 from app.core.config import settings
-from app.api.dependencies import settings
+from app.db.models import Subscription
+
 
 # Importaciones necesarias en la parte superior del archivo
 import time
 from datetime import datetime
-from app.models.subscription import Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
