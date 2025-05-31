@@ -6,9 +6,11 @@ import stripe
 import logging
 from typing import Dict, Any
 
-from app.core.deps import get_current_user, get_db
-from app.models.user import User
+from app.api.dependencies import get_current_user, get_current_active_superuser
+from app.db.models import User, Subscription
+from app.db.database import get_db
 from app.core.config import settings
+from app.api.dependencies import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

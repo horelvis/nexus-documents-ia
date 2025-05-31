@@ -1,10 +1,10 @@
 # app/api/endpoints/document_insights.py
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
-from app.api.deps import get_current_user
+from fastapi import APIRouter, Depends, Query
+from typing import List
 from app.schemas.document import DocumentWithMetrics, DocumentBasic
 from app.services.document_insights_service import DocumentInsightsService
+from app.api.dependencies import get_current_user
 
 router = APIRouter()
 

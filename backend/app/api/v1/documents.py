@@ -1,10 +1,7 @@
-from typing import Any, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
-from sqlalchemy.orm import Session
-
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from app.api.dependencies import get_current_user, get_current_tenant_id
-from app.db.database import get_db
 from app.db.models import User
 from app.schemas.document import (
     Document, DocumentDetail, DocumentCreate, DocumentUpdate,

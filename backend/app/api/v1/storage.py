@@ -1,10 +1,7 @@
-from typing import Optional, List
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-
+from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import get_current_user, get_current_tenant_id, get_current_active_superuser
-from app.db.database import get_db
 from app.db.models import User
 from app.schemas.document import SignedUrlResponse, UploadRequest
 from app.services.storage_service import StorageService
@@ -15,7 +12,6 @@ router = APIRouter()
 @router.post("/upload-url", response_model=SignedUrlResponse)
 async def generate_upload_url(
     request: UploadRequest,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -38,7 +34,6 @@ async def generate_upload_url(
 @router.post("/download-url", response_model=SignedUrlResponse)
 async def generate_download_url(
     object_name: str,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -66,7 +61,6 @@ async def generate_download_url(
 @router.get("/list", response_model=List[dict])
 async def list_files(
     prefix: str = Query("", description="Prefijo para filtrar archivos"),
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -83,7 +77,6 @@ async def list_files(
 @router.delete("/{object_name:path}", response_model=dict)
 async def delete_file(
     object_name: str,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -105,7 +98,6 @@ async def delete_file(
 
 @router.get("/buckets", response_model=List[str])
 async def list_buckets(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """

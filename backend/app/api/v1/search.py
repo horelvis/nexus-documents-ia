@@ -1,12 +1,8 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-
 from app.api.dependencies import get_current_user, get_current_tenant_id
-from app.db.database import get_db
 from app.db.models import User
-from app.schemas.document import ChatMessage, SearchQuery
 from app.services.search_service import SearchService
 
 router = APIRouter()
@@ -19,7 +15,6 @@ async def search_documents(
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -49,7 +44,6 @@ async def search_documents(
 @router.post("/ask", response_model=dict)
 async def ask_documents(
     message: ChatMessage,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
