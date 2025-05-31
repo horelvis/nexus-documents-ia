@@ -1,27 +1,46 @@
 # Auth
 from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm, LoginRequest
-from .document import (
-    DocumentBase, DocumentCreate, DocumentUpdate, Document,
-    DocumentChunkBase, DocumentChunkCreate, DocumentChunk,
-    DocumentMetricsBase, DocumentMetricsCreate, DocumentMetrics,
-    DocumentTagBase, DocumentTagCreate, DocumentTag,
-    DocumentViewBase, DocumentViewCreate, DocumentView
-)
-from .enums import IndexingStatus, ErrorCode
-from .general import Message, ErrorResponse, SuccessResponse, PaginatedResponse
-from .tenant import TenantBase, TenantCreate, TenantUpdate, Tenant, TenantSettings
-from .user import (
-    UserBase, UserCreate, UserUpdate, User,
-    UserImageBase, UserImageCreate, UserImageUpdate, UserImage
-)
-from .rbac import (
-    PermissionBase, PermissionCreate, PermissionUpdate, Permission,
-    RoleBase, RoleCreate, RoleUpdate, Role
-)
+
+# Billing
 from .billing import (
     PlanBase, PlanCreate, PlanUpdate, Plan,
     PriceBase, PriceCreate, PriceUpdate, Price,
     SubscriptionBase, SubscriptionCreate, SubscriptionUpdate, Subscription
+)
+
+# Document
+from .document import (
+    DocumentBase, DocumentCreate, DocumentUpdate, Document, DocumentDetail, DocumentBasic, DocumentWithMetrics,
+    DocumentChunkBase, DocumentChunkCreate, DocumentChunk,
+    DocumentMetricsBase, DocumentMetricsCreate, DocumentMetrics,
+    DocumentTagBase, DocumentTagCreate, DocumentTag,
+    DocumentViewBase, DocumentViewCreate, DocumentView,
+    TagBase, TagCreate, TagUpdate, Tag,
+    SearchQuery, SearchResult, SearchResultMatch, ChatMessage,
+    SignedUrlResponse, UploadRequest
+)
+
+# Enums
+from .enums import IndexingStatus, ErrorCode
+
+# General
+from .general import Message, ErrorResponse, SuccessResponse, PaginatedResponse, ErrorDetail
+
+# RBAC
+from .rbac import (
+    PermissionBase, PermissionCreate, PermissionUpdate, Permission,
+    RoleBase, RoleCreate, RoleUpdate, Role
+)
+
+# Tenant
+from .tenant import (
+    TenantBase, TenantCreate, TenantUpdate, TenantResponse, TenantWithUsers, Tenant, TenantSettings
+)
+
+# User
+from .user import (
+    UserBase, UserCreate, UserUpdate, User, UserRead, UserResponse,
+    UserImageBase, UserImageCreate, UserImageUpdate, UserImage
 )
 
 __all__ = [
@@ -32,6 +51,7 @@ __all__ = [
     "UserAuth",
     "PasswordResetRequest",
     "PasswordResetConfirm",
+    
     # Billing
     "PlanBase",
     "PlanCreate",
@@ -45,11 +65,15 @@ __all__ = [
     "SubscriptionCreate",
     "SubscriptionUpdate",
     "Subscription",
+    
     # Document
     "DocumentBase",
     "DocumentCreate",
     "DocumentUpdate",
     "Document",
+    "DocumentDetail",
+    "DocumentBasic",
+    "DocumentWithMetrics",
     "DocumentChunkBase",
     "DocumentChunkCreate",
     "DocumentChunk",
@@ -62,14 +86,28 @@ __all__ = [
     "DocumentViewBase",
     "DocumentViewCreate",
     "DocumentView",
+    "TagBase",
+    "TagCreate",
+    "TagUpdate",
+    "Tag",
+    "SearchQuery",
+    "SearchResult", 
+    "SearchResultMatch",
+    "ChatMessage",
+    "SignedUrlResponse",
+    "UploadRequest",
+    
     # Enums
     "IndexingStatus",
     "ErrorCode",
+    
     # General
     "Message",
     "ErrorResponse",
     "SuccessResponse",
     "PaginatedResponse",
+    "ErrorDetail",
+    
     # RBAC
     "PermissionBase",
     "PermissionCreate",
@@ -79,17 +117,23 @@ __all__ = [
     "RoleCreate",
     "RoleUpdate",
     "Role",
+    
     # Tenant
     "TenantBase",
     "TenantCreate",
     "TenantUpdate",
+    "TenantResponse",
+    "TenantWithUsers",
     "Tenant",
     "TenantSettings",
+    
     # User
     "UserBase",
     "UserCreate",
     "UserUpdate",
     "User",
+    "UserRead",
+    "UserResponse",
     "UserImageBase",
     "UserImageCreate",
     "UserImageUpdate",
