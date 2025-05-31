@@ -7,7 +7,7 @@ from app.main import app # Import your FastAPI app
 
 # Fixture to provide a TestClient for integration tests
 @pytest.fixture(scope="function")
-def test_app_client(): 
+def client(): 
     # Create a TestClient instance for the app
     with TestClient(app) as client:
         yield client # Provide the client to the test
