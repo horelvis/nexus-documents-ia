@@ -1,3 +1,4 @@
+# backend/app/api/v1/auth.py
 from datetime import timedelta
 from typing import Any
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.database import get_db
 from app.schemas.auth import TokenResponse
-from app.schemas.user import UserCreate,User, UserResponse
+from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter()
@@ -66,14 +67,11 @@ async def register_user(
     
     return user
 
-
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
-    current_user = Depends(AuthService.get_current_user),
+    current_user = Depends(AuthService.get_current_user)
 ) -> Any:
     """
     Get current user.
     """
     return current_user
-
-

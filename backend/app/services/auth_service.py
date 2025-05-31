@@ -1,168 +1,173 @@
-import logging
+# backend/app/services/auth_service.py
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-import uuid
+from typing import Optional, Union, Any
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from pydantic import ValidationError
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import verify_password, get_password_hash
-from app.db.models import User, Tenant # SQLAlchemy models
+from app.db.database import get_db
+from app.db.models import User, Tenant
 from app.schemas.auth import TokenPayload
 
-logger = logging.getLogger(__name__)
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login/access-token") # Corrected tokenUrl to point to /auth not /login
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"
+)
 
 class AuthService:
-    SECRET_KEY = settings.SECRET_KEY
-    ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """Verifica que la contraseña coincida con el hash."""
+        return pwd_context.verify(plain_password, hashed_password)
 
     @staticmethod
-    def create_access_token(subject: str, tenant_id: str, expires_delta: Optional[timedelta] = None) -> str:
+    def get_password_hash(password: str) -> str:
+        """Genera un hash de la contraseña."""
+        return pwd_context.hash(password)
+
+    @staticmethod
+    def create_access_token(
+        subject: Union[str, Any], 
+        tenant_id: str,
+        expires_delta: timedelta = None
+    ) -> str:
+        """Crea un token de acceso JWT."""
         if expires_delta:
             expire = datetime.utcnow() + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=AuthService.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.utcnow() + timedelta(
+                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            )
         
         to_encode = {
             "exp": expire,
-            "iat": datetime.utcnow(),
-            "sub": str(subject), # Ensure subject is string
-            "tid": str(tenant_id)  # Ensure tenant_id is string
+            "sub": str(subject),
+            "tid": tenant_id
         }
-        encoded_jwt = jwt.encode(to_encode, AuthService.SECRET_KEY, algorithm=AuthService.ALGORITHM)
+        
+        encoded_jwt = jwt.encode(
+            to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
+        )
         return encoded_jwt
 
     @staticmethod
     def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+        """Autentica un usuario con email y contraseña."""
         user = db.query(User).filter(User.email == email).first()
         if not user:
             return None
-        if not verify_password(password, user.hashed_password):
+        if not AuthService.verify_password(password, user.hashed_password):
             return None
         return user
 
-    @classmethod
-    def get_current_user(cls, db: Session, token: str = Depends(oauth2_scheme)) -> Optional[User]:
+    @staticmethod
+    def create_user(
+        db: Session,
+        email: str,
+        password: str,
+        full_name: Optional[str] = None,
+        is_superuser: bool = False,
+        tenant_id: Optional[str] = None
+    ) -> User:
+        """Crea un nuevo usuario."""
+        # Si no se proporciona tenant_id, usar el tenant por defecto
+        if not tenant_id:
+            default_tenant = db.query(Tenant).filter(
+                Tenant.name == settings.DEFAULT_TENANT
+            ).first()
+            if not default_tenant:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Default tenant not found"
+                )
+            tenant_id = str(default_tenant.id)
+        
+        # Verificar que el tenant existe
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise HTTPException(
+                status_code=404,
+                detail="Tenant not found"
+            )
+        
+        # Crear usuario
+        db_user = User(
+            id=uuid4(),
+            email=email,
+            hashed_password=AuthService.get_password_hash(password),
+            full_name=full_name,
+            is_superuser=is_superuser,
+            tenant_id=tenant_id
+        )
+        
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        return db_user
+
+    @staticmethod
+    def create_tenant(
+        db: Session,
+        name: str,
+        description: Optional[str] = None,
+        settings: Optional[dict] = None
+    ) -> Tenant:
+        """Crea un nuevo tenant."""
+        # Generar bucket name único
+        bucket_name = f"tenant-{name.lower().replace(' ', '-')}-{uuid4().hex[:8]}"
+        
+        db_tenant = Tenant(
+            id=uuid4(),
+            name=name,
+            description=description,
+            bucket_name=bucket_name,
+            settings=settings or {}
+        )
+        
+        db.add(db_tenant)
+        db.commit()
+        db.refresh(db_tenant)
+        return db_tenant
+
+    @staticmethod
+    def get_current_user(
+        db: Session = Depends(get_db),
+        token: str = Depends(oauth2_scheme)
+    ) -> User:
+        """Obtiene el usuario actual basado en el token JWT."""
         credentials_exception = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        
         try:
-            payload = jwt.decode(token, cls.SECRET_KEY, algorithms=[cls.ALGORITHM])
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+            )
             token_data = TokenPayload(**payload)
-            if token_data.exp is not None and datetime.fromtimestamp(token_data.exp) < datetime.utcnow():
-                raise credentials_exception
-        except (JWTError, ValidationError) as e:
-            logger.error(f"Token validation error: {e}")
+        except JWTError:
             raise credentials_exception
         
         user = db.query(User).filter(User.id == token_data.sub).first()
         if user is None:
             raise credentials_exception
-        # Additional checks like user.is_active can be added here if needed
-        # if not user.is_active:
-        #     raise HTTPException(status_code=400, detail="Inactive user")
-        # if str(user.tenant_id) != token_data.tid:
-        #     raise HTTPException(status_code=403, detail="Tenant mismatch")
+        
         return user
 
-    @classmethod
-    def get_current_active_user(cls, current_user: User = Depends(get_current_user)) -> User: # Renamed for clarity
+    @staticmethod
+    def get_current_active_user(
+        current_user: User = Depends(get_current_user)
+    ) -> User:
+        """Obtiene el usuario actual si está activo."""
         if not current_user.is_active:
             raise HTTPException(status_code=400, detail="Inactive user")
         return current_user
-
-    @classmethod
-    def get_current_active_superuser(cls, current_user: User = Depends(get_current_user)) -> User: # Depends on the reverted get_current_user
-        # Note: get_current_user itself should be wired via dependencies.py to use this AuthService.get_current_user
-        # This method is a simple check on the user object provided by the dependency.
-        if not current_user.is_superuser:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="The user doesn't have enough privileges"
-            )
-        return current_user
-
-    @classmethod
-    def create_user(
-        cls,
-        db: Session,
-        email: str,
-        password: str,
-        full_name: Optional[str] = None,
-        tenant_id: Optional[uuid.UUID] = None, # Allow None for default tenant or if tenant creation is separate
-        is_superuser: bool = False,
-        clerk_user_id: Optional[str] = None # New parameter
-    ) -> User:
-        existing_user = db.query(User).filter(User.email == email).first()
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
-        
-        if tenant_id:
-            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-            if not tenant:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tenant with ID {tenant_id} not found."
-                )
-        else:
-            # Handle cases where tenant_id might be optional or a default is used
-            # For now, let's assume if no tenant_id, it's an error or needs specific logic
-            # This depends on application requirements. For now, let's make it required for clarity.
-            # Or, if users can exist without tenants or belong to a default one, adjust here.
-            raise HTTPException(status_code=400, detail="Tenant ID is required to create a user.")
-
-        hashed_password = get_password_hash(password)
-        new_user = User(
-            email=email,
-            hashed_password=hashed_password,
-            full_name=full_name,
-            tenant_id=tenant_id,
-            is_superuser=is_superuser,
-            is_active=True, # Default to active
-            clerk_user_id=clerk_user_id # Add this line
-        )
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return new_user
-
-    @classmethod
-    def create_tenant(
-        cls,
-        db: Session,
-        name: str,
-        bucket_name: str, # Added as it's non-nullable in SQLAlchemy model
-        description: Optional[str] = None,
-        settings: Optional[Dict[str, Any]] = None
-    ) -> Tenant:
-        existing_tenant = db.query(Tenant).filter(Tenant.name == name).first()
-        if existing_tenant:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant name already exists"
-            )
-        
-        new_tenant = Tenant(
-            name=name,
-            description=description,
-            bucket_name=bucket_name,
-            settings=settings,
-            is_active=True # Default to active
-        )
-        db.add(new_tenant)
-        db.commit()
-        db.refresh(new_tenant)
-        return new_tenant

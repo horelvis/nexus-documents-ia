@@ -78,7 +78,7 @@ class User(UserBase):
     subscription: Optional[Subscription] = None
 
     class Config:
-        from_orm = True
+        orm_mode = True
 
 # Alias for UserResponse (commonly used in APIs)
 UserResponse = User
