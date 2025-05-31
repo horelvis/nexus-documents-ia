@@ -6,7 +6,7 @@ import stripe
 import logging
 from typing import Dict, Any
 
-from app.api.dependencies import get_current_user, get_current_active_superuser
+from app.api.dependencies import get_current_user, get_current_active_superuser, get_current_admin_user
 from app.db.models import User, Subscription
 from app.db.database import get_db
 from app.core.config import settings
