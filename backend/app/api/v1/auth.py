@@ -13,7 +13,6 @@ from app.services.auth_service import AuthService
 
 router = APIRouter()
 
-
 @router.post("/login/access-token", response_model=TokenResponse)
 async def login_access_token(
     db: Session = Depends(get_db),
@@ -50,7 +49,6 @@ async def login_access_token(
         "token_type": "bearer"
     }
 
-
 @router.post("/register", response_model=UserResponse)
 async def register_user(
     user_in: UserCreate,
@@ -77,3 +75,5 @@ async def read_users_me(
     Get current user.
     """
     return current_user
+
+
