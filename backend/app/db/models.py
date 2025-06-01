@@ -289,3 +289,280 @@ class DocumentMetrics(Base):
     # Relaciones
     document = relationship("Document", back_populates="metrics")
     tenant = relationship("Tenant")
+
+
+# =====================================
+# SISTEMA DE AGENTES MULTI-TENANT
+# =====================================
+
+class Agent(Base):
+    """Modelo para agentes AI del sistema"""
+    __tablename__ = "agents"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    type = Column(String(50), nullable=False)  # 'digital_signature', 'document_analyzer', etc.
+    
+    # Multi-tenant
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Configuración del agente
+    configuration = Column(JSONB, nullable=False, default={})  # Configuración específica del tipo
+    tools = Column(ARRAY(String), nullable=False, default=[])  # Lista de herramientas disponibles
+    
+    # Estado y permisos
+    is_active = Column(Boolean, default=True)
+    is_public = Column(Boolean, default=False)  # Si otros usuarios del tenant pueden usarlo
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relaciones
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+    conversations = relationship("AgentConversation", back_populates="agent")
+    executions = relationship("AgentExecution", back_populates="agent")
+    
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_agent_name_tenant'),
+    )
+
+
+class AgentConversation(Base):
+    """Conversaciones con agentes"""
+    __tablename__ = "agent_conversations"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    title = Column(String(200), nullable=True)
+    context = Column(JSONB, nullable=False, default={})  # Contexto persistente
+    
+    # Estado
+    is_active = Column(Boolean, default=True)
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relaciones
+    agent = relationship("Agent", back_populates="conversations")
+    user = relationship("User")
+    tenant = relationship("Tenant")
+    messages = relationship("AgentMessage", back_populates="conversation")
+
+
+class AgentMessage(Base):
+    """Mensajes en conversaciones con agentes"""
+    __tablename__ = "agent_messages"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=False)
+    
+    # Contenido del mensaje
+    role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    metadata = Column(JSONB, nullable=False, default={})  # Attachments, tool calls, etc.
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    
+    # Relaciones
+    conversation = relationship("AgentConversation", back_populates="messages")
+
+
+class AgentExecution(Base):
+    """Ejecuciones de agentes para auditoría"""
+    __tablename__ = "agent_executions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    # Detalles de ejecución
+    task_type = Column(String(100), nullable=False)  # Tipo de tarea ejecutada
+    input_data = Column(JSONB, nullable=False)  # Datos de entrada
+    output_data = Column(JSONB, nullable=True)  # Resultado
+    
+    # Estado y métricas
+    status = Column(String(20), nullable=False, default='pending')  # pending, running, completed, failed
+    error_message = Column(Text, nullable=True)
+    execution_time_ms = Column(Integer, nullable=True)
+    
+    # Metadatos
+    started_at = Column(DateTime, default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relaciones
+    agent = relationship("Agent", back_populates="executions")
+    user = relationship("User")
+    tenant = relationship("Tenant")
+
+
+class AgentTool(Base):
+    """Herramientas disponibles para agentes"""
+    __tablename__ = "agent_tools"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=False)
+    
+    # Configuración de la herramienta
+    tool_type = Column(String(50), nullable=False)  # 'internal', 'external_api', 'custom'
+    configuration_schema = Column(JSONB, nullable=False)  # JSON Schema para configuración
+    
+    # Permisos
+    requires_admin = Column(Boolean, default=False)
+    is_tenant_specific = Column(Boolean, default=False)
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+
+# =====================================
+# SISTEMA DE FIRMA DIGITAL
+# =====================================
+
+class SignatureProvider(Base):
+    """Proveedores de firma digital por tenant"""
+    __tablename__ = "signature_providers"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    # Configuración del proveedor
+    provider_name = Column(String(50), nullable=False)  # 'docusign', 'yousign', 'signaturit'
+    display_name = Column(String(100), nullable=False)
+    
+    # Credenciales encriptadas
+    encrypted_credentials = Column(LargeBinary, nullable=False)  # Credenciales cifradas
+    
+    # Estado
+    is_active = Column(Boolean, default=True)
+    is_default = Column(Boolean, default=False)
+    
+    # Configuración específica
+    configuration = Column(JSONB, nullable=False, default={})
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relaciones
+    tenant = relationship("Tenant")
+    signature_requests = relationship("SignatureRequest", back_populates="provider")
+    
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'provider_name', name='uq_tenant_provider'),
+    )
+
+
+class SignatureRequest(Base):
+    """Solicitudes de firma digital"""
+    __tablename__ = "signature_requests"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("signature_providers.id"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Identificadores externos
+    external_id = Column(String(255), nullable=True)  # ID en el proveedor externo
+    
+    # Información del documento
+    document_name = Column(String(255), nullable=False)
+    document_content = Column(LargeBinary, nullable=True)  # Contenido del documento
+    document_url = Column(String(500), nullable=True)  # URL del documento
+    
+    # Configuración de firma
+    title = Column(String(200), nullable=False)
+    message = Column(Text, nullable=True)
+    signature_type = Column(String(20), default='sequential')  # sequential, parallel
+    
+    # Estado
+    status = Column(String(30), default='draft')  # draft, sent, in_progress, completed, declined, expired
+    
+    # URLs y configuración
+    callback_url = Column(String(500), nullable=True)
+    success_url = Column(String(500), nullable=True)
+    error_url = Column(String(500), nullable=True)
+    
+    # Metadatos
+    metadata = Column(JSONB, nullable=False, default={})
+    
+    # Fechas
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    
+    # Relaciones
+    tenant = relationship("Tenant")
+    provider = relationship("SignatureProvider", back_populates="signature_requests")
+    creator = relationship("User")
+    signers = relationship("SignatureRequestSigner", back_populates="request")
+    events = relationship("SignatureEvent", back_populates="request")
+
+
+class SignatureRequestSigner(Base):
+    """Firmantes de una solicitud de firma"""
+    __tablename__ = "signature_request_signers"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(UUID(as_uuid=True), ForeignKey("signature_requests.id"), nullable=False)
+    
+    # Información del firmante
+    name = Column(String(100), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(20), nullable=True)
+    
+    # Configuración de firma
+    order = Column(Integer, nullable=False, default=1)
+    authentication_method = Column(String(20), default='email')  # email, sms, code
+    
+    # URLs personalizadas
+    success_url = Column(String(500), nullable=True)
+    error_url = Column(String(500), nullable=True)
+    
+    # Estado
+    status = Column(String(20), default='pending')  # pending, sent, opened, signed, declined
+    
+    # Identificadores externos
+    external_id = Column(String(255), nullable=True)
+    signing_url = Column(String(500), nullable=True)
+    
+    # Metadatos
+    signed_at = Column(DateTime, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    
+    # Relaciones
+    request = relationship("SignatureRequest", back_populates="signers")
+
+
+class SignatureEvent(Base):
+    """Eventos de auditoría para firmas"""
+    __tablename__ = "signature_events"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(UUID(as_uuid=True), ForeignKey("signature_requests.id"), nullable=False)
+    
+    # Información del evento
+    event_type = Column(String(50), nullable=False)  # created, sent, opened, signed, completed, etc.
+    description = Column(Text, nullable=True)
+    
+    # Datos del evento
+    event_data = Column(JSONB, nullable=False, default={})
+    
+    # Metadatos
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    
+    # Relaciones
+    request = relationship("SignatureRequest", back_populates="events")
