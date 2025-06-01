@@ -72,7 +72,7 @@ def test_register_existing_email(client, test_user):
     assert "detail" in content
     assert "Email already registered" in content["detail"]
 
-def test_get_current_user(client, normal_user_token_headers):
+def test_get_current_user(client, normal_user_token_headers, test_user):
     """Prueba para obtener el usuario actual"""
     response = client.get(
         "/api/v1/auth/me",
@@ -80,18 +80,12 @@ def test_get_current_user(client, normal_user_token_headers):
     )
     assert response.status_code == 200
     content = response.json()
-    assert content["email"] == "test@example.com"  # Assuming test_user's email
-    assert content["full_name"] == "Test User"   # Assuming test_user's full_name
+    assert content["email"] == test_user.email  # Use actual test_user email
+    assert content["full_name"] == test_user.full_name  # Use actual test_user full_name
     assert "clerk_user_id" in content  # Check for presence
     assert "image" in content
     assert "roles" in content
     assert "subscription" in content
-    # Specific values for clerk_user_id, image, roles, subscription will depend
-    # on how the mock for the 'test_user' underlying normal_user_token_headers is set up.
-    # For now, checking key presence is the primary goal.
-    # Example: if test_user mock was augmented:
-    # assert content["clerk_user_id"] == "expected_clerk_id_for_test_user"
-    # assert content["roles"] == [{"id": "some_role_id", "name": "some_role", ...}]
 
 def test_access_without_token(client):
     """Prueba de acceso sin token"""

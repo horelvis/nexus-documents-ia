@@ -12,6 +12,7 @@ from app.db.base_class import Base
 from app.db.models import User, Tenant, Document
 from app.core.security import get_password_hash
 from app.api.dependencies import get_db, get_current_user, get_current_active_user, get_current_active_superuser
+from app.services.auth_service import AuthService
 
 # Fixture to provide a TestClient for integration tests
 @pytest.fixture(scope="function")
@@ -229,8 +230,10 @@ def normal_user_token_headers(test_user):
     def override_get_current_active_user():
         return test_user
     
+    # Override both the dependencies and the AuthService methods
     app.dependency_overrides[get_current_user] = override_get_current_user
     app.dependency_overrides[get_current_active_user] = override_get_current_active_user
+    app.dependency_overrides[AuthService.get_current_user] = override_get_current_user
     
     token = "mock_normal_user_token"
     yield {"Authorization": f"Bearer {token}"}
@@ -238,6 +241,7 @@ def normal_user_token_headers(test_user):
     # Clean up overrides
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(AuthService.get_current_user, None)
 
 
 @pytest.fixture
@@ -253,9 +257,11 @@ def superuser_token_headers(test_superuser):
     def override_get_current_active_superuser():
         return test_superuser
     
+    # Override both the dependencies and the AuthService methods
     app.dependency_overrides[get_current_user] = override_get_current_user
     app.dependency_overrides[get_current_active_user] = override_get_current_active_user
     app.dependency_overrides[get_current_active_superuser] = override_get_current_active_superuser
+    app.dependency_overrides[AuthService.get_current_user] = override_get_current_user
     
     token = "mock_superuser_token"
     yield {"Authorization": f"Bearer {token}"}
@@ -264,6 +270,7 @@ def superuser_token_headers(test_superuser):
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_active_user, None)
     app.dependency_overrides.pop(get_current_active_superuser, None)
+    app.dependency_overrides.pop(AuthService.get_current_user, None)
 
 
 @pytest.fixture
