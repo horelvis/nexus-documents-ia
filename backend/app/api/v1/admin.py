@@ -174,6 +174,7 @@ async def list_all_documents(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     tenant_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -189,6 +190,7 @@ async def list_all_documents(
     )
     
     return document_service.get_documents(
+        db=db,
         page=page,
         per_page=per_page
     )
