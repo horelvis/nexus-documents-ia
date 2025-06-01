@@ -547,16 +547,22 @@ export default function Dashboard() {
             <CardTitle>Acciones Disponibles</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
               <Button variant="outline" asChild>
-                <Link to="/dashboard/settings">
-                  ⚙️ Configuración
+                <Link to="/dashboard/agents">
+                  🤖 Agentes IA
                 </Link>
               </Button>
               
               <Button variant="outline" asChild>
-                <Link to="/dashboard/profile">
-                  👤 Perfil
+                <Link to="/dashboard/signatures">
+                  📝 Firma Digital
+                </Link>
+              </Button>
+              
+              <Button variant="outline" asChild>
+                <Link to="/dashboard/settings">
+                  ⚙️ Configuración
                 </Link>
               </Button>
               

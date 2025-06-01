@@ -10,6 +10,8 @@ import {
   Shield,         // Icon for Admin
   PanelLeftOpen,  // Icon for collapse/expand
   PanelRightOpen,
+  Bot,            // Icon for AI Agents
+  FileSignature,  // Icon for Digital Signatures
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -33,6 +35,18 @@ export function Sidebar({ isAdmin, className }: SidebarProps) {
       to: DASHBOARD_PATH,
       icon: <LayoutDashboard className="h-5 w-5" />,
       text: 'Dashboard',
+      adminOnly: false,
+    },
+    {
+      to: '/dashboard/agents',
+      icon: <Bot className="h-5 w-5" />,
+      text: 'Agentes IA',
+      adminOnly: false,
+    },
+    {
+      to: '/dashboard/signatures',
+      icon: <FileSignature className="h-5 w-5" />,
+      text: 'Firma Digital',
       adminOnly: false,
     },
     {
