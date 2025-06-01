@@ -111,7 +111,7 @@ services:
   # LangChain microservice for tests
   test-langchain-service:
     build:
-      context: ../langchain-service
+      context: ../microservices/langchain-service
       dockerfile: Dockerfile
     environment:
       - QDRANT_HOST=test-qdrant

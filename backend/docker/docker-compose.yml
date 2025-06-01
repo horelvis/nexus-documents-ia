@@ -93,7 +93,7 @@ services:
   # LangChain microservice
   langchain-service:
     build:
-      context: ../langchain-service
+      context: ../microservices/langchain-service
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
