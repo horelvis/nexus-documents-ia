@@ -1,334 +1,259 @@
+"""
+LangChain-based LLM Service with RAG capabilities
+"""
 import logging
-import json
-import requests
 from typing import List, Dict, Any, Optional
-import time
+
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain.schema import Document
 
 from app.core.config import settings
+from app.core.langchain_config import LangChainManager
+from app.services.vector_service import VectorService
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Servicio para interactuar con modelos LLM a través de Ollama"""
+    """Servicio para generación de texto y RAG usando LangChain"""
     
     def __init__(self):
-        self.base_url = settings.OLLAMA_BASE_URL
-        self.model = settings.OLLAMA_MODEL
+        self.llm = LangChainManager.get_llm()
+        logger.info("LLMService initialized with LangChain")
     
-    def _call_ollama_api(
+    def create_rag_chain(self, vectorstore):
+        """Crea una cadena RAG con el vectorstore proporcionado"""
+        return LangChainManager.create_rag_chain(vectorstore)
+    
+    async def generate_response(
         self, 
-        prompt: str, 
-        system_prompt: Optional[str] = None,
-        temperature: float = 0.5,
-        max_tokens: int = 1000,
-        stream: bool = False
-    ) -> str:
+        query: str, 
+        doc_ids: List[str] = None, 
+        tenant_id: str = None,
+        max_tokens: int = 500
+    ) -> Dict[str, Any]:
         """
-        Realiza una llamada a la API de Ollama.
+        Genera una respuesta usando RAG o LLM directo.
         
         Args:
-            prompt: Texto de entrada
-            system_prompt: Instrucciones del sistema (opcional)
-            temperature: Temperatura de generación (0.0-1.0)
-            max_tokens: Número máximo de tokens a generar
-            stream: Si se debe usar modo streaming
+            query: Pregunta o consulta del usuario
+            doc_ids: Lista opcional de IDs de documentos para RAG
+            tenant_id: ID del tenant para búsqueda vectorial
+            max_tokens: Máximo número de tokens en la respuesta
             
         Returns:
-            Texto generado por el modelo
+            Diccionario con la respuesta y fuentes (si aplica)
         """
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": stream,
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        }
-        
-        if system_prompt:
-            data["system"] = system_prompt
-        
         try:
-            start_time = time.time()
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                headers=headers,
-                json=data
-            )
-            elapsed_time = time.time() - start_time
-            
-            if response.status_code != 200:
-                logger.error(f"Ollama API error: {response.status_code} - {response.text}")
-                return f"Error: Unable to get response from Ollama API (Status: {response.status_code})"
-            
-            if stream:
-                # Para streaming, recolectar todos los fragmentos de respuesta
-                result = ""
-                for line in response.iter_lines():
-                    if line:
-                        chunk = json.loads(line)
-                        result += chunk.get("response", "")
-                        if chunk.get("done", False):
-                            break
+            if doc_ids and tenant_id:
+                # Usar RAG con documentos específicos
+                logger.debug(f"Generating RAG response for query: {query[:100]}...")
+                
+                vector_service = VectorService(tenant_id)
+                vectorstore = vector_service.get_vectorstore()
+                
+                # Crear chain RAG
+                chain = self.create_rag_chain(vectorstore)
+                
+                # Filtrar por documentos específicos si se proporcionan
+                if doc_ids:
+                    # Buscar contexto relevante en documentos específicos
+                    context_results = vector_service.search_by_document_ids(
+                        doc_ids=doc_ids,
+                        query=query,
+                        limit=5
+                    )
+                    
+                    if context_results:
+                        # Ejecutar chain con contexto filtrado
+                        result = chain({"query": query})
+                        
+                        return {
+                            "answer": result["result"],
+                            "sources": [
+                                {
+                                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                                    "metadata": doc.metadata
+                                }
+                                for doc in result.get("source_documents", [])
+                            ],
+                            "context_used": len(context_results)
+                        }
+                    else:
+                        # No se encontró contexto relevante
+                        return {
+                            "answer": "Lo siento, no encontré información relevante en los documentos especificados para responder tu pregunta.",
+                            "sources": [],
+                            "context_used": 0
+                        }
+                else:
+                    # RAG sin filtro de documentos
+                    result = chain({"query": query})
+                    
+                    return {
+                        "answer": result["result"],
+                        "sources": [
+                            {
+                                "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                                "metadata": doc.metadata
+                            }
+                            for doc in result.get("source_documents", [])
+                        ]
+                    }
             else:
-                # Para respuestas no streaming
-                result = response.json().get("response", "")
-            
-            logger.info(f"Ollama request completed in {elapsed_time:.2f}s")
-            return result
-            
+                # LLM directo sin RAG
+                logger.debug(f"Generating direct LLM response for query: {query[:100]}...")
+                
+                response = self.llm.invoke(query)
+                
+                return {
+                    "answer": response,
+                    "sources": [],
+                    "type": "direct_llm"
+                }
+                
         except Exception as e:
-            logger.exception(f"Error calling Ollama API: {str(e)}")
-            return f"Error: {str(e)}"
+            logger.error(f"Error generating response: {str(e)}")
+            return {
+                "answer": "Lo siento, ocurrió un error al procesar tu consulta. Por favor, intenta nuevamente.",
+                "sources": [],
+                "error": str(e)
+            }
     
-    def summarize_text(self, text: str, max_length: int = 500) -> str:
+    async def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
         """
-        Genera un resumen conciso del texto proporcionado.
+        Sugiere tags relevantes para un texto.
         
         Args:
-            text: Texto a resumir
-            max_length: Longitud máxima aproximada del resumen en caracteres
+            text: Texto para analizar
+            num_tags: Número de tags a sugerir
             
         Returns:
-            Resumen generado
+            Lista de tags sugeridos
         """
-        if len(text) < max_length:
-            return text
-        
-        # Truncar el texto si es demasiado largo para la API
-        max_input_length = 100000  # Ajustar según los límites del modelo
-        if len(text) > max_input_length:
-            text = text[:max_input_length-1000] + "..."
-        
-        system_prompt = """
-        Eres un asistente experto en resumir documentos. Crea resúmenes concisos 
-        que capturen los puntos principales y la información más relevante.
-        """
-        
-        prompt = f"""
-        Resume el siguiente texto en aproximadamente {max_length} caracteres, 
-        manteniendo los puntos clave y la información más importante:
-        
-        {text}
-        """
-        
-        return self._call_ollama_api(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-            max_tokens=max_length // 2  # Estimación aproximada de tokens
-        )
-    
-    def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
-        """
-        Sugiere etiquetas relevantes basadas en el contenido del texto.
-        
-        Args:
-            text: Texto del documento
-            num_tags: Número de etiquetas a sugerir
-            
-        Returns:
-            Lista de etiquetas sugeridas
-        """
-        # Truncar el texto si es demasiado largo
-        max_input_length = 50000  # Ajustar según los límites del modelo
-        if len(text) > max_input_length:
-            text = text[:max_input_length-1000] + "..."
-        
-        system_prompt = """
-        Eres un experto en análisis de documentos y categorización. Debes identificar 
-        las etiquetas más relevantes para el contenido.
-        """
-        
-        prompt = f"""
-        Basándote en el siguiente texto, sugiere exactamente {num_tags} etiquetas relevantes. 
-        Proporciónalas como una lista separada por comas, usando solo palabras clave concisas 
-        (1-2 palabras por etiqueta) sin explicaciones adicionales:
-        
-        {text}
-        """
-        
-        response = self._call_ollama_api(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-            max_tokens=100
-        )
-        
-        # Procesar la respuesta para extraer etiquetas
         try:
-            # Eliminar cualquier explicación y quedarse solo con la lista
-            if ":" in response:
-                response = response.split(":", 1)[1]
+            logger.debug(f"Generating {num_tags} tags for text of length: {len(text)}")
             
-            # Eliminar puntos, comillas y otros caracteres extraños
-            response = response.replace('"', '').replace("'", "").strip()
+            prompt = f"""Analiza el siguiente texto y sugiere {num_tags} tags o etiquetas relevantes.
+            Las etiquetas deben ser palabras clave que describan el contenido, tema o categoría del texto.
+            Responde solo con las etiquetas separadas por comas, sin explicaciones adicionales.
+
+            Texto: {text[:2000]}
+
+            Etiquetas:"""
             
-            # Dividir por comas y limpiar espacios
-            tags = [tag.strip() for tag in response.split(",") if tag.strip()]
+            response = self.llm.invoke(prompt)
             
-            # Limitar al número solicitado
-            return tags[:num_tags]
+            # Procesar respuesta para extraer tags
+            tags = [tag.strip() for tag in response.split(',')]
+            tags = [tag for tag in tags if tag and len(tag) > 1]  # Filtrar tags vacíos o muy cortos
+            
+            logger.debug(f"Generated tags: {tags}")
+            return tags[:num_tags]  # Limitar al número solicitado
             
         except Exception as e:
-            logger.exception(f"Error parsing tags from LLM response: {str(e)}")
-            return []
+            logger.error(f"Error generating tags: {str(e)}")
+            return ["documento", "texto", "contenido"]  # Tags por defecto
     
-    def extract_metadata(self, text: str) -> Dict[str, Any]:
+    async def extract_metadata(self, text: str) -> Dict[str, str]:
         """
-        Extrae metadatos estructurados del texto del documento.
+        Extrae metadatos relevantes de un texto.
         
         Args:
-            text: Texto del documento
+            text: Texto para analizar
             
         Returns:
             Diccionario con metadatos extraídos
         """
-        # Truncar el texto si es demasiado largo
-        max_input_length = 50000
-        if len(text) > max_input_length:
-            text = text[:max_input_length-1000] + "..."
-        
-        system_prompt = """
-        Eres un experto en extracción de información y metadata de documentos. 
-        Tu tarea es identificar metadatos clave y proporcionarlos en formato JSON.
-        """
-        
-        prompt = f"""
-        Extrae los siguientes metadatos del texto proporcionado en formato JSON. 
-        Si no puedes determinar un valor, déjalo como null:
-        
-        1. título: el título principal del documento si está presente
-        2. autor: nombre(s) del autor o autores
-        3. fecha: cualquier fecha relevante en formato ISO (YYYY-MM-DD)
-        4. categoría: la categoría principal del documento
-        5. entidades: las 5 entidades principales mencionadas (personas, organizaciones, lugares)
-        
-        Texto del documento:
-        {text}
-        
-        Responde únicamente con el JSON sin explicaciones adicionales.
-        """
-        
-        response = self._call_ollama_api(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.1,
-            max_tokens=1000
-        )
-        
         try:
-            # Intentar extraer solo el JSON de la respuesta
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_str = response.split("```")[1].strip()
-            else:
-                json_str = response.strip()
+            logger.debug(f"Extracting metadata from text of length: {len(text)}")
             
-            # Analizar la respuesta JSON
-            metadata = json.loads(json_str)
+            prompt = f"""Analiza el siguiente texto y extrae metadatos relevantes.
+            Identifica información como título, autor, fecha, categoría, tema principal, etc.
+            Responde en formato JSON con las claves en español.
+
+            Texto: {text[:2000]}
+
+            Metadatos JSON:"""
+            
+            response = self.llm.invoke(prompt)
+            
+            # Intentar parsear como JSON, si falla usar valores por defecto
+            try:
+                import json
+                metadata = json.loads(response)
+            except:
+                # Si no se puede parsear, crear metadatos básicos
+                metadata = {
+                    "título": "Documento sin título",
+                    "tipo": "documento",
+                    "idioma": "español"
+                }
+            
+            logger.debug(f"Extracted metadata: {metadata}")
             return metadata
             
         except Exception as e:
-            logger.exception(f"Error parsing metadata from LLM response: {str(e)}")
+            logger.error(f"Error extracting metadata: {str(e)}")
             return {
-                "título": None,
-                "autor": None,
-                "fecha": None,
-                "categoría": None,
-                "entidades": []
+                "título": "Documento",
+                "tipo": "texto",
+                "estado": "procesado"
             }
     
-    def answer_question(self, question: str, context: str) -> str:
+    async def summarize_text(self, text: str, max_length: int = 200) -> str:
         """
-        Responde una pregunta basándose en el contexto proporcionado.
+        Genera un resumen del texto.
         
         Args:
-            question: Pregunta del usuario
-            context: Contexto extraído de los documentos
+            text: Texto a resumir
+            max_length: Longitud máxima del resumen
             
         Returns:
-            Respuesta a la pregunta
+            Resumen del texto
         """
-        # Truncar el contexto si es demasiado largo
-        max_context_length = 80000  # Ajustar según los límites del modelo
-        if len(context) > max_context_length:
-            context = context[:max_context_length-1000] + "..."
-        
-        system_prompt = """
-        Eres un asistente experto en responder preguntas basadas en la información proporcionada. 
-        Utiliza solo la información del contexto para responder. Si la información no está en el contexto, 
-        indica que no puedes responder basándote en los documentos disponibles. No inventes información. 
-        Cita las partes relevantes del contexto para respaldar tu respuesta.
-        """
-        
-        prompt = f"""
-        Contexto:
-        {context}
-        
-        Pregunta: {question}
-        
-        Respuesta:
-        """
-        
-        return self._call_ollama_api(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.2,
-            max_tokens=1500
-        )
+        try:
+            logger.debug(f"Summarizing text of length: {len(text)}")
+            
+            prompt = f"""Resume el siguiente texto en aproximadamente {max_length} caracteres.
+            El resumen debe capturar las ideas principales y ser coherente.
+
+            Texto: {text}
+
+            Resumen:"""
+            
+            response = self.llm.invoke(prompt)
+            
+            # Truncar si es necesario
+            if len(response) > max_length:
+                response = response[:max_length-3] + "..."
+            
+            logger.debug(f"Generated summary of length: {len(response)}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error summarizing text: {str(e)}")
+            return "Resumen no disponible."
     
-    def classify_document(self, text: str, categories: List[str]) -> str:
+    def create_custom_prompt(self, template: str, variables: Dict[str, str]) -> str:
         """
-        Clasifica un documento en una de las categorías proporcionadas.
+        Crea un prompt personalizado con variables.
         
         Args:
-            text: Texto del documento
-            categories: Lista de categorías posibles
+            template: Template del prompt con placeholders
+            variables: Variables para rellenar el template
             
         Returns:
-            La categoría asignada
+            Prompt formateado
         """
-        # Truncar el texto si es demasiado largo
-        max_input_length = 50000
-        if len(text) > max_input_length:
-            text = text[:max_input_length-1000] + "..."
-        
-        categories_str = ", ".join(categories)
-        
-        system_prompt = """
-        Eres un experto en clasificación de documentos. Debes asignar cada documento 
-        a la categoría más apropiada entre las opciones disponibles.
-        """
-        
-        prompt = f"""
-        Clasifica el siguiente texto en una de estas categorías: {categories_str}
-        
-        Responde solamente con el nombre de la categoría, sin explicaciones adicionales.
-        
-        Texto:
-        {text}
-        """
-        
-        response = self._call_ollama_api(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.1,
-            max_tokens=50
-        )
-        
-        # Limpiar la respuesta
-        response = response.strip()
-        
-        # Verificar si la respuesta coincide con alguna categoría
-        for category in categories:
-            if category.lower() in response.lower():
-                return category
-        
-        # Si no hay coincidencia exacta, devolver la respuesta completa
-        return response
+        try:
+            prompt_template = PromptTemplate(
+                template=template,
+                input_variables=list(variables.keys())
+            )
+            return prompt_template.format(**variables)
+            
+        except Exception as e:
+            logger.error(f"Error creating custom prompt: {str(e)}")
+            return template

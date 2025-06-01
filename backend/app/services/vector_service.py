@@ -1,224 +1,230 @@
+"""
+LangChain-based Vector Service using Qdrant
+"""
 import logging
-import os
-import numpy as np
-from typing import List, Dict, Any, Optional, Union
-import uuid
+from typing import List, Dict, Any, Optional
+from uuid import uuid4
 
-import qdrant_client
+from langchain_community.vectorstores import Qdrant
+from langchain.schema import Document
+from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.core.config import settings
+from app.core.langchain_config import LangChainManager
 
 logger = logging.getLogger(__name__)
 
 
 class VectorService:
-    """Servicio para la gestión de vectores en la base de datos Qdrant"""
+    """Servicio para gestión de vectores usando LangChain y Qdrant"""
     
     def __init__(self, tenant_id: str = None):
-        """
-        Inicializa el servicio de vectores.
-        
-        Args:
-            tenant_id: ID del tenant para separar colecciones
-        """
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
-        self.embedding_dim = 1536  # Dimensión típica para embeddings de modelos Ollama
+        self.collection_name = f"documents_{self.tenant_id}"
         
-        # Inicializar cliente Qdrant
-        self.client = qdrant_client.QdrantClient(
-            host=settings.QDRANT_HOST,
-            port=settings.QDRANT_PORT
-        )
+        # Inicializar componentes LangChain
+        self.client = LangChainManager.get_qdrant_client()
+        self.embeddings = LangChainManager.get_embeddings()
         
-        # Nombre de la colección específica para el tenant
-        self.collection_name = f"{settings.QDRANT_COLLECTION}_{self.tenant_id}"
+        # Inicializar colección
+        self._ensure_collection_exists()
         
-        # Inicializar la colección si no existe
-        self._init_collection()
-
-    def _init_collection(self):
-        """Inicializa la colección en Qdrant si no existe"""
+        logger.info(f"VectorService initialized for tenant: {self.tenant_id}")
+    
+    def _ensure_collection_exists(self):
+        """Asegura que la colección existe en Qdrant"""
         try:
-            # Comprobar si la colección existe
-            collections = self.client.get_collections().collections
-            collection_names = [collection.name for collection in collections]
+            collections = self.client.get_collections()
+            collection_names = [col.name for col in collections.collections]
             
             if self.collection_name not in collection_names:
                 # Crear nueva colección
                 self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
-                        size=self.embedding_dim,
-                        distance=models.Distance.COSINE
-                    )
+                        size=1536,  # Dimensión estándar para embeddings
+                        distance=models.Distance.COSINE,
+                    ),
                 )
                 logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente")
             else:
-                logger.info(f"Usando colección Qdrant existente '{self.collection_name}'")
-                    
-        except UnexpectedResponse as e:
-            # Puede ser un error porque la colección no existe
-            if "Collection not found" in str(e):
-                try:
-                    logger.warning(f"Colección no encontrada, intentando crearla: {str(e)}")
-                    self.client.create_collection(
-                        collection_name=self.collection_name,
-                        vectors_config=models.VectorParams(
-                            size=self.embedding_dim,
-                            distance=models.Distance.COSINE
-                        )
-                    )
-                    logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente")
-                except Exception as inner_e:
-                    logger.exception(f"Error al crear colección Qdrant: {str(inner_e)}")
-                    raise
-            else:
-                logger.exception(f"Error inesperado con Qdrant: {str(e)}")
-                raise
-        except Exception as e:
-            logger.exception(f"Error inicializando colección Qdrant: {str(e)}")
-            raise
-
-    def add_document_vectors(
-        self, 
-        doc_id: str, 
-        vectors: List[np.ndarray], 
-        metadatas: List[Dict[str, Any]]
-    ) -> List[str]:
-        """
-        Añade vectores de un documento a la base de datos.
-        
-        Args:
-            doc_id: ID del documento
-            vectors: Lista de vectores de embedding
-            metadatas: Lista de metadatos correspondientes a cada vector
-            
-        Returns:
-            Lista de IDs de puntos creados
-        """
-        try:
-            if len(vectors) != len(metadatas):
-                raise ValueError("El número de vectores y metadatos debe ser igual")
-            
-            # Generar IDs para cada vector
-            point_ids = [str(uuid.uuid4()) for _ in range(len(vectors))]
-            
-            # Crear puntos para upsert
-            points = []
-            for i, (vector, metadata) in enumerate(zip(vectors, metadatas)):
-                # Asegurarse de que doc_id esté en los metadatos
-                metadata["doc_id"] = doc_id
+                logger.debug(f"Colección Qdrant '{self.collection_name}' ya existe")
                 
-                # Crear punto
-                points.append(models.PointStruct(
-                    id=point_ids[i],
-                    vector=vector.tolist(),
-                    payload=metadata
-                ))
-            
-            # Insertar puntos en la colección
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
-            
-            logger.info(f"Añadidos {len(points)} vectores para documento {doc_id}")
-            return point_ids
-            
         except Exception as e:
-            logger.exception(f"Error añadiendo vectores a Qdrant: {str(e)}")
+            logger.error(f"Error al verificar/crear colección {self.collection_name}: {str(e)}")
             raise
     
-    def search_similar(
-        self, 
-        query_vector: np.ndarray, 
-        limit: int = 10, 
-        filter_by: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+    def get_vectorstore(self) -> Qdrant:
+        """Obtiene instancia del vectorstore LangChain"""
+        return LangChainManager.create_vectorstore(self.collection_name)
+    
+    def add_documents(self, texts: List[str], metadatas: List[Dict[str, Any]]) -> bool:
         """
-        Busca vectores similares en la base de datos.
+        Añade documentos al vector store.
         
         Args:
-            query_vector: Vector de consulta
-            limit: Número máximo de resultados
-            filter_by: Filtros para la búsqueda
+            texts: Lista de textos a vectorizar
+            metadatas: Lista de metadatos correspondientes
             
         Returns:
-            Lista de resultados con metadatos y puntuaciones
+            True si fue exitoso, False en caso contrario
         """
         try:
-            # Crear objeto de filtro si es necesario
-            filter_obj = None
-            if filter_by:
-                conditions = []
-                
-                # Filtrar por ID de documento
-                if "doc_ids" in filter_by and filter_by["doc_ids"]:
-                    conditions.append(
-                        models.FieldCondition(
-                            key="doc_id",
-                            match=models.MatchAny(any=filter_by["doc_ids"])
-                        )
-                    )
-                
-                # Filtrar por metadatos adicionales
-                for key, value in filter_by.items():
-                    if key != "doc_ids" and value is not None:
-                        conditions.append(
-                            models.FieldCondition(
-                                key=key,
-                                match=models.MatchValue(value=value)
-                            )
-                        )
-                
-                if conditions:
-                    filter_obj = models.Filter(
-                        must=conditions
-                    )
+            if len(texts) != len(metadatas):
+                raise ValueError("Texts and metadatas must have the same length")
             
-            # Realizar búsqueda
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector.tolist(),
-                limit=limit,
-                query_filter=filter_obj
+            logger.debug(f"Adding {len(texts)} documents to vector store")
+            
+            # Crear vectorstore
+            vectorstore = self.get_vectorstore()
+            
+            # Generar IDs únicos para cada documento
+            ids = [str(uuid4()) for _ in texts]
+            
+            # Añadir documentos al vectorstore
+            vectorstore.add_texts(
+                texts=texts,
+                metadatas=metadatas,
+                ids=ids
             )
+            
+            logger.info(f"Successfully added {len(texts)} documents to vector store")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding documents to vector store: {str(e)}")
+            return False
+    
+    def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any]) -> bool:
+        """
+        Añade un solo documento al vector store.
+        
+        Args:
+            doc_id: ID único del documento
+            text: Contenido del texto
+            metadata: Metadatos del documento
+            
+        Returns:
+            True si fue exitoso, False en caso contrario
+        """
+        try:
+            logger.debug(f"Adding single document {doc_id} to vector store")
+            
+            # Agregar tenant_id a metadatos
+            metadata = metadata.copy()
+            metadata["tenant_id"] = self.tenant_id
+            metadata["doc_id"] = doc_id
+            
+            vectorstore = self.get_vectorstore()
+            vectorstore.add_texts(
+                texts=[text],
+                metadatas=[metadata],
+                ids=[doc_id]
+            )
+            
+            logger.info(f"Successfully added document {doc_id} to vector store")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding document {doc_id}: {str(e)}")
+            return False
+    
+    def search_similar(self, query: str, limit: int = 5, filter_dict: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        """
+        Busca documentos similares al query.
+        
+        Args:
+            query: Consulta de búsqueda
+            limit: Número máximo de resultados
+            filter_dict: Filtros adicionales para los metadatos
+            
+        Returns:
+            Lista de documentos similares con scores
+        """
+        try:
+            logger.debug(f"Searching for similar documents with query: {query[:100]}...")
+            
+            vectorstore = self.get_vectorstore()
+            
+            # Realizar búsqueda de similitud
+            if filter_dict:
+                # Búsqueda con filtros
+                docs = vectorstore.similarity_search_with_score(
+                    query=query,
+                    k=limit,
+                    filter=filter_dict
+                )
+            else:
+                # Búsqueda sin filtros
+                docs = vectorstore.similarity_search_with_score(
+                    query=query,
+                    k=limit
+                )
             
             # Formatear resultados
             results = []
-            for res in search_results:
-                results.append({
-                    "score": res.score,
-                    "metadata": res.payload
-                })
+            for doc, score in docs:
+                result = {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                    "score": float(score)
+                }
+                results.append(result)
             
+            logger.debug(f"Found {len(results)} similar documents")
             return results
             
         except Exception as e:
-            logger.exception(f"Error al buscar en Qdrant: {str(e)}")
+            logger.error(f"Error searching similar documents: {str(e)}")
             return []
     
-    def delete_document_vectors(self, doc_id: str) -> bool:
+    def search_by_document_ids(self, doc_ids: List[str], query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Elimina todos los vectores asociados a un documento.
+        Busca dentro de documentos específicos.
         
         Args:
-            doc_id: ID del documento
+            doc_ids: Lista de IDs de documentos donde buscar
+            query: Consulta de búsqueda
+            limit: Número máximo de resultados
             
         Returns:
-            True si se eliminaron con éxito, False en caso contrario
+            Lista de resultados filtrados por documento
         """
         try:
-            # Eliminar vectores con el filtro de doc_id
+            # Filtrar por documentos específicos
+            filter_dict = {
+                "doc_id": {"$in": doc_ids}
+            }
+            
+            return self.search_similar(query, limit, filter_dict)
+            
+        except Exception as e:
+            logger.error(f"Error searching by document IDs: {str(e)}")
+            return []
+    
+    def delete_document(self, doc_id: str) -> bool:
+        """
+        Elimina un documento del vector store.
+        
+        Args:
+            doc_id: ID del documento a eliminar
+            
+        Returns:
+            True si fue exitoso, False en caso contrario
+        """
+        try:
+            logger.debug(f"Deleting document {doc_id} from vector store")
+            
+            # Buscar y eliminar puntos con el doc_id específico
             self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=models.FilterSelector(
                     filter=models.Filter(
                         must=[
                             models.FieldCondition(
-                                key="doc_id",
+                                key="metadata.doc_id",
                                 match=models.MatchValue(value=doc_id)
                             )
                         ]
@@ -226,48 +232,61 @@ class VectorService:
                 )
             )
             
-            logger.info(f"Vectores eliminados para documento {doc_id}")
+            logger.info(f"Successfully deleted document {doc_id} from vector store")
             return True
             
         except Exception as e:
-            logger.exception(f"Error eliminando vectores de Qdrant: {str(e)}")
+            logger.error(f"Error deleting document {doc_id}: {str(e)}")
             return False
     
-    def get_document_vectors(self, doc_id: str) -> List[Dict[str, Any]]:
+    def get_collection_info(self) -> Dict[str, Any]:
         """
-        Obtiene todos los vectores asociados a un documento.
+        Obtiene información sobre la colección.
         
-        Args:
-            doc_id: ID del documento
-            
         Returns:
-            Lista de vectores con sus metadatos
+            Diccionario con información de la colección
         """
         try:
-            # Buscar vectores con el filtro de doc_id
-            results = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="doc_id",
-                            match=models.MatchValue(value=doc_id)
-                        )
-                    ]
-                ),
-                limit=1000  # Límite máximo para un documento
-            )
+            collection_info = self.client.get_collection(self.collection_name)
             
-            vectors = []
-            for point in results[0]:
-                vectors.append({
-                    "id": point.id,
-                    "vector": np.array(point.vector),
-                    "metadata": point.payload
-                })
-            
-            return vectors
+            return {
+                "name": self.collection_name,
+                "vectors_count": collection_info.vectors_count,
+                "indexed_vectors_count": collection_info.indexed_vectors_count,
+                "status": collection_info.status
+            }
             
         except Exception as e:
-            logger.exception(f"Error obteniendo vectores de Qdrant: {str(e)}")
-            return []
+            logger.error(f"Error getting collection info: {str(e)}")
+            return {}
+    
+    def clear_collection(self) -> bool:
+        """
+        Limpia todos los documentos de la colección.
+        
+        Returns:
+            True si fue exitoso, False en caso contrario
+        """
+        try:
+            logger.warning(f"Clearing all documents from collection {self.collection_name}")
+            
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="metadata.tenant_id",
+                                match=models.MatchValue(value=self.tenant_id)
+                            )
+                        ]
+                    )
+                )
+            )
+            
+            logger.info(f"Successfully cleared collection {self.collection_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error clearing collection: {str(e)}")
+            return False
