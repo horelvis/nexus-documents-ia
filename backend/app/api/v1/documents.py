@@ -9,6 +9,7 @@ from app.schemas.document import (
 )
 from app.services.document_service import DocumentService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 

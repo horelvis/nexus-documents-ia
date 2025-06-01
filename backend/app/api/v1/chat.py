@@ -10,8 +10,8 @@ from app.db.models import User
 from app.schemas.document import ChatMessage
 from app.services.search_service import SearchService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
-
 
 @router.post("/", response_model=dict)
 async def chat_with_documents(
