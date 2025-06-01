@@ -65,10 +65,8 @@ class Settings(BaseSettings):
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
     
-    # Ollama
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "gemma3:27b-it-qat"  # Modelo para chat/generación
-    EMBEDDING_MODEL: str = "nomic-embed-text"  # Modelo para embeddings
+    # LangChain Microservice
+    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto

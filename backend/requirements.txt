@@ -35,7 +35,3 @@ scikit-learn
 pandas
 scipy
 
-# LangChain dependencies
-langchain>=0.1.0
-langchain-community>=0.0.13
-langchain-ollama>=0.1.0

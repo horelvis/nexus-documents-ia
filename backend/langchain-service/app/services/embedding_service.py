@@ -1,24 +1,33 @@
 """
-Embedding Service using LangChain microservice HTTP client
+LangChain-based Embedding Service
 """
 import logging
 from typing import List, Dict, Any
+from langchain_core.documents import Document
+
 from app.core.config import settings
-from app.services.langchain_client import LangChainClient
+from app.core.langchain_config import LangChainManager
+from app.services.vector_service import VectorService
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Servicio para la generación y gestión de embeddings usando el microservicio LangChain"""
+    """Servicio para la generación y gestión de embeddings usando LangChain"""
     
     def __init__(self, tenant_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
+        self.embeddings = LangChainManager.get_embeddings()
+        self.text_splitter = LangChainManager.get_text_splitter()
+        
+        # Mantener vector service para retrocompatibilidad
+        self.vector_service = VectorService(tenant_id)
+        
         logger.info(f"EmbeddingService initialized for tenant: {self.tenant_id}")
     
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
-        Genera embeddings para una lista de textos usando el microservicio LangChain.
+        Genera embeddings para una lista de textos usando LangChain.
         
         Args:
             texts: Lista de textos para generar embeddings
@@ -28,15 +37,14 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Generating embeddings for {len(texts)} texts")
-            async with LangChainClient() as client:
-                embeddings = await client.generate_embeddings(texts)
+            embeddings = self.embeddings.embed_documents(texts)
             logger.debug(f"Generated {len(embeddings)} embeddings successfully")
             return embeddings
         except Exception as e:
             logger.error(f"Error generating embeddings: {str(e)}")
             raise
     
-    async def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> List[float]:
         """
         Genera embedding para un solo texto.
         
@@ -48,17 +56,16 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Generating embedding for text of length: {len(text)}")
-            async with LangChainClient() as client:
-                embedding = await client.generate_embedding(text)
+            embedding = self.embeddings.embed_query(text)
             logger.debug("Embedding generated successfully")
             return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {str(e)}")
             raise
     
-    async def chunk_text(self, text: str) -> List[Dict[str, Any]]:
+    def chunk_text(self, text: str) -> List[Dict[str, Any]]:
         """
-        Divide texto en chunks usando el microservicio LangChain.
+        Divide texto en chunks usando LangChain.
         
         Args:
             text: Texto a dividir
@@ -68,15 +75,50 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Chunking text of length: {len(text)}")
-            async with LangChainClient() as client:
-                chunks = await client.chunk_text(text)
-            logger.debug(f"Text split into {len(chunks)} chunks")
-            return chunks
+            chunks = self.text_splitter.split_text(text)
+            
+            chunked_data = []
+            for i, chunk in enumerate(chunks):
+                chunked_data.append({
+                    "text": chunk,
+                    "chunk_index": i,
+                    "chunk_size": len(chunk)
+                })
+            
+            logger.debug(f"Text split into {len(chunked_data)} chunks")
+            return chunked_data
+            
         except Exception as e:
             logger.error(f"Error chunking text: {str(e)}")
             raise
     
-    async def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any] = None) -> bool:
+    def create_documents(self, texts: List[str], metadatas: List[Dict] = None) -> List[Document]:
+        """
+        Crea documentos LangChain con metadatos.
+        
+        Args:
+            texts: Lista de textos
+            metadatas: Lista opcional de metadatos
+            
+        Returns:
+            Lista de documentos LangChain
+        """
+        if metadatas is None:
+            metadatas = [{}] * len(texts)
+        
+        documents = []
+        for text, metadata in zip(texts, metadatas):
+            # Agregar información del tenant a los metadatos
+            metadata = metadata.copy()
+            metadata["tenant_id"] = self.tenant_id
+            
+            doc = Document(page_content=text, metadata=metadata)
+            documents.append(doc)
+        
+        logger.debug(f"Created {len(documents)} LangChain documents")
+        return documents
+    
+    def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any] = None) -> bool:
         """
         Procesa y añade un documento al vector store.
         
@@ -90,7 +132,7 @@ class EmbeddingService:
         """
         try:
             # Chunking del texto
-            chunks_data = await self.chunk_text(text)
+            chunks_data = self.chunk_text(text)
             
             # Preparar textos y metadatos para vectorización
             chunk_texts = [chunk["text"] for chunk in chunks_data]
@@ -107,9 +149,8 @@ class EmbeddingService:
                     chunk_metadata.update(metadata)
                 chunk_metadatas.append(chunk_metadata)
             
-            # Usar cliente HTTP para añadir al vectorstore
-            async with LangChainClient() as client:
-                success = await client.add_documents(self.tenant_id, chunk_texts, chunk_metadatas)
+            # Usar vector service para añadir al vectorstore
+            success = self.vector_service.add_documents(chunk_texts, chunk_metadatas)
             
             if success:
                 logger.info(f"Document {doc_id} processed and added successfully with {len(chunk_texts)} chunks")
@@ -122,7 +163,7 @@ class EmbeddingService:
             logger.error(f"Error adding document {doc_id}: {str(e)}")
             return False
     
-    async def search_similar(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_similar(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Busca documentos similares usando el query.
         
@@ -136,9 +177,8 @@ class EmbeddingService:
         try:
             logger.debug(f"Searching for similar documents with query: {query[:100]}...")
             
-            # Usar cliente HTTP para búsqueda
-            async with LangChainClient() as client:
-                results = await client.search_similar(self.tenant_id, query, limit)
+            # Usar vector service para búsqueda
+            results = self.vector_service.search_similar(query, limit)
             
             logger.debug(f"Found {len(results)} similar documents")
             return results

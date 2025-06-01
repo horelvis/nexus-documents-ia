@@ -1,30 +1,19 @@
 """
-LangChain-based LLM Service with RAG capabilities
+LLM Service using LangChain microservice HTTP client
 """
 import logging
 from typing import List, Dict, Any, Optional
-
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from langchain_core.documents import Document
-
 from app.core.config import settings
-from app.core.langchain_config import LangChainManager
-from app.services.vector_service import VectorService
+from app.services.langchain_client import LangChainClient
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Servicio para generación de texto y RAG usando LangChain"""
+    """Servicio para generación de texto y RAG usando el microservicio LangChain"""
     
     def __init__(self):
-        self.llm = LangChainManager.get_llm()
-        logger.info("LLMService initialized with LangChain")
-    
-    def create_rag_chain(self, vectorstore):
-        """Crea una cadena RAG con el vectorstore proporcionado"""
-        return LangChainManager.create_rag_chain(vectorstore)
+        logger.info("LLMService initialized with LangChain microservice client")
     
     async def generate_response(
         self, 
@@ -46,72 +35,18 @@ class LLMService:
             Diccionario con la respuesta y fuentes (si aplica)
         """
         try:
-            if doc_ids and tenant_id:
-                # Usar RAG con documentos específicos
-                logger.debug(f"Generating RAG response for query: {query[:100]}...")
-                
-                vector_service = VectorService(tenant_id)
-                vectorstore = vector_service.get_vectorstore()
-                
-                # Crear chain RAG
-                chain = self.create_rag_chain(vectorstore)
-                
-                # Filtrar por documentos específicos si se proporcionan
-                if doc_ids:
-                    # Buscar contexto relevante en documentos específicos
-                    context_results = vector_service.search_by_document_ids(
-                        doc_ids=doc_ids,
-                        query=query,
-                        limit=5
-                    )
-                    
-                    if context_results:
-                        # Ejecutar chain con contexto filtrado
-                        result = chain({"query": query})
-                        
-                        return {
-                            "answer": result["result"],
-                            "sources": [
-                                {
-                                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                                    "metadata": doc.metadata
-                                }
-                                for doc in result.get("source_documents", [])
-                            ],
-                            "context_used": len(context_results)
-                        }
-                    else:
-                        # No se encontró contexto relevante
-                        return {
-                            "answer": "Lo siento, no encontré información relevante en los documentos especificados para responder tu pregunta.",
-                            "sources": [],
-                            "context_used": 0
-                        }
-                else:
-                    # RAG sin filtro de documentos
-                    result = chain({"query": query})
-                    
-                    return {
-                        "answer": result["result"],
-                        "sources": [
-                            {
-                                "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                                "metadata": doc.metadata
-                            }
-                            for doc in result.get("source_documents", [])
-                        ]
-                    }
-            else:
-                # LLM directo sin RAG
-                logger.debug(f"Generating direct LLM response for query: {query[:100]}...")
-                
-                response = self.llm.invoke(query)
-                
-                return {
-                    "answer": response,
-                    "sources": [],
-                    "type": "direct_llm"
-                }
+            logger.debug(f"Generating response for query: {query[:100]}...")
+            
+            # Usar cliente HTTP para generar respuesta
+            async with LangChainClient() as client:
+                response = await client.generate_response(
+                    query=query,
+                    tenant_id=tenant_id,
+                    doc_ids=doc_ids,
+                    max_tokens=max_tokens
+                )
+            
+            return response
                 
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
@@ -135,22 +70,12 @@ class LLMService:
         try:
             logger.debug(f"Generating {num_tags} tags for text of length: {len(text)}")
             
-            prompt = f"""Analiza el siguiente texto y sugiere {num_tags} tags o etiquetas relevantes.
-            Las etiquetas deben ser palabras clave que describan el contenido, tema o categoría del texto.
-            Responde solo con las etiquetas separadas por comas, sin explicaciones adicionales.
-
-            Texto: {text[:2000]}
-
-            Etiquetas:"""
-            
-            response = self.llm.invoke(prompt)
-            
-            # Procesar respuesta para extraer tags
-            tags = [tag.strip() for tag in response.split(',')]
-            tags = [tag for tag in tags if tag and len(tag) > 1]  # Filtrar tags vacíos o muy cortos
+            # Usar cliente HTTP para sugerir tags
+            async with LangChainClient() as client:
+                tags = await client.suggest_tags(text, num_tags)
             
             logger.debug(f"Generated tags: {tags}")
-            return tags[:num_tags]  # Limitar al número solicitado
+            return tags
             
         except Exception as e:
             logger.error(f"Error generating tags: {str(e)}")
@@ -169,27 +94,9 @@ class LLMService:
         try:
             logger.debug(f"Extracting metadata from text of length: {len(text)}")
             
-            prompt = f"""Analiza el siguiente texto y extrae metadatos relevantes.
-            Identifica información como título, autor, fecha, categoría, tema principal, etc.
-            Responde en formato JSON con las claves en español.
-
-            Texto: {text[:2000]}
-
-            Metadatos JSON:"""
-            
-            response = self.llm.invoke(prompt)
-            
-            # Intentar parsear como JSON, si falla usar valores por defecto
-            try:
-                import json
-                metadata = json.loads(response)
-            except:
-                # Si no se puede parsear, crear metadatos básicos
-                metadata = {
-                    "título": "Documento sin título",
-                    "tipo": "documento",
-                    "idioma": "español"
-                }
+            # Usar cliente HTTP para extraer metadatos
+            async with LangChainClient() as client:
+                metadata = await client.extract_metadata(text)
             
             logger.debug(f"Extracted metadata: {metadata}")
             return metadata
@@ -216,21 +123,12 @@ class LLMService:
         try:
             logger.debug(f"Summarizing text of length: {len(text)}")
             
-            prompt = f"""Resume el siguiente texto en aproximadamente {max_length} caracteres.
-            El resumen debe capturar las ideas principales y ser coherente.
-
-            Texto: {text}
-
-            Resumen:"""
+            # Usar cliente HTTP para resumir texto
+            async with LangChainClient() as client:
+                summary = await client.summarize_text(text, max_length)
             
-            response = self.llm.invoke(prompt)
-            
-            # Truncar si es necesario
-            if len(response) > max_length:
-                response = response[:max_length-3] + "..."
-            
-            logger.debug(f"Generated summary of length: {len(response)}")
-            return response
+            logger.debug(f"Generated summary of length: {len(summary)}")
+            return summary
             
         except Exception as e:
             logger.error(f"Error summarizing text: {str(e)}")
@@ -248,11 +146,11 @@ class LLMService:
             Prompt formateado
         """
         try:
-            prompt_template = PromptTemplate(
-                template=template,
-                input_variables=list(variables.keys())
-            )
-            return prompt_template.format(**variables)
+            # Implementación simple de formateo de template
+            prompt = template
+            for key, value in variables.items():
+                prompt = prompt.replace(f"{{{key}}}", value)
+            return prompt
             
         except Exception as e:
             logger.error(f"Error creating custom prompt: {str(e)}")
