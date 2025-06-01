@@ -8,6 +8,7 @@ from app.schemas.document import (
     SignedUrlResponse, UploadRequest
 )
 from app.services.document_service import DocumentService
+import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

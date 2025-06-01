@@ -5,7 +5,9 @@ from typing import List
 from app.schemas.document import DocumentWithMetrics, DocumentBasic
 from app.services.document_insights_service import DocumentInsightsService
 from app.api.dependencies import get_current_user
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/trending", response_model=List[DocumentWithMetrics])

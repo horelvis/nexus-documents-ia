@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from uuid import UUID
-
+import logging
 from app.api.dependencies import get_current_user, get_current_tenant_id
 from app.db.database import get_db
 from app.db.models import User

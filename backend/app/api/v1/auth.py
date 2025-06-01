@@ -12,6 +12,9 @@ from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
+import logging
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/login/access-token", response_model=TokenResponse)
