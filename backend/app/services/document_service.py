@@ -31,13 +31,28 @@ class DocumentService:
         Inicializa el servicio de documentos.
         
         Args:
-            tenant_id: ID del tenant
+            tenant_id: ID del tenant (debe ser un UUID válido)
             user_id: ID del usuario actual
         """
-        self.tenant_id = tenant_id or settings.DEFAULT_TENANT
+        # Si tenant_id es None o el string "default", obtener el UUID real del tenant por defecto
+        if not tenant_id or tenant_id == settings.DEFAULT_TENANT:
+            from app.db.database import SessionLocal
+            from app.db.models import Tenant
+            db = SessionLocal()
+            try:
+                default_tenant = db.query(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT).first()
+                if default_tenant:
+                    self.tenant_id = str(default_tenant.id)
+                else:
+                    raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
+            finally:
+                db.close()
+        else:
+            self.tenant_id = tenant_id
+            
         self.user_id = user_id
-        self.storage_service = StorageService(tenant_id)
-        self.embedding_service = EmbeddingService(tenant_id)
+        self.storage_service = StorageService(self.tenant_id)
+        self.embedding_service = EmbeddingService(self.tenant_id)
         self.llm_service = LLMService()
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:

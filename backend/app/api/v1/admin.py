@@ -180,9 +180,13 @@ async def list_all_documents(
     """
     Lista todos los documentos del sistema (solo administradores).
     """
-    # Si se proporciona tenant_id, filtrar por ese tenant
-    # Si no, mostrar documentos de todos los tenants
-    tenant_id_str = str(tenant_id) if tenant_id else None
+    # Si se proporciona tenant_id, usar ese tenant
+    # Si no, usar el tenant del usuario actual o el tenant por defecto
+    if tenant_id:
+        tenant_id_str = str(tenant_id)
+    else:
+        # Usar el tenant del usuario actual como fallback
+        tenant_id_str = str(current_user.tenant_id)
     
     document_service = DocumentService(
         tenant_id=tenant_id_str, 
