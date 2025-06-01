@@ -26,7 +26,7 @@ services:
       - TESTING=true
       - GCS_PROJECT_ID=tu-project-id
       - GCS_BUCKET_NAME=test-docs-eu  # ← Nombre que indique región
-      # - GCS_CREDENTIALS=/app/test-credentials.json # Removed: Path not used and file not mounted
+      - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
       - GCS_REGION=europe-west1  # ← Agregar variable de región
     depends_on:
       test-db:
@@ -41,6 +41,7 @@ services:
       # Montar solo lo necesario para tests
       - ../tests:/app/tests:ro
       - ../app:/app/app:ro
+      - ../credentials:/app/credentials:ro
       - test_coverage:/app/coverage_report
     command: bash -c "
       echo '🔧 Instalando dependencias...' &&

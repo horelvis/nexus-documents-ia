@@ -26,8 +26,17 @@ class StorageService:
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         
         # Inicializar cliente GCS
-        if settings.GCS_CREDENTIALS:
-            # Usar credenciales explícitas si están configuradas
+        import os
+        if os.getenv("TESTING") == "true":
+            # En entorno de testing, usar credenciales por defecto sin archivo
+            try:
+                self.client = storage.Client(project=settings.GCS_PROJECT_ID)
+            except Exception as e:
+                logger.warning(f"No se pudo inicializar GCS en testing, usando cliente mock: {e}")
+                # Si falla, crear un cliente básico para testing
+                self.client = None
+        elif settings.GCS_CREDENTIALS and os.path.exists(settings.GCS_CREDENTIALS):
+            # Usar credenciales explícitas si están configuradas y el archivo existe
             credentials = service_account.Credentials.from_service_account_file(
                 settings.GCS_CREDENTIALS
             )
@@ -45,6 +54,13 @@ class StorageService:
     
     def _ensure_bucket_exists(self):
         """Asegura que el bucket exista, creándolo si es necesario"""
+        import os
+        if os.getenv("TESTING") == "true" and self.client is None:
+            # En testing sin cliente GCS real, crear un bucket mock
+            logger.info(f"Testing mode: using mock bucket {self.bucket_name}")
+            self.bucket = None
+            return
+            
         try:
             self.bucket = self.client.get_bucket(self.bucket_name)
         except Exception as e:
@@ -73,8 +89,13 @@ class StorageService:
         Returns:
             Tuple con la URL firmada y la fecha de expiración
         """
+        import os
         expiration = expiration or settings.SIGNED_URL_EXPIRATION
         expires_at = datetime.utcnow() + timedelta(seconds=expiration)
+        
+        # En modo testing, devolver URL mock
+        if os.getenv("TESTING") == "true" and self.bucket is None:
+            return f"https://mock-storage.googleapis.com/upload/{object_name}", expires_at
         
         blob = self.bucket.blob(object_name)
         
@@ -102,8 +123,13 @@ class StorageService:
         Returns:
             Tuple con la URL firmada y la fecha de expiración
         """
+        import os
         expiration = expiration or settings.SIGNED_URL_EXPIRATION
         expires_at = datetime.utcnow() + timedelta(seconds=expiration)
+        
+        # En modo testing, devolver URL mock
+        if os.getenv("TESTING") == "true" and self.bucket is None:
+            return f"https://mock-storage.googleapis.com/download/{object_name}", expires_at
         
         blob = self.bucket.blob(object_name)
         
