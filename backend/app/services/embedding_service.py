@@ -3,7 +3,7 @@ LangChain-based Embedding Service
 """
 import logging
 from typing import List, Dict, Any
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from app.core.config import settings
 from app.core.langchain_config import LangChainManager

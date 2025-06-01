@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from uuid import uuid4
 
 from langchain_community.vectorstores import Qdrant
-from langchain.schema import Document
+from langchain_core.documents import Document
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.exceptions import ResponseHandlingException

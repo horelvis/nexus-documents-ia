@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from app.core.config import settings
 from app.core.langchain_config import LangChainManager
