@@ -125,10 +125,11 @@ def test_user(db_session, test_tenant):
     user_email = f"test-{unique_id}@example.com"
     clerk_user_id = f"test_clerk_{unique_id}"
     
-    # Check if user already exists, if so return it
+    # Check if user already exists, if so delete it first to avoid conflicts
     existing_user = db_session.query(User).filter(User.email == user_email).first()
     if existing_user:
-        return existing_user
+        db_session.delete(existing_user)
+        db_session.commit()
     
     user = User(
         id=uuid.uuid4(),
@@ -141,8 +142,16 @@ def test_user(db_session, test_tenant):
         clerk_user_id=clerk_user_id
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    try:
+        db_session.commit()
+        db_session.refresh(user)
+    except Exception:
+        db_session.rollback()
+        # Try to find existing user again
+        existing_user = db_session.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        if existing_user:
+            return existing_user
+        raise
     return user
 
 
@@ -154,10 +163,11 @@ def test_superuser(db_session, test_tenant):
     admin_email = f"admin-{unique_id}@example.com"
     clerk_user_id = f"admin_clerk_{unique_id}"
     
-    # Check if superuser already exists, if so return it
+    # Check if superuser already exists, if so delete it first to avoid conflicts
     existing_superuser = db_session.query(User).filter(User.email == admin_email).first()
     if existing_superuser:
-        return existing_superuser
+        db_session.delete(existing_superuser)
+        db_session.commit()
     
     superuser = User(
         id=uuid.uuid4(),
@@ -170,8 +180,16 @@ def test_superuser(db_session, test_tenant):
         clerk_user_id=clerk_user_id
     )
     db_session.add(superuser)
-    db_session.commit()
-    db_session.refresh(superuser)
+    try:
+        db_session.commit()
+        db_session.refresh(superuser)
+    except Exception:
+        db_session.rollback()
+        # Try to find existing superuser again
+        existing_superuser = db_session.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        if existing_superuser:
+            return existing_superuser
+        raise
     return superuser
 
 
@@ -246,3 +264,26 @@ def superuser_token_headers(test_superuser):
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_active_user, None)
     app.dependency_overrides.pop(get_current_active_superuser, None)
+
+
+@pytest.fixture
+def mock_embedding_service():
+    """Mock embedding service for tests"""
+    mock = MagicMock()
+    mock.get_embeddings = AsyncMock(return_value=[[0.1, 0.2, 0.3] * 100])  # Mock 300-dim embeddings
+    return mock
+
+
+@pytest.fixture
+def mock_llm_service():
+    """Mock LLM service for tests"""
+    mock = MagicMock()
+    mock.generate_response = AsyncMock(return_value="Mock answer from LLM service")
+    mock.suggest_tags = AsyncMock(return_value=["tag1", "tag2", "tag3", "tag4", "tag5"])
+    mock.extract_metadata = AsyncMock(return_value={
+        "título": "Mock Title",
+        "autor": "Mock Author",
+        "fecha": "2023-01-01",
+        "categoría": "Mock Category"
+    })
+    return mock

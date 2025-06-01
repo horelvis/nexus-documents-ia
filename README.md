@@ -112,7 +112,7 @@ Se recomienda ejecutar la aplicación utilizando Docker Compose si existe una co
 ## Tecnologías Principales
 
 *   **Backend:** Python, FastAPI, SQLAlchemy, PostgreSQL, Redis, Qdrant, Docker.
-*   **Frontend:** Remix, React, TypeScript, Tailwind CSS, Prisma, Vitest, Docker.
+*   **Frontend:** Remix, React, TypeScript, Tailwind CSS, Vitest, Docker.
 
 ---
 
