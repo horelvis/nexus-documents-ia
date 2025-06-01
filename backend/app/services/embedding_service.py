@@ -18,7 +18,7 @@ class EmbeddingService:
     def __init__(self, tenant_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         self.base_url = settings.OLLAMA_BASE_URL
-        self.model = settings.OLLAMA_MODEL
+        self.model = settings.EMBEDDING_MODEL  # Usar modelo específico para embeddings
         self.embedding_dim = 1536  # Dimensión del vector de embedding
         self.chunk_size = settings.CHUNK_SIZE
         self.chunk_overlap = settings.CHUNK_OVERLAP

@@ -67,7 +67,8 @@ class Settings(BaseSettings):
     
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "gemma3:27b-it-qat"  # Modelo por defecto
+    OLLAMA_MODEL: str = "gemma3:27b-it-qat"  # Modelo para chat/generación
+    EMBEDDING_MODEL: str = "nomic-embed-text"  # Modelo para embeddings
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto

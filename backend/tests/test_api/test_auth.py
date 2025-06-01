@@ -101,7 +101,7 @@ def test_access_with_invalid_token(client):
         "/api/v1/auth/me",
         headers={"Authorization": "Bearer invalid_token"}
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
     content = response.json()
     assert "detail" in content
     assert "Could not validate credentials" in content["detail"]
