@@ -14,8 +14,7 @@ services:
       - TESTING=true
       - SECRET_KEY=test-secret-key-never-use-in-production
       - GCS_BUCKET_NAME=test-bucket
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - EMBEDDING_MODEL=nomic-embed-text
+      - LANGCHAIN_SERVICE_URL=http://test-langchain-service:8001
       - QDRANT_HOST=test-qdrant
       - QDRANT_PORT=6333
       - REDIS_HOST=test-redis  
@@ -35,7 +34,9 @@ services:
       test-redis:
         condition: service_healthy
       test-qdrant:
-        condition: service_started # Esta línea ha sido cambiada
+        condition: service_started
+      test-langchain-service:
+        condition: service_healthy
     networks:
       - test-network
     volumes:
@@ -106,6 +107,29 @@ services:
       start_period: 20s   # Aumentado de 10s
     tmpfs:
       - /qdrant/storage:rw,noexec,nosuid,size=500m
+
+  # LangChain microservice for tests
+  test-langchain-service:
+    build:
+      context: ../langchain-service
+      dockerfile: Dockerfile
+    environment:
+      - QDRANT_HOST=test-qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=llama3.1
+      - EMBEDDING_MODEL=nomic-embed-text
+    networks:
+      - test-network
+    depends_on:
+      test-qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 networks:
   test-network:
