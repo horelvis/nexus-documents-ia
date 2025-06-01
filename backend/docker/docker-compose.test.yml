@@ -14,7 +14,7 @@ services:
       - TESTING=true
       - SECRET_KEY=test-secret-key-never-use-in-production
       - GCS_BUCKET_NAME=test-bucket
-      - OLLAMA_BASE_URL=http://localhost:11434
+      - OLLAMA_BASE_URL=http://192.168.1.52:11434
       - QDRANT_HOST=test-qdrant
       - QDRANT_PORT=6333
       - REDIS_HOST=test-redis  
