@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 import uuid
 
@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.main import app # Import your FastAPI app
 from app.db.base_class import Base
-from app.db.models import User, Tenant, Document
+from app.db.models import User, Tenant, Document, Tag
 from app.core.security import get_password_hash
 from app.api.dependencies import get_db, get_current_user, get_current_active_user, get_current_active_superuser
 from app.services.auth_service import AuthService
@@ -221,6 +221,26 @@ def test_documents(db_session, test_tenant, test_user):
 
 
 @pytest.fixture
+def test_tags(db_session, test_tenant):
+    """Create test tags"""
+    tags = []
+    tag_names = ["python", "fastapi", "testing", "documentation", "api"]
+    
+    for name in tag_names:
+        tag = Tag(
+            name=name,
+            tenant_id=test_tenant.id
+        )
+        tags.append(tag)
+        db_session.add(tag)
+    
+    db_session.commit()
+    for tag in tags:
+        db_session.refresh(tag)
+    return tags
+
+
+@pytest.fixture
 def normal_user_token_headers(test_user):
     """Create token headers for normal user"""
     # Override authentication dependencies to return the test user
@@ -285,7 +305,11 @@ def mock_embedding_service():
 def mock_llm_service():
     """Mock LLM service for tests"""
     mock = MagicMock()
-    mock.generate_response = AsyncMock(return_value="Mock answer from LLM service")
+    mock.generate_response = AsyncMock(return_value={
+        "answer": "Mock answer from LLM service",
+        "sources": [],
+        "confidence": 0.95
+    })
     mock.suggest_tags = AsyncMock(return_value=["tag1", "tag2", "tag3", "tag4", "tag5"])
     mock.extract_metadata = AsyncMock(return_value={
         "título": "Mock Title",
@@ -294,3 +318,86 @@ def mock_llm_service():
         "categoría": "Mock Category"
     })
     return mock
+
+
+@pytest.fixture
+def mock_vector_service():
+    """Mock vector service for tests"""
+    mock = MagicMock()
+    mock.search_similar = MagicMock(return_value=[
+        {
+            "document": {"id": "doc1", "title": "Test Doc 1", "content": "Mock content 1"},
+            "score": 0.95,
+            "matches": ["match1", "match2"]
+        },
+        {
+            "document": {"id": "doc2", "title": "Test Doc 2", "content": "Mock content 2"},
+            "score": 0.85,
+            "matches": ["match3", "match4"]
+        }
+    ])
+    mock.search_by_document_ids = MagicMock(return_value=[
+        {
+            "document": {"id": "doc1", "title": "Test Doc 1", "content": "Mock content 1"},
+            "score": 0.95,
+            "matches": ["match1", "match2"]
+        }
+    ])
+    mock.get_collection_info = MagicMock(return_value={"total_documents": 10, "total_vectors": 100})
+    return mock
+
+
+@pytest.fixture
+def mock_search_service():
+    """Mock search service for tests"""
+    mock = MagicMock()
+    mock.ask_documents = AsyncMock(return_value={
+        "answer": "Mock answer from search service",
+        "sources": [],
+        "confidence": 0.95
+    })
+    mock.chat_with_documents = AsyncMock(return_value={
+        "answer": "Mock answer from search service",
+        "sources": [],
+        "confidence": 0.95
+    })
+    mock.semantic_search = MagicMock(return_value=[
+        {
+            "document": {"id": "doc1", "title": "Test Doc 1", "content": "Mock content 1"},
+            "score": 0.95,
+            "matches": ["match1", "match2"]
+        }
+    ])
+    mock.search_documents = AsyncMock(return_value=[
+        {
+            "document": {"id": "doc1", "title": "Test Doc 1", "content": "Mock content 1"},
+            "score": 0.95,
+            "matches": ["match1", "match2"]
+        }
+    ])
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service, mock_search_service):
+    """Auto-patch services for all tests"""
+    with patch('app.services.search_service.LLMService') as mock_llm_class, \
+         patch('app.services.search_service.VectorService') as mock_vector_class, \
+         patch('app.services.llm_service.LLMService') as mock_llm_class2, \
+         patch('app.api.v1.chat.LLMService') as mock_llm_class3, \
+         patch('app.services.search_service.SearchService') as mock_search_class, \
+         patch('app.api.v1.search.SearchService') as mock_search_class2, \
+         patch('app.api.v1.chat.SearchService') as mock_search_class3, \
+         patch('app.services.llm_service.LLMService') as mock_llm_class4:
+        
+        # Configure the service classes to return our mocks
+        mock_llm_class.return_value = mock_llm_service
+        mock_vector_class.return_value = mock_vector_service
+        mock_llm_class2.return_value = mock_llm_service
+        mock_llm_class3.return_value = mock_llm_service
+        mock_llm_class4.return_value = mock_llm_service
+        mock_search_class.return_value = mock_search_service
+        mock_search_class2.return_value = mock_search_service
+        mock_search_class3.return_value = mock_search_service
+        
+        yield

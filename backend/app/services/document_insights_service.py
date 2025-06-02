@@ -2,20 +2,24 @@
 
 from app.ml.document_recommender import DocumentRecommender
 from sqlalchemy.sql import func, desc
-from app.db.database import get_db
+from app.db.database import SessionLocal
 from app.db.models import Document, document_views, DocumentMetrics, User
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DocumentInsightsService:
     def __init__(self, tenant_id, user_id=None):
         self.tenant_id = tenant_id
         self.user_id = user_id
-        self.db = get_db()
+        self.db = SessionLocal()
     
     def __del__(self):
-        self.db.close()
+        if hasattr(self, 'db'):
+            self.db.close()
     
     def get_trending_documents(self, limit: int = 10, time_period_days: int = 30) -> List[Dict[str, Any]]:
         """Obtiene los documentos con mayor interés en un periodo de tiempo"""
@@ -41,8 +45,8 @@ class DocumentInsightsService:
                 "description": doc.description,
                 "created_at": doc.created_at,
                 "updated_at": doc.updated_at,
-                "format": doc.format,
-                "size": doc.size,
+                "format": doc.file_type,
+                "size": doc.file_size,
                 "metrics": {
                     "view_count": metrics.view_count,
                     "download_count": metrics.download_count,
@@ -84,8 +88,8 @@ class DocumentInsightsService:
                 "description": doc.description,
                 "created_at": doc.created_at,
                 "updated_at": doc.updated_at,
-                "format": doc.format,
-                "size": doc.size,
+                "format": doc.file_type,
+                "size": doc.file_size,
                 "last_viewed_at": last_viewed_at
             })
         
@@ -113,8 +117,8 @@ class DocumentInsightsService:
                         "description": doc.description,
                         "created_at": doc.created_at,
                         "updated_at": doc.updated_at,
-                        "format": doc.format,
-                        "size": doc.size,
+                        "format": doc.file_type,
+                        "size": doc.file_size,
                         "reason": rec["reason"]
                     })
                 return results
@@ -128,3 +132,45 @@ class DocumentInsightsService:
             logger.error(f"Error al obtener recomendaciones: {str(e)}")
             # Fallback al método original si hay error
             return self._fallback_recommendations(limit)
+    
+    def _fallback_recommendations(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Método de respaldo para recomendaciones cuando ML no está disponible.
+        Devuelve documentos populares que el usuario no ha visto.
+        """
+        try:
+            # Obtener documentos que el usuario ha visto
+            user_viewed_docs = self.db.query(document_views.c.document_id)\
+                .filter(document_views.c.user_id == self.user_id)\
+                .subquery()
+            
+            # Obtener documentos populares no vistos por el usuario
+            documents = self.db.query(Document, DocumentMetrics)\
+                .join(DocumentMetrics, Document.id == DocumentMetrics.document_id)\
+                .filter(
+                    Document.tenant_id == self.tenant_id,
+                    Document.id.notin_(user_viewed_docs)
+                )\
+                .order_by(desc(DocumentMetrics.relevance_score))\
+                .limit(limit)\
+                .all()
+            
+            # Formatear resultados
+            results = []
+            for doc, metrics in documents:
+                results.append({
+                    "id": doc.id,
+                    "title": doc.title,
+                    "description": doc.description,
+                    "created_at": doc.created_at,
+                    "updated_at": doc.updated_at,
+                    "format": doc.file_type,
+                    "size": doc.file_size,
+                    "reason": f"Documento popular (puntuación: {metrics.relevance_score:.1f})"
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error en recomendaciones de respaldo: {str(e)}")
+            return []

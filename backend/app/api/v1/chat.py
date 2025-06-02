@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.schemas.document import ChatMessage
 from app.services.search_service import SearchService
+from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,7 +29,7 @@ async def chat_with_documents(
     # Convertir UUID a string si es necesario
     doc_ids = [str(doc_id) for doc_id in message.doc_ids] if message.doc_ids else None
     
-    result = search_service.ask_documents(
+    result = await search_service.ask_documents(
         question=message.question,
         doc_ids=doc_ids
     )
@@ -47,10 +48,8 @@ async def suggest_document_tags(
     """
     Sugiere etiquetas basadas en el contenido de texto proporcionado.
     """
-    from app.services.llm_service import LLMService
-    
     llm_service = LLMService()
-    suggested_tags = llm_service.suggest_tags(text, num_tags)
+    suggested_tags = await llm_service.suggest_tags(text, num_tags)
     
     return {"suggested_tags": suggested_tags}
 
@@ -65,9 +64,7 @@ async def extract_document_metadata(
     """
     Extrae metadatos estructurados del texto proporcionado.
     """
-    from app.services.llm_service import LLMService
-    
     llm_service = LLMService()
-    metadata = llm_service.extract_metadata(text)
+    metadata = await llm_service.extract_metadata(text)
     
     return {"metadata": metadata}

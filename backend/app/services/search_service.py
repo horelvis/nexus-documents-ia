@@ -148,6 +148,83 @@ class SearchService:
             logger.error(f"Error summarizing document: {str(e)}")
             return "Resumen no disponible."
     
+    async def ask_documents(
+        self, 
+        question: str, 
+        doc_ids: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Hace una pregunta sobre documentos específicos.
+        Alias para chat_with_documents para compatibilidad con API.
+        
+        Args:
+            question: Pregunta del usuario
+            doc_ids: Lista opcional de IDs de documentos para filtrar
+            
+        Returns:
+            Respuesta con fuentes
+        """
+        return await self.chat_with_documents(query=question, doc_ids=doc_ids)
+    
+    def semantic_search(
+        self, 
+        query: str, 
+        limit: int = 10,
+        filters: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Realiza búsqueda semántica en los documentos.
+        Versión síncrona que envuelve search_documents para compatibilidad con API.
+        
+        Args:
+            query: Consulta de búsqueda
+            limit: Número máximo de resultados
+            filters: Filtros adicionales (tags, fechas, etc.)
+            
+        Returns:
+            Lista de documentos similares con puntuaciones
+        """
+        try:
+            logger.debug(f"Semantic search for query: {query[:100]}...")
+            
+            # Por ahora, llamamos directamente al método síncrono del vector_service
+            # En el futuro, se puede agregar lógica de filtros adicionales aquí
+            if filters:
+                # Aplicar filtros si están presentes
+                doc_ids = filters.get('doc_ids')
+                if doc_ids:
+                    results = self.vector_service.search_by_document_ids(
+                        doc_ids=doc_ids,
+                        query=query,
+                        limit=limit
+                    )
+                else:
+                    results = self.vector_service.search_similar(
+                        query=query,
+                        limit=limit
+                    )
+            else:
+                results = self.vector_service.search_similar(
+                    query=query,
+                    limit=limit
+                )
+            
+            # Formatear resultados para que coincidan con la estructura esperada por los tests
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "document": result.get("document", {}),
+                    "score": result.get("score", 0.0),
+                    "matches": result.get("matches", [])
+                })
+            
+            logger.debug(f"Found {len(formatted_results)} semantic search results")
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Error in semantic search: {str(e)}")
+            return []
+
     def get_vector_store_info(self) -> Dict[str, Any]:
         """
         Obtiene información del vector store.

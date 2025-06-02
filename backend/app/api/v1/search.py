@@ -56,7 +56,7 @@ async def ask_documents(
     # Convertir UUID a string si es necesario
     doc_ids = [str(doc_id) for doc_id in message.doc_ids] if message.doc_ids else None
     
-    result = search_service.ask_documents(
+    result = await search_service.ask_documents(
         question=message.question,
         doc_ids=doc_ids
     )
