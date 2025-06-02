@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     # Temporary API Key for basic auth during development
     API_KEY: str = "your_secret_api_key_here" # Default value, should be overridden by env var
     
+    # Storage Microservice
+    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
+    STORAGE_API_KEY: str = os.getenv("STORAGE_API_KEY", "your-secret-api-key-here")
+    
     class Config:
         case_sensitive = True
         env_file = ".env"

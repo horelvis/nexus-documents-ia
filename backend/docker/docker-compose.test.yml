@@ -28,6 +28,9 @@ services:
       - GCS_BUCKET_NAME=test-docs-eu  # ← Nombre que indique región
       - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
       - GCS_REGION=europe-west1  # ← Agregar variable de región
+      # Storage microservice configuration
+      - STORAGE_SERVICE_URL=http://test-storage-service:8001
+      - STORAGE_API_KEY=test-storage-api-key-12345
     depends_on:
       test-db:
         condition: service_healthy
@@ -38,6 +41,8 @@ services:
       test-ollama-service:
         condition: service_healthy
       test-langchain-service:
+        condition: service_healthy
+      test-storage-service:
         condition: service_healthy
     networks:
       - test-network
@@ -149,6 +154,32 @@ services:
         condition: service_started
       test-ollama-service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Storage microservice for tests
+  test-storage-service:
+    build:
+      context: ../microservices/storage-service
+      dockerfile: Dockerfile
+    environment:
+      - STORAGE_API_KEY=test-storage-api-key-12345
+      - GCS_PROJECT_ID=tu-project-id
+      - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
+      - GCS_BUCKET_NAME=test-docs-eu
+      - SIGNED_URL_EXPIRATION=3600
+      - MAX_UPLOAD_SIZE=104857600
+      - RATE_LIMIT_PER_MINUTE=100  # Más permisivo para tests
+      - DEBUG=true
+      - TESTING=true
+    networks:
+      - test-network
+    volumes:
+      - ../credentials:/app/credentials:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s

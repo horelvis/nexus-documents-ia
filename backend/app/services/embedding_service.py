@@ -1,6 +1,7 @@
 """
 Embedding Service using LangChain microservice HTTP client
 """
+import asyncio
 import logging
 from typing import List, Dict, Any
 from app.core.config import settings
@@ -56,7 +57,7 @@ class EmbeddingService:
             logger.error(f"Error generating embedding: {str(e)}")
             raise
     
-    async def chunk_text(self, text: str) -> List[Dict[str, Any]]:
+    async def chunk_text_async(self, text: str) -> List[Dict[str, Any]]:
         """
         Divide texto en chunks usando el microservicio LangChain.
         
@@ -76,7 +77,7 @@ class EmbeddingService:
             logger.error(f"Error chunking text: {str(e)}")
             raise
     
-    async def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any] = None) -> bool:
+    async def add_document_async(self, doc_id: str, text: str, metadata: Dict[str, Any] = None) -> bool:
         """
         Procesa y añade un documento al vector store.
         
@@ -90,7 +91,7 @@ class EmbeddingService:
         """
         try:
             # Chunking del texto
-            chunks_data = await self.chunk_text(text)
+            chunks_data = await self.chunk_text_async(text)
             
             # Preparar textos y metadatos para vectorización
             chunk_texts = [chunk["text"] for chunk in chunks_data]
@@ -146,3 +147,55 @@ class EmbeddingService:
         except Exception as e:
             logger.error(f"Error searching similar documents: {str(e)}")
             return []
+    
+    async def delete_document_async(self, doc_id: str) -> bool:
+        """
+        Elimina un documento del vector store.
+        
+        Args:
+            doc_id: ID del documento a eliminar
+            
+        Returns:
+            True si fue exitoso, False en caso contrario
+        """
+        try:
+            logger.debug(f"Deleting document {doc_id} from vector store")
+            
+            async with LangChainClient() as client:
+                success = await client.delete_document(self.tenant_id, doc_id)
+            
+            if success:
+                logger.info(f"Document {doc_id} deleted successfully from vector store")
+            else:
+                logger.error(f"Failed to delete document {doc_id} from vector store")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error deleting document {doc_id}: {str(e)}")
+            return False
+    
+    # Métodos síncronos para compatibilidad con DocumentService
+    def chunk_text(self, text: str) -> List[Dict[str, Any]]:
+        """Versión síncrona de chunk_text"""
+        try:
+            return asyncio.run(self.chunk_text_async(text))
+        except Exception as e:
+            logger.error(f"Error in sync chunk_text: {str(e)}")
+            return []
+    
+    def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any] = None) -> bool:
+        """Versión síncrona de add_document"""
+        try:
+            return asyncio.run(self.add_document_async(doc_id, text, metadata))
+        except Exception as e:
+            logger.error(f"Error in sync add_document: {str(e)}")
+            return False
+    
+    def delete_document(self, doc_id: str) -> bool:
+        """Versión síncrona de delete_document"""
+        try:
+            return asyncio.run(self.delete_document_async(doc_id))
+        except Exception as e:
+            logger.error(f"Error in sync delete_document: {str(e)}")
+            return False

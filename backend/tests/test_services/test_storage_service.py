@@ -190,3 +190,109 @@ def test_list_files(monkeypatch):
     assert "size" in files[0]
     assert "updated" in files[0]
     assert "test/file1.txt" in files[0]["name"] or "test/file2.txt" in files[0]["name"] or "test/subfolder/file3.txt" in files[0]["name"]
+
+
+# Tests con storage service real (requieren credenciales GCS)
+class TestRealStorageService:
+    """Tests que usan el storage service real con bucket de test"""
+    
+    def test_real_upload_and_download(self, real_storage_service):
+        """Test completo de subida y descarga con GCS real"""
+        # Contenido de prueba
+        test_content = b"Este es un archivo de prueba para verificar el storage real"
+        test_file = io.BytesIO(test_content)
+        object_name = "test-files/test-upload.txt"
+        
+        # Subir archivo
+        upload_result = real_storage_service.upload_file(
+            file=test_file,
+            object_name=object_name,
+            metadata={"test": "true", "purpose": "integration-test"}
+        )
+        
+        assert upload_result is True, "La subida debe ser exitosa"
+        
+        # Descargar archivo
+        downloaded_content = real_storage_service.download_file(object_name)
+        
+        assert downloaded_content == test_content, "El contenido descargado debe coincidir"
+        
+        # Verificar que el archivo existe en la lista
+        files = real_storage_service.list_files(prefix="test-files/")
+        file_names = [f["name"] for f in files]
+        
+        assert object_name in file_names, "El archivo debe aparecer en la lista"
+    
+    def test_real_delete_file(self, real_storage_service):
+        """Test de eliminación con GCS real"""
+        # Subir archivo para luego eliminarlo
+        test_content = b"Archivo temporal para test de eliminacion"
+        test_file = io.BytesIO(test_content)
+        object_name = "test-files/temp-delete.txt"
+        
+        # Subir
+        upload_result = real_storage_service.upload_file(test_file, object_name)
+        assert upload_result is True
+        
+        # Verificar que existe
+        downloaded_content = real_storage_service.download_file(object_name)
+        assert downloaded_content == test_content
+        
+        # Eliminar
+        delete_result = real_storage_service.delete_file(object_name)
+        assert delete_result is True, "La eliminación debe ser exitosa"
+        
+        # Verificar que ya no existe
+        downloaded_content_after = real_storage_service.download_file(object_name)
+        assert downloaded_content_after is None, "El archivo no debe existir después de eliminarlo"
+    
+    def test_real_signed_urls(self, real_storage_service):
+        """Test de URLs firmadas con GCS real"""
+        # Subir archivo primero
+        test_content = b"Contenido para test de URLs firmadas"
+        test_file = io.BytesIO(test_content)
+        object_name = "test-files/signed-url-test.txt"
+        
+        upload_result = real_storage_service.upload_file(test_file, object_name)
+        assert upload_result is True
+        
+        # Generar URL firmada de descarga
+        download_url, expires_at = real_storage_service.generate_download_signed_url(object_name)
+        
+        assert isinstance(download_url, str)
+        assert download_url.startswith("https://")
+        assert "storage.googleapis.com" in download_url or "storage.cloud.google.com" in download_url
+        assert isinstance(expires_at, datetime)
+        assert expires_at > datetime.utcnow()
+        
+        # Generar URL firmada de subida
+        upload_url, upload_expires_at = real_storage_service.generate_upload_signed_url(
+            object_name="test-files/new-upload.txt",
+            content_type="text/plain"
+        )
+        
+        assert isinstance(upload_url, str)
+        assert upload_url.startswith("https://")
+        assert isinstance(upload_expires_at, datetime)
+        assert upload_expires_at > datetime.utcnow()
+    
+    def test_real_bucket_cleanup(self, real_storage_service_with_cleanup):
+        """Test que verifica el funcionamiento del cleanup del bucket"""
+        # Subir varios archivos
+        test_files = [
+            ("test-cleanup/file1.txt", b"Contenido 1"),
+            ("test-cleanup/file2.txt", b"Contenido 2"),
+            ("test-cleanup/subdir/file3.txt", b"Contenido 3"),
+        ]
+        
+        for object_name, content in test_files:
+            test_file = io.BytesIO(content)
+            result = real_storage_service_with_cleanup.upload_file(test_file, object_name)
+            assert result is True, f"Falló subir {object_name}"
+        
+        # Verificar que los archivos existen
+        files_before = real_storage_service_with_cleanup.list_files(prefix="test-cleanup/")
+        assert len(files_before) >= 3, "Deben existir al menos 3 archivos"
+        
+        # El cleanup se ejecutará automáticamente cuando termine el test
+        # debido al fixture real_storage_service_with_cleanup

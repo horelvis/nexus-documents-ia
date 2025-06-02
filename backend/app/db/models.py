@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint, Index
@@ -51,7 +51,7 @@ class RoleAssignmentAudit(Base):
     assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     reason = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     user = relationship("User", foreign_keys=[user_id])
     role = relationship("Role")
@@ -76,7 +76,7 @@ class PermissionAssignmentAudit(Base):
     assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     reason = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     role = relationship("Role")
     permission = relationship("Permission")
@@ -101,7 +101,7 @@ class DocumentTagAudit(Base):
     tagged_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     reason = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     document = relationship("Document")
     tag = relationship("Tag")
@@ -133,8 +133,8 @@ class User(Base):
     last_login_at = Column(DateTime, nullable=True)
     email_verified_at = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relaciones
     tenant = relationship("Tenant", back_populates="users")
@@ -163,8 +163,8 @@ class UserImage(Base):
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="image")
 
@@ -178,8 +178,8 @@ class Role(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
     is_system_role = Column(Boolean, default=False, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     users = relationship("User", secondary=user_roles, back_populates="roles")
     permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
@@ -201,8 +201,8 @@ class Permission(Base):
     resource_id = Column(String(255), nullable=True)
     conditions = Column(JSONB, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     roles = relationship("Role", secondary=role_permissions, back_populates="permissions")
 
@@ -224,8 +224,8 @@ class Tenant(Base):
     max_users = Column(Integer, nullable=True)
     max_storage_mb = Column(Integer, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     users = relationship("User", back_populates="tenant")
     documents = relationship("Document", back_populates="tenant")
@@ -257,8 +257,8 @@ class Document(Base):
     indexed = Column(Integer, default=0, nullable=False)
     indexing_error = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     tenant = relationship("Tenant", back_populates="documents")
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_documents")
@@ -283,7 +283,7 @@ class Document(Base):
         setattr(self.metrics, metric_name, current_value + amount)
         
         if metric_name == "view_count":
-            self.metrics.last_viewed_at = func.now()
+            self.metrics.last_viewed_at = datetime.now(timezone.utc)
         
         self._update_relevance_score()
         
@@ -321,7 +321,7 @@ class DocumentView(Base):
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     
-    viewed_at = Column(DateTime, default=func.now, nullable=False)
+    viewed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     view_duration_seconds = Column(Integer, nullable=True)
     is_complete_view = Column(Boolean, default=False, nullable=False)
     ip_address = Column(String(45), nullable=True)
@@ -329,8 +329,8 @@ class DocumentView(Base):
     page_views = Column(Integer, default=1, nullable=False)
     scroll_percentage = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     user = relationship("User", back_populates="document_views")
     document = relationship("Document", back_populates="views")
@@ -355,7 +355,7 @@ class DocumentChunk(Base):
     word_count = Column(Integer, nullable=True)
     char_count = Column(Integer, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     document = relationship("Document", back_populates="chunks")
     
@@ -374,7 +374,7 @@ class Tag(Base):
     color = Column(String(7), nullable=True)
     description = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     tenant = relationship("Tenant", back_populates="tags")
     documents = relationship("Document", secondary=document_tags, back_populates="tags")
@@ -400,8 +400,8 @@ class DocumentMetrics(Base):
     relevance_score = Column(Float, default=0.0, nullable=False)
     last_viewed_at = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     document = relationship("Document", back_populates="metrics")
     tenant = relationship("Tenant")
@@ -428,8 +428,8 @@ class Plan(Base):
     features = Column(JSONB, nullable=False, default={})
     is_active = Column(Boolean, default=True, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     prices = relationship("Price", back_populates="plan", cascade="all, delete-orphan")
     subscriptions = relationship("Subscription", back_populates="plan")
@@ -446,8 +446,8 @@ class Price(Base):
     stripe_price_id = Column(String(255), nullable=True, unique=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     plan = relationship("Plan", back_populates="prices")
     subscriptions = relationship("Subscription", back_populates="price")
@@ -470,8 +470,8 @@ class Subscription(Base):
     cancel_at_period_end = Column(Boolean, default=False, nullable=False)
     stripe_subscription_id = Column(String(255), nullable=True, unique=True)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="subscription")
     plan = relationship("Plan", back_populates="subscriptions")
@@ -501,8 +501,8 @@ class Agent(Base):
     is_public = Column(Boolean, default=False, nullable=False)
     version = Column(Integer, default=1, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     tenant = relationship("Tenant")
     creator = relationship("User")
@@ -527,8 +527,8 @@ class AgentConversation(Base):
     context = Column(JSONB, nullable=False, default={})
     is_active = Column(Boolean, default=True, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     agent = relationship("Agent", back_populates="conversations")
     user = relationship("User", back_populates="agent_conversations")
@@ -551,7 +551,7 @@ class AgentMessage(Base):
     message_metadata = Column(JSONB, nullable=False, default={})
     sequence_number = Column(Integer, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     conversation = relationship("AgentConversation", back_populates="messages")
     
@@ -576,7 +576,7 @@ class AgentExecution(Base):
     error_message = Column(Text, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
     
-    started_at = Column(DateTime, default=func.now, nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(DateTime, nullable=True)
     
     agent = relationship("Agent", back_populates="executions")
@@ -602,8 +602,8 @@ class AgentTool(Base):
     is_tenant_specific = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index('idx_agent_tools_type_active', 'tool_type', 'is_active'),
@@ -626,8 +626,8 @@ class SignatureProvider(Base):
     is_default = Column(Boolean, default=False)
     configuration = Column(JSONB, nullable=False, default={})
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
-    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     tenant = relationship("Tenant")
     signature_requests = relationship("SignatureRequest", back_populates="provider")
@@ -657,7 +657,7 @@ class SignatureRequest(Base):
     error_url = Column(String(500), nullable=True)
     request_metadata = Column(JSONB, nullable=False, default={})
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     sent_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
@@ -701,6 +701,6 @@ class SignatureEvent(Base):
     description = Column(Text, nullable=True)
     event_data = Column(JSONB, nullable=False, default={})
     
-    created_at = Column(DateTime, default=func.now, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     request = relationship("SignatureRequest", back_populates="events")

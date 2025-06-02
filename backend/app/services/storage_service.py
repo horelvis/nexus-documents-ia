@@ -27,15 +27,7 @@ class StorageService:
         
         # Inicializar cliente GCS
         import os
-        if os.getenv("TESTING") == "true":
-            # En entorno de testing, usar credenciales por defecto sin archivo
-            try:
-                self.client = storage.Client(project=settings.GCS_PROJECT_ID)
-            except Exception as e:
-                logger.warning(f"No se pudo inicializar GCS en testing, usando cliente mock: {e}")
-                # Si falla, crear un cliente básico para testing
-                self.client = None
-        elif settings.GCS_CREDENTIALS and os.path.exists(settings.GCS_CREDENTIALS):
+        if settings.GCS_CREDENTIALS and os.path.exists(settings.GCS_CREDENTIALS):
             # Usar credenciales explícitas si están configuradas y el archivo existe
             credentials = service_account.Credentials.from_service_account_file(
                 settings.GCS_CREDENTIALS
@@ -46,23 +38,22 @@ class StorageService:
             )
         else:
             # Usar credenciales por defecto del entorno
-            self.client = storage.Client()
+            self.client = storage.Client(project=settings.GCS_PROJECT_ID)
         
-        # Obtener o crear bucket
-        self.bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"
+        # Determinar nombre del bucket (añadir sufijo -test en modo testing)
+        base_bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"
+        if os.getenv("TESTING") == "true":
+            self.bucket_name = f"{base_bucket_name}-test"
+        else:
+            self.bucket_name = base_bucket_name
+            
         self._ensure_bucket_exists()
     
     def _ensure_bucket_exists(self):
         """Asegura que el bucket exista, creándolo si es necesario"""
-        import os
-        if os.getenv("TESTING") == "true" and self.client is None:
-            # En testing sin cliente GCS real, crear un bucket mock
-            logger.info(f"Testing mode: using mock bucket {self.bucket_name}")
-            self.bucket = None
-            return
-            
         try:
             self.bucket = self.client.get_bucket(self.bucket_name)
+            logger.info(f"Bucket {self.bucket_name} encontrado")
         except Exception as e:
             logger.info(f"Bucket {self.bucket_name} no encontrado, creando...")
             # Crear bucket con ubicación europe-west1
@@ -89,13 +80,8 @@ class StorageService:
         Returns:
             Tuple con la URL firmada y la fecha de expiración
         """
-        import os
         expiration = expiration or settings.SIGNED_URL_EXPIRATION
         expires_at = datetime.utcnow() + timedelta(seconds=expiration)
-        
-        # En modo testing, devolver URL mock
-        if os.getenv("TESTING") == "true" and self.bucket is None:
-            return f"https://mock-storage.googleapis.com/upload/{object_name}", expires_at
         
         blob = self.bucket.blob(object_name)
         
@@ -123,13 +109,8 @@ class StorageService:
         Returns:
             Tuple con la URL firmada y la fecha de expiración
         """
-        import os
         expiration = expiration or settings.SIGNED_URL_EXPIRATION
         expires_at = datetime.utcnow() + timedelta(seconds=expiration)
-        
-        # En modo testing, devolver URL mock
-        if os.getenv("TESTING") == "true" and self.bucket is None:
-            return f"https://mock-storage.googleapis.com/download/{object_name}", expires_at
         
         blob = self.bucket.blob(object_name)
         
@@ -270,3 +251,70 @@ class StorageService:
         except Exception as e:
             logger.exception(f"Error al listar archivos con prefijo {prefix}: {str(e)}")
             return []
+    
+    def cleanup_test_bucket(self) -> bool:
+        """
+        Limpia completamente el bucket de test eliminando todos los archivos.
+        Solo funciona si el bucket tiene el sufijo '-test'.
+        
+        Returns:
+            True si se limpió correctamente, False en caso contrario
+        """
+        import os
+        if not self.bucket_name.endswith("-test"):
+            logger.warning(f"Intento de limpiar bucket no-test: {self.bucket_name}")
+            return False
+            
+        if os.getenv("TESTING") != "true":
+            logger.warning("cleanup_test_bucket solo debe ejecutarse en modo testing")
+            return False
+            
+        try:
+            # Listar y eliminar todos los archivos
+            blobs = list(self.bucket.list_blobs())
+            
+            if not blobs:
+                logger.info(f"Bucket {self.bucket_name} ya está vacío")
+                return True
+                
+            # Eliminar todos los archivos
+            for blob in blobs:
+                blob.delete()
+                logger.debug(f"Eliminado: {blob.name}")
+                
+            logger.info(f"Bucket de test {self.bucket_name} limpiado ({len(blobs)} archivos eliminados)")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Error al limpiar bucket de test {self.bucket_name}: {str(e)}")
+            return False
+    
+    def delete_test_bucket(self) -> bool:
+        """
+        Elimina completamente el bucket de test.
+        Solo funciona si el bucket tiene el sufijo '-test' y está en modo testing.
+        
+        Returns:
+            True si se eliminó correctamente, False en caso contrario
+        """
+        import os
+        if not self.bucket_name.endswith("-test"):
+            logger.warning(f"Intento de eliminar bucket no-test: {self.bucket_name}")
+            return False
+            
+        if os.getenv("TESTING") != "true":
+            logger.warning("delete_test_bucket solo debe ejecutarse en modo testing")
+            return False
+            
+        try:
+            # Primero limpiar todos los archivos
+            self.cleanup_test_bucket()
+            
+            # Luego eliminar el bucket
+            self.bucket.delete()
+            logger.info(f"Bucket de test {self.bucket_name} eliminado completamente")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Error al eliminar bucket de test {self.bucket_name}: {str(e)}")
+            return False
