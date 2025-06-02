@@ -196,28 +196,51 @@ def test_superuser(db_session, test_tenant):
 
 @pytest.fixture
 def test_documents(db_session, test_tenant, test_user):
-    """Create test documents"""
-    documents = []
-    for i in range(3):
-        doc = Document(
-            id=uuid.uuid4(),
-            title=f"Test Document {i+1}",
-            description=f"Description for test document {i+1}",
-            filename=f"test_doc_{i+1}.pdf",
-            file_path=f"/path/to/test_doc_{i+1}.pdf",
-            file_type="application/pdf",
-            file_size=1024 * (i+1),
-            tenant_id=test_tenant.id,
-            created_by=test_user.id,
-            indexed=1
-        )
-        documents.append(doc)
-        db_session.add(doc)
+    """Create test documents with real temporary files"""
+    import tempfile
+    import os
     
-    db_session.commit()
-    for doc in documents:
-        db_session.refresh(doc)
-    return documents
+    documents = []
+    temp_files = []
+    
+    try:
+        for i in range(3):
+            # Create a temporary file with some content
+            temp_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.pdf', delete=False)
+            content = f"This is test document {i+1} content for testing purposes."
+            temp_file.write(content)
+            temp_file.close()
+            temp_files.append(temp_file.name)
+            
+            doc = Document(
+                id=uuid.uuid4(),
+                title=f"Test Document {i+1}",
+                description=f"Description for test document {i+1}",
+                filename=f"test_doc_{i+1}.pdf",
+                file_path=temp_file.name,
+                file_type="application/pdf",
+                file_size=len(content.encode('utf-8')),
+                tenant_id=test_tenant.id,
+                created_by=test_user.id,
+                indexed=1
+            )
+            documents.append(doc)
+            db_session.add(doc)
+        
+        db_session.commit()
+        for doc in documents:
+            db_session.refresh(doc)
+        
+        yield documents
+        
+    finally:
+        # Clean up temporary files
+        for temp_file_path in temp_files:
+            try:
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+            except Exception:
+                pass
 
 
 @pytest.fixture
@@ -378,8 +401,42 @@ def mock_search_service():
     return mock
 
 
+@pytest.fixture
+def mock_storage_service():
+    """Mock storage service for tests"""
+    mock = MagicMock()
+    mock.upload_file = AsyncMock(return_value={
+        "file_path": "/mock/path/test_file.pdf",
+        "file_size": 1024,
+        "content_type": "application/pdf"
+    })
+    mock.download_file = AsyncMock(return_value=b"Mock file content")
+    mock.delete_file = AsyncMock(return_value=True)
+    mock.file_exists = MagicMock(return_value=True)
+    mock.get_file_info = MagicMock(return_value={
+        "size": 1024,
+        "content_type": "application/pdf",
+        "last_modified": datetime.now()
+    })
+    return mock
+
+
+@pytest.fixture
+def mock_document_service():
+    """Mock document service for tests"""
+    mock = MagicMock()
+    mock.process_document = AsyncMock(return_value={
+        "status": "processed",
+        "chunks": 10,
+        "embedding_id": "mock_embedding_123"
+    })
+    mock.extract_text = AsyncMock(return_value="Mock extracted text content")
+    mock.get_document_content = AsyncMock(return_value="Mock document content")
+    return mock
+
+
 @pytest.fixture(autouse=True)
-def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service, mock_search_service):
+def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service, mock_search_service, mock_storage_service, mock_document_service):
     """Auto-patch services for all tests"""
     with patch('app.services.search_service.LLMService') as mock_llm_class, \
          patch('app.services.search_service.VectorService') as mock_vector_class, \
@@ -388,7 +445,9 @@ def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service
          patch('app.services.search_service.SearchService') as mock_search_class, \
          patch('app.api.v1.search.SearchService') as mock_search_class2, \
          patch('app.api.v1.chat.SearchService') as mock_search_class3, \
-         patch('app.services.llm_service.LLMService') as mock_llm_class4:
+         patch('app.services.llm_service.LLMService') as mock_llm_class4, \
+         patch('app.services.storage_service.StorageService') as mock_storage_class, \
+         patch('app.services.document_service.DocumentService') as mock_document_class:
         
         # Configure the service classes to return our mocks
         mock_llm_class.return_value = mock_llm_service
@@ -399,5 +458,7 @@ def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service
         mock_search_class.return_value = mock_search_service
         mock_search_class2.return_value = mock_search_service
         mock_search_class3.return_value = mock_search_service
+        mock_storage_class.return_value = mock_storage_service
+        mock_document_class.return_value = mock_document_service
         
         yield
