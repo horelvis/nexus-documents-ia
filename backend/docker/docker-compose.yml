@@ -107,7 +107,7 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - OLLAMA_BASE_URL=http://ollama-service:11434
-      - OLLAMA_MODEL=llama3.1
+      - OLLAMA_MODEL=llama3.1:8b
       - EMBEDDING_MODEL=nomic-embed-text
     restart: unless-stopped
     healthcheck:
@@ -134,7 +134,16 @@ services:
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_PORT=11434
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=3
       - PYTHONPATH=/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

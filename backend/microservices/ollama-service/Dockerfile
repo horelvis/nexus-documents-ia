@@ -29,16 +29,30 @@ EXPOSE 11434 8000
 
 # Create startup script
 RUN echo '#!/bin/bash\n\
+# Set environment for GPU detection\n\
+export NVIDIA_VISIBLE_DEVICES=all\n\
+export NVIDIA_DRIVER_CAPABILITIES=compute,utility\n\
+\n\
 # Start Ollama server in background\n\
 ollama serve &\n\
+\n\
 # Wait for Ollama to be ready\n\
-sleep 5\n\
-# Pull default models if they do not exist\n\
-if [ ! -d "/root/.ollama/models" ]; then\n\
-    echo "Pulling default models..."\n\
-    ollama pull llama3.2:3b\n\
-    ollama pull codellama:7b\n\
+echo "Waiting for Ollama to start..."\n\
+sleep 10\n\
+\n\
+# Pull optimized models for your hardware\n\
+if [ ! -d "/root/.ollama/models" ] || [ -z "$(ls -A /root/.ollama/models 2>/dev/null)" ]; then\n\
+    echo "Pulling optimized models for high-end hardware..."\n\
+    # Larger, more capable models for 64GB RAM + 42GB VRAM\n\
+    ollama pull llama3.1:8b\n\
+    ollama pull codellama:13b\n\
+    ollama pull mistral:7b\n\
+    ollama pull nomic-embed-text\n\
+    echo "Models downloaded successfully"\n\
+else\n\
+    echo "Models already exist, skipping download"\n\
 fi\n\
+\n\
 # Start the Python API wrapper\n\
 python -m app.main\n\
 ' > /app/start.sh && chmod +x /app/start.sh

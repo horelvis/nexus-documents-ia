@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     OLLAMA_PORT: int = 11434
     OLLAMA_BASE_URL: str = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
     
-    # Default models to load
-    DEFAULT_MODELS: List[str] = ["llama3.2:3b", "codellama:7b"]
+    # Default models to load (optimized for high-end hardware)
+    DEFAULT_MODELS: List[str] = ["llama3.1:8b", "codellama:13b", "mistral:7b", "nomic-embed-text"]
     
     # API configuration
     API_HOST: str = "0.0.0.0"
