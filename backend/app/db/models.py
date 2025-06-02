@@ -18,28 +18,101 @@ user_roles = Table(
     "user_roles",
     Base.metadata,
     Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True),
-    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
-    Column("assigned_at", DateTime, default=func.now, nullable=False),
-    Column("assigned_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True)
 )
 
 role_permissions = Table(
     "role_permissions",
     Base.metadata,
     Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
-    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True),
-    Column("assigned_at", DateTime, default=func.now, nullable=False),
-    Column("assigned_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True)
 )
 
 document_tags = Table(
     "document_tags",
     Base.metadata,
     Column("document_id", UUID(as_uuid=True), ForeignKey("documents.id"), primary_key=True),
-    Column("tag_id", Integer, ForeignKey("tags.id"), primary_key=True),
-    Column("tagged_at", DateTime, default=func.now, nullable=False),
-    Column("tagged_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    Column("tag_id", Integer, ForeignKey("tags.id"), primary_key=True)
 )
+
+# =====================================
+# TABLAS DE AUDITORÍA SEPARADAS
+# =====================================
+
+class RoleAssignmentAudit(Base):
+    """Auditoría de asignaciones/remociones de roles"""
+    __tablename__ = "role_assignment_audits"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    action = Column(String(20), nullable=False, index=True)  # 'assigned', 'removed'
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    
+    user = relationship("User", foreign_keys=[user_id])
+    role = relationship("Role")
+    assigner = relationship("User", foreign_keys=[assigned_by])
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_role_audits_user_action', 'user_id', 'action'),
+        Index('idx_role_audits_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+
+class PermissionAssignmentAudit(Base):
+    """Auditoría de asignaciones/remociones de permisos a roles"""
+    __tablename__ = "permission_assignment_audits"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False, index=True)
+    permission_id = Column(UUID(as_uuid=True), ForeignKey("permissions.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
+    action = Column(String(20), nullable=False, index=True)  # 'assigned', 'removed'
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    
+    role = relationship("Role")
+    permission = relationship("Permission")
+    assigner = relationship("User")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_permission_audits_role_action', 'role_id', 'action'),
+        Index('idx_permission_audits_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+
+class DocumentTagAudit(Base):
+    """Auditoría de asignaciones/remociones de tags a documentos"""
+    __tablename__ = "document_tag_audits"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, index=True)
+    tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    action = Column(String(20), nullable=False, index=True)  # 'tagged', 'untagged'
+    tagged_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    
+    document = relationship("Document")
+    tag = relationship("Tag")
+    tagger = relationship("User")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_tag_audits_document_action', 'document_id', 'action'),
+        Index('idx_tag_audits_tenant_created', 'tenant_id', 'created_at'),
+    )
+
 
 # =====================================
 # MODELOS PRINCIPALES
