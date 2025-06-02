@@ -9,6 +9,8 @@ from app.schemas.document import (
 )
 from app.services.document_service import DocumentService
 import logging
+from sqlalchemy.orm import Session
+from app.db.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
