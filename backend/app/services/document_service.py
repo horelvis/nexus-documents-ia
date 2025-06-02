@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.db.models import Document, DocumentChunk, Tag
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
-from app.services.storage_service import StorageService
+from app.services.storage_factory import StorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
 
@@ -51,7 +51,7 @@ class DocumentService:
             self.tenant_id = tenant_id
             
         self.user_id = user_id
-        self.storage_service = StorageService(self.tenant_id)
+        self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, self.user_id)
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.llm_service = LLMService()
 

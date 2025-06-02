@@ -473,8 +473,8 @@ def real_storage_service(test_tenant):
     import os
     os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
     
-    from app.services.storage_service import StorageService
-    storage = StorageService(tenant_id=str(test_tenant.id))
+    from app.services.storage_factory import StorageServiceFactory
+    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
     
     yield storage
     
@@ -494,8 +494,8 @@ def real_storage_service_with_cleanup(test_tenant):
     import os
     os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
     
-    from app.services.storage_service import StorageService
-    storage = StorageService(tenant_id=str(test_tenant.id))
+    from app.services.storage_factory import StorageServiceFactory
+    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
     
     yield storage
     
@@ -504,3 +504,28 @@ def real_storage_service_with_cleanup(test_tenant):
         storage.delete_test_bucket()
     except Exception as e:
         print(f"Warning: No se pudo eliminar bucket de test: {e}")
+
+
+@pytest.fixture
+def mock_storage_service(test_tenant):
+    """
+    Fixture para usar el MockStorageService en tests.
+    """
+    import os
+    os.environ["TESTING"] = "true"
+    os.environ["USE_MOCK_STORAGE"] = "true"
+    
+    from app.services.storage_factory import StorageServiceFactory
+    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
+    
+    yield storage
+    
+    # Cleanup
+    try:
+        storage.cleanup_test_bucket()
+    except Exception:
+        pass
+    
+    # Reset environment
+    if "USE_MOCK_STORAGE" in os.environ:
+        del os.environ["USE_MOCK_STORAGE"]

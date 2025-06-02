@@ -12,6 +12,7 @@ services:
       - qdrant
       - langchain-service
       - ollama-service
+      - storage-service
     networks:
       - backend-network
     volumes:
@@ -150,6 +151,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  # Storage Microservice
+  storage-service:
+    build:
+      context: ../microservices/storage-service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8001"
+    networks:
+      - backend-network
+    environment:
+      - STORAGE_API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS=${GCS_CREDENTIALS}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-nexus-documents}
+      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-104857600}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
+      - DEBUG=${DEBUG:-false}
+      - TESTING=${TESTING:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   backend-network:
