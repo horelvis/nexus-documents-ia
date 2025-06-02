@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     
     # LangChain Microservice
     LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
+
+    # Ollama
+    OLLAMA_BASE_URL: str = "http://ollama-service:11434"
+    OLLAMA_MODEL: str = "llama3.2"
+    EMBEDDING_MODEL: str = "nomic-embed-text"
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
