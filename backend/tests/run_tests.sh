@@ -136,7 +136,7 @@ show_progress() {
     local percentage=0
     
     while [ $current -le $total ]; do
-        percentage=$((current * 100 / total))
+        percentage=$((current))
         filled=$((current * width / total))
         
         printf "\r${BLUE}Progreso: ["
