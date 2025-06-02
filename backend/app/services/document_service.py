@@ -204,6 +204,7 @@ class DocumentService:
     
     async def process_document(
         self, 
+        db: Session,
         file: UploadFile, 
         title: str,
         description: Optional[str] = None,
@@ -213,7 +214,6 @@ class DocumentService:
         Procesa un documento: lo valida, crea el registro en BD, lo almacena en GCS, 
         extrae texto, genera embeddings y lo indexa.
         """
-        db = SessionLocal()
         try:
             filename = file.filename
             # 1. Validate file

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint, Index
@@ -8,7 +8,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from sqlalchemy.sql import func
-from datetime import datetime
 from app.db.base_class import Base
 
 # =====================================
@@ -284,7 +283,7 @@ class Document(Base):
         setattr(self.metrics, metric_name, current_value + amount)
         
         if metric_name == "view_count":
-            self.metrics.last_viewed_at = datetime.utcnow()
+            self.metrics.last_viewed_at = datetime.now(timezone.utc)
         
         self._update_relevance_score()
         
