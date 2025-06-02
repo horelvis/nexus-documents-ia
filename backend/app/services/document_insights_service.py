@@ -3,7 +3,7 @@
 from app.ml.document_recommender import DocumentRecommender
 from sqlalchemy.sql import func, desc
 from app.db.database import SessionLocal
-from app.db.models import Document, document_views, DocumentMetrics,DocumentView
+from app.db.models import Document, DocumentView, DocumentMetrics,DocumentView
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import uuid
@@ -63,14 +63,14 @@ class DocumentInsightsService:
         """Obtiene los documentos vistos recientemente por el usuario o en general"""
         query = self.db.query(
                 Document,
-                func.max(document_views.c.viewed_at).label("last_viewed_at")
+                func.max(DocumentView.c.viewed_at).label("last_viewed_at")
             )\
-            .join(document_views, Document.id == document_views.c.document_id)\
+            .join(DocumentView, Document.id == DocumentView.c.document_id)\
             .filter(Document.tenant_id == self.tenant_id)
         
         # Filtrar por usuario si es necesario
         if user_specific and self.user_id:
-            query = query.filter(document_views.c.user_id == self.user_id)
+            query = query.filter(DocumentView.c.user_id == self.user_id)
         
         # Agrupar, ordenar y limitar resultados
         documents = query\
@@ -140,8 +140,8 @@ class DocumentInsightsService:
         """
         try:
             # Obtener documentos que el usuario ha visto
-            user_viewed_docs = self.db.query(document_views.c.document_id)\
-                .filter(document_views.c.user_id == self.user_id)\
+            user_viewed_docs = self.db.query(DocumentView.c.document_id)\
+                .filter(DocumentView.c.user_id == self.user_id)\
                 .subquery()
             
             # Obtener documentos populares no vistos por el usuario

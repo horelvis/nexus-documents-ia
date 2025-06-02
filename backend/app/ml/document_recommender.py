@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from app.db.database import get_db
-from app.db.models import Document, document_views, User
+from app.db.models import Document, DocumentView , User
 from sqlalchemy.sql import func, desc
 
 import logging
@@ -24,14 +24,14 @@ class DocumentRecommender:
         try:
             # Obtener todas las vistas de documentos para este tenant
             views = self.db.query(
-                document_views.c.user_id,
-                document_views.c.document_id,
-                func.count(document_views.c.id).label("view_count")
+                DocumentView.c.user_id,
+                DocumentView.c.document_id,
+                func.count(DocumentView.c.id).label("view_count")
             ).filter(
-                document_views.c.tenant_id == self.tenant_id
+                DocumentView.c.tenant_id == self.tenant_id
             ).group_by(
-                document_views.c.user_id,
-                document_views.c.document_id
+                DocumentView.c.user_id,
+                DocumentView.c.document_id
             ).all()
             
             # Convertir a dataframe
@@ -78,9 +78,9 @@ class DocumentRecommender:
             return []
         
         # Documentos ya vistos por el usuario
-        user_docs = self.db.query(document_views.c.document_id).filter(
-            document_views.c.user_id == user_id,
-            document_views.c.tenant_id == self.tenant_id
+        user_docs = self.db.query(DocumentView.c.document_id).filter(
+            DocumentView.c.user_id == user_id,
+            DocumentView.c.tenant_id == self.tenant_id
         ).distinct().all()
         
         user_doc_ids = [doc[0] for doc in user_docs]
@@ -92,12 +92,12 @@ class DocumentRecommender:
             # Documentos vistos por el usuario similar
             similar_user_docs = self.db.query(
                 Document, 
-                func.count(document_views.c.id).label("view_count")
+                func.count(DocumentView.c.id).label("view_count")
             ).join(
-                document_views, Document.id == document_views.c.document_id
+                DocumentView, Document.id == DocumentView.c.document_id
             ).filter(
-                document_views.c.user_id == similar_user_id,
-                document_views.c.tenant_id == self.tenant_id,
+                DocumentView.c.user_id == similar_user_id,
+                DocumentView.c.tenant_id == self.tenant_id,
                 ~Document.id.in_(user_doc_ids),  # Excluir docs ya vistos
                 Document.is_deleted == False  # No docs eliminados
             ).group_by(

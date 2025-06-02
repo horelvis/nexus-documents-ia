@@ -8,7 +8,7 @@ from uuid import UUID
 import logging
 
 from app.api.dependencies import get_current_active_superuser, get_db
-from app.db.models import User, Tenant, Document, DocumentMetrics, document_views
+from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.services.auth_service import AuthService
 from app.services.document_service import DocumentService
@@ -312,23 +312,23 @@ async def get_document_activity_stats(
         
         # Estadísticas generales
         general_stats = db.query(
-            func.count(document_views.c.id).label("total_views"),
-            func.count(func.distinct(document_views.c.document_id)).label("documents_viewed"),
-            func.count(func.distinct(document_views.c.user_id)).label("active_users")
+            func.count(DocumentView.c.id).label("total_views"),
+            func.count(func.distinct(DocumentView.c.document_id)).label("documents_viewed"),
+            func.count(func.distinct(DocumentView.c.user_id)).label("active_users")
         ).filter(
-            document_views.c.tenant_id == tenant_id,
-            document_views.c.viewed_at >= cutoff_date
+            DocumentView.c.tenant_id == tenant_id,
+            DocumentView.c.viewed_at >= cutoff_date
         ).first()
         
         # Formatos más populares
         top_formats = db.query(
             Document.file_type,
-            func.count(document_views.c.id).label("view_count")
+            func.count(DocumentView.c.id).label("view_count")
         ).join(
-            document_views, Document.id == document_views.c.document_id
+            DocumentView, Document.id == DocumentView.c.document_id
         ).filter(
-            document_views.c.tenant_id == tenant_id,
-            document_views.c.viewed_at >= cutoff_date
+            DocumentView.c.tenant_id == tenant_id,
+            DocumentView.c.viewed_at >= cutoff_date
         ).group_by(
             Document.file_type
         ).order_by(
@@ -340,12 +340,12 @@ async def get_document_activity_stats(
             User.id,
             User.email,
             User.full_name,
-            func.count(document_views.c.id).label("view_count")
+            func.count(DocumentView.c.id).label("view_count")
         ).join(
-            document_views, User.id == document_views.c.user_id
+            DocumentView, User.id == DocumentView.c.user_id
         ).filter(
-            document_views.c.tenant_id == tenant_id,
-            document_views.c.viewed_at >= cutoff_date
+            DocumentView.c.tenant_id == tenant_id,
+            DocumentView.c.viewed_at >= cutoff_date
         ).group_by(
             User.id
         ).order_by(

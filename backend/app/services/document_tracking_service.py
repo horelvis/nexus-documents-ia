@@ -1,7 +1,7 @@
 # app/services/document_tracking_service.py
 
 from app.db.database import SessionLocal
-from app.db.models import Document, document_views, DocumentMetrics
+from app.db.models import Document, DocumentView, DocumentMetrics
 from datetime import datetime
 import uuid
 
@@ -20,11 +20,11 @@ class DocumentTrackingService:
             return False
         
         try:
-            # Registrar la vista en document_views
+            # Registrar la vista en DocumentView
             # CORRECCIÓN: Usar uuid.uuid4() directamente en lugar de str(uuid.uuid4())
             view_id = uuid.uuid4()  # Cambio: UUID en lugar de String
             self.db.execute(
-                document_views.insert().values(
+                DocumentView.insert().values(
                     id=view_id,
                     user_id=uuid.UUID(self.user_id) if isinstance(self.user_id, str) else self.user_id,  # Asegurar UUID
                     document_id=uuid.UUID(document_id) if isinstance(document_id, str) else document_id,  # Asegurar UUID
