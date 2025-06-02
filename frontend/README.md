@@ -1,73 +1,50 @@
-<h1 align="center">
-  🛍️ Remix SaaS
-</h1>
+<img src="https://github.com/user-attachments/assets/86750a4c-2876-4b4e-b703-7fa901dcd8bb" alt="caps.ai Logo" width="50" height="50">
 
-<div align="center">
-  <p>
-  A Lightweight, Feature-Rich, and Production-Ready Remix Stack for your next SaaS application.
-  </p>
-</div>
+# 🚀 Caps.ai - Modern Startup Landing Page
 
-<div align="center">
-  <p>
-    <a href="https://remix-saas.fly.dev">Live Demo</a>
-    ·
-    <a href="https://github.com/dev-xo/remix-saas/tree/main/docs">Documentation</a>
-    ·
-    <a href="https://twitter.com/DanielKanem">Twitter</a>
-  </p>
-</div>
+<img src="https://github.com/user-attachments/assets/ab02ae68-b208-4bf1-b5b1-4879632548cb" alt="caps.ai Thumbnail">
 
-```sh
-npx create-remix-saas@latest
-```
+## 🌟 Introduction
+caps.ai is an AI-powered social media management tool that simplifies and enhances your workflow(landing page). With its smart automation and data-driven insights, managing your brand's social media presence has never been easier. Built using Next.js, Tailwind CSS, and shadcn UI, caps.ai is designed for both performance and scalability.
 
-## [Live Demo](https://remix-saas.fly.dev)
+## 🔗 Live Preview
 
-[![Remix SaaS](https://raw.githubusercontent.com/dev-xo/dev-xo/main/remix-saas/intro.png)](https://remix-saas.fly.dev)
+Check out the live demo of caps.ai here: [Live Preview](https://caps-ai.vercel.app/)
 
-We've created a simple demo that displays all template-provided features. Psst! Give the site a few seconds to load! _(It's running on a free tier!)_
+## 🎥 Watch the Preview Video on YouTube
 
-> [!NOTE]
-> Remix SaaS is an Open Source Template that shares common bits of code with: [Indie Stack](https://github.com/remix-run/indie-stack), [Epic Stack](https://github.com/epicweb-dev/epic-stack), [Supa Stripe Stack](https://github.com/rphlmr/supa-stripe-stack), and some other amazing Open Source Remix resources. Check them out, please!
+Get a glimpse of how caps.ai works by watching the demo: [Watch the Video](https://www.youtube.com/watch?v=bnMIm6OfYDM) 🎬
 
-## Getting Started
+## 💻 Tech Stack
 
-Please, read the [Getting Started Documentation](https://github.com/dev-xo/remix-saas/tree/main/docs#remix-saas-documentation) to successfully initialize your **Remix SaaS** Template.
+- **Next.js** – React framework for server-rendered apps.
+- **TailwindCSS** – Utility-first CSS framework for styling.
+- **Shadcn UI** – A collection of reusable UI components.
+- **Framer Motion** – Animating for components to bring them alive.
 
-## Acknowledgments
+## 🛠️ Installation
+To run caps.ai locally, follow these simple steps:
 
-Special thanks to [@mw10013](https://github.com/mw10013) who has been part of the Remix SaaS development.
+1. Clone the repository:
+    ```bash
+    git clone https://github.com/Shreyas-29/caps-ai.git
+    ```
+2. Install dependencies:
+    ```bash
+    npm install
+    ```
+3. Run the development server:
+    ```bash
+    npm run dev
+    ```
 
-If you found **Remix SaaS** helpful, consider supporting it with a ⭐ [Star](https://github.com/dev-xo/remix-saas). It helps the repository grow and provides the required motivation to continue maintaining the project. Thank you!
+## ☕ Buy Me a Coffee
+If you enjoy using caps.ai, consider supporting my work!  
+[Buy Me a Coffee ☕](https://buymeacoffee.com/shreyas29)
 
-## Sponsors
+## 📜 License
+This project is licensed under the Creative Commons Zero v1.0 Universal. See the [LICENSE](LICENSE) file for details.
 
-Huge thanks to our sponsors who makes it possible to maintain and improve Remix SaaS! 🙌
+---
 
-<table width="100%">
-  <tr height="187px">
-    <td align="center" width="33%">
-      <a href="https://launch.arcjet.com/hdXzPbO" target="_blank">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="https://arcjet.com/logo/arcjet-dark-lockup-voyage-horizontal.svg">
-          <img src="https://arcjet.com/logo/arcjet-light-lockup-voyage-horizontal.svg" alt="Arcjet">
-        </picture>
-      </a>
-    </td>
-     <td align="center" width="33%">
-      <a href="https://www.convex.dev/?utm_source=remix-saas-github" target="_blank">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="https://static.convex.dev/logo/convex-logo-light.svg">
-          <source media="(prefers-color-scheme: light)" srcset="https://static.convex.dev/logo/convex-logo.svg">
-          <img alt="Convex" src="https://static-http.s3.amazonaws.com/logo/convex-logo.svg">
-        </picture>
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="mailto:devxo@mail.com">
-        Support us!<br />💝
-      </a>
-    </td>
-  </tr>
-</table>
+Built with ❤️ by [Shreyas](https://shreyas-sihasane.vercel.app)
