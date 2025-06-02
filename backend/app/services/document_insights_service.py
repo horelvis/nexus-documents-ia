@@ -3,9 +3,9 @@
 from app.ml.document_recommender import DocumentRecommender
 from sqlalchemy.sql import func, desc
 from app.db.database import SessionLocal
-from app.db.models import Document, document_views, DocumentMetrics, User
+from app.db.models import Document, document_views, DocumentMetrics,DocumentView
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import uuid
 import logging
 

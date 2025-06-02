@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -10,62 +10,72 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 
-# Intermediary Tables for Many-to-Many relationships
+# =====================================
+# TABLAS DE ASOCIACIÓN (Many-to-Many)
+# =====================================
+
 user_roles = Table(
     "user_roles",
     Base.metadata,
     Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True),
-    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True)
+    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
+    Column("assigned_at", DateTime, default=func.now, nullable=False),
+    Column("assigned_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 )
 
 role_permissions = Table(
     "role_permissions",
     Base.metadata,
     Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
-    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True)
+    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True),
+    Column("assigned_at", DateTime, default=func.now, nullable=False),
+    Column("assigned_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 )
 
-# Tabla de asociación para relaciones many-to-many
 document_tags = Table(
     "document_tags",
     Base.metadata,
-    Column("document_id", UUID(as_uuid=True), ForeignKey("documents.id")),
-    Column("tag_id", Integer, ForeignKey("tags.id"))
+    Column("document_id", UUID(as_uuid=True), ForeignKey("documents.id"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id"), primary_key=True),
+    Column("tagged_at", DateTime, default=func.now, nullable=False),
+    Column("tagged_by", UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 )
 
-# Tabla de asociación para las lecturas de documentos
-# CORRECCIÓN: Cambiar tipos String por UUID(as_uuid=True) para compatibilidad
-document_views = Table(
-    "document_views",
-    Base.metadata,
-    Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),  # Cambio: UUID en lugar de String
-    Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), nullable=False),  # Cambio: UUID en lugar de String
-    Column("document_id", UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False),  # Cambio: UUID en lugar de String
-    Column("viewed_at", DateTime, default=func.now(), nullable=False),
-    Column("view_duration_seconds", Integer, nullable=True),
-    Column("is_complete_view", Boolean, default=False),
-    Column("tenant_id", UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False),  # Cambio: UUID en lugar de String
-)
+# =====================================
+# MODELOS PRINCIPALES
+# =====================================
 
 class User(Base):
     __tablename__ = "users"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String, nullable=True)
-    clerk_user_id = Column(String, nullable=True, unique=True)  # New field
-    is_active = Column(Boolean(), default=True)
-    is_superuser = Column(Boolean(), default=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    clerk_user_id = Column(String(255), nullable=True, unique=True, index=True)
+    is_active = Column(Boolean(), default=True, nullable=False)
+    is_superuser = Column(Boolean(), default=False, nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    
+    last_login_at = Column(DateTime, nullable=True)
+    email_verified_at = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
     # Relaciones
     tenant = relationship("Tenant", back_populates="users")
     image = relationship("UserImage", back_populates="user", uselist=False, cascade="all, delete-orphan")
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
+    document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
+    agent_conversations = relationship("AgentConversation", back_populates="user")
+    
+    __table_args__ = (
+        Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
+        Index('idx_users_email_active', 'email', 'is_active'),
+    )
 
 
 class UserImage(Base):
@@ -73,11 +83,15 @@ class UserImage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
-    alt_text = Column(String, nullable=True)
-    content_type = Column(String, nullable=False)
+    alt_text = Column(String(500), nullable=True)
+    content_type = Column(String(100), nullable=False)
     blob = Column(LargeBinary, nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    file_size = Column(Integer, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
 
     user = relationship("User", back_populates="image")
 
@@ -86,123 +100,108 @@ class Role(Base):
     __tablename__ = "roles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, default="")
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
+    is_system_role = Column(Boolean, default=False, nullable=False)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
 
     users = relationship("User", secondary=user_roles, back_populates="roles")
     permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_role_name_tenant'),
+        Index('idx_roles_tenant_system', 'tenant_id', 'is_system_role'),
+    )
 
 
 class Permission(Base):
     __tablename__ = "permissions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    entity = Column(String, nullable=False)  # e.g., 'document', 'user', 'tenant'
-    action = Column(String, nullable=False)  # e.g., 'create', 'read', 'update', 'delete'
-    access = Column(String, nullable=False)  # e.g., 'own', 'tenant', 'all'
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    entity = Column(String(50), nullable=False)
+    action = Column(String(50), nullable=False)
+    access = Column(String(50), nullable=False)
+    resource_id = Column(String(255), nullable=True)
+    conditions = Column(JSONB, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
 
     roles = relationship("Role", secondary=role_permissions, back_populates="permissions")
 
-    __table_args__ = (UniqueConstraint('action', 'entity', 'access', name='uq_action_entity_access'),)
-
-
-class Plan(Base):
-    __tablename__ = "plans"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    prices = relationship("Price", back_populates="plan", cascade="all, delete-orphan")
-    subscriptions = relationship("Subscription", back_populates="plan")
-
-
-class Price(Base):
-    __tablename__ = "prices"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False)
-    amount = Column(Integer, nullable=False)  # Amount in cents
-    currency = Column(String, nullable=False)  # e.g., 'usd', 'eur'
-    interval = Column(String, nullable=False)  # e.g., 'month', 'year'
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    plan = relationship("Plan", back_populates="prices")
-    subscriptions = relationship("Subscription", back_populates="price")
-
-
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False)
-    price_id = Column(UUID(as_uuid=True), ForeignKey("prices.id"), nullable=False)
-    status = Column(String, nullable=False)  # e.g., 'active', 'canceled', 'past_due'
-    current_period_start = Column(DateTime, nullable=False)
-    current_period_end = Column(DateTime, nullable=False)
-    cancel_at_period_end = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    user = relationship("User", back_populates="subscription")
-    plan = relationship("Plan", back_populates="subscriptions")
-    price = relationship("Price", back_populates="subscriptions")
+    __table_args__ = (
+        UniqueConstraint('entity', 'action', 'access', 'resource_id', name='uq_permission_full'),
+        Index('idx_permissions_entity_action', 'entity', 'action'),
+    )
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
-    bucket_name = Column(String, nullable=False)
-    is_active = Column(Boolean(), default=True)
-    settings = Column(JSONB, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    bucket_name = Column(String(255), nullable=False, unique=True)
+    is_active = Column(Boolean(), default=True, nullable=False)
+    settings = Column(JSONB, nullable=True, default={})
+    max_users = Column(Integer, nullable=True)
+    max_storage_mb = Column(Integer, nullable=True)
     
-    # Relaciones
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    
     users = relationship("User", back_populates="tenant")
     documents = relationship("Document", back_populates="tenant")
+    tags = relationship("Tag", back_populates="tenant")
+    roles = relationship("Role", back_populates="tenant")
+    
+    __table_args__ = (
+        Index('idx_tenants_active', 'is_active'),
+    )
 
 
 class Document(Base):
     __tablename__ = "documents"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    title = Column(String, nullable=False)
+    title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
-    filename = Column(String, nullable=False)
-    file_path = Column(String, nullable=False)
-    file_type = Column(String, nullable=False)
+    filename = Column(String(500), nullable=False)
+    file_path = Column(String(1000), nullable=False)
+    file_type = Column(String(100), nullable=False)
     file_size = Column(Integer, nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    indexed = Column(Integer, default=0)  # See IndexingStatus enum in app.schemas.enums
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    mime_type = Column(String(200), nullable=True)
+    file_hash = Column(String(64), nullable=True, index=True)
+    version = Column(Integer, default=1, nullable=False)
     
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
-    # Relaciones
+    indexed = Column(Integer, default=0, nullable=False)
+    indexing_error = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    
     tenant = relationship("Tenant", back_populates="documents")
-    creator = relationship("User")
+    creator = relationship("User", foreign_keys=[created_by], back_populates="created_documents")
     tags = relationship("Tag", secondary=document_tags, back_populates="documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
-
-    # Nuevas relaciones
     metrics = relationship("DocumentMetrics", back_populates="document", uselist=False, cascade="all, delete-orphan")
-    views = relationship("User", secondary=document_views, backref="viewed_documents")
+    views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
     
-    # Método de ayuda para incrementar métricas
-    def increment_metric(self, metric_name, session, amount=1):
+    __table_args__ = (
+        Index('idx_documents_tenant_created', 'tenant_id', 'created_at'),
+        Index('idx_documents_creator_created', 'created_by', 'created_at'),
+        Index('idx_documents_type_tenant', 'file_type', 'tenant_id'),
+        Index('idx_documents_indexed', 'indexed'),
+    )
+    
+    def increment_metric(self, metric_name: str, session, amount: int = 1):
         if not self.metrics:
             self.metrics = DocumentMetrics(document_id=self.id, tenant_id=self.tenant_id)
             session.add(self.metrics)
@@ -213,16 +212,17 @@ class Document(Base):
         if metric_name == "view_count":
             self.metrics.last_viewed_at = func.now()
         
-        # Actualizar relevance_score basado en todas las métricas
         self._update_relevance_score()
         
     def _update_relevance_score(self):
-        # Fórmula simple para calcular relevancia: se puede ajustar según necesidades
+        if not self.metrics:
+            return
+            
         view_weight = 1.0
         download_weight = 3.0
         share_weight = 2.0
         query_weight = 1.5
-        recency_weight = 2.0  # Para favorecer documentos vistos recientemente
+        recency_weight = 2.0
         
         base_score = (
             self.metrics.view_count * view_weight +
@@ -231,64 +231,182 @@ class Document(Base):
             self.metrics.query_count * query_weight
         )
         
-        # Factor de recencia: favorece documentos vistos recientemente
         recency_factor = 1.0
         if self.metrics.last_viewed_at:
             days_since_view = (datetime.now() - self.metrics.last_viewed_at).days
-            if days_since_view < 30:  # Documentos vistos en el último mes
+            if days_since_view < 30:
                 recency_factor = 1 + ((30 - days_since_view) / 30) * recency_weight
         
         self.metrics.relevance_score = base_score * recency_factor
+
+
+class DocumentView(Base):
+    __tablename__ = "document_views"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    viewed_at = Column(DateTime, default=func.now, nullable=False)
+    view_duration_seconds = Column(Integer, nullable=True)
+    is_complete_view = Column(Boolean, default=False, nullable=False)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    page_views = Column(Integer, default=1, nullable=False)
+    scroll_percentage = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+    
+    user = relationship("User", back_populates="document_views")
+    document = relationship("Document", back_populates="views")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_document_views_doc_user', 'document_id', 'user_id'),
+        Index('idx_document_views_tenant_date', 'tenant_id', 'viewed_at'),
+        Index('idx_document_views_user_date', 'user_id', 'viewed_at'),
+    )
 
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
-    embedding_id = Column(String, nullable=True)  # ID en la base de datos vectorial
+    embedding_id = Column(String(255), nullable=True, index=True)
+    chunk_type = Column(String(50), nullable=True)
+    word_count = Column(Integer, nullable=True)
+    char_count = Column(Integer, nullable=True)
     
-    # Relaciones
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    
     document = relationship("Document", back_populates="chunks")
+    
+    __table_args__ = (
+        UniqueConstraint('document_id', 'chunk_index', name='uq_document_chunk_index'),
+        Index('idx_chunks_doc_index', 'document_id', 'chunk_index'),
+    )
 
 
 class Tag(Base):
     __tablename__ = "tags"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String, nullable=False, unique=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    name = Column(String(100), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    color = Column(String(7), nullable=True)
+    description = Column(Text, nullable=True)
     
-    # Relaciones
-    tenant = relationship("Tenant")
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    
+    tenant = relationship("Tenant", back_populates="tags")
     documents = relationship("Document", secondary=document_tags, back_populates="tags")
+    
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_tag_name_tenant'),
+        Index('idx_tags_tenant_name', 'tenant_id', 'name'),
+    )
 
 
-# Tabla para métricas de documentos
 class DocumentMetrics(Base):
     __tablename__ = "document_metrics"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, unique=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
-    view_count = Column(Integer, default=0)
-    download_count = Column(Integer, default=0)
-    share_count = Column(Integer, default=0)
-    query_count = Column(Integer, default=0)  # Número de consultas sobre este documento
+    view_count = Column(Integer, default=0, nullable=False)
+    download_count = Column(Integer, default=0, nullable=False)
+    share_count = Column(Integer, default=0, nullable=False)
+    query_count = Column(Integer, default=0, nullable=False)
     
-    relevance_score = Column(Float, default=0.0)  # Puntuación calculada de relevancia
+    relevance_score = Column(Float, default=0.0, nullable=False)
     last_viewed_at = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
-    # Relaciones
     document = relationship("Document", back_populates="metrics")
     tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_document_metrics_tenant_relevance', 'tenant_id', 'relevance_score'),
+        Index('idx_document_metrics_last_viewed', 'last_viewed_at'),
+    )
+
+
+# =====================================
+# SISTEMA DE SUSCRIPCIONES
+# =====================================
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    max_users = Column(Integer, nullable=True)
+    max_storage_mb = Column(Integer, nullable=True)
+    max_documents = Column(Integer, nullable=True)
+    features = Column(JSONB, nullable=False, default={})
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+
+    prices = relationship("Price", back_populates="plan", cascade="all, delete-orphan")
+    subscriptions = relationship("Subscription", back_populates="plan")
+
+
+class Price(Base):
+    __tablename__ = "prices"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
+    interval = Column(String(20), nullable=False)
+    stripe_price_id = Column(String(255), nullable=True, unique=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+
+    plan = relationship("Plan", back_populates="prices")
+    subscriptions = relationship("Subscription", back_populates="price")
+    
+    __table_args__ = (
+        Index('idx_prices_plan_active', 'plan_id', 'is_active'),
+    )
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False, index=True)
+    price_id = Column(UUID(as_uuid=True), ForeignKey("prices.id"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, index=True)
+    current_period_start = Column(DateTime, nullable=False)
+    current_period_end = Column(DateTime, nullable=False)
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    stripe_subscription_id = Column(String(255), nullable=True, unique=True)
+    
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
+
+    user = relationship("User", back_populates="subscription")
+    plan = relationship("Plan", back_populates="subscriptions")
+    price = relationship("Price", back_populates="subscriptions")
+    
+    __table_args__ = (
+        Index('idx_subscriptions_status_period', 'status', 'current_period_end'),
+    )
 
 
 # =====================================
@@ -296,31 +414,23 @@ class DocumentMetrics(Base):
 # =====================================
 
 class Agent(Base):
-    """Modelo para agentes AI del sistema"""
     __tablename__ = "agents"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
-    type = Column(String(50), nullable=False)  # 'digital_signature', 'document_analyzer', etc.
+    type = Column(String(50), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    configuration = Column(JSONB, nullable=False, default={})
+    tools = Column(ARRAY(String), nullable=False, default=[])
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_public = Column(Boolean, default=False, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
     
-    # Multi-tenant
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
-    # Configuración del agente
-    configuration = Column(JSONB, nullable=False, default={})  # Configuración específica del tipo
-    tools = Column(ARRAY(String), nullable=False, default=[])  # Lista de herramientas disponibles
-    
-    # Estado y permisos
-    is_active = Column(Boolean, default=True)
-    is_public = Column(Boolean, default=False)  # Si otros usuarios del tenant pueden usarlo
-    
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
-    
-    # Relaciones
     tenant = relationship("Tenant")
     creator = relationship("User")
     conversations = relationship("AgentConversation", back_populates="agent")
@@ -328,102 +438,103 @@ class Agent(Base):
     
     __table_args__ = (
         UniqueConstraint('name', 'tenant_id', name='uq_agent_name_tenant'),
+        Index('idx_agents_tenant_type', 'tenant_id', 'type'),
+        Index('idx_agents_tenant_active', 'tenant_id', 'is_active'),
     )
 
 
 class AgentConversation(Base):
-    """Conversaciones con agentes"""
     __tablename__ = "agent_conversations"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     title = Column(String(200), nullable=True)
-    context = Column(JSONB, nullable=False, default={})  # Contexto persistente
+    context = Column(JSONB, nullable=False, default={})
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    # Estado
-    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
-    
-    # Relaciones
     agent = relationship("Agent", back_populates="conversations")
-    user = relationship("User")
+    user = relationship("User", back_populates="agent_conversations")
     tenant = relationship("Tenant")
-    messages = relationship("AgentMessage", back_populates="conversation")
+    messages = relationship("AgentMessage", back_populates="conversation", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('idx_agent_conversations_user_updated', 'user_id', 'updated_at'),
+        Index('idx_agent_conversations_agent_active', 'agent_id', 'is_active'),
+    )
 
 
 class AgentMessage(Base):
-    """Mensajes en conversaciones con agentes"""
     __tablename__ = "agent_messages"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=False)
-    
-    # Contenido del mensaje
-    role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False, index=True)
     content = Column(Text, nullable=False)
-    message_metadata = Column(JSONB, nullable=False, default={})  # Attachments, tool calls, etc.
+    message_metadata = Column(JSONB, nullable=False, default={})
+    sequence_number = Column(Integer, nullable=False)
     
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
     
-    # Relaciones
     conversation = relationship("AgentConversation", back_populates="messages")
+    
+    __table_args__ = (
+        UniqueConstraint('conversation_id', 'sequence_number', name='uq_conversation_sequence'),
+        Index('idx_agent_messages_conversation_sequence', 'conversation_id', 'sequence_number'),
+    )
 
 
 class AgentExecution(Base):
-    """Ejecuciones de agentes para auditoría"""
     __tablename__ = "agent_executions"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    
-    # Detalles de ejecución
-    task_type = Column(String(100), nullable=False)  # Tipo de tarea ejecutada
-    input_data = Column(JSONB, nullable=False)  # Datos de entrada
-    output_data = Column(JSONB, nullable=True)  # Resultado
-    
-    # Estado y métricas
-    status = Column(String(20), nullable=False, default='pending')  # pending, running, completed, failed
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=True, index=True)
+    task_type = Column(String(100), nullable=False, index=True)
+    input_data = Column(JSONB, nullable=False)
+    output_data = Column(JSONB, nullable=True)
+    status = Column(String(20), nullable=False, default='pending', index=True)
     error_message = Column(Text, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
     
-    # Metadatos
-    started_at = Column(DateTime, default=func.now(), nullable=False)
+    started_at = Column(DateTime, default=func.now, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     
-    # Relaciones
     agent = relationship("Agent", back_populates="executions")
     user = relationship("User")
     tenant = relationship("Tenant")
+    conversation = relationship("AgentConversation")
+    
+    __table_args__ = (
+        Index('idx_agent_executions_status_started', 'status', 'started_at'),
+        Index('idx_agent_executions_tenant_task', 'tenant_id', 'task_type'),
+    )
 
 
 class AgentTool(Base):
-    """Herramientas disponibles para agentes"""
     __tablename__ = "agent_tools"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False, unique=True)
     description = Column(Text, nullable=False)
+    tool_type = Column(String(50), nullable=False, index=True)
+    configuration_schema = Column(JSONB, nullable=False)
+    requires_admin = Column(Boolean, default=False, nullable=False)
+    is_tenant_specific = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    # Configuración de la herramienta
-    tool_type = Column(String(50), nullable=False)  # 'internal', 'external_api', 'custom'
-    configuration_schema = Column(JSONB, nullable=False)  # JSON Schema para configuración
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
-    # Permisos
-    requires_admin = Column(Boolean, default=False)
-    is_tenant_specific = Column(Boolean, default=False)
-    
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        Index('idx_agent_tools_type_active', 'tool_type', 'is_active'),
+    )
 
 
 # =====================================
@@ -431,31 +542,20 @@ class AgentTool(Base):
 # =====================================
 
 class SignatureProvider(Base):
-    """Proveedores de firma digital por tenant"""
     __tablename__ = "signature_providers"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    
-    # Configuración del proveedor
-    provider_name = Column(String(50), nullable=False)  # 'docusign', 'yousign', 'signaturit'
+    provider_name = Column(String(50), nullable=False)
     display_name = Column(String(100), nullable=False)
-    
-    # Credenciales encriptadas
-    encrypted_credentials = Column(LargeBinary, nullable=False)  # Credenciales cifradas
-    
-    # Estado
+    encrypted_credentials = Column(LargeBinary, nullable=False)
     is_active = Column(Boolean, default=True)
     is_default = Column(Boolean, default=False)
-    
-    # Configuración específica
     configuration = Column(JSONB, nullable=False, default={})
     
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
+    updated_at = Column(DateTime, default=func.now, onupdate=func.now, nullable=False)
     
-    # Relaciones
     tenant = relationship("Tenant")
     signature_requests = relationship("SignatureRequest", back_populates="provider")
     
@@ -465,45 +565,30 @@ class SignatureProvider(Base):
 
 
 class SignatureRequest(Base):
-    """Solicitudes de firma digital"""
     __tablename__ = "signature_requests"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     provider_id = Column(UUID(as_uuid=True), ForeignKey("signature_providers.id"), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    
-    # Identificadores externos
-    external_id = Column(String(255), nullable=True)  # ID en el proveedor externo
-    
-    # Información del documento
+    external_id = Column(String(255), nullable=True)
     document_name = Column(String(255), nullable=False)
-    document_content = Column(LargeBinary, nullable=True)  # Contenido del documento
-    document_url = Column(String(500), nullable=True)  # URL del documento
-    
-    # Configuración de firma
+    document_content = Column(LargeBinary, nullable=True)
+    document_url = Column(String(500), nullable=True)
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=True)
-    signature_type = Column(String(20), default='sequential')  # sequential, parallel
-    
-    # Estado
-    status = Column(String(30), default='draft')  # draft, sent, in_progress, completed, declined, expired
-    
-    # URLs y configuración
+    signature_type = Column(String(20), default='sequential')
+    status = Column(String(30), default='draft')
     callback_url = Column(String(500), nullable=True)
     success_url = Column(String(500), nullable=True)
     error_url = Column(String(500), nullable=True)
-    
-    # Metadatos
     request_metadata = Column(JSONB, nullable=False, default={})
     
-    # Fechas
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
     sent_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
     
-    # Relaciones
     tenant = relationship("Tenant")
     provider = relationship("SignatureProvider", back_populates="signature_requests")
     creator = relationship("User")
@@ -512,57 +597,37 @@ class SignatureRequest(Base):
 
 
 class SignatureRequestSigner(Base):
-    """Firmantes de una solicitud de firma"""
     __tablename__ = "signature_request_signers"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     request_id = Column(UUID(as_uuid=True), ForeignKey("signature_requests.id"), nullable=False)
-    
-    # Información del firmante
     name = Column(String(100), nullable=False)
     email = Column(String(255), nullable=False)
     phone = Column(String(20), nullable=True)
-    
-    # Configuración de firma
     order = Column(Integer, nullable=False, default=1)
-    authentication_method = Column(String(20), default='email')  # email, sms, code
-    
-    # URLs personalizadas
+    authentication_method = Column(String(20), default='email')
     success_url = Column(String(500), nullable=True)
     error_url = Column(String(500), nullable=True)
-    
-    # Estado
-    status = Column(String(20), default='pending')  # pending, sent, opened, signed, declined
-    
-    # Identificadores externos
+    status = Column(String(20), default='pending')
     external_id = Column(String(255), nullable=True)
     signing_url = Column(String(500), nullable=True)
     
-    # Metadatos
     signed_at = Column(DateTime, nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
     
-    # Relaciones
     request = relationship("SignatureRequest", back_populates="signers")
 
 
 class SignatureEvent(Base):
-    """Eventos de auditoría para firmas"""
     __tablename__ = "signature_events"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     request_id = Column(UUID(as_uuid=True), ForeignKey("signature_requests.id"), nullable=False)
-    
-    # Información del evento
-    event_type = Column(String(50), nullable=False)  # created, sent, opened, signed, completed, etc.
+    event_type = Column(String(50), nullable=False)
     description = Column(Text, nullable=True)
-    
-    # Datos del evento
     event_data = Column(JSONB, nullable=False, default={})
     
-    # Metadatos
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now, nullable=False)
     
-    # Relaciones
     request = relationship("SignatureRequest", back_populates="events")
