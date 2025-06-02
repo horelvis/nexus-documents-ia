@@ -495,7 +495,7 @@ class SignatureRequest(Base):
     error_url = Column(String(500), nullable=True)
     
     # Metadatos
-    metadata = Column(JSONB, nullable=False, default={})
+    request_metadata = Column(JSONB, nullable=False, default={})
     
     # Fechas
     created_at = Column(DateTime, default=func.now(), nullable=False)

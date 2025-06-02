@@ -316,7 +316,7 @@ class SignatureService:
                 callback_url=request_data.callback_url,
                 success_url=request_data.success_url,
                 error_url=request_data.error_url,
-                metadata=request_data.metadata,
+                request_metadata=request_data.metadata,
                 status='draft'
             )
             
@@ -405,7 +405,7 @@ class SignatureService:
                 "success_url": request.success_url,
                 "error_url": request.error_url,
                 "signers": signers_data,
-                "metadata": request.metadata
+                "metadata": request.request_metadata
             }
             
             # Enviar al proveedor
