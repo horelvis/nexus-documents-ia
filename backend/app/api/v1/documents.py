@@ -16,6 +16,7 @@ router = APIRouter()
 
 @router.get("/", response_model=dict)
 async def list_documents(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id),
     page: int = Query(1, ge=1),
@@ -29,6 +30,7 @@ async def list_documents(
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return document_service.get_documents(
+        db=db,
         page=page,
         per_page=per_page,
         tags=tags,
@@ -39,6 +41,7 @@ async def list_documents(
 
 @router.post("/", response_model=Document)
 async def create_document(
+    db: Session = Depends(get_db),
     title: str = Form(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
@@ -55,6 +58,7 @@ async def create_document(
     
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.process_document(
+        db=db,
         file=file,
         title=title,
         description=description,
@@ -81,6 +85,7 @@ async def get_upload_url(
 @router.get("/{doc_id}", response_model=DocumentDetail)
 async def get_document(
     doc_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -88,7 +93,7 @@ async def get_document(
     Obtiene detalles de un documento específico.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_document(doc_id=doc_id)
+    return document_service.get_document(db=db, doc_id=doc_id)
 
 
 @router.get("/{doc_id}/download-url", response_model=SignedUrlResponse)
@@ -107,6 +112,7 @@ async def get_download_url(
 @router.delete("/{doc_id}", response_model=dict)
 async def delete_document(
     doc_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -114,12 +120,13 @@ async def delete_document(
     Elimina un documento y sus datos asociados.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.delete_document(doc_id=doc_id)
+    return document_service.delete_document(db=db, doc_id=doc_id)
 
 
 @router.get("/{doc_id}/summary", response_model=dict)
 async def get_document_summary(
     doc_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -127,7 +134,7 @@ async def get_document_summary(
     Genera un resumen del documento utilizando LLM.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.generate_summary(doc_id=doc_id)
+    return document_service.generate_summary(db=db,doc_id=doc_id)
 
 
 @router.post("/{doc_id}/tag", response_model=dict)
