@@ -23,6 +23,68 @@ Este proyecto implementa una API REST para un sistema de gestión documental con
 - **Modelos de lenguaje**: Ollama
 - **Docker**: Contenedores para todos los componentes
 
+## Arquitectura del Sistema
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    NEXUS DOCUMENT BACKEND ARCHITECTURE              │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         FASTAPI REST API LAYER                      │
+├─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┤
+│  Auth   │Documents│ Search  │ Agents  │  Chat   │Signature│ Admin   │
+│         │         │         │         │         │         │         │
+│ Tenants │ Stripe  │Storage  │         │         │         │         │
+└─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
+              │                           │
+              ▼                           ▼
+┌──────────────────────────┐    ┌─────────────────────────────────────┐
+│    CORE CONFIGURATION    │    │      BUSINESS LOGIC SERVICES       │
+├─────────┬────────┬───────┤    ├────────────┬────────────┬───────────┤
+│ Config  │Security│Logging│    │Auth Service│Doc Service │Agent Serv │
+└─────────┴────────┴───────┘    ├────────────┼────────────┼───────────┤
+                                │Search Serv │Signature S │Storage S  │
+                                ├────────────┼────────────┼───────────┤
+                                │LLM Service │Vector Serv │Embedding S│
+                                └────────────┴────────────┴───────────┘
+                                              │           │
+                      ┌───────────────────────┼───────────┼───────────────┐
+                      ▼                       ▼           ▼               ▼
+            ┌─────────────────────┐  ┌──────────────────────┐  ┌─────────────────────┐
+            │     DATA LAYER      │  │    MICROSERVICES     │  │   EXTERNAL SERVICES │
+            ├──────────┬──────────┤  ├──────────┬───────────┤  ├──────────┬──────────┤
+            │PostgreSQL│Redis     │  │LangChain │Vector     │  │Google    │Ollama    │
+            │          │Cache     │  │Service   │Service    │  │Cloud     │LLM       │
+            ├──────────┼──────────┤  ├──────────┼───────────┤  │Storage   ├──────────┤
+            │Qdrant    │          │  │LLM       │           │  │          │Stripe    │
+            │Vector DB │          │  │Service   │           │  │          │API       │
+            └──────────┴──────────┘  └──────────┴───────────┘  └──────────┴──────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────────┐
+                                    │    AI & STORAGE     │
+                                    ├──────────┬──────────┤
+                                    │Document  │Digital   │
+                                    │Recommend │Signature │
+                                    │          │Agent     │
+                                    ├──────────┼──────────┤
+                                    │Cloud     │          │
+                                    │Storage   │          │
+                                    └──────────┴──────────┘
+
+CARACTERÍSTICAS PRINCIPALES:
+╔══════════════════════════════════════════════════════════════════════╗
+║ • Multi-tenant con aislamiento de datos por organización            ║
+║ • Arquitectura de microservicios para operaciones AI/ML             ║
+║ • Base de datos vectorial para búsqueda semántica                   ║
+║ • Almacenamiento en la nube escalable                               ║
+║ • Sistema de firmas digitales con soporte de agentes AI             ║
+║ • API RESTful con cobertura completa de endpoints                   ║
+║ • Integración LangChain para procesamiento avanzado de documentos   ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
 ## Estructura del Proyecto
 
 ```
@@ -32,6 +94,15 @@ backend/
 │   ├── api/                # Endpoints de la API
 │   │   ├── dependencies.py # Dependencias compartidas
 │   │   └── v1/             # Endpoints versión 1
+│   │       ├── auth.py           # Autenticación y autorización
+│   │       ├── documents.py      # Gestión de documentos
+│   │       ├── search.py         # Búsqueda semántica
+│   │       ├── agents.py         # Sistema de agentes AI
+│   │       ├── chat.py           # Chat con documentos
+│   │       ├── signatures.py     # Firmas digitales
+│   │       ├── admin.py          # Administración
+│   │       ├── tenants.py        # Multi-tenancy
+│   │       └── stripe.py         # Facturación
 │   │
 │   ├── core/               # Configuración central
 │   │   ├── config.py       # Configuración de la aplicación
@@ -45,18 +116,32 @@ backend/
 │   ├── schemas/            # Modelos Pydantic
 │   │   ├── auth.py         # Esquemas de autenticación
 │   │   ├── document.py     # Esquemas de documentos
+│   │   ├── agent.py        # Esquemas de agentes
+│   │   ├── tenant.py       # Esquemas multi-tenant
 │   │   └── user.py         # Esquemas de usuarios
 │   │
 │   ├── services/           # Lógica de negocio
 │   │   ├── auth_service.py         # Servicio de autenticación
 │   │   ├── document_service.py     # Servicio de documentos
+│   │   ├── agent_service.py        # Servicio de agentes AI
 │   │   ├── embedding_service.py    # Servicio de embeddings
 │   │   ├── llm_service.py          # Servicio de LLM
 │   │   ├── search_service.py       # Servicio de búsqueda
+│   │   ├── signature_service.py    # Servicio de firmas digitales
 │   │   ├── storage_service.py      # Servicio de almacenamiento
 │   │   └── vector_service.py       # Servicio de base vectorial
 │   │
+│   ├── ml/                 # Machine Learning
+│   │   └── document_recommender.py # Recomendador de documentos
+│   │
 │   └── main.py            # Punto de entrada de la aplicación
+│
+├── microservices/         # Microservicios independientes
+│   └── langchain-service/ # Servicio LangChain
+│       ├── app/
+│       │   ├── services/        # Servicios especializados
+│       │   └── core/           # Configuración del microservicio
+│       └── requirements.txt
 │
 ├── docker/                # Configuración de Docker
 │   ├── Dockerfile         # Configuración para la imagen
@@ -64,6 +149,7 @@ backend/
 │
 ├── scripts/               # Scripts de utilidad
 │   ├── init_db.py         # Inicialización de la base de datos
+│   ├── init_agents.py     # Inicialización de agentes
 │   └── seed_data.py       # Datos de prueba
 │
 ├── tests/                 # Tests automatizados
