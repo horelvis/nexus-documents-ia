@@ -462,3 +462,45 @@ def patch_services(mock_llm_service, mock_vector_service, mock_embedding_service
         mock_document_class.return_value = mock_document_service
         
         yield
+
+
+@pytest.fixture
+def real_storage_service(test_tenant):
+    """
+    Fixture para usar el StorageService real en tests de storage.
+    Usa un bucket de test separado y se limpia después de cada test.
+    """
+    import os
+    os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
+    
+    from app.services.storage_service import StorageService
+    storage = StorageService(tenant_id=str(test_tenant.id))
+    
+    yield storage
+    
+    # Cleanup: limpiar el bucket de test después de cada test
+    try:
+        storage.cleanup_test_bucket()
+    except Exception as e:
+        print(f"Warning: No se pudo limpiar bucket de test: {e}")
+
+
+@pytest.fixture
+def real_storage_service_with_cleanup(test_tenant):
+    """
+    Fixture para usar el StorageService real con cleanup completo.
+    Elimina completamente el bucket de test después del test.
+    """
+    import os
+    os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
+    
+    from app.services.storage_service import StorageService
+    storage = StorageService(tenant_id=str(test_tenant.id))
+    
+    yield storage
+    
+    # Cleanup completo: eliminar bucket de test
+    try:
+        storage.delete_test_bucket()
+    except Exception as e:
+        print(f"Warning: No se pudo eliminar bucket de test: {e}")
