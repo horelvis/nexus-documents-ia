@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arquitectura del Sistema de Gestión Documental</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }
+        
+        .diagram {
+            padding: 40px;
+            background: #f8f9fa;
+        }
+        
+        .layer {
+            margin-bottom: 40px;
+            animation: fadeInUp 0.6s ease-out;
+        }
+        
+        .layer-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #3498db;
+        }
+        
+        .components {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        
+        .component {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            border-left: 5px solid;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .component::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        .component:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+        
+        .frontend { border-left-color: #e74c3c; }
+        .api { border-left-color: #3498db; }
+        .service { border-left-color: #2ecc71; }
+        .microservice { border-left-color: #f39c12; }
+        .database { border-left-color: #9b59b6; }
+        .external { border-left-color: #34495e; }
+        
+        .component-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        
+        .component-description {
+            color: #7f8c8d;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+        
+        .component-tech {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .tech-tag {
+            background: #ecf0f1;
+            color: #34495e;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .flow-arrows {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        
+        .arrow {
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 30px solid #bdc3c7;
+            animation: bounce 2s infinite;
+        }
+        
+        .connections {
+            background: #2c3e50;
+            color: white;
+            padding: 30px;
+            margin-top: 40px;
+            border-radius: 12px;
+        }
+        
+        .connections h3 {
+            margin-top: 0;
+            color: #ecf0f1;
+        }
+        
+        .connection-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .connection {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .data-flow {
+            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            color: white;
+            padding: 30px;
+            margin-top: 30px;
+            border-radius: 12px;
+        }
+        
+        .flow-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .flow-step {
+            background: rgba(255,255,255,0.15);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .flow-step::after {
+            content: attr(data-step);
+            position: absolute;
+            top: -10px;
+            left: 20px;
+            background: #00b894;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0);
+            }
+            40% {
+                transform: translateY(-10px);
+            }
+            60% {
+                transform: translateY(-5px);
+            }
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .architecture-summary {
+            background: linear-gradient(135deg, #00b894 0%, #00a085 100%);
+            color: white;
+            padding: 30px;
+            margin-top: 30px;
+            border-radius: 12px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .summary-item {
+            text-align: center;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+        
+        .summary-number {
+            font-size: 2rem;
+            font-weight: bold;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏗️ Arquitectura del Sistema</h1>
+            <p>Sistema de Gestión Documental con IA y Firma Digital</p>
+        </div>
+        
+        <div class="diagram">
+            <!-- Capa de Presentación -->
+            <div class="layer">
+                <h2 class="layer-title">🎨 Capa de Presentación</h2>
+                <div class="components">
+                    <div class="component frontend">
+                        <div class="component-title">Frontend Web/Mobile</div>
+                        <div class="component-description">Interfaz de usuario moderna y responsiva para gestión de documentos</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">React/Vue</span>
+                            <span class="tech-tag">Responsive</span>
+                            <span class="tech-tag">PWA</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrows">
+                <div class="arrow"></div>
+            </div>
+            
+            <!-- Capa de API Gateway -->
+            <div class="layer">
+                <h2 class="layer-title">🌐 Capa de API Gateway</h2>
+                <div class="components">
+                    <div class="component api">
+                        <div class="component-title">FastAPI Backend</div>
+                        <div class="component-description">API principal con autenticación, autorización y enrutamiento</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">FastAPI</span>
+                            <span class="tech-tag">OAuth2</span>
+                            <span class="tech-tag">JWT</span>
+                            <span class="tech-tag">CORS</span>
+                        </div>
+                    </div>
+                    <div class="component api">
+                        <div class="component-title">API Documentation</div>
+                        <div class="component-description">Documentación automática con Swagger UI y ReDoc</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">OpenAPI</span>
+                            <span class="tech-tag">Swagger</span>
+                            <span class="tech-tag">ReDoc</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrows">
+                <div class="arrow"></div>
+            </div>
+            
+            <!-- Capa de Servicios de Negocio -->
+            <div class="layer">
+                <h2 class="layer-title">⚙️ Servicios de Negocio</h2>
+                <div class="components">
+                    <div class="component service">
+                        <div class="component-title">Document Service</div>
+                        <div class="component-description">Gestión completa de documentos: upload, procesamiento, extracción de texto</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">PyPDF2</span>
+                            <span class="tech-tag">docx</span>
+                            <span class="tech-tag">OCR</span>
+                            <span class="tech-tag">File Processing</span>
+                        </div>
+                    </div>
+                    <div class="component service">
+                        <div class="component-title">Search Service</div>
+                        <div class="component-description">Búsqueda semántica y chat con documentos usando RAG</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Vector Search</span>
+                            <span class="tech-tag">Semantic Search</span>
+                            <span class="tech-tag">RAG</span>
+                        </div>
+                    </div>
+                    <div class="component service">
+                        <div class="component-title">Agent Service</div>
+                        <div class="component-description">Gestión de agentes AI especializados en diferentes tareas</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">AI Agents</span>
+                            <span class="tech-tag">Conversations</span>
+                            <span class="tech-tag">Streaming</span>
+                        </div>
+                    </div>
+                    <div class="component service">
+                        <div class="component-title">Signature Service</div>
+                        <div class="component-description">Integración con múltiples proveedores de firma digital</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">DocuSign</span>
+                            <span class="tech-tag">YouSign</span>
+                            <span class="tech-tag">Signaturit</span>
+                            <span class="tech-tag">Webhooks</span>
+                        </div>
+                    </div>
+                    <div class="component service">
+                        <div class="component-title">Storage Service</div>
+                        <div class="component-description">Gestión de archivos en Google Cloud Storage con URLs firmadas</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">GCS</span>
+                            <span class="tech-tag">Signed URLs</span>
+                            <span class="tech-tag">Multi-tenant</span>
+                        </div>
+                    </div>
+                    <div class="component service">
+                        <div class="component-title">Auth Service</div>
+                        <div class="component-description">Autenticación y autorización multi-tenant con RBAC</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Multi-tenant</span>
+                            <span class="tech-tag">RBAC</span>
+                            <span class="tech-tag">bcrypt</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrows">
+                <div class="arrow"></div>
+            </div>
+            
+            <!-- Microservicios -->
+            <div class="layer">
+                <h2 class="layer-title">🔧 Microservicios</h2>
+                <div class="components">
+                    <div class="component microservice">
+                        <div class="component-title">LangChain Service</div>
+                        <div class="component-description">Microservicio especializado en procesamiento de IA: embeddings, LLM, RAG</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">LangChain</span>
+                            <span class="tech-tag">Ollama</span>
+                            <span class="tech-tag">Embeddings</span>
+                            <span class="tech-tag">FastAPI</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrows">
+                <div class="arrow"></div>
+            </div>
+            
+            <!-- Capa de Datos -->
+            <div class="layer">
+                <h2 class="layer-title">💾 Capa de Datos</h2>
+                <div class="components">
+                    <div class="component database">
+                        <div class="component-title">PostgreSQL</div>
+                        <div class="component-description">Base de datos principal con esquema multi-tenant</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">SQLAlchemy</span>
+                            <span class="tech-tag">Multi-tenant</span>
+                            <span class="tech-tag">Alembic</span>
+                        </div>
+                    </div>
+                    <div class="component database">
+                        <div class="component-title">Qdrant</div>
+                        <div class="component-description">Base de datos vectorial para búsqueda semántica</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Vector DB</span>
+                            <span class="tech-tag">Cosine Similarity</span>
+                            <span class="tech-tag">Collections</span>
+                        </div>
+                    </div>
+                    <div class="component database">
+                        <div class="component-title">Redis</div>
+                        <div class="component-description">Cache y sesiones para mejorar rendimiento</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Cache</span>
+                            <span class="tech-tag">Sessions</span>
+                            <span class="tech-tag">Rate Limiting</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrows">
+                <div class="arrow"></div>
+            </div>
+            
+            <!-- Servicios Externos -->
+            <div class="layer">
+                <h2 class="layer-title">🌍 Servicios Externos</h2>
+                <div class="components">
+                    <div class="component external">
+                        <div class="component-title">Google Cloud Storage</div>
+                        <div class="component-description">Almacenamiento seguro y escalable de documentos</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">GCS</span>
+                            <span class="tech-tag">Buckets</span>
+                            <span class="tech-tag">IAM</span>
+                        </div>
+                    </div>
+                    <div class="component external">
+                        <div class="component-title">Ollama</div>
+                        <div class="component-description">Motor de LLM local para procesamiento de IA</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Llama 3.1</span>
+                            <span class="tech-tag">Local LLM</span>
+                            <span class="tech-tag">API REST</span>
+                        </div>
+                    </div>
+                    <div class="component external">
+                        <div class="component-title">Stripe</div>
+                        <div class="component-description">Procesamiento de pagos y suscripciones</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Payments</span>
+                            <span class="tech-tag">Subscriptions</span>
+                            <span class="tech-tag">Customer Portal</span>
+                        </div>
+                    </div>
+                    <div class="component external">
+                        <div class="component-title">Signature Providers</div>
+                        <div class="component-description">APIs de terceros para firma digital</div>
+                        <div class="component-tech">
+                            <span class="tech-tag">Multi-provider</span>
+                            <span class="tech-tag">Webhooks</span>
+                            <span class="tech-tag">API Integration</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Flujo de Datos -->
+            <div class="data-flow">
+                <h3>📊 Flujo de Procesamiento de Documentos</h3>
+                <div class="flow-steps">
+                    <div class="flow-step" data-step="1">
+                        <strong>Upload</strong><br>
+                        Usuario sube documento via frontend
+                    </div>
+                    <div class="flow-step" data-step="2">
+                        <strong>Storage</strong><br>
+                        Archivo se almacena en GCS
+                    </div>
+                    <div class="flow-step" data-step="3">
+                        <strong>Processing</strong><br>
+                        Extracción de texto y metadatos
+                    </div>
+                    <div class="flow-step" data-step="4">
+                        <strong>Chunking</strong><br>
+                        División del texto en fragmentos
+                    </div>
+                    <div class="flow-step" data-step="5">
+                        <strong>Embeddings</strong><br>
+                        Generación de vectores semánticos
+                    </div>
+                    <div class="flow-step" data-step="6">
+                        <strong>Indexing</strong><br>
+                        Almacenamiento en Qdrant
+                    </div>
+                    <div class="flow-step" data-step="7">
+                        <strong>Search</strong><br>
+                        Búsqueda semántica disponible
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Conexiones Principales -->
+            <div class="connections">
+                <h3>🔗 Conexiones y Comunicación</h3>
+                <div class="connection-list">
+                    <div class="connection">
+                        <strong>Frontend ↔ FastAPI</strong><br>
+                        HTTP/HTTPS, JWT Authentication, CORS
+                    </div>
+                    <div class="connection">
+                        <strong>FastAPI ↔ LangChain Service</strong><br>
+                        HTTP REST API, Async Processing
+                    </div>
+                    <div class="connection">
+                        <strong>LangChain ↔ Ollama</strong><br>
+                        HTTP API, Model Inference
+                    </div>
+                    <div class="connection">
+                        <strong>Services ↔ PostgreSQL</strong><br>
+                        SQLAlchemy ORM, Connection Pool
+                    </div>
+                    <div class="connection">
+                        <strong>Vector Service ↔ Qdrant</strong><br>
+                        gRPC/HTTP, Vector Operations
+                    </div>
+                    <div class="connection">
+                        <strong>Storage ↔ GCS</strong><br>
+                        Google Cloud SDK, Signed URLs
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Resumen de Arquitectura -->
+            <div class="architecture-summary">
+                <h3>📈 Resumen de Arquitectura</h3>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <span class="summary-number">15+</span>
+                        Servicios
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-number">3</span>
+                        Bases de Datos
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-number">Multi</span>
+                        Tenant
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-number">AI</span>
+                        Powered
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-number">Cloud</span>
+                        Native
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-number">REST</span>
+                        APIs
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
