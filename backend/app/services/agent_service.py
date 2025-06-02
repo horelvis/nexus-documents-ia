@@ -286,7 +286,7 @@ class AgentService:
                 conversation_id=message_data.conversation_id,
                 role=message_data.role,
                 content=message_data.content,
-                metadata=message_data.metadata
+                message_metadata=message_data.metadata
             )
             
             self.db.add(message)

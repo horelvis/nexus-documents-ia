@@ -367,7 +367,7 @@ class AgentMessage(Base):
     # Contenido del mensaje
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
-    metadata = Column(JSONB, nullable=False, default={})  # Attachments, tool calls, etc.
+    message_metadata = Column(JSONB, nullable=False, default={})  # Attachments, tool calls, etc.
     
     # Metadatos
     created_at = Column(DateTime, default=func.now(), nullable=False)
