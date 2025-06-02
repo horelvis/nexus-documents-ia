@@ -5,9 +5,9 @@ import logging
 from typing import Optional
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain_community.vectorstores import Qdrant
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from qdrant_client import QdrantClient
 
 from app.core.config import settings

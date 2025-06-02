@@ -5,7 +5,7 @@ import logging
 from typing import List, Dict, Any, Optional
 
 from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
 from app.core.config import settings
