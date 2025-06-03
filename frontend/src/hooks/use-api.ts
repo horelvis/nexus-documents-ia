@@ -52,15 +52,18 @@ export function useCurrentUser() {
   const [backendUser, setBackendUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false); // Prevenir llamadas múltiples
+  const [hasAttempted, setHasAttempted] = useState(false); // Track if we've tried once
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isProcessing || hasAttempted) return;
 
     const syncAndFetchUser = async () => {
       console.log('👤 useCurrentUser - Starting sync process', {
         clerkUser: !!clerkUser,
         isSignedIn,
-        userId: clerkUser?.id
+        userId: clerkUser?.id,
+        isProcessing
       });
 
       if (!clerkUser || !isSignedIn) {
@@ -70,8 +73,15 @@ export function useCurrentUser() {
         return;
       }
 
+      if (isProcessing) {
+        console.log('👤 Already processing, skipping duplicate request');
+        return;
+      }
+
       try {
         console.log('👤 Starting user sync and fetch...');
+        setIsProcessing(true);
+        setHasAttempted(true); // Mark that we've attempted
         setLoading(true);
         setError(null);
 
@@ -109,13 +119,20 @@ export function useCurrentUser() {
         }
       } finally {
         setLoading(false);
+        setIsProcessing(false);
       }
     };
 
     syncAndFetchUser();
-  }, [clerkUser, isLoaded, isSignedIn, getToken]);
+  }, [clerkUser, isLoaded, isSignedIn, getToken]); // Removed isProcessing from deps to avoid infinite loops
 
-  return { user: backendUser, loading, error, clerkUser };
+  const retry = () => {
+    setHasAttempted(false);
+    setError(null);
+    setIsProcessing(false);
+  };
+
+  return { user: backendUser, loading, error, clerkUser, retry };
 }
 
 // Hook for documents

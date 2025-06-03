@@ -199,6 +199,18 @@ async def test_connection(request: Request):
         "server_host": str(settings.SERVER_HOST)
     }
 
+# Ruta de debug para listar endpoints
+@app.get("/debug/routes", tags=["debug"])
+async def list_routes():
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods) if route.methods else []
+            })
+    return {"routes": routes}
+
 # Manejador de errores global
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

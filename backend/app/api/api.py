@@ -8,7 +8,15 @@ from fastapi import APIRouter
 
 
 api_router = APIRouter()
+
+# Log para verificar que se incluye el router de auth
+import logging
+logger = logging.getLogger(__name__)
+logger.info("🔧 Including auth router with endpoints...")
+
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+
+logger.info("✅ Auth router included with prefix=/auth")
 api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])

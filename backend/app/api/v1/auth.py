@@ -17,6 +17,9 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Log que el router se está cargando
+logger.info("🚀 Auth router loaded with endpoints: login, register, sync-user, me")
+
 @router.post("/login/access-token", response_model=TokenResponse)
 async def login_access_token(
     db: Session = Depends(get_db),
