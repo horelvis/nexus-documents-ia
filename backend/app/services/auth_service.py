@@ -160,7 +160,7 @@ class AuthService:
             
             # Decodificar el token sin verificar la firma (solo para desarrollo)
             # NOTA: En producción esto debe cambiar para usar las claves de Clerk
-            payload = jwt.decode(token, options={"verify_signature": False})
+            payload = jwt.decode(token, key="", options={"verify_signature": False})
             
             logger.info(f"🔑 Clerk token decoded: {payload.get('sub', 'no-sub')}")
             return payload

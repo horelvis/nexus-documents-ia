@@ -211,6 +211,72 @@ async def list_routes():
             })
     return {"routes": routes}
 
+# Ruta para inicializar la base de datos
+@app.post("/debug/init-db", tags=["debug"])
+async def init_database():
+    """Inicializar la base de datos con tablas y datos iniciales"""
+    try:
+        from app.db.models import Base
+        from app.db.database import engine, SessionLocal
+        from app.services.auth_service import AuthService
+        from app.db.models import Tenant, User
+        import uuid
+        
+        logger.info("🗄️ Initializing database...")
+        
+        # Crear todas las tablas
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Tables created")
+        
+        # Crear datos iniciales
+        db = SessionLocal()
+        try:
+            # Crear tenant por defecto
+            tenant = db.query(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT).first()
+            if not tenant:
+                tenant = Tenant(
+                    id=uuid.uuid4(),
+                    name=settings.DEFAULT_TENANT,
+                    description="Default tenant",
+                    bucket_name=f"nexus-{settings.DEFAULT_TENANT}"
+                )
+                db.add(tenant)
+                db.flush()
+                logger.info(f"✅ Default tenant created: {tenant.id}")
+            
+            # Crear usuario admin
+            admin_user = db.query(User).filter(User.email == "admin@example.com").first()
+            if not admin_user:
+                admin_user = User(
+                    id=uuid.uuid4(),
+                    email="admin@example.com",
+                    hashed_password=AuthService.get_password_hash("admin123"),
+                    full_name="Admin User",
+                    is_superuser=True,
+                    is_active=True,
+                    tenant_id=tenant.id
+                )
+                db.add(admin_user)
+                logger.info("✅ Admin user created")
+            
+            db.commit()
+            
+        finally:
+            db.close()
+        
+        return {
+            "status": "success",
+            "message": "Database initialized successfully",
+            "tenant_id": str(tenant.id) if tenant else None
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Database initialization failed: {str(e)}"
+        }
+
 # Manejador de errores global
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
