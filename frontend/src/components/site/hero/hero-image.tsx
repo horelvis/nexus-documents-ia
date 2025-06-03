@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from "react";
 import Tilt from 'react-parallax-tilt';
-import Images from "../ui/images";
-import AnimationContainer from "../utils/animation-container";
+import Images from "../../ui/images";
+import AnimationContainer from "../../utils/animation-container";
 
 const HeroImage = () => {
 

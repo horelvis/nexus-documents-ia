@@ -41,6 +41,12 @@ class UserCreate(UserBase):
     is_superuser: bool = Field(False, example=False)
     is_active: bool = Field(True, example=True)
 
+# Schema for syncing user from Clerk
+class UserSync(BaseModel):
+    clerk_user_id: str = Field(..., example="user_2aBcDeFgHiJkLmNoPqRsTuVwXyZ")
+    email: EmailStr = Field(..., example="user@example.com")
+    full_name: str = Field(..., example="John Doe")
+
 # Schema for reading/returning user data (response model)
 class UserRead(UserBase):
     id: uuid.UUID

@@ -1,8 +1,8 @@
 import { offerings } from '@/constants';
 import { LifeBuoy, LucideIcon } from 'lucide-react';
-import { Badge } from '../ui/badge';
-import Images from "../ui/images";
-import AnimationContainer from "../utils/animation-container";
+import { Badge } from '../../ui/badge';
+import Images from "../../ui/images";
+import AnimationContainer from "../../utils/animation-container";
 
 interface Props {
     title: string;

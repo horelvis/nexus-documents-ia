@@ -3,9 +3,9 @@
 import { testimonials } from '@/constants';
 import { motion } from 'framer-motion';
 import { User, Users } from 'lucide-react';
-import { Badge } from '../ui/badge';
-import Marquee from "../ui/marquee";
-import AnimationContainer from "../utils/animation-container";
+import { Badge } from '../../ui/badge';
+import Marquee from "../../ui/marquee";
+import AnimationContainer from "../../utils/animation-container";
 
 interface Props {
     testimonial: {

@@ -24,14 +24,14 @@ class DocumentRecommender:
         try:
             # Obtener todas las vistas de documentos para este tenant
             views = self.db.query(
-                DocumentView.c.user_id,
-                DocumentView.c.document_id,
-                func.count(DocumentView.c.id).label("view_count")
+                DocumentView.user_id,
+                DocumentView.document_id,
+                func.count(DocumentView.id).label("view_count")
             ).filter(
-                DocumentView.c.tenant_id == self.tenant_id
+                DocumentView.tenant_id == self.tenant_id
             ).group_by(
-                DocumentView.c.user_id,
-                DocumentView.c.document_id
+                DocumentView.user_id,
+                DocumentView.document_id
             ).all()
             
             # Convertir a dataframe
@@ -78,9 +78,9 @@ class DocumentRecommender:
             return []
         
         # Documentos ya vistos por el usuario
-        user_docs = self.db.query(DocumentView.c.document_id).filter(
-            DocumentView.c.user_id == user_id,
-            DocumentView.c.tenant_id == self.tenant_id
+        user_docs = self.db.query(DocumentView.document_id).filter(
+            DocumentView.user_id == user_id,
+            DocumentView.tenant_id == self.tenant_id
         ).distinct().all()
         
         user_doc_ids = [doc[0] for doc in user_docs]
@@ -92,14 +92,13 @@ class DocumentRecommender:
             # Documentos vistos por el usuario similar
             similar_user_docs = self.db.query(
                 Document, 
-                func.count(DocumentView.c.id).label("view_count")
+                func.count(DocumentView.id).label("view_count")
             ).join(
-                DocumentView, Document.id == DocumentView.c.document_id
+                DocumentView, Document.id == DocumentView.document_id
             ).filter(
-                DocumentView.c.user_id == similar_user_id,
-                DocumentView.c.tenant_id == self.tenant_id,
-                ~Document.id.in_(user_doc_ids),  # Excluir docs ya vistos
-                Document.is_deleted == False  # No docs eliminados
+                DocumentView.user_id == similar_user_id,
+                DocumentView.tenant_id == self.tenant_id,
+                ~Document.id.in_(user_doc_ids)  # Excluir docs ya vistos
             ).group_by(
                 Document.id
             ).order_by(

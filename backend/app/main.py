@@ -21,12 +21,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup:
-    # Add any application startup logic here (e.g., connecting to SQLAlchemy if needed globally)
-    logger.info("Application startup...")
+    logger.info("🚀 Application startup...")
+    logger.info(f"📍 Server URL: {settings.SERVER_HOST}:{settings.SERVER_PORT if hasattr(settings, 'SERVER_PORT') else '8000'}")
+    logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
+    logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
+    logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
+    logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     yield
     # Shutdown:
-    # Add any application shutdown logic here (e.g., closing SQLAlchemy connections)
-    logger.info("Application shutdown...")
+    logger.info("🛑 Application shutdown...")
 
 # Crear aplicación FastAPI con metadatos mejorados
 app = FastAPI(
@@ -114,28 +117,54 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-# Middleware para logging
+# Middleware para logging detallado
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     
-    # Procesar la solicitud
-    response = await call_next(request)
+    # Obtener información de la request
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    auth_header = request.headers.get("authorization")
+    user_id = request.headers.get("x-user-id")
     
-    # Calcular tiempo de procesamiento
-    process_time = time.time() - start_time
-    
-    # Añadir cabecera de tiempo de procesamiento
-    response.headers["X-Process-Time"] = str(process_time)
-    
-    # Loggear la solicitud
+    # Log inicial de la request
     logger.info(
-        f"Request: {request.method} {request.url.path} - "
-        f"Status: {response.status_code} - "
-        f"Time: {process_time:.4f}s"
+        f"📨 Incoming request: {request.method} {request.url.path} "
+        f"from {client_ip} - User-Agent: {user_agent[:50]}... "
+        f"Auth: {'Bearer ***' if auth_header else 'None'} "
+        f"User-ID: {user_id or 'None'}"
     )
     
-    return response
+    try:
+        # Procesar la solicitud
+        response = await call_next(request)
+        
+        # Calcular tiempo de procesamiento
+        process_time = time.time() - start_time
+        
+        # Añadir cabecera de tiempo de procesamiento
+        response.headers["X-Process-Time"] = str(process_time)
+        
+        # Log de respuesta exitosa
+        logger.info(
+            f"✅ Request completed: {request.method} {request.url.path} - "
+            f"Status: {response.status_code} - "
+            f"Time: {process_time:.4f}s - "
+            f"Client: {client_ip}"
+        )
+        
+        return response
+        
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(
+            f"❌ Request failed: {request.method} {request.url.path} - "
+            f"Error: {str(e)} - "
+            f"Time: {process_time:.4f}s - "
+            f"Client: {client_ip}"
+        )
+        raise
 
 # Incluir router de documentación personalizada
 app.include_router(
@@ -151,6 +180,24 @@ app.include_router(v1_api_router, prefix=settings.API_PREFIX)
 @app.get("/health", tags=["health"])
 async def health_check():
     return {"status": "healthy", "version": "1.0.0"}
+
+# Ruta de test de conectividad
+@app.get("/test-connection", tags=["health"])
+async def test_connection(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    headers = dict(request.headers)
+    
+    logger.info(f"🔍 Connection test from {client_ip}")
+    logger.info(f"🔍 Headers received: {headers}")
+    
+    return {
+        "status": "connected",
+        "client_ip": client_ip,
+        "headers": headers,
+        "cors_origins": [str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+        "api_prefix": settings.API_PREFIX,
+        "server_host": str(settings.SERVER_HOST)
+    }
 
 # Manejador de errores global
 @app.exception_handler(Exception)

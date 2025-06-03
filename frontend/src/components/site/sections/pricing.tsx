@@ -2,11 +2,14 @@
 
 import { plans } from '@/constants';
 import { cn } from '@/lib/utils';
-import { CircleArrowUp, CreditCard, Gem, Headset, Zap } from 'lucide-react';
+import { CircleArrowUp, CreditCard, Gem, Headset, Zap, Loader2 } from 'lucide-react';
 import { useState } from 'react';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import AnimationContainer from "../utils/animation-container";
+import { Badge } from '../../ui/badge';
+import { Button } from '../../ui/button';
+import AnimationContainer from "../../utils/animation-container";
+import { useSubscription } from '@/hooks/use-subscription';
+import { useCurrentUser } from '@/hooks/use-api';
+import Link from 'next/link';
 
 interface Props {
     plan: {
@@ -16,17 +19,26 @@ interface Props {
         priceYearly: string;
         buttonText: string;
         features: string[];
+        stripePriceIdMonthly?: string;
+        stripePriceIdYearly?: string;
+        stripePriceId?: string | null;
     };
 }
 
 type Plan = "monthly" | "annually";
 
 const Pricing = () => {
-
     const [billPlan, setBillPlan] = useState<Plan>("monthly");
+    const { user } = useCurrentUser();
+    const { subscription, loading: subscriptionLoading, createCheckoutSession } = useSubscription();
 
     const handleSwitch = () => {
         setBillPlan((prev) => (prev === "monthly" ? "annually" : "monthly"));
+    };
+
+    const getCurrentPlanId = () => {
+        if (!subscription || subscription.id === 'free') return 'free';
+        return subscription.plan_id;
     };
 
     return (
@@ -68,7 +80,15 @@ const Pricing = () => {
             <div className="grid w-full grid-cols-1 gap-8 pt-8 lg:grid-cols-3 md:pt-12 lg:pt-16">
                 {plans.map((plan, idx) => (
                     <AnimationContainer key={idx} delay={0.1 * idx + 0.1}>
-                        <Plan key={plan.id} plan={plan} billPlan={billPlan} />
+                        <Plan 
+                            key={plan.id} 
+                            plan={plan} 
+                            billPlan={billPlan}
+                            user={user}
+                            subscription={subscription}
+                            subscriptionLoading={subscriptionLoading}
+                            onUpgrade={createCheckoutSession}
+                        />
                     </AnimationContainer>
                 ))}
             </div>
@@ -91,12 +111,73 @@ const Pricing = () => {
     );
 };
 
-const Plan = ({ plan, billPlan }: Props & { billPlan: Plan }) => {
+const Plan = ({ 
+    plan, 
+    billPlan, 
+    user, 
+    subscription, 
+    subscriptionLoading, 
+    onUpgrade 
+}: Props & { 
+    billPlan: Plan;
+    user: any;
+    subscription: any;
+    subscriptionLoading: boolean;
+    onUpgrade: (priceId: string) => Promise<void>;
+}) => {
+    const [loading, setLoading] = useState(false);
+    
+    const isCurrentPlan = subscription?.plan_id === plan.title.toLowerCase() || 
+                         (plan.title === "Free" && (!subscription || subscription.id === 'free'));
+    
+    const getPriceId = () => {
+        if (plan.title === "Free") return null;
+        return billPlan === "monthly" ? plan.stripePriceIdMonthly : plan.stripePriceIdYearly;
+    };
+
+    const handleUpgrade = async () => {
+        if (!user) {
+            // Redirect to login if not authenticated
+            window.location.href = '/auth/login';
+            return;
+        }
+
+        if (plan.title === "Free") {
+            // Redirect to dashboard for free plan
+            window.location.href = '/dashboard';
+            return;
+        }
+
+        const priceId = getPriceId();
+        if (!priceId) return;
+
+        try {
+            setLoading(true);
+            await onUpgrade(priceId);
+        } catch (error) {
+            console.error('Upgrade failed:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const getButtonText = () => {
+        if (subscriptionLoading) return "Loading...";
+        if (isCurrentPlan) return "Current Plan";
+        if (!user && plan.title !== "Free") return "Sign Up";
+        return plan.buttonText;
+    };
+
+    const isButtonDisabled = () => {
+        return subscriptionLoading || loading || isCurrentPlan;
+    };
+
     return (
         <div
             className={cn(
-                "flex flex-col rounded-2xl border cursor-pointer transition-all bg-background items-start w-full select-none",
-                plan.title === "Standard" ? "border-primary/60 hover:border-primary" : "border-border/60 hover:border-muted-foreground/50"
+                "flex flex-col rounded-2xl border transition-all bg-background items-start w-full select-none",
+                plan.title === "Standard" ? "border-primary/60" : "border-border/60",
+                isCurrentPlan ? "ring-2 ring-primary/50" : "hover:border-muted-foreground/50"
             )}
         >
             <div
@@ -106,11 +187,20 @@ const Plan = ({ plan, billPlan }: Props & { billPlan: Plan }) => {
                 )}
             >
                 <span className="font-medium text-muted-foreground">{plan.title} Plan</span>
-                <h3 className="mt-4 text-2xl font-medium md:text-3xl">{billPlan === "monthly" ? plan.priceMonthly : plan.priceYearly}</h3>
-                <span className="mt-2 text-neutral-500">{billPlan === "monthly" ? "per month" : "per year"}</span>
+                <h3 className="mt-4 text-2xl font-medium md:text-3xl">
+                    {billPlan === "monthly" ? plan.priceMonthly : plan.priceYearly}
+                </h3>
+                <span className="mt-2 text-neutral-500">
+                    {billPlan === "monthly" ? "per month" : "per year"}
+                </span>
                 {plan.title === "Standard" && (
                     <span className="absolute border border-primary/60 bg-primary/20 top-3 right-3 rounded-full px-3 py-1.5 text-xs text-primary">
                         Most Popular
+                    </span>
+                )}
+                {isCurrentPlan && (
+                    <span className="absolute border border-green-600/60 bg-green-600/20 top-3 left-3 rounded-full px-3 py-1.5 text-xs text-green-600">
+                        Current
                     </span>
                 )}
             </div>
@@ -135,10 +225,19 @@ const Plan = ({ plan, billPlan }: Props & { billPlan: Plan }) => {
                 ))}
             </div>
             <div className="flex flex-col items-start w-full px-4 pt-2 pb-5 md:pb-6 md:px-6">
-                <Button size="lg" variant={plan.title === "Standard" ? "default" : "white"} className="w-full">
-                    {plan.buttonText}
+                <Button 
+                    size="lg" 
+                    variant={plan.title === "Standard" ? "default" : "white"} 
+                    className="w-full"
+                    onClick={handleUpgrade}
+                    disabled={isButtonDisabled()}
+                >
+                    {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    {getButtonText()}
                 </Button>
-                <span className="px-2 mt-4 text-sm text-muted-foreground">No credit card required</span>
+                <span className="px-2 mt-4 text-sm text-muted-foreground">
+                    {plan.title === "Free" ? "No credit card required" : "Cancel anytime"}
+                </span>
             </div>
         </div>
     );

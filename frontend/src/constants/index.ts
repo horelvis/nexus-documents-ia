@@ -162,43 +162,51 @@ export const plans = [
     {
         id: 1,
         title: "Free",
-        priceMonthly: "₹0",
-        priceYearly: "₹0",
+        priceMonthly: "$0",
+        priceYearly: "$0",
         buttonText: "Get Started for Free",
+        stripePriceId: null,
         features: [
-            "AI-Powered Caption Generation",
-            "Multi-Platform Publishing",
-            "Content Calendar",
-            "Basic Analytics Insights",
-            // "Limited Content Recycling"
+            "Up to 10 documents",
+            "Basic AI search",
+            "1GB storage",
+            "Email support",
+            "Basic insights"
         ]
     },
     {
         id: 2,
         title: "Standard",
-        priceMonthly: "₹499",
-        priceYearly: "₹2999",
+        priceMonthly: "$9",
+        priceYearly: "$99",
         buttonText: "Upgrade to Standard",
+        stripePriceIdMonthly: "price_standard_monthly",
+        stripePriceIdYearly: "price_standard_yearly",
         features: [
-            "AI-Powered Caption Generation",
-            "Multi-Platform Publishing",
-            "Content Calendar",
-            "Advanced Analytics Insights",
-            // "Enhanced Content Recycling"
+            "Up to 100 documents",
+            "Advanced AI search & chat",
+            "10GB storage",
+            "Priority support",
+            "Advanced analytics",
+            "Document summarization"
         ]
     },
     {
         id: 3,
         title: "Premium",
-        priceMonthly: "₹999",
-        priceYearly: "₹7999",
+        priceMonthly: "$19",
+        priceYearly: "$199",
         buttonText: "Upgrade to Premium",
+        stripePriceIdMonthly: "price_premium_monthly",
+        stripePriceIdYearly: "price_premium_yearly",
         features: [
-            "AI-Powered Caption Generation",
-            "Multi-Platform Publishing",
-            "Content Calendar",
-            "Tailored Analytics Insights",
-            // "Unlimited Content Recycling"
+            "Unlimited documents",
+            "Advanced AI chat & insights",
+            "100GB storage",
+            "24/7 priority support",
+            "Custom integrations",
+            "Advanced automation",
+            "Team collaboration"
         ]
     }
 ];

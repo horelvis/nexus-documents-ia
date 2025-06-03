@@ -17,8 +17,15 @@ class Settings(BaseSettings):
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
     ALGORITHM: str = "HS256"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    # CORS - Valores por defecto para desarrollo
+    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000", 
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://192.168.1.47:3000",
+        "http://192.168.1.47:8000"
+    ]
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:

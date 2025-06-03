@@ -8,9 +8,11 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/button';
 import Icons from '../ui/icons';
+import { UserNav } from '../auth/user-nav';
+import { useAuth } from '@clerk/nextjs';
 
 const MobileNavbar = () => {
-
+    const { isSignedIn, isLoaded } = useAuth();
     const [isOpen, setIsOpen] = useState<boolean>(false);
 
     const variants = {
@@ -174,17 +176,31 @@ const MobileNavbar = () => {
                             </ul>
 
                             <div className="flex flex-col items-center justify-center w-full gap-4 p-6 mt-auto">
-                                <Button variant="secondary" className="w-full" asChild>
-                                    <Link href="/auth/login" className="w-full">
-                                        Login
-                                    </Link>
-                                </Button>
-                                <Button className="w-full" asChild>
-                                    <Link href="/auth/register" className="flex items-center w-full">
-                                        Start for free
-                                        <ArrowRight className="w-4 h-4 ml-2" />
-                                    </Link>
-                                </Button>
+                                {!isLoaded ? (
+                                    // Show skeleton while loading
+                                    <div className="flex flex-col gap-4 w-full">
+                                        <div className="w-full h-10 bg-muted/50 rounded animate-pulse" />
+                                        <div className="w-full h-10 bg-muted/50 rounded animate-pulse" />
+                                    </div>
+                                ) : isSignedIn ? (
+                                    <div className="flex items-center justify-center w-full">
+                                        <UserNav />
+                                    </div>
+                                ) : (
+                                    <>
+                                        <Button variant="secondary" className="w-full" asChild>
+                                            <Link href="/auth/login" className="w-full">
+                                                Login
+                                            </Link>
+                                        </Button>
+                                        <Button className="w-full" asChild>
+                                            <Link href="/dashboard" className="flex items-center w-full">
+                                                Get Started
+                                                <ArrowRight className="w-4 h-4 ml-2" />
+                                            </Link>
+                                        </Button>
+                                    </>
+                                )}
                             </div>
                         </motion.div>
                     )}

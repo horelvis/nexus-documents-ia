@@ -3,12 +3,14 @@
 import { motion } from 'framer-motion';
 import { CreditCard, History, Play } from 'lucide-react';
 import Link from 'next/link';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import Icons from '../ui/icons';
-import AnimationContainer from "../utils/animation-container";
+import { Badge } from '../../ui/badge';
+import { Button } from '../../ui/button';
+import Icons from '../../ui/icons';
+import AnimationContainer from "../../utils/animation-container";
+import { useUser } from '@clerk/nextjs';
 
 const Hero = () => {
+    const { isSignedIn } = useUser();
 
     const leftVariants = {
         hidden: { x: -100, opacity: 0 },
@@ -40,24 +42,24 @@ const Hero = () => {
                     <AnimationContainer delay={0.15}>
                         <h1 className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold text-center !leading-tight">
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                Supercharge your {" "}
+                                Transform your {" "}
                             </span>
                             <span className="text-primary to-primaryLight-foreground">
-                                social media {" "}
+                                document management {" "}
                             </span>
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                presence with AI
+                                with AI
                             </span>
                         </h1>
                     </AnimationContainer>
                     <AnimationContainer delay={0.2}>
                         <p className="max-w-xl mt-2 text-base text-center text-accent-foreground/60">
-                            Elevate your social media game with AI-powered caption generation and scheduling. <span className="hidden lg:inline">CapsAI is a powerful tool that uses AI to generate captivating captions from your photos.</span>
+                            Upload, search, and chat with your documents using AI-powered insights and automation. <span className="hidden lg:inline">Nexus is a powerful platform that transforms how you manage and interact with your documents.</span>
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
                             <Button size="lg" asChild>
-                                <Link href="/auth/register">
-                                    Start for free
+                                <Link href={isSignedIn ? "/dashboard" : "/auth/register"}>
+                                    {isSignedIn ? "Go to Dashboard" : "Get Started"}
                                 </Link>
                             </Button>
                             <Button size="lg" variant="secondary" asChild>
@@ -71,8 +73,8 @@ const Hero = () => {
                     <AnimationContainer delay={0.3}>
                         <div className="flex items-center justify-center mt-6 lg:hidden gap-x-4">
                             <Button asChild>
-                                <Link href="/auth/register">
-                                    Start for free
+                                <Link href={isSignedIn ? "/dashboard" : "/auth/register"}>
+                                    {isSignedIn ? "Go to Dashboard" : "Get Started"}
                                 </Link>
                             </Button>
                             <Button variant="secondary" asChild>

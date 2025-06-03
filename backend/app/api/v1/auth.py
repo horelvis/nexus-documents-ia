@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.database import get_db
 from app.schemas.auth import TokenResponse
-from app.schemas.user import UserCreate, UserResponse
+from app.schemas.user import UserCreate, UserResponse, UserSync
 from app.services.auth_service import AuthService
 
 import logging
@@ -73,6 +73,27 @@ async def register_user(
         clerk_user_id=user_in.clerk_user_id
     )
     
+    return user
+
+@router.post("/sync-user", response_model=UserResponse, tags=["auth"])
+async def sync_user(
+    user_data: UserSync,
+    db: Session = Depends(get_db)
+) -> Any:
+    """
+    Sync user from Clerk authentication system.
+    Creates user if it doesn't exist, updates if it does.
+    """
+    logger.info(f"🔄 Syncing user from Clerk: {user_data.clerk_user_id}")
+    
+    user = AuthService.sync_user_from_clerk(
+        db=db,
+        clerk_user_id=user_data.clerk_user_id,
+        email=user_data.email,
+        full_name=user_data.full_name
+    )
+    
+    logger.info(f"✅ User synced successfully: {user.id}")
     return user
 
 @router.get("/me", response_model=UserResponse)

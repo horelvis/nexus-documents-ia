@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+import requests
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -148,11 +149,39 @@ class AuthService:
         return db_tenant
 
     @staticmethod
+    def verify_clerk_token(token: str) -> dict:
+        """Verifica un token de Clerk y retorna el payload."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Para desarrollo, vamos a hacer una verificación simplificada del token Clerk
+            # En producción deberías usar las claves públicas de Clerk para verificar
+            
+            # Decodificar el token sin verificar la firma (solo para desarrollo)
+            # NOTA: En producción esto debe cambiar para usar las claves de Clerk
+            payload = jwt.decode(token, options={"verify_signature": False})
+            
+            logger.info(f"🔑 Clerk token decoded: {payload.get('sub', 'no-sub')}")
+            return payload
+            
+        except Exception as e:
+            logger.error(f"❌ Error verifying Clerk token: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Clerk token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    @staticmethod
     def get_current_user(
         db: Session = Depends(get_db),
         token: str = Depends(oauth2_scheme)
     ) -> User:
-        """Obtiene el usuario actual basado en el token JWT."""
+        """Obtiene el usuario actual basado en el token JWT o Clerk token."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         credentials_exception = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -160,18 +189,43 @@ class AuthService:
         )
         
         try:
-            payload = jwt.decode(
-                token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-            )
-            token_data = TokenPayload(**payload)
-        except JWTError:
+            # Intentar verificar como token de Clerk primero
+            try:
+                clerk_payload = AuthService.verify_clerk_token(token)
+                clerk_user_id = clerk_payload.get('sub')
+                
+                if clerk_user_id:
+                    # Buscar usuario por clerk_user_id
+                    user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+                    if user:
+                        logger.info(f"✅ User found by Clerk ID: {user.id}")
+                        return user
+                    else:
+                        logger.warning(f"⚠️ User not found for Clerk ID: {clerk_user_id}")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="User not found. Please sync your account first.",
+                        )
+            except:
+                # Si falla la verificación de Clerk, intentar como JWT interno
+                logger.info("🔄 Trying internal JWT verification...")
+                payload = jwt.decode(
+                    token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+                )
+                token_data = TokenPayload(**payload)
+                
+                user = db.query(User).filter(User.id == token_data.sub).first()
+                if user is None:
+                    raise credentials_exception
+                
+                return user
+                
+        except JWTError as e:
+            logger.error(f"❌ JWT Error: {str(e)}")
             raise credentials_exception
-        
-        user = db.query(User).filter(User.id == token_data.sub).first()
-        if user is None:
+        except Exception as e:
+            logger.error(f"❌ Auth Error: {str(e)}")
             raise credentials_exception
-        
-        return user
 
     @staticmethod
     def get_current_active_user(
@@ -181,3 +235,75 @@ class AuthService:
         if not current_user.is_active:
             raise HTTPException(status_code=400, detail="Inactive user")
         return current_user
+
+    @staticmethod
+    def sync_user_from_clerk(
+        db: Session,
+        clerk_user_id: str,
+        email: str,
+        full_name: str
+    ) -> User:
+        """Sincroniza un usuario desde Clerk. Crea si no existe, actualiza si existe."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Buscar usuario existente por clerk_user_id
+        user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        
+        if user:
+            # Usuario existe, actualizar información si ha cambiado
+            logger.info(f"🔄 Updating existing user: {user.id}")
+            if user.email != email:
+                user.email = email
+            if user.full_name != full_name:
+                user.full_name = full_name
+            db.commit()
+            db.refresh(user)
+            return user
+        
+        # Usuario no existe, verificar si existe por email
+        user_by_email = db.query(User).filter(User.email == email).first()
+        if user_by_email:
+            # Usuario existe por email pero sin clerk_user_id, actualizar
+            logger.info(f"🔗 Linking existing user by email: {user_by_email.id}")
+            user_by_email.clerk_user_id = clerk_user_id
+            user_by_email.full_name = full_name
+            db.commit()
+            db.refresh(user_by_email)
+            return user_by_email
+        
+        # Usuario no existe, crear uno nuevo
+        logger.info(f"👤 Creating new user from Clerk: {clerk_user_id}")
+        
+        # Obtener tenant por defecto
+        default_tenant = db.query(Tenant).filter(
+            Tenant.name == settings.DEFAULT_TENANT
+        ).first()
+        
+        if not default_tenant:
+            # Crear tenant por defecto si no existe
+            logger.info("🏢 Creating default tenant")
+            default_tenant = AuthService.create_tenant(
+                db=db,
+                name=settings.DEFAULT_TENANT,
+                description="Default tenant for new users"
+            )
+        
+        # Crear usuario con password temporal (no se usará con Clerk)
+        new_user = User(
+            id=uuid4(),
+            email=email,
+            hashed_password=AuthService.get_password_hash("temp_password_from_clerk"),
+            full_name=full_name,
+            is_superuser=False,
+            tenant_id=default_tenant.id,
+            clerk_user_id=clerk_user_id,
+            is_active=True
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        logger.info(f"✅ New user created: {new_user.id}")
+        return new_user

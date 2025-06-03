@@ -2,10 +2,10 @@ import { Metadata } from "next";
 
 export const SITE_CONFIG: Metadata = {
     title: {
-        default: "Caps AI - Elevate Your Social Media Presence",
-        template: `%s | Astra`
+        default: "Nexus Document Backend - AI-Powered Document Management",
+        template: `%s | Nexus`
     },
-    description: "Unlock the power of AI with Caps AI, the ultimate social media management tool for businesses and entrepreneurs. Create captivating posts, generate engaging captions, and streamline your social media strategy with ease.",
+    description: "Transform your document management with AI. Upload, search, chat with your documents, and unlock insights with our intelligent document processing platform.",
     icons: {
         icon: [
             {
@@ -15,8 +15,8 @@ export const SITE_CONFIG: Metadata = {
         ]
     },
     openGraph: {
-        title: "Caps AI - Elevate Your Social Media Presence",
-        description: "Unlock the power of AI with Caps AI, the ultimate social media management tool for businesses and entrepreneurs. Create captivating posts, generate engaging captions, and streamline your social media strategy with ease.",
+        title: "Nexus Document Backend - AI-Powered Document Management",
+        description: "Transform your document management with AI. Upload, search, chat with your documents, and unlock insights with our intelligent document processing platform.",
         images: [
             {
                 url: "/assets/og-image.png",
@@ -25,14 +25,14 @@ export const SITE_CONFIG: Metadata = {
     },
     twitter: {
         card: "summary_large_image",
-        creator: "@shreyassihasane",
-        title: "Caps AI - Elevate Your Social Media Presence",
-        description: "Unlock the power of AI with Caps AI, the ultimate social media management tool for businesses and entrepreneurs. Create captivating posts, generate engaging captions, and streamline your social media strategy with ease.",
+        creator: "@nexus",
+        title: "Nexus Document Backend - AI-Powered Document Management",
+        description: "Transform your document management with AI. Upload, search, chat with your documents, and unlock insights with our intelligent document processing platform.",
         images: [
             {
                 url: "/assets/og-image.png",
             }
         ]
     },
-    metadataBase: new URL("https://caps-ai.vercel.app"),
+    metadataBase: new URL("http://localhost:3000"),
 };

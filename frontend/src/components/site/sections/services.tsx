@@ -1,5 +1,5 @@
-import Images from "../ui/images";
-import AnimationContainer from "../utils/animation-container";
+import Images from "../../ui/images";
+import AnimationContainer from "../../utils/animation-container";
 
 const Services = () => {
     return (

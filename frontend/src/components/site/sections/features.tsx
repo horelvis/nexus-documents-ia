@@ -2,10 +2,10 @@
 
 import { badges, features } from '@/constants';
 import { LucideIcon } from 'lucide-react';
-import { Badge } from '../ui/badge';
-import Icons from '../ui/icons';
-import AnimationContainer from "../utils/animation-container";
-import Images from "../ui/images";
+import { Badge } from '../../ui/badge';
+import Icons from '../../ui/icons';
+import AnimationContainer from "../../utils/animation-container";
+import Images from "../../ui/images";
 
 interface ItemProps {
     title: string;

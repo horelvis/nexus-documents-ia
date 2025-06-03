@@ -1,7 +1,7 @@
 import { tools } from '@/constants';
 import { LucideProps, Waypoints } from 'lucide-react';
-import { Badge } from '../ui/badge';
-import AnimationContainer from "../utils/animation-container";
+import { Badge } from '../../ui/badge';
+import AnimationContainer from "../../utils/animation-container";
 
 interface Props {
     tool: {

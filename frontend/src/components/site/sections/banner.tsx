@@ -1,7 +1,7 @@
 import Link from 'next/link'
-import { Button } from '../ui/button'
-import Icons from '../ui/icons'
-import AnimationContainer from "../utils/animation-container"
+import { Button } from '../../ui/button'
+import Icons from '../../ui/icons'
+import AnimationContainer from "../../utils/animation-container"
 
 const Banner = () => {
     return (
@@ -27,15 +27,15 @@ const Banner = () => {
 
                 <div className="flex flex-col items-center justify-center max-w-2xl mx-auto py-5 lg:py-8">
                     <h2 className="text-2xl lg:text-4xl xl:text-5xl font-semibold text-center !leading-tight">
-                        Unlock Your Social Media Success with AI
+                        Transform Your Document Management with AI
                     </h2>
                     <p className="mt-6 text-center text-muted-foreground max-w-lg">
-                        Unlock the power of AI-driven content creation and scheduling to elevate your social media game. <span className="hidden lg:inline-flex">
-                            Experience seamless integration, insightful analytics, and more.
+                        Unlock the power of AI-driven document processing and intelligent search to streamline your workflow. <span className="hidden lg:inline-flex">
+                            Experience seamless uploads, smart organization, and powerful insights.
                         </span>
                     </p>
                     <Button size="lg" className="mt-6" asChild>
-                        <Link href="/auth/register">
+                        <Link href="/dashboard">
                             Get Started - It&apos;s Free
                         </Link>
                     </Button>
