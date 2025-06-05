@@ -8,6 +8,7 @@ httpx>=0.25.0
 loguru>=0.7.0
 
 # Langroid dependencies
+psycopg2-binary>=2.9.7
 langroid[all]>=0.1.203
 # includes qdrant-client, openai, anthropic, and other core dependencies
 
