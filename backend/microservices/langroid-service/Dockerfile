@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip
 RUN pip install --upgrade pip
 
+# Instalar psycopg2-binary primero
+RUN pip install psycopg2-binary>=2.9.7
+
 # Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
