@@ -1,17 +1,19 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { UserOnboarding } from '@/components/auth/user-onboarding'
 
 export default function OnboardingPage() {
   const router = useRouter()
 
-  const handleOnboardingComplete = () => {
-    // Redirect to dashboard after onboarding
-    router.push('/dashboard')
-  }
+  useEffect(() => {
+    // Always redirect to welcome page immediately
+    router.replace('/welcome')
+  }, [router])
 
   return (
-    <UserOnboarding onComplete={handleOnboardingComplete} />
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+    </div>
   )
 }

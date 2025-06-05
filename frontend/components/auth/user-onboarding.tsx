@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +17,7 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react'
-import { apiClient } from '@/lib/api-client'
+import { useUserContext } from '@/contexts/user-context'
 
 interface OnboardingStep {
   id: string
@@ -34,7 +33,12 @@ interface UserOnboardingProps {
 }
 
 export function UserOnboarding({ onComplete }: UserOnboardingProps) {
-  const { user, isLoaded } = useUser()
+  const { 
+    clerkUser, 
+    isClerkLoaded, 
+    syncUserWithBackend, 
+    markOnboardingComplete 
+  } = useUserContext()
   const [currentStep, setCurrentStep] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<'pending' | 'success' | 'error'>('pending')
@@ -47,7 +51,7 @@ export function UserOnboarding({ onComplete }: UserOnboardingProps) {
       description: 'Sincronizamos tu información con nuestro sistema',
       icon: <User className="h-5 w-5" />,
       completed: false,
-      action: syncUserWithBackend
+      action: handleUserSync
     },
     {
       id: 'welcome',
@@ -80,29 +84,18 @@ export function UserOnboarding({ onComplete }: UserOnboardingProps) {
   ])
 
   useEffect(() => {
-    if (isLoaded && user) {
+    if (isClerkLoaded && clerkUser) {
       // Auto-start with user sync
       handleStepAction(0)
     }
-  }, [isLoaded, user])
+  }, [isClerkLoaded, clerkUser])
 
-  async function syncUserWithBackend(): Promise<void> {
-    if (!user) throw new Error('No user found')
-
+  async function handleUserSync(): Promise<void> {
     try {
       setIsProcessing(true)
       setSyncStatus('pending')
 
-      const response = await apiClient.post('/auth/sync-user', {
-        clerk_user_id: user.id,
-        email: user.emailAddresses[0]?.emailAddress,
-        full_name: `${user.firstName || ''} ${user.lastName || ''}`.trim()
-      })
-
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
+      await syncUserWithBackend()
       setSyncStatus('success')
       return Promise.resolve()
     } catch (error) {
@@ -156,17 +149,29 @@ export function UserOnboarding({ onComplete }: UserOnboardingProps) {
     }
   }
 
-  const handleCompleteOnboarding = () => {
-    // Mark all remaining steps as completed
-    const updatedSteps = steps.map(step => ({ ...step, completed: true }))
-    setSteps(updatedSteps)
-    onComplete?.()
+  const handleCompleteOnboarding = async () => {
+    try {
+      // Mark onboarding as completed in backend
+      const success = await markOnboardingComplete()
+      
+      // Mark all remaining steps as completed
+      const updatedSteps = steps.map(step => ({ ...step, completed: true }))
+      setSteps(updatedSteps)
+      
+      onComplete?.()
+    } catch (error) {
+      console.error('Error completing onboarding:', error)
+      // Still complete locally even if backend fails
+      const updatedSteps = steps.map(step => ({ ...step, completed: true }))
+      setSteps(updatedSteps)
+      onComplete?.()
+    }
   }
 
   const completedSteps = steps.filter(step => step.completed).length
   const progressPercentage = (completedSteps / steps.length) * 100
 
-  if (!isLoaded) {
+  if (!isClerkLoaded) {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -388,8 +393,65 @@ export function UserOnboarding({ onComplete }: UserOnboardingProps) {
                   </div>
                 )}
 
-                {/* Remaining steps (4 and 5) can be implemented similarly */}
-                {currentStep >= 3 && (
+                {currentStep === 3 && (
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <h3 className="text-xl font-semibold mb-4">Sube tu Primer Documento</h3>
+                      <p className="text-gray-600 mb-6">
+                        Prueba subiendo un documento para ver cómo funciona nuestro sistema de gestión documental.
+                      </p>
+                    </div>
+                    
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                      <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                      <p className="text-lg font-medium mb-2">Arrastra y suelta un archivo aquí</p>
+                      <p className="text-sm text-gray-600 mb-4">o haz clic para seleccionar</p>
+                      <Button variant="outline">
+                        Seleccionar Archivo
+                      </Button>
+                    </div>
+                    
+                    <div className="flex justify-center space-x-3">
+                      <Button onClick={() => handleStepAction(currentStep)}>
+                        Continuar sin subir
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {currentStep === 4 && (
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <h3 className="text-xl font-semibold mb-4">Explora los Agentes de IA</h3>
+                      <p className="text-gray-600 mb-6">
+                        Nuestros agentes de IA pueden ayudarte a automatizar tareas y analizar documentos.
+                      </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                        <Bot className="h-8 w-8 text-purple-600 mb-2" />
+                        <h4 className="font-semibold mb-2">Asistente de Contratos</h4>
+                        <p className="text-sm text-gray-600">Analiza contratos y documentos legales</p>
+                      </div>
+                      <div className="p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                        <Bot className="h-8 w-8 text-blue-600 mb-2" />
+                        <h4 className="font-semibold mb-2">Firma Digital</h4>
+                        <p className="text-sm text-gray-600">Automatiza procesos de firma digital</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-center space-x-3">
+                      <Button onClick={() => handleStepAction(currentStep)}>
+                        Continuar
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {currentStep >= 5 && (
                   <div className="space-y-6 text-center">
                     <div>
                       <h3 className="text-xl font-semibold mb-4">¡Configuración Completa!</h3>

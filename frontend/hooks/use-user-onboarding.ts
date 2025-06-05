@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
-import { apiClient } from '@/lib/api-client'
+import { useApiClient } from '@/lib/api-client'
 
 export interface OnboardingStatus {
   needsOnboarding: boolean
@@ -17,6 +17,7 @@ export function useUserOnboarding() {
   const { user, isLoaded } = useUser()
   const router = useRouter()
   const pathname = usePathname()
+  const apiClient = useApiClient()
   
   const [status, setStatus] = useState<OnboardingStatus>({
     needsOnboarding: false,

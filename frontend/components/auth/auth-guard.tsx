@@ -1,8 +1,8 @@
 "use client"
 
-import { useAuth } from '@clerk/nextjs'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
+import { useUserContext } from '@/contexts/user-context'
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -10,16 +10,22 @@ interface AuthGuardProps {
 }
 
 export function AuthGuard({ children, fallback }: AuthGuardProps) {
-  const { isLoaded, isSignedIn } = useAuth()
+  const { 
+    isClerkLoaded, 
+    isSignedIn, 
+    onboarding: { needsOnboarding, loading: onboardingLoading },
+    userLoading
+  } = useUserContext()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
+    if (isClerkLoaded && !isSignedIn) {
       router.push('/auth/sign-in')
     }
-  }, [isLoaded, isSignedIn, router])
+  }, [isClerkLoaded, isSignedIn, router])
 
-  if (!isLoaded) {
+  if (!isClerkLoaded || userLoading || onboardingLoading) {
     return fallback || (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
@@ -30,6 +36,8 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   if (!isSignedIn) {
     return fallback || null
   }
+
+  // Let components handle onboarding display - don't block here
 
   return <>{children}</>
 }
