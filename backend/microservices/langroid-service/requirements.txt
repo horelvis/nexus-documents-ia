@@ -8,7 +8,8 @@ httpx>=0.25.0
 loguru>=0.7.0
 
 # Langroid dependencies
-langroid[all]>=0.1.203
+langroid[doc-chat]>=0.1.203
+psycopg2-binary>=2.9.7
 # includes qdrant-client, openai, anthropic, and other core dependencies
 
 # Additional utilities for document processing
