@@ -11,6 +11,7 @@ services:
       - redis
       - qdrant
       - langchain-service
+      - langroid-service
       - ollama-service
       - storage-service
     networks:
@@ -118,6 +119,34 @@ services:
       retries: 3
       start_period: 30s
 
+  # Langroid microservice (Advanced AI agents)
+  langroid-service:
+    build:
+      context: ../microservices/langroid-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    depends_on:
+      - qdrant
+      - ollama-service
+    networks:
+      - backend-network
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+      - DEFAULT_LLM_MODEL=llama3.1:8b
+      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
+      - SECRET_KEY=${SECRET_KEY:-langroid-secret-key}
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # Ollama Microservice
   ollama-service:
     build:
@@ -125,7 +154,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "11434:11434"  # Ollama server port
-      - "8002:8000"    # FastAPI wrapper port
+      - "8004:8000"    # FastAPI wrapper port
     volumes:
       - ollama_data:/root/.ollama
     networks:

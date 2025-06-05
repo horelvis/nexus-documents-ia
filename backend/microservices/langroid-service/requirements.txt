@@ -1,0 +1,17 @@
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+httpx>=0.25.0
+loguru>=0.7.0
+
+# Langroid dependencies
+langroid[all]>=0.1.203
+# includes qdrant-client, openai, anthropic, and other core dependencies
+
+# Additional utilities for document processing
+PyPDF2>=3.0.0
+python-multipart>=0.0.6
+numpy>=1.24.0

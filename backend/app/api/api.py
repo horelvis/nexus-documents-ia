@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, tenants, stripe, auth, admin, chat,
-    agents, signatures  # Added new routers
+    agents, signatures, webhooks  # Added new routers
 )
 from fastapi import APIRouter
 
@@ -27,3 +27,6 @@ api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 # AI Agents and Digital Signature routes
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_router.include_router(signatures.router, prefix="/signatures", tags=["signatures"])
+
+# Webhooks for external integrations
+api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])

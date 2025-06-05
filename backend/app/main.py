@@ -1,7 +1,7 @@
 # Actualización para app/main.py
 
 import logging
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -211,10 +211,21 @@ async def list_routes():
             })
     return {"routes": routes}
 
-# Ruta para inicializar la base de datos
-@app.post("/debug/init-db", tags=["debug"])
+# NOTA: Este endpoint es SOLO para desarrollo y debería removerse en producción
+@app.post("/debug/init-db", tags=["debug"], include_in_schema=False)
 async def init_database():
-    """Inicializar la base de datos con tablas y datos iniciales"""
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Inicializar la base de datos con tablas y datos iniciales.
+    Este endpoint NO debe usarse en producción por razones de seguridad.
+    """
+    # Verificar que estamos en modo desarrollo
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Database initialization endpoint only available in development mode"
+        )
+    
     try:
         from app.db.models import Base
         from app.db.database import engine, SessionLocal
@@ -222,7 +233,7 @@ async def init_database():
         from app.db.models import Tenant, User
         import uuid
         
-        logger.info("🗄️ Initializing database...")
+        logger.warning("🚨 DEVELOPMENT ONLY: Initializing database via API endpoint")
         
         # Crear todas las tablas
         Base.metadata.create_all(bind=engine)
@@ -266,8 +277,9 @@ async def init_database():
         
         return {
             "status": "success",
-            "message": "Database initialized successfully",
-            "tenant_id": str(tenant.id) if tenant else None
+            "message": "Database initialized successfully (DEVELOPMENT ONLY)",
+            "tenant_id": str(tenant.id) if tenant else None,
+            "warning": "This endpoint should NOT be used in production"
         }
         
     except Exception as e:
@@ -280,10 +292,13 @@ async def init_database():
 # Manejador de errores global
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception: {str(exc)}")
+    logger.exception(f"Unhandled exception on {request.url.path}: {str(exc)}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error"}
+        content={
+            "detail": "Internal server error",
+            "path": str(request.url.path)
+        }
     )
 
 if __name__ == "__main__":

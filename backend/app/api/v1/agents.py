@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_active_user
 from app.db.models import User
 from app.services.agent_service import AgentService
-from app.services.digital_signature_agent import DigitalSignatureAgent
 from app.schemas.agent import (
     AgentCreate, AgentUpdate, AgentResponse,
     ConversationCreate, ConversationResponse,
@@ -367,43 +366,53 @@ async def chat_with_agent(
             )
             conversation_id = conversation.id
         
-        # Procesar según el tipo de agente
-        if agent.type == "digital_signature":
-            signature_agent = DigitalSignatureAgent(db, agent_id, current_user.tenant_id)
-            
-            # Obtener primera respuesta (no streaming para API síncrona)
-            response_generator = signature_agent.process_message(
-                chat_request.message,
-                conversation_id,
-                current_user.id,
-                chat_request.context
+        # Usar Langroid para todos los agentes
+        from app.services.langroid_client import LangroidClient
+        
+        async with LangroidClient() as client:
+            # Crear agente temporal en Langroid
+            langroid_agent_id = await client.create_agent(
+                agent_type=agent.type,
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                configuration=agent.configuration or {}
             )
             
-            # Recopilar respuestas
+            # Recopilar respuestas del chat
             responses = []
-            async for response in response_generator:
+            async for response in client.chat_with_agent(
+                agent_id=langroid_agent_id,
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                message=chat_request.message,
+                conversation_id=str(conversation_id),
+                context=chat_request.context
+            ):
                 responses.append(response)
+            
+            # Limpiar agente temporal
+            await client.delete_agent(langroid_agent_id, current_user.tenant_id, current_user.id)
             
             # Devolver respuesta consolidada
             if responses:
                 last_response = responses[-1]
                 return ChatResponse(
-                    message=last_response.get("content", ""),
+                    message=last_response.get("content", "Chat completado"),
                     conversation_id=conversation_id,
                     agent_id=agent_id,
                     metadata={
                         "responses": responses,
-                        "response_count": len(responses)
+                        "response_count": len(responses),
+                        "langroid_agent_id": langroid_agent_id
                     }
                 )
-        
-        # Respuesta por defecto para otros tipos de agentes
-        return ChatResponse(
-            message="Tipo de agente no soportado aún",
-            conversation_id=conversation_id,
-            agent_id=agent_id,
-            metadata={}
-        )
+            
+            return ChatResponse(
+                message="No se pudo procesar la solicitud",
+                conversation_id=conversation_id,
+                agent_id=agent_id,
+                metadata={}
+            )
         
     except HTTPException:
         raise
@@ -455,20 +464,34 @@ async def chat_with_agent_stream(
                 # Enviar ID de conversación
                 yield f"data: {{'type': 'conversation_id', 'content': '{conversation_id}'}}\n\n"
             
-            # Procesar según el tipo de agente
-            if agent.type == "digital_signature":
-                signature_agent = DigitalSignatureAgent(db, agent_id, current_user.tenant_id)
+            # Usar Langroid para todos los agentes
+            from app.services.langroid_client import LangroidClient
+            
+            async with LangroidClient() as client:
+                # Crear agente temporal en Langroid
+                langroid_agent_id = await client.create_agent(
+                    agent_type=agent.type,
+                    tenant_id=current_user.tenant_id,
+                    user_id=current_user.id,
+                    configuration=agent.configuration or {}
+                )
                 
-                async for response in signature_agent.process_message(
-                    chat_request.message,
-                    conversation_id,
-                    current_user.id,
-                    chat_request.context
+                yield f"data: {{'type': 'langroid_agent_created', 'content': 'Agent created', 'agent_id': '{langroid_agent_id}'}}\n\n"
+                
+                # Streaming del chat
+                async for response in client.chat_with_agent(
+                    agent_id=langroid_agent_id,
+                    tenant_id=current_user.tenant_id,
+                    user_id=current_user.id,
+                    message=chat_request.message,
+                    conversation_id=str(conversation_id),
+                    context=chat_request.context
                 ):
                     import json
                     yield f"data: {json.dumps(response)}\n\n"
-            else:
-                yield f"data: {{'type': 'error', 'content': 'Agent type not supported'}}\n\n"
+                
+                # Limpiar agente temporal
+                await client.delete_agent(langroid_agent_id, current_user.tenant_id, current_user.id)
             
             # Señal de finalización
             yield f"data: {{'type': 'completion', 'content': 'Stream completed'}}\n\n"
@@ -493,6 +516,51 @@ async def chat_with_agent_stream(
 # =====================================
 # AGENT EXECUTION
 # =====================================
+
+@router.post("/{agent_id}/execute/stream")
+async def execute_agent_streaming(
+    agent_id: UUID,
+    execution_request: AgentExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Ejecutar agente con streaming de resultados"""
+    
+    from app.services.agent_execution_service import AgentExecutionService
+    
+    async def event_stream():
+        try:
+            execution_service = AgentExecutionService(db)
+            
+            async for result in execution_service.execute_agent_streaming(
+                agent_id=agent_id,
+                task_type=execution_request.task_type,
+                parameters=execution_request.parameters,
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                context=execution_request.context
+            ):
+                import json
+                yield f"data: {json.dumps(result)}\n\n"
+            
+            # Señal de finalización
+            yield f"data: {json.dumps({'type': 'stream_end', 'content': 'Execution completed'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Error in streaming execution: {str(e)}")
+            import json
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
 
 @router.post("/{agent_id}/execute", response_model=ExecutionResponse)
 async def execute_agent(
@@ -575,6 +643,78 @@ async def get_agent_executions(
             detail="Error retrieving executions"
         )
 
+
+# =====================================
+# LANGROID INTEGRATION TEST
+# =====================================
+
+@router.get("/langroid/health")
+async def check_langroid_health():
+    """Verificar conectividad con Langroid service"""
+    
+    try:
+        from app.services.langroid_client import LangroidClient
+        
+        async with LangroidClient() as client:
+            health_status = await client.health_check()
+            return {
+                "status": "healthy",
+                "langroid_service": health_status,
+                "integration": "working"
+            }
+            
+    except Exception as e:
+        logger.error(f"Langroid health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Langroid service unavailable: {str(e)}"
+        )
+
+@router.post("/langroid/test-agent")
+async def test_langroid_agent(
+    current_user: User = Depends(get_current_active_user)
+):
+    """Crear un agente de prueba en Langroid"""
+    
+    try:
+        from app.services.langroid_client import LangroidClient
+        
+        async with LangroidClient() as client:
+            # Crear agente de prueba
+            agent_id = await client.create_agent(
+                agent_type="generic",
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                configuration={"test_mode": True}
+            )
+            
+            # Probar ejecución
+            test_results = []
+            async for response in client.execute_agent_task(
+                agent_id=agent_id,
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                task_type="test_task",
+                parameters={"message": "Hello from integration test"}
+            ):
+                test_results.append(response)
+            
+            # Limpiar agente
+            await client.delete_agent(agent_id, current_user.tenant_id, current_user.id)
+            
+            return {
+                "status": "success",
+                "agent_id": agent_id,
+                "test_results": test_results,
+                "message": "Langroid integration test completed successfully"
+            }
+            
+    except Exception as e:
+        logger.error(f"Langroid test failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Langroid test failed: {str(e)}"
+        )
 
 # =====================================
 # STATISTICS

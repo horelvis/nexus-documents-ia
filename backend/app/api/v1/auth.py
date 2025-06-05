@@ -107,3 +107,27 @@ async def read_users_me(
     Get current user.
     """
     return current_user
+
+@router.post("/complete-onboarding", response_model=UserResponse)
+async def complete_onboarding(
+    db: Session = Depends(get_db),
+    current_user = Depends(AuthService.get_current_user)
+) -> Any:
+    """
+    Mark user onboarding as completed.
+    """
+    try:
+        # Update user onboarding status
+        current_user.onboarding_completed = True
+        db.commit()
+        db.refresh(current_user)
+        
+        logger.info(f"✅ Onboarding completed for user: {current_user.id}")
+        return current_user
+        
+    except Exception as e:
+        logger.error(f"Error completing onboarding: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error completing onboarding"
+        )

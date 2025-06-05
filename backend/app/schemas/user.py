@@ -76,6 +76,7 @@ class User(UserBase):
     id: uuid.UUID = Field(..., example=uuid.uuid4())
     is_active: bool = Field(..., example=True)
     is_superuser: bool = Field(..., example=False)
+    onboarding_completed: bool = Field(False, example=False)
     tenant_id: uuid.UUID = Field(..., example=uuid.uuid4())
     created_at: datetime = Field(..., example=datetime.now())
     updated_at: datetime = Field(..., example=datetime.now())

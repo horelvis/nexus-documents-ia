@@ -128,6 +128,7 @@ class User(Base):
     clerk_user_id = Column(String(255), nullable=True, unique=True, index=True)
     is_active = Column(Boolean(), default=True, nullable=False)
     is_superuser = Column(Boolean(), default=False, nullable=False)
+    onboarding_completed = Column(Boolean(), default=False, nullable=False)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     last_login_at = Column(DateTime, nullable=True)

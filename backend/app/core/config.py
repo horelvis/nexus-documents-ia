@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
     ALGORITHM: str = "HS256"
     
+    # Development/Debug mode
+    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    
     # CORS - Valores por defecto para desarrollo
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
@@ -74,6 +77,9 @@ class Settings(BaseSettings):
     
     # LangChain Microservice
     LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
+    
+    # Langroid Microservice (Advanced AI Agents)
+    LANGROID_SERVICE_URL: str = "http://langroid-service:8002"
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"

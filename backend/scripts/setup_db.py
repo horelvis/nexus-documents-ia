@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Script para configurar la base de datos completa:
+Script para configurar la base de datos completa de forma SEGURA:
 1. Crear todas las tablas usando SQLAlchemy
 2. Ejecutar migraciones de Alembic
 3. Crear datos iniciales
+
+USO RECOMENDADO:
+- En desarrollo: python scripts/setup_db.py
+- En producción: usar migraciones de Alembic + scripts de inicialización
+- NO usar el endpoint REST API para esto en producción
 """
 
 import logging
