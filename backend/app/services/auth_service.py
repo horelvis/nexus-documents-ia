@@ -154,25 +154,89 @@ class AuthService:
     def verify_clerk_token(token: str) -> dict:
         """Verifica un token de Clerk usando la API oficial de Clerk."""
         import logging
+        import httpx
         from clerk_backend_api import Clerk
+        from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
         
         logger = logging.getLogger(__name__)
         
         try:
+            logger.info(f"🔍 Starting Clerk token verification...")
+            logger.info(f"📝 Token length: {len(token) if token else 0}")
+            logger.info(f"🔐 Clerk secret key configured: {'Yes' if settings.CLERK_SECRET_KEY else 'No'}")
+            
+            if not settings.CLERK_SECRET_KEY:
+                logger.error("❌ CLERK_SECRET_KEY not configured")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Clerk not properly configured",
+                )
+            
             # Inicializar cliente de Clerk
+            logger.info(f"🏗️ Initializing Clerk client...")
             clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+            logger.info(f"✅ Clerk client initialized successfully")
             
-            logger.info(f"🔍 Verifying Clerk token...")
+            # Crear un request mock para usar con authenticate_request
+            logger.info(f"🔧 Creating mock request with Bearer token...")
+            mock_request = httpx.Request(
+                method="GET",
+                url="http://localhost:8000",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            logger.info(f"📨 Mock request created")
             
-            # Verificar el token usando la API de Clerk
-            result = clerk.jwt_templates.verify_token(token)
+            # Configurar opciones de autenticación
+            logger.info(f"⚙️ Setting up authentication options...")
+            auth_options = AuthenticateRequestOptions(
+                authorized_parties=[settings.SERVER_HOST, "http://localhost:3000", "http://localhost:8000"]
+            )
+            logger.info(f"✅ Auth options configured")
             
-            if result and hasattr(result, 'payload'):
-                payload = result.payload
-                logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
-                return payload
+            # Verificar el token usando authenticate_request
+            logger.info(f"🔎 Calling Clerk authenticate_request...")
+            request_state = clerk.authenticate_request(mock_request, auth_options)
+            logger.info(f"📨 Clerk API response received: {type(request_state)}")
+            
+            if request_state:
+                logger.info(f"📊 Request state attributes: {dir(request_state)}")
+                logger.info(f"🔓 Is signed in: {getattr(request_state, 'is_signed_in', 'N/A')}")
+                
+                if hasattr(request_state, 'is_signed_in') and request_state.is_signed_in:
+                    logger.info(f"✅ User is signed in")
+                    
+                    # Obtener información del usuario
+                    user_id = getattr(request_state, 'user_id', None)
+                    session_id = getattr(request_state, 'session_id', None)
+                    
+                    logger.info(f"👤 User ID: {user_id}")
+                    logger.info(f"🎫 Session ID: {session_id}")
+                    
+                    if user_id:
+                        # Crear payload compatible con nuestro sistema
+                        payload = {
+                            'sub': user_id,
+                            'session_id': session_id,
+                            'iss': 'clerk'
+                        }
+                        logger.info(f"🔑 Clerk token verified successfully")
+                        return payload
+                    else:
+                        logger.error(f"❌ No user_id found in request state")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="No user ID in token",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                else:
+                    logger.error(f"❌ User is not signed in")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User not signed in",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
             else:
-                logger.error("❌ Invalid token response from Clerk")
+                logger.error("❌ Clerk API returned None/empty result")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid token",
@@ -181,12 +245,17 @@ class AuthService:
                 
         except HTTPException:
             # Re-raise HTTP exceptions
+            logger.error("🔄 Re-raising HTTP exception")
             raise
         except Exception as e:
-            logger.error(f"❌ Error verifying Clerk token: {str(e)}")
+            logger.error(f"❌ Unexpected error verifying Clerk token: {str(e)}")
+            logger.error(f"🐛 Exception type: {type(e)}")
+            logger.error(f"📜 Exception args: {e.args}")
+            import traceback
+            logger.error(f"📚 Full traceback: {traceback.format_exc()}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token verification failed",
+                detail=f"Token verification failed: {str(e)}",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
