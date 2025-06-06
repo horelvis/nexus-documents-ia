@@ -1,15 +1,15 @@
 # backend/app/services/auth_service.py
 from datetime import datetime, timedelta
-from typing import Optional, Union, Any, Dict
+from typing import Optional, Union, Any
 from uuid import uuid4
-import time
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-import requests
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from clerk_backend_api import Clerk
+from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
 
 from app.core.config import settings
 from app.db.database import get_db
@@ -24,42 +24,8 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"
 )
 
-# Cache para las claves JWKS de Clerk
-_jwks_cache: Dict[str, Any] = {}
-_jwks_cache_expiry: float = 0
-JWKS_CACHE_TTL = 3600  # 1 hora
 
 class AuthService:
-    @staticmethod
-    def _get_clerk_jwks() -> Dict[str, Any]:
-        """Obtiene las claves JWKS de Clerk con cache."""
-        global _jwks_cache, _jwks_cache_expiry
-        
-        current_time = time.time()
-        
-        # Verificar si el cache es válido
-        if current_time < _jwks_cache_expiry and _jwks_cache:
-            return _jwks_cache
-        
-        # Obtener nuevas claves de Clerk
-        try:
-            jwks_url = "https://api.clerk.dev/v1/jwks"
-            response = requests.get(jwks_url, timeout=10)
-            response.raise_for_status()
-            jwks = response.json()
-            
-            # Actualizar cache
-            _jwks_cache = jwks
-            _jwks_cache_expiry = current_time + JWKS_CACHE_TTL
-            
-            return jwks
-            
-        except requests.RequestException as e:
-            # Si falla la petición pero tenemos cache, usarlo
-            if _jwks_cache:
-                return _jwks_cache
-            raise e
-    
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verifica que la contraseña coincida con el hash."""
@@ -186,99 +152,62 @@ class AuthService:
 
     @staticmethod
     def verify_clerk_token(token: str) -> dict:
-        """Verifica un token de Clerk usando las claves públicas oficiales."""
+        """Verifica un token de Clerk usando el SDK oficial."""
         import logging
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        import base64
         
         logger = logging.getLogger(__name__)
         
         try:
-            # Obtener las claves públicas de Clerk para verificar el token
-            try:
-                # Extraer el header del JWT para obtener el kid (key ID)
-                header = jwt.get_unverified_header(token)
-                kid = header.get('kid')
-                
-                if not kid:
-                    raise ValueError("Token missing 'kid' in header")
-                
-                logger.info(f"🔍 Looking for key with kid: {kid}")
-                
-                # Obtener las claves públicas de Clerk (con cache)
-                jwks = AuthService._get_clerk_jwks()
-                
-                # Buscar la clave correcta usando el kid
-                key_data = None
-                for key in jwks.get('keys', []):
-                    if key.get('kid') == kid:
-                        key_data = key
-                        break
-                
-                if not key_data:
-                    available_kids = [k.get('kid') for k in jwks.get('keys', [])]
-                    logger.error(f"❌ Key with kid '{kid}' not found. Available kids: {available_kids}")
-                    raise ValueError(f"Key with kid '{kid}' not found in JWKS")
-                
-                # Construir la clave pública RSA desde los componentes JWK
-                try:
-                    # Obtener los componentes RSA de la clave JWK
-                    n = base64.urlsafe_b64decode(key_data['n'] + '===')  # Agregar padding si es necesario
-                    e = base64.urlsafe_b64decode(key_data['e'] + '===')
-                    
-                    # Convertir bytes a enteros
-                    n_int = int.from_bytes(n, byteorder='big')
-                    e_int = int.from_bytes(e, byteorder='big')
-                    
-                    # Crear la clave pública RSA
-                    public_numbers = rsa.RSAPublicNumbers(e_int, n_int)
-                    public_key = public_numbers.public_key()
-                    
-                    # Convertir a formato PEM para PyJWT
-                    pem_key = public_key.public_key_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    )
-                    
-                    # Verificar el token usando PyJWT
-                    payload = jwt.decode(
-                        token,
-                        pem_key,
-                        algorithms=['RS256'],
-                        options={"verify_aud": False}  # Clerk tokens might not have aud
-                    )
-                    
-                    # Verificaciones adicionales
-                    if not payload.get('sub'):
-                        raise ValueError("Token missing 'sub' claim")
-                    
-                    # Verificar el issuer
-                    iss = payload.get('iss', '')
-                    if not iss or 'clerk' not in iss.lower():
-                        logger.warning(f"⚠️ Unexpected issuer: {iss}")
-                    
-                    logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
-                    return payload
-                    
-                except Exception as key_error:
-                    logger.error(f"❌ Error processing public key: {str(key_error)}")
-                    raise ValueError(f"Failed to process public key: {str(key_error)}")
-                
-            except requests.RequestException as e:
-                logger.error(f"❌ Failed to fetch Clerk JWKS: {str(e)}")
+            # Verificar que tenemos la configuración de Clerk
+            if not settings.CLERK_SECRET_KEY:
+                logger.error("❌ CLERK_SECRET_KEY not configured")
                 raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Unable to verify token - Clerk service unavailable"
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Clerk authentication not properly configured"
                 )
             
-        except ValueError as e:
-            logger.error(f"❌ Token validation error: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {str(e)}",
-                headers={"WWW-Authenticate": "Bearer"},
+            # Crear el cliente de Clerk
+            clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+            
+            # Crear un request mock para la verificación
+            # El SDK de Clerk espera un request con headers
+            import httpx
+            mock_request = httpx.Request(
+                method="GET", 
+                url="https://example.com", 
+                headers={"Authorization": f"Bearer {token}"}
             )
+            
+            # Verificar el token usando el SDK de Clerk
+            request_state = clerk.authenticate_request(
+                mock_request,
+                AuthenticateRequestOptions()
+            )
+            
+            if not request_state.is_signed_in:
+                logger.error("❌ Token verification failed - user not signed in")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired token",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            # Obtener el payload del token
+            payload = request_state.payload
+            if not payload or not payload.get('sub'):
+                logger.error("❌ Token payload missing or invalid")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token payload",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
+            return payload
+            
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
         except Exception as e:
             logger.error(f"❌ Unexpected error verifying Clerk token: {str(e)}")
             raise HTTPException(
