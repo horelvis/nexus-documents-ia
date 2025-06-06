@@ -22,8 +22,6 @@ COPY requirements.txt .
 # Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Instalar dependencias de Clerk 
-RUN pip install clerk-backend-api
 
 # Verificar que uvicorn está instalado
 RUN pip show uvicorn || pip install uvicorn
