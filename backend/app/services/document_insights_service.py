@@ -1,13 +1,14 @@
 # app/services/document_insights_service.py
 
-from app.ml.document_recommender import DocumentRecommender
 from sqlalchemy.sql import func, desc
 from app.db.database import SessionLocal
 from app.db.models import Document, DocumentView, DocumentMetrics
+from app.core.config import settings
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import uuid
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -95,43 +96,67 @@ class DocumentInsightsService:
         
         return results
     
-    # Modificar el método get_document_recommendations
-    def get_document_recommendations(self, limit: int = 5) -> List[Dict[str, Any]]:
-        """Recomienda documentos basados en el historial de visualización del usuario"""
+    async def get_document_recommendations(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Recomienda documentos basados en el historial de visualización del usuario usando microservicio"""
         if not self.user_id:
             return []
         
         try:
-            # Usar recomendador basado en ML
-            recommender = DocumentRecommender(tenant_id=self.tenant_id)
-            ml_recommendations = recommender.recommend_documents(user_id=self.user_id, n=limit)
-            
-            # Si hay suficientes recomendaciones de ML, usarlas
-            if len(ml_recommendations) >= limit:
-                results = []
-                for rec in ml_recommendations[:limit]:
-                    doc = rec["document"]
-                    results.append({
-                        "id": doc.id,
-                        "title": doc.title,
-                        "description": doc.description,
-                        "created_at": doc.created_at,
-                        "updated_at": doc.updated_at,
-                        "format": doc.file_type,
-                        "size": doc.file_size,
-                        "reason": rec["reason"]
-                    })
-                return results
-            
-            # Si no hay suficientes, combinar con el método original
-            # (código original del método)
-            # ...
-            
-            return results
+            # Llamar al microservicio de LangChain para obtener recomendaciones
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{settings.LANGCHAIN_SERVICE_URL}/recommendations/documents",
+                    json={
+                        "user_id": str(self.user_id),
+                        "tenant_id": str(self.tenant_id),
+                        "limit": limit,
+                        "database_url": str(settings.SQLALCHEMY_DATABASE_URI)
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    ml_recommendations = response.json()
+                    logger.info(f"✅ Got {len(ml_recommendations)} recommendations from microservice")
+                    
+                    # Obtener detalles completos de documentos desde la base de datos local
+                    if ml_recommendations:
+                        doc_ids = [rec["document_id"] for rec in ml_recommendations]
+                        documents = self.db.query(Document).filter(
+                            Document.id.in_(doc_ids),
+                            Document.tenant_id == self.tenant_id
+                        ).all()
+                        
+                        # Crear mapa de documentos por ID
+                        doc_map = {str(doc.id): doc for doc in documents}
+                        
+                        # Combinar recomendaciones con detalles de documentos
+                        results = []
+                        for rec in ml_recommendations:
+                            doc = doc_map.get(rec["document_id"])
+                            if doc:
+                                results.append({
+                                    "id": doc.id,
+                                    "title": doc.title,
+                                    "description": doc.description,
+                                    "created_at": doc.created_at,
+                                    "updated_at": doc.updated_at,
+                                    "format": doc.file_type,
+                                    "size": doc.file_size,
+                                    "reason": rec["reason"],
+                                    "score": rec["score"]
+                                })
+                        
+                        return results
+                else:
+                    logger.warning(f"⚠️ Microservice returned {response.status_code}: {response.text}")
+                    
         except Exception as e:
-            logger.error(f"Error al obtener recomendaciones: {str(e)}")
-            # Fallback al método original si hay error
-            return self._fallback_recommendations(limit)
+            logger.error(f"❌ Error calling recommendations microservice: {str(e)}")
+        
+        # Fallback al método local si el microservicio falla
+        logger.info("🔄 Using fallback recommendations")
+        return self._fallback_recommendations(limit)
     
     def _fallback_recommendations(self, limit: int = 5) -> List[Dict[str, Any]]:
         """

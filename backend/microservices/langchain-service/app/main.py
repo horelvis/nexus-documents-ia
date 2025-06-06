@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.llm_service import LLMService
+from app.api.recommendations import router as recommendations_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(recommendations_router)
 
 # Pydantic models for API
 class EmbeddingRequest(BaseModel):

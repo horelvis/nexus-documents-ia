@@ -45,7 +45,7 @@ def get_recently_viewed_documents(
     )
 
 @router.get("/recommendations", response_model=List[DocumentBasic])
-def get_document_recommendations(
+async def get_document_recommendations(
     limit: int = Query(5, ge=1, le=20),
     current_user = Depends(get_current_user)
 ):
@@ -55,4 +55,4 @@ def get_document_recommendations(
         user_id=str(current_user.id)
     )
     
-    return insights_service.get_document_recommendations(limit=limit)
+    return await insights_service.get_document_recommendations(limit=limit)

@@ -1,41 +1,47 @@
-# app/ml/document_recommender.py
+# microservices/langchain-service/app/services/document_recommender.py
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
-from app.db.database import get_db
-from app.db.models import Document, DocumentView , User
-from sqlalchemy.sql import func, desc
-
+from sqlalchemy import create_engine, func, desc
+from sqlalchemy.orm import sessionmaker
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 class DocumentRecommender:
-    def __init__(self, tenant_id):
+    def __init__(self, tenant_id, db_url=None):
         self.tenant_id = tenant_id
-        self.db = get_db()
+        # Usar URL de base de datos del environment o parámetro
+        database_url = db_url or os.getenv("DATABASE_URL", "postgresql://user:password@localhost/db")
+        self.engine = create_engine(database_url)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.db = SessionLocal()
     
     def __del__(self):
-        self.db.close()
+        if hasattr(self, 'db'):
+            self.db.close()
     
     def build_user_item_matrix(self):
         """Construye una matriz usuario-documento para análisis colaborativo"""
         try:
-            # Obtener todas las vistas de documentos para este tenant
-            views = self.db.query(
-                DocumentView.user_id,
-                DocumentView.document_id,
-                func.count(DocumentView.id).label("view_count")
-            ).filter(
-                DocumentView.tenant_id == self.tenant_id
-            ).group_by(
-                DocumentView.user_id,
-                DocumentView.document_id
-            ).all()
+            # Query SQL directo para evitar dependencias de modelos
+            query = """
+                SELECT user_id, document_id, COUNT(*) as view_count
+                FROM document_views 
+                WHERE tenant_id = :tenant_id
+                GROUP BY user_id, document_id
+            """
+            
+            result = self.db.execute(query, {"tenant_id": self.tenant_id})
+            views = result.fetchall()
             
             # Convertir a dataframe
             df = pd.DataFrame(views, columns=["user_id", "document_id", "view_count"])
+            
+            if df.empty:
+                return None
             
             # Crear matriz usuario-documento
             user_item_matrix = df.pivot(
@@ -78,40 +84,54 @@ class DocumentRecommender:
             return []
         
         # Documentos ya vistos por el usuario
-        user_docs = self.db.query(DocumentView.document_id).filter(
-            DocumentView.user_id == user_id,
-            DocumentView.tenant_id == self.tenant_id
-        ).distinct().all()
-        
-        user_doc_ids = [doc[0] for doc in user_docs]
+        user_docs_query = """
+            SELECT DISTINCT document_id 
+            FROM document_views 
+            WHERE user_id = :user_id AND tenant_id = :tenant_id
+        """
+        result = self.db.execute(user_docs_query, {"user_id": user_id, "tenant_id": self.tenant_id})
+        user_doc_ids = [row[0] for row in result.fetchall()]
         
         # Obtener documentos populares entre usuarios similares
         recommended_docs = []
         
         for similar_user_id, similarity_score in similar_users:
             # Documentos vistos por el usuario similar
-            similar_user_docs = self.db.query(
-                Document, 
-                func.count(DocumentView.id).label("view_count")
-            ).join(
-                DocumentView, Document.id == DocumentView.document_id
-            ).filter(
-                DocumentView.user_id == similar_user_id,
-                DocumentView.tenant_id == self.tenant_id,
-                ~Document.id.in_(user_doc_ids)  # Excluir docs ya vistos
-            ).group_by(
-                Document.id
-            ).order_by(
-                desc("view_count")
-            ).limit(n).all()
+            similar_docs_query = """
+                SELECT d.id, d.title, d.filename, COUNT(dv.id) as view_count
+                FROM documents d
+                JOIN document_views dv ON d.id = dv.document_id
+                WHERE dv.user_id = :similar_user_id 
+                AND dv.tenant_id = :tenant_id
+                AND d.id NOT IN :user_doc_ids
+                GROUP BY d.id, d.title, d.filename
+                ORDER BY view_count DESC
+                LIMIT :limit
+            """
+            
+            user_doc_ids_str = "(" + ",".join(map(str, user_doc_ids)) + ")" if user_doc_ids else "(NULL)"
+            
+            result = self.db.execute(
+                similar_docs_query.replace("NOT IN :user_doc_ids", f"NOT IN {user_doc_ids_str}"),
+                {
+                    "similar_user_id": similar_user_id,
+                    "tenant_id": self.tenant_id,
+                    "limit": n
+                }
+            )
+            
+            docs = result.fetchall()
             
             # Añadir a la lista de recomendaciones
-            for doc, count in similar_user_docs:
+            for doc in docs:
+                doc_id, title, filename, count = doc
                 # Calcular puntuación ponderada por similitud del usuario
                 weighted_score = count * similarity_score
                 
                 recommended_docs.append({
-                    "document": doc,
+                    "document_id": doc_id,
+                    "title": title,
+                    "filename": filename,
                     "score": weighted_score,
                     "reason": f"Popular entre usuarios con intereses similares"
                 })
