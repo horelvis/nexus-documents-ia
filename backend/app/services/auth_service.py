@@ -275,10 +275,16 @@ class AuthService:
         )
         
         try:
+            logger.info(f"🚀 Starting user authentication process...")
+            logger.info(f"🔑 Token preview: {token[:20]}..." if token else "❌ No token provided")
+            
             # Intentar verificar como token de Clerk primero
             try:
+                logger.info(f"🔍 Attempting Clerk token verification...")
                 clerk_payload = AuthService.verify_clerk_token(token)
+                logger.info(f"✅ Clerk verification successful")
                 clerk_user_id = clerk_payload.get('sub')
+                logger.info(f"👤 Clerk user ID extracted: {clerk_user_id}")
                 
                 if clerk_user_id:
                     # Buscar usuario por clerk_user_id
@@ -297,6 +303,7 @@ class AuthService:
                 raise
             except Exception as e:
                 # Si falla la verificación de Clerk, intentar como JWT interno
+                logger.warning(f"⚠️ Clerk verification failed: {str(e)}")
                 logger.info("🔄 Trying internal JWT verification...")
                 try:
                     payload = jwt.decode(
