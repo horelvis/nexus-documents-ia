@@ -129,6 +129,7 @@ async def chat_with_agent(
                 agent_id=agent_id,
                 tenant_id=str(current_user.tenant_id),
                 message=message,
+                user_id=str(current_user.id),
                 conversation_id=conversation_id,
                 context=context or {}
             ):

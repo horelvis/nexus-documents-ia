@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
+    API_KEY: str = os.getenv("API_KEY", "your-secret-api-key-here")
     
     # LLM Configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")

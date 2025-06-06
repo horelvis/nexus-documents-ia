@@ -5,7 +5,7 @@ class Settings:
     """Configuración del storage microservice"""
     
     # API Security
-    API_KEY: str = os.getenv("STORAGE_API_KEY", "your-secret-api-key-here")
+    API_KEY: str = os.getenv("API_KEY", "your-secret-api-key-here")
     
     # Google Cloud Storage
     GCS_PROJECT_ID: str = os.getenv("GCS_PROJECT_ID", "your-project-id")

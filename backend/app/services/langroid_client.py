@@ -15,16 +15,49 @@ class LangroidClient:
         self.base_url = settings.LANGROID_SERVICE_URL
         self.timeout = 30.0
     
+    def _get_security_headers(self, tenant_id: str = None, user_id: str = None) -> Dict[str, str]:
+        """Obtener headers de seguridad para requests al microservicio"""
+        headers = {
+            "X-API-Key": settings.API_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        if tenant_id:
+            headers["X-Tenant-ID"] = tenant_id
+        if user_id:
+            headers["X-User-ID"] = user_id
+            
+        return headers
+    
     async def _make_request(
         self, 
         method: str, 
-        endpoint: str, 
+        endpoint: str,
+        tenant_id: str = None,
+        user_id: str = None,
         **kwargs
     ) -> httpx.Response:
-        """Realizar una request HTTP al microservicio"""
+        """Realizar una request HTTP al microservicio con headers de seguridad"""
         async with httpx.AsyncClient() as client:
             url = f"{self.base_url}{endpoint}"
-            logger.info(f"🌐 {method.upper()} {url}")
+            
+            # Agregar headers de seguridad
+            security_headers = {
+                "X-API-Key": settings.API_KEY
+            }
+            
+            if tenant_id:
+                security_headers["X-Tenant-ID"] = tenant_id
+            if user_id:
+                security_headers["X-User-ID"] = user_id
+            
+            # Combinar headers
+            if "headers" in kwargs:
+                kwargs["headers"].update(security_headers)
+            else:
+                kwargs["headers"] = security_headers
+            
+            logger.info(f"🌐 {method.upper()} {url} (Tenant: {tenant_id}, User: {user_id})")
             
             response = await client.request(
                 method=method,
@@ -68,7 +101,12 @@ class LangroidClient:
             "configuration": configuration or {}
         }
         
-        response = await self._make_request("POST", "/agents/create", json=data)
+        response = await self._make_request(
+            "POST", "/agents/create", 
+            tenant_id=tenant_id, 
+            user_id=user_id,
+            json=data
+        )
         return response.json()
     
     async def delete_agent(self, agent_id: str, tenant_id: str) -> Dict[str, Any]:
@@ -76,6 +114,7 @@ class LangroidClient:
         response = await self._make_request(
             "DELETE", 
             f"/agents/{agent_id}",
+            tenant_id=tenant_id,
             params={"tenant_id": tenant_id}
         )
         return response.json()
@@ -85,6 +124,7 @@ class LangroidClient:
         response = await self._make_request(
             "GET", 
             "/agents/list",
+            tenant_id=tenant_id,
             params={"tenant_id": tenant_id}
         )
         return response.json()
@@ -98,6 +138,7 @@ class LangroidClient:
         agent_id: str, 
         tenant_id: str, 
         message: str,
+        user_id: str = None,
         conversation_id: Optional[str] = None,
         context: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -111,10 +152,14 @@ class LangroidClient:
         async with httpx.AsyncClient() as client:
             url = f"{self.base_url}/agents/{agent_id}/chat"
             
+            # Headers de seguridad
+            headers = self._get_security_headers(tenant_id, user_id)
+            
             async with client.stream(
                 "POST",
                 url,
                 json=data,
+                headers=headers,
                 params={"tenant_id": tenant_id},
                 timeout=60.0
             ) as response:

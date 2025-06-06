@@ -109,9 +109,8 @@ class Settings(BaseSettings):
     CLERK_PUBLISHABLE_KEY: Optional[str] = os.getenv("CLERK_PUBLISHABLE_KEY")
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
-    # Storage Microservice
+    # Microservices - Usando la misma API_KEY para todos
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
-    STORAGE_API_KEY: str = os.getenv("STORAGE_API_KEY", "your-secret-api-key-here")
     
     model_config = {
         "case_sensitive": True,

@@ -134,6 +134,18 @@ security_service = SecurityService()
 
 
 # FastAPI dependencies
+async def get_api_key(api_key: str = Header(..., alias="X-API-Key")) -> str:
+    """Extract and validate API key from headers"""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+    
+    if api_key != settings.API_KEY:
+        logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    return api_key
+
+
 async def get_tenant_id(tenant_id: str = Header(..., alias="X-Tenant-ID")) -> str:
     """Extract tenant ID from headers"""
     if not tenant_id:
@@ -149,6 +161,7 @@ async def get_user_id(user_id: str = Header(..., alias="X-User-ID")) -> str:
 
 
 async def verify_admin_access(
+    api_key: str = Depends(get_api_key),
     tenant_id: str = Depends(get_tenant_id),
     user_id: str = Depends(get_user_id)
 ) -> Dict[str, Any]:
@@ -160,6 +173,7 @@ async def verify_admin_access(
 
 
 async def verify_user_access(
+    api_key: str = Depends(get_api_key),
     tenant_id: str = Depends(get_tenant_id),
     user_id: str = Depends(get_user_id)
 ) -> Dict[str, Any]:

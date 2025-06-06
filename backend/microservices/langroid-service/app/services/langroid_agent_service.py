@@ -35,7 +35,6 @@ class LangroidAgentService:
             "generic": self._create_generic_agent
         }
         self.llm_config = None
-        self.vector_store_config = None
     
     async def initialize(self):
         """Initialize the service"""
@@ -52,17 +51,25 @@ class LangroidAgentService:
             base_url=app_settings.OLLAMA_BASE_URL
         )
         
-        # Configure vector store
-        self.vector_store_config = QdrantDBConfig(
-            cloud=False,
-            host=app_settings.QDRANT_HOST,
-            port=app_settings.QDRANT_PORT,
-            storage_path=None,  # Use server mode
-            collection_name="nexus_langroid_default",
-            embedding_model=app_settings.DEFAULT_EMBEDDING_MODEL
-        )
+        # Configure base vector store config (will be customized per tenant)
+        self.base_vector_store_config = {
+            "cloud": False,
+            "host": app_settings.QDRANT_HOST,
+            "port": app_settings.QDRANT_PORT,
+            "storage_path": None,  # Use server mode
+            "embedding_model": app_settings.DEFAULT_EMBEDDING_MODEL
+        }
         
         logger.info("Langroid Agent Service initialized successfully")
+    
+    def _get_tenant_vector_store_config(self, tenant_id: str) -> QdrantDBConfig:
+        """Get vector store config isolated by tenant"""
+        collection_name = f"nexus_langroid_agents_{tenant_id}"
+        
+        return QdrantDBConfig(
+            **self.base_vector_store_config,
+            collection_name=collection_name
+        )
     
     async def cleanup(self):
         """Cleanup resources"""
@@ -308,7 +315,7 @@ class LangroidAgentService:
             tenant_id=tenant_id,
             user_id=user_id,
             llm_config=self.llm_config,
-            vector_config=self.vector_store_config,
+            vector_config=self._get_tenant_vector_store_config(tenant_id),
             config=config
         )
     
@@ -324,7 +331,7 @@ class LangroidAgentService:
         agent_config = lr.ChatAgentConfig(
             name="DocumentAnalyzer",
             llm=self.llm_config,
-            vecdb=self.vector_store_config,
+            vecdb=self._get_tenant_vector_store_config(tenant_id),
             system_message="""You are an expert document analyzer.
             
 Your capabilities include:
