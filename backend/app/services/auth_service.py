@@ -188,21 +188,13 @@ class AuthService:
     def verify_clerk_token(token: str) -> dict:
         """Verifica un token de Clerk usando las claves públicas oficiales."""
         import logging
-        import jwcrypto.jwk as jwk
-        import jwcrypto.jwt as jwcrypto_jwt
-        from jwcrypto.common import json_encode, json_decode
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import base64
         
         logger = logging.getLogger(__name__)
         
         try:
-            # Verificar que tenemos las credenciales de Clerk configuradas
-            if not settings.CLERK_SECRET_KEY:
-                logger.error("❌ CLERK_SECRET_KEY not configured")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Clerk authentication not properly configured"
-                )
-            
             # Obtener las claves públicas de Clerk para verificar el token
             try:
                 # Extraer el header del JWT para obtener el kid (key ID)
@@ -211,6 +203,8 @@ class AuthService:
                 
                 if not kid:
                     raise ValueError("Token missing 'kid' in header")
+                
+                logger.info(f"🔍 Looking for key with kid: {kid}")
                 
                 # Obtener las claves públicas de Clerk (con cache)
                 jwks = AuthService._get_clerk_jwks()
@@ -223,26 +217,53 @@ class AuthService:
                         break
                 
                 if not key_data:
+                    available_kids = [k.get('kid') for k in jwks.get('keys', [])]
+                    logger.error(f"❌ Key with kid '{kid}' not found. Available kids: {available_kids}")
                     raise ValueError(f"Key with kid '{kid}' not found in JWKS")
                 
-                # Crear el objeto de clave pública para verificación
-                public_key = jwk.JWK(**key_data)
-                
-                # Verificar el token
-                jwt_token = jwcrypto_jwt.JWT(jwt=token, key=public_key)
-                payload = json_decode(jwt_token.claims)
-                
-                # Verificaciones adicionales
-                if not payload.get('sub'):
-                    raise ValueError("Token missing 'sub' claim")
-                
-                # Verificar el issuer
-                iss = payload.get('iss', '')
-                if not iss or 'clerk' not in iss:
-                    raise ValueError(f"Invalid issuer: {iss}")
-                
-                logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
-                return payload
+                # Construir la clave pública RSA desde los componentes JWK
+                try:
+                    # Obtener los componentes RSA de la clave JWK
+                    n = base64.urlsafe_b64decode(key_data['n'] + '===')  # Agregar padding si es necesario
+                    e = base64.urlsafe_b64decode(key_data['e'] + '===')
+                    
+                    # Convertir bytes a enteros
+                    n_int = int.from_bytes(n, byteorder='big')
+                    e_int = int.from_bytes(e, byteorder='big')
+                    
+                    # Crear la clave pública RSA
+                    public_numbers = rsa.RSAPublicNumbers(e_int, n_int)
+                    public_key = public_numbers.public_key()
+                    
+                    # Convertir a formato PEM para PyJWT
+                    pem_key = public_key.public_key_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+                    
+                    # Verificar el token usando PyJWT
+                    payload = jwt.decode(
+                        token,
+                        pem_key,
+                        algorithms=['RS256'],
+                        options={"verify_aud": False}  # Clerk tokens might not have aud
+                    )
+                    
+                    # Verificaciones adicionales
+                    if not payload.get('sub'):
+                        raise ValueError("Token missing 'sub' claim")
+                    
+                    # Verificar el issuer
+                    iss = payload.get('iss', '')
+                    if not iss or 'clerk' not in iss.lower():
+                        logger.warning(f"⚠️ Unexpected issuer: {iss}")
+                    
+                    logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
+                    return payload
+                    
+                except Exception as key_error:
+                    logger.error(f"❌ Error processing public key: {str(key_error)}")
+                    raise ValueError(f"Failed to process public key: {str(key_error)}")
                 
             except requests.RequestException as e:
                 logger.error(f"❌ Failed to fetch Clerk JWKS: {str(e)}")
