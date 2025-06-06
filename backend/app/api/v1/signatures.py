@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_active_user
 from app.db.models import User
 from app.services.signature_service import SignatureService
-from app.schemas.agent import (
-    SignatureProviderCreate, SignatureProviderUpdate, SignatureProviderResponse,
-    SignatureRequestCreate, SignatureRequestUpdate, SignatureRequestResponse
+from app.schemas.signature import (
+    SignatureProviderCreate, SignatureProviderUpdate, SignatureProvider,
+    SignatureRequestCreate, SignatureRequestUpdate, SignatureRequest
 )
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ router = APIRouter()
 # SIGNATURE PROVIDERS
 # =====================================
 
-@router.post("/providers", response_model=SignatureProviderResponse)
+@router.post("/providers", response_model=SignatureProvider)
 async def create_signature_provider(
     provider_data: SignatureProviderCreate,
     db: Session = Depends(get_db),
@@ -60,7 +60,7 @@ async def create_signature_provider(
         )
 
 
-@router.get("/providers", response_model=List[SignatureProviderResponse])
+@router.get("/providers", response_model=List[SignatureProvider])
 async def get_signature_providers(
     is_active: Optional[bool] = True,
     db: Session = Depends(get_db),
@@ -84,7 +84,7 @@ async def get_signature_providers(
         )
 
 
-@router.get("/providers/{provider_id}", response_model=SignatureProviderResponse)
+@router.get("/providers/{provider_id}", response_model=SignatureProvider)
 async def get_signature_provider(
     provider_id: UUID,
     db: Session = Depends(get_db),
@@ -114,7 +114,7 @@ async def get_signature_provider(
         )
 
 
-@router.get("/providers/default", response_model=SignatureProviderResponse)
+@router.get("/providers/default", response_model=SignatureProvider)
 async def get_default_signature_provider(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -147,7 +147,7 @@ async def get_default_signature_provider(
 # SIGNATURE REQUESTS
 # =====================================
 
-@router.post("/requests", response_model=SignatureRequestResponse)
+@router.post("/requests", response_model=SignatureRequest)
 async def create_signature_request(
     request_data: SignatureRequestCreate,
     db: Session = Depends(get_db),
@@ -213,7 +213,7 @@ async def send_signature_request(
         )
 
 
-@router.get("/requests", response_model=List[SignatureRequestResponse])
+@router.get("/requests", response_model=List[SignatureRequest])
 async def get_signature_requests(
     status_filter: Optional[str] = None,
     limit: int = 50,
@@ -242,7 +242,7 @@ async def get_signature_requests(
         )
 
 
-@router.get("/requests/{request_id}", response_model=SignatureRequestResponse)
+@router.get("/requests/{request_id}", response_model=SignatureRequest)
 async def get_signature_request(
     request_id: UUID,
     db: Session = Depends(get_db),
@@ -275,7 +275,7 @@ async def get_signature_request(
         )
 
 
-@router.put("/requests/{request_id}", response_model=SignatureRequestResponse)
+@router.put("/requests/{request_id}", response_model=SignatureRequest)
 async def update_signature_request(
     request_id: UUID,
     request_data: SignatureRequestUpdate,

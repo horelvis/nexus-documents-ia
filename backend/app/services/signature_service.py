@@ -17,7 +17,7 @@ from app.db.models import (
     SignatureProvider, SignatureRequest, SignatureRequestSigner, 
     SignatureEvent, Tenant, User
 )
-from app.schemas.agent import (
+from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate,
     SignatureRequestCreate, SignatureRequestUpdate,
     SignerCreate

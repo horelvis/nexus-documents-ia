@@ -11,8 +11,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import AgentTool, Tenant, User
-from app.services.agent_service import AgentService
-from app.schemas.agent import AgentCreate
+# NOTE: Agent functionality has been moved to Langroid microservice
+# from app.services.agent_service import AgentService
+# NOTE: Agent functionality has been moved to Langroid microservice
+# This script is deprecated and should be replaced with calls to Langroid service
+# from app.schemas.agent import AgentCreate
 
 
 def init_default_tools(db: Session):
