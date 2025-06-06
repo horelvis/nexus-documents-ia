@@ -1,58 +1,13 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
 import { useApiClient } from '@/lib/api-client'
 
-// Types
-export interface BackendUser {
-  id: string
-  email: string
-  full_name?: string
-  is_active: boolean
-  is_superuser: boolean
-  onboarding_completed: boolean
-  tenant_id: string
-  clerk_user_id?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface OnboardingStatus {
-  needsOnboarding: boolean
-  isNewUser: boolean
-  hasCompletedSync: boolean
-  loading: boolean
-  error: string | null
-}
-
-export interface UserContextType {
-  // Clerk user data
-  clerkUser: any
-  isClerkLoaded: boolean
-  isSignedIn: boolean
-  
-  // Backend user data
-  backendUser: BackendUser | null
-  userLoading: boolean
-  userError: string | null
-  
-  // Onboarding
-  onboarding: OnboardingStatus
-  
-  // Actions
-  syncUserWithBackend: () => Promise<void>
-  markOnboardingComplete: () => Promise<boolean>
-  checkOnboardingStatus: () => Promise<void>
-  refetchUser: () => Promise<void>
-}
+import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
-
-interface UserProviderProps {
-  children: ReactNode
-}
 
 export function UserProvider({ children }: UserProviderProps) {
   const { user: clerkUser, isLoaded: isClerkLoaded, isSignedIn } = useUser()
@@ -63,7 +18,7 @@ export function UserProvider({ children }: UserProviderProps) {
   // Backend user state
   const [backendUser, setBackendUser] = useState<BackendUser | null>(null)
   const [userLoading, setUserLoading] = useState(true)
-  const [userError, setUserError] = useState<string | null>(null)
+  const [userError] = useState<string | null>(null)
   
   // Onboarding state
   const [onboarding, setOnboarding] = useState<OnboardingStatus>({
@@ -73,6 +28,24 @@ export function UserProvider({ children }: UserProviderProps) {
     loading: true,
     error: null
   })
+
+  // Helper function to get tenant-aware welcome path
+  const getWelcomePath = (userData?: BackendUser) => {
+    if (userData?.tenant_id) {
+      return `/${userData.tenant_id}/welcome`
+    }
+    // Fallback to extract tenantId from pathname if available
+    const tenantMatch = pathname.match(/^\/([^\/]+)\//)
+    if (tenantMatch) {
+      return `/${tenantMatch[1]}/welcome`
+    }
+    return '/welcome' // Fallback
+  }
+
+  // Helper function to check if current path is welcome or onboarding
+  const isWelcomeOrOnboardingPath = () => {
+    return pathname.includes('/welcome') || pathname.includes('/onboarding')
+  }
 
   // Sync user with backend
   const syncUserWithBackend = async (): Promise<void> => {
@@ -154,8 +127,8 @@ export function UserProvider({ children }: UserProviderProps) {
         })
         
         // Redirect to welcome page for new users
-        if (pathname !== '/welcome' && pathname !== '/onboarding') {
-          router.push('/welcome')
+        if (!isWelcomeOrOnboardingPath()) {
+          router.push(getWelcomePath())
         }
         return
       }
@@ -174,8 +147,8 @@ export function UserProvider({ children }: UserProviderProps) {
       })
 
       // Redirect to welcome page if needs onboarding and not already there
-      if (!hasCompletedOnboarding && pathname !== '/welcome' && pathname !== '/onboarding') {
-        router.push('/welcome')
+      if (!hasCompletedOnboarding && !isWelcomeOrOnboardingPath()) {
+        router.push(getWelcomePath(userData))
       }
 
     } catch (error) {
@@ -192,8 +165,8 @@ export function UserProvider({ children }: UserProviderProps) {
       })
 
       // Redirect to welcome page for error cases
-      if (pathname !== '/welcome' && pathname !== '/onboarding') {
-        router.push('/welcome')
+      if (!isWelcomeOrOnboardingPath()) {
+        router.push(getWelcomePath())
       }
     } finally {
       setUserLoading(false)

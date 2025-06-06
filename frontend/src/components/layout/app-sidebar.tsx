@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useUser } from "@clerk/nextjs"
+import type { AppSidebarProps } from '@/lib/types'
 import {
   IconCloudUpload,
   IconSearch,
@@ -182,7 +182,26 @@ const data = {
   ],
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
+  // Generate tenant-aware navigation data
+  const getNavData = () => {
+    const basePath = tenantId ? `/${tenantId}` : '';
+    
+    return {
+      ...data,
+      navMain: data.navMain.map(item => ({
+        ...item,
+        url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`,
+        items: item.items?.map(subItem => ({
+          ...subItem,
+          url: `${basePath}${subItem.url}`
+        }))
+      }))
+    };
+  };
+
+  const navData = getNavData();
+
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -201,12 +220,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
-        <NavDocuments items={data.quickActions} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <NavMain items={navData.navMain} />
+        <NavDocuments items={navData.quickActions} />
+        <NavSecondary items={navData.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser user={navData.user} />
       </SidebarFooter>
     </Sidebar>
   )

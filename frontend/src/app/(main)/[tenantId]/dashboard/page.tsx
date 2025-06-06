@@ -1,4 +1,3 @@
-import { ChartAreaInteractive } from "@/components/dashboard/chart-area-interactive"
 import { DataTable } from "@/components/common/data-table"
 import { SectionCards } from "@/components/dashboard/section-cards"
 

@@ -3,6 +3,7 @@
 import { useAuth } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
+import { useUserContext } from '@/contexts/user-context'
 import { 
   HeroSection, 
   FeaturesSection, 
@@ -14,16 +15,18 @@ import {
 
 export default function Home() {
   const { isLoaded, isSignedIn } = useAuth()
+  const { backendUser, userLoading } = useUserContext()
   const router = useRouter()
 
   // Auto-redirect signed in users to dashboard
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      router.push('/dashboard')
+    if (isLoaded && isSignedIn && backendUser && !userLoading) {
+      const tenantId = backendUser.tenant_id
+      router.push(`/${tenantId}/dashboard`)
     }
-  }, [isLoaded, isSignedIn, router])
+  }, [isLoaded, isSignedIn, backendUser, userLoading, router])
 
-  if (!isLoaded) {
+  if (!isLoaded || userLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600"></div>
@@ -31,7 +34,7 @@ export default function Home() {
     )
   }
 
-  if (isSignedIn) {
+  if (isSignedIn && backendUser) {
     return null // Will redirect to dashboard
   }
 

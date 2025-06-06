@@ -4,10 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
 
-interface AuthGuardProps {
-  children: React.ReactNode
-  fallback?: React.ReactNode
-}
+import type { AuthGuardProps } from '@/lib/types'
 
 export function AuthGuard({ children, fallback }: AuthGuardProps) {
   const { 
