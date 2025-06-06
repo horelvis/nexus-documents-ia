@@ -1,182 +1,126 @@
-"""
-Langroid Client Service - Interface to communicate with Langroid microservice
-"""
-import asyncio
-import logging
-import json
-from typing import Dict, Any, List, Optional, AsyncGenerator
-from uuid import UUID
-import httpx
-from datetime import datetime
+# app/services/langroid_client.py
 
+import httpx
+import logging
+from typing import Dict, Any, List, Optional, AsyncGenerator
+import json
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class LangroidClient:
-    """Client for communicating with Langroid microservice"""
+    """Cliente para comunicarse con el microservicio Langroid"""
     
     def __init__(self):
-        self.base_url = getattr(settings, 'LANGROID_SERVICE_URL', 'http://langroid-service:8002')
-        self.timeout = 60.0
-        self.http_client = None
+        self.base_url = settings.LANGROID_SERVICE_URL
+        self.timeout = 30.0
     
-    async def __aenter__(self):
-        """Async context manager entry"""
-        self.http_client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=self.timeout
-        )
-        return self
+    async def _make_request(
+        self, 
+        method: str, 
+        endpoint: str, 
+        **kwargs
+    ) -> httpx.Response:
+        """Realizar una request HTTP al microservicio"""
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}{endpoint}"
+            logger.info(f"🌐 {method.upper()} {url}")
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                timeout=self.timeout,
+                **kwargs
+            )
+            
+            if response.status_code >= 400:
+                logger.error(f"❌ Langroid service error: {response.status_code} - {response.text}")
+                response.raise_for_status()
+            
+            return response
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        if self.http_client:
-            await self.http_client.aclose()
+    async def health_check(self) -> Dict[str, Any]:
+        """Verificar el estado del microservicio"""
+        response = await self._make_request("GET", "/health")
+        return response.json()
     
-    def _get_headers(self, tenant_id: str, user_id: str) -> Dict[str, str]:
-        """Get headers for requests"""
-        return {
-            "X-Tenant-ID": str(tenant_id),
-            "X-User-ID": str(user_id),
-            "Content-Type": "application/json"
-        }
+    async def get_service_status(self) -> Dict[str, Any]:
+        """Obtener estado detallado del servicio"""
+        response = await self._make_request("GET", "/status")
+        return response.json()
     
     # =====================================
     # AGENT MANAGEMENT
     # =====================================
     
     async def create_agent(
-        self,
-        agent_type: str,
-        tenant_id: UUID,
-        user_id: UUID,
+        self, 
+        agent_type: str, 
+        tenant_id: str, 
+        user_id: str, 
         configuration: Dict[str, Any] = None
-    ) -> str:
-        """Create a new Langroid agent"""
+    ) -> Dict[str, Any]:
+        """Crear un nuevo agente"""
+        data = {
+            "agent_type": agent_type,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "configuration": configuration or {}
+        }
         
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            payload = {
-                "agent_type": agent_type,
-                "tenant_id": str(tenant_id),
-                "user_id": str(user_id),
-                "configuration": configuration or {}
-            }
-            
-            response = await self.http_client.post(
-                "/agents/create",
-                json=payload,
-                headers=self._get_headers(str(tenant_id), str(user_id))
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["agent_id"]
-            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error creating agent: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error creating agent: {str(e)}")
-            raise
+        response = await self._make_request("POST", "/agents/create", json=data)
+        return response.json()
     
-    async def delete_agent(
-        self,
-        agent_id: str,
-        tenant_id: UUID,
-        user_id: UUID
-    ) -> bool:
-        """Delete a Langroid agent"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            response = await self.http_client.delete(
-                f"/agents/{agent_id}",
-                params={"tenant_id": str(tenant_id)},
-                headers=self._get_headers(str(tenant_id), str(user_id))
-            )
-            
-            response.raise_for_status()
-            return True
-            
-        except httpx.HTTPError as e:
-            if e.response.status_code == 404:
-                return False
-            logger.error(f"HTTP error deleting agent: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error deleting agent: {str(e)}")
-            raise
+    async def delete_agent(self, agent_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Eliminar un agente"""
+        response = await self._make_request(
+            "DELETE", 
+            f"/agents/{agent_id}",
+            params={"tenant_id": tenant_id}
+        )
+        return response.json()
     
-    async def list_agents(
-        self,
-        tenant_id: UUID,
-        user_id: UUID
-    ) -> List[Dict[str, Any]]:
-        """List all agents for a tenant"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            response = await self.http_client.get(
-                "/agents/list",
-                params={"tenant_id": str(tenant_id)},
-                headers=self._get_headers(str(tenant_id), str(user_id))
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["agents"]
-            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error listing agents: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error listing agents: {str(e)}")
-            raise
+    async def list_agents(self, tenant_id: str) -> Dict[str, Any]:
+        """Listar agentes de un tenant"""
+        response = await self._make_request(
+            "GET", 
+            "/agents/list",
+            params={"tenant_id": tenant_id}
+        )
+        return response.json()
     
     # =====================================
     # AGENT INTERACTION
     # =====================================
     
     async def chat_with_agent(
-        self,
-        agent_id: str,
-        tenant_id: UUID,
-        user_id: UUID,
+        self, 
+        agent_id: str, 
+        tenant_id: str, 
         message: str,
         conversation_id: Optional[str] = None,
         context: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Chat with an agent and stream responses"""
+        """Chat con un agente (streaming)"""
+        data = {
+            "message": message,
+            "conversation_id": conversation_id,
+            "context": context or {}
+        }
         
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            payload = {
-                "message": message,
-                "conversation_id": conversation_id,
-                "context": context or {}
-            }
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/agents/{agent_id}/chat"
             
-            async with self.http_client.stream(
+            async with client.stream(
                 "POST",
-                f"/agents/{agent_id}/chat",
-                json=payload,
-                params={"tenant_id": str(tenant_id)},
-                headers=self._get_headers(str(tenant_id), str(user_id))
+                url,
+                json=data,
+                params={"tenant_id": tenant_id},
+                timeout=60.0
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"❌ Chat error: {response.status_code}")
+                    response.raise_for_status()
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
@@ -184,52 +128,36 @@ class LangroidClient:
                             data = json.loads(line[6:])  # Remove "data: " prefix
                             yield data
                         except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error in agent chat: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Connection error: {str(e)}",
-                "metadata": {"error_type": "http_error"}
-            }
-        except Exception as e:
-            logger.error(f"Error in agent chat: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "metadata": {"error_type": "unexpected_error"}
-            }
+                            logger.warning(f"Invalid JSON in stream: {line}")
     
     async def execute_agent_task(
-        self,
-        agent_id: str,
-        tenant_id: UUID,
-        user_id: UUID,
+        self, 
+        agent_id: str, 
+        tenant_id: str, 
         task_type: str,
         parameters: Dict[str, Any],
         context: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Execute a task with an agent and stream responses"""
+        """Ejecutar una tarea con un agente (streaming)"""
+        data = {
+            "task_type": task_type,
+            "parameters": parameters,
+            "context": context or {}
+        }
         
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            payload = {
-                "task_type": task_type,
-                "parameters": parameters,
-                "context": context or {}
-            }
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/agents/{agent_id}/execute"
             
-            async with self.http_client.stream(
+            async with client.stream(
                 "POST",
-                f"/agents/{agent_id}/execute",
-                json=payload,
-                params={"tenant_id": str(tenant_id)},
-                headers=self._get_headers(str(tenant_id), str(user_id))
+                url,
+                json=data,
+                params={"tenant_id": tenant_id},
+                timeout=120.0
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"❌ Task execution error: {response.status_code}")
+                    response.raise_for_status()
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
@@ -237,227 +165,120 @@ class LangroidClient:
                             data = json.loads(line[6:])  # Remove "data: " prefix
                             yield data
                         except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error executing agent task: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Connection error: {str(e)}",
-                "metadata": {"error_type": "http_error"}
-            }
-        except Exception as e:
-            logger.error(f"Error executing agent task: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "metadata": {"error_type": "unexpected_error"}
-            }
+                            logger.warning(f"Invalid JSON in stream: {line}")
     
     # =====================================
-    # DIGITAL SIGNATURE SPECIFIC
+    # DIGITAL SIGNATURE
     # =====================================
     
-    async def create_signature_request_with_agent(
+    async def create_signature_request(
         self,
-        tenant_id: UUID,
-        user_id: UUID,
+        tenant_id: str,
+        user_id: str,
         title: str,
         document_name: str,
         signers: List[Dict[str, Any]],
         message: Optional[str] = None,
         signature_type: str = "sequential"
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Create signature request using Langroid agent"""
+        """Crear una solicitud de firma digital (streaming)"""
+        data = {
+            "title": title,
+            "document_name": document_name,
+            "signers": signers,
+            "message": message,
+            "signature_type": signature_type
+        }
         
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            payload = {
-                "title": title,
-                "document_name": document_name,
-                "signers": signers,
-                "message": message,
-                "signature_type": signature_type
-            }
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/signature-agent/create-request"
             
-            async with self.http_client.stream(
+            async with client.stream(
                 "POST",
-                "/signature-agent/create-request",
-                json=payload,
-                params={
-                    "tenant_id": str(tenant_id),
-                    "user_id": str(user_id)
-                },
-                headers=self._get_headers(str(tenant_id), str(user_id))
+                url,
+                json=data,
+                params={"tenant_id": tenant_id, "user_id": user_id},
+                timeout=120.0
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"❌ Signature request error: {response.status_code}")
+                    response.raise_for_status()
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         try:
-                            data = json.loads(line[6:])
+                            data = json.loads(line[6:])  # Remove "data: " prefix
                             yield data
                         except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error creating signature request: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Connection error: {str(e)}",
-                "metadata": {"error_type": "http_error"}
-            }
-        except Exception as e:
-            logger.error(f"Error creating signature request: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "metadata": {"error_type": "unexpected_error"}
-            }
+                            logger.warning(f"Invalid JSON in stream: {line}")
     
-    async def get_signature_status_with_agent(
+    async def get_signature_status(
         self,
         request_id: str,
-        tenant_id: UUID,
-        user_id: UUID
+        tenant_id: str,
+        user_id: str
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Get signature status using Langroid agent"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            async with self.http_client.stream(
+        """Obtener estado de una solicitud de firma (streaming)"""
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/signature-agent/status/{request_id}"
+            
+            async with client.stream(
                 "GET",
-                f"/signature-agent/status/{request_id}",
-                params={
-                    "tenant_id": str(tenant_id),
-                    "user_id": str(user_id)
-                },
-                headers=self._get_headers(str(tenant_id), str(user_id))
+                url,
+                params={"tenant_id": tenant_id, "user_id": user_id},
+                timeout=60.0
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"❌ Signature status error: {response.status_code}")
+                    response.raise_for_status()
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         try:
-                            data = json.loads(line[6:])
+                            data = json.loads(line[6:])  # Remove "data: " prefix
                             yield data
                         except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error getting signature status: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Connection error: {str(e)}",
-                "metadata": {"error_type": "http_error"}
-            }
-        except Exception as e:
-            logger.error(f"Error getting signature status: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "metadata": {"error_type": "unexpected_error"}
-            }
+                            logger.warning(f"Invalid JSON in stream: {line}")
     
     # =====================================
-    # DOCUMENT PROCESSING
+    # DOCUMENT ANALYSIS
     # =====================================
     
-    async def analyze_document_with_agent(
+    async def analyze_document(
         self,
         document_content: str,
         analysis_type: str = "general",
-        tenant_id: UUID = None,
-        user_id: UUID = None
+        tenant_id: str = "",
+        user_id: str = ""
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Analyze document using Langroid agent"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            payload = {
+        """Analizar documento con agentes (streaming)"""
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/document/analyze"
+            
+            data = {
                 "document_content": document_content,
                 "analysis_type": analysis_type,
-                "tenant_id": str(tenant_id) if tenant_id else "",
-                "user_id": str(user_id) if user_id else ""
+                "tenant_id": tenant_id,
+                "user_id": user_id
             }
             
-            headers = {}
-            if tenant_id and user_id:
-                headers = self._get_headers(str(tenant_id), str(user_id))
-            
-            async with self.http_client.stream(
+            async with client.stream(
                 "POST",
-                "/document/analyze",
-                json=payload,
-                headers=headers
+                url,
+                json=data,
+                timeout=120.0
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    logger.error(f"❌ Document analysis error: {response.status_code}")
+                    response.raise_for_status()
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         try:
-                            data = json.loads(line[6:])
+                            data = json.loads(line[6:])  # Remove "data: " prefix
                             yield data
                         except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error analyzing document: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Connection error: {str(e)}",
-                "metadata": {"error_type": "http_error"}
-            }
-        except Exception as e:
-            logger.error(f"Error analyzing document: {str(e)}")
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "metadata": {"error_type": "unexpected_error"}
-            }
-    
-    # =====================================
-    # HEALTH CHECK
-    # =====================================
-    
-    async def health_check(self) -> Dict[str, Any]:
-        """Check health of Langroid service"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            response = await self.http_client.get("/health")
-            response.raise_for_status()
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
-    
-    async def get_service_status(self) -> Dict[str, Any]:
-        """Get detailed service status"""
-        
-        if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        try:
-            response = await self.http_client.get("/status")
-            response.raise_for_status()
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"Status check failed: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+                            logger.warning(f"Invalid JSON in stream: {line}")
+
+# Instancia singleton
+langroid_client = LangroidClient()
