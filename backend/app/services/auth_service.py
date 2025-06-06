@@ -5,16 +5,15 @@ from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+# Removido jose - usando clerk-backend-api para JWT
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-import requests
-import json
+# requests y json removidos - no se usan
 
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User, Tenant
-from app.schemas.auth import TokenPayload
+# TokenPayload removido - ya no se usa JWT interno
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -36,30 +35,7 @@ class AuthService:
         """Genera un hash de la contraseña."""
         return pwd_context.hash(password)
 
-    @staticmethod
-    def create_access_token(
-        subject: Union[str, Any], 
-        tenant_id: str,
-        expires_delta: timedelta = None
-    ) -> str:
-        """Crea un token de acceso JWT."""
-        if expires_delta:
-            expire = datetime.utcnow() + expires_delta
-        else:
-            expire = datetime.utcnow() + timedelta(
-                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-            )
-        
-        to_encode = {
-            "exp": expire,
-            "sub": str(subject),
-            "tid": tenant_id
-        }
-        
-        encoded_jwt = jwt.encode(
-            to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
-        )
-        return encoded_jwt
+    # create_access_token removido - usando Clerk para tokens
 
     @staticmethod
     def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
@@ -305,24 +281,11 @@ class AuthService:
                 # Si falla la verificación de Clerk, intentar como JWT interno
                 logger.warning(f"⚠️ Clerk verification failed: {str(e)}")
                 logger.info("🔄 Trying internal JWT verification...")
-                try:
-                    payload = jwt.decode(
-                        token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-                    )
-                    token_data = TokenPayload(**payload)
-                    
-                    user = db.query(User).filter(User.id == token_data.sub).first()
-                    if user is None:
-                        raise credentials_exception
-                    
-                    return user
-                except JWTError as jwt_error:
-                    logger.error(f"❌ JWT Error: {str(jwt_error)}")
-                    raise credentials_exception
+                # JWT interno ya no se usa - solo Clerk
+                logger.error("❌ Internal JWT not supported - use Clerk authentication")
+                raise credentials_exception
                 
-        except JWTError as e:
-            logger.error(f"❌ JWT Error: {str(e)}")
-            raise credentials_exception
+        # JWTError ya no se usa
         except Exception as e:
             logger.error(f"❌ Auth Error: {str(e)}")
             raise credentials_exception
