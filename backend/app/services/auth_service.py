@@ -152,72 +152,38 @@ class AuthService:
 
     @staticmethod
     def verify_clerk_token(token: str) -> dict:
-        """Verifica un token de Clerk usando verificación simplificada pero segura."""
+        """Verifica un token de Clerk usando la API oficial de Clerk."""
         import logging
-        import base64
+        from clerk_backend_api import Clerk
         
         logger = logging.getLogger(__name__)
         
         try:
-            # Para desarrollo, verificamos el token básicamente pero de manera segura
-            # En producción deberías usar la API de Clerk para verificar
+            # Inicializar cliente de Clerk
+            clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
             
-            # Decodificar el header para obtener información básica
-            try:
-                header = jwt.get_unverified_header(token)
-                logger.info(f"🔍 Token header: {header}")
-            except Exception as e:
-                logger.error(f"❌ Invalid token format: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token format",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+            logger.info(f"🔍 Verifying Clerk token...")
             
-            # Decodificar el payload sin verificar la firma (para desarrollo)
-            # En producción esto debe cambiarse por verificación con claves públicas
-            try:
-                payload = jwt.decode(
-                    token, 
-                    options={"verify_signature": False, "verify_aud": False, "verify_exp": True}
-                )
-                
-                # Verificaciones básicas
-                if not payload.get('sub'):
-                    raise ValueError("Token missing 'sub' claim")
-                
-                if not payload.get('iss'):
-                    raise ValueError("Token missing 'iss' claim")
-                
-                # Verificar que el issuer es de Clerk
-                iss = payload.get('iss', '')
-                if 'clerk' not in iss.lower():
-                    raise ValueError(f"Invalid issuer: {iss}")
-                
-                # Verificar expiración manualmente si es necesario
-                import time
-                exp = payload.get('exp')
-                if exp and exp < time.time():
-                    raise ValueError("Token has expired")
-                
-                logger.info(f"🔑 Clerk token verified (dev mode): {payload.get('sub')}")
-                logger.warning("⚠️ Using development token verification - update for production!")
-                
+            # Verificar el token usando la API de Clerk
+            result = clerk.jwt_templates.verify_token(token)
+            
+            if result and hasattr(result, 'payload'):
+                payload = result.payload
+                logger.info(f"🔑 Clerk token verified successfully: {payload.get('sub')}")
                 return payload
-                
-            except ValueError as e:
-                logger.error(f"❌ Token validation error: {str(e)}")
+            else:
+                logger.error("❌ Invalid token response from Clerk")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid token: {str(e)}",
+                    detail="Invalid token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            
+                
         except HTTPException:
             # Re-raise HTTP exceptions
             raise
         except Exception as e:
-            logger.error(f"❌ Unexpected error verifying Clerk token: {str(e)}")
+            logger.error(f"❌ Error verifying Clerk token: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token verification failed",
