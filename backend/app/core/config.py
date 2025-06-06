@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     SERVER_NAME: str = "Document Management API"
     SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
-    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY")
-    STRIPE_PUBLIC_KEY: str = os.getenv("STRIPE_PUBLIC_KEY")
-    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET")
+    STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
+    STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
+    STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
     ALGORITHM: str = "HS256"
     
@@ -113,9 +113,11 @@ class Settings(BaseSettings):
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
     STORAGE_API_KEY: str = os.getenv("STORAGE_API_KEY", "your-secret-api-key-here")
     
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    model_config = {
+        "case_sensitive": True,
+        "env_file": ".env",
+        "extra": "ignore"  # Ignorar campos extra del .env
+    }
 
 
 settings = Settings()
