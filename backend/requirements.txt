@@ -25,6 +25,8 @@ httpx>=0.24.1,<0.25.0
 PyJWT==2.8.0
 python-jose[cryptography]==3.3.0
 stripe==5.5.0
+clerk-backend-api>=1.0.0
+jwcrypto>=1.5.0
 
 # Dependencias de testing
 pytest>=7.0.0
