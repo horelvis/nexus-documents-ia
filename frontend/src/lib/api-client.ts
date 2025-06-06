@@ -157,7 +157,13 @@ export function useApiClient() {
   // Configurar el cliente para usar el token de Clerk
   client.setAuthTokenGetter(async () => {
     try {
-      return await getToken()
+      const token = await getToken()
+      if (token) {
+        console.log('✅ Got Clerk token, length:', token.length)
+      } else {
+        console.log('❌ No Clerk token available')
+      }
+      return token
     } catch (error) {
       console.error('Failed to get auth token:', error)
       return null

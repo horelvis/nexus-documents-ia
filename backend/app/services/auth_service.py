@@ -160,7 +160,16 @@ class AuthService:
             
             # Decodificar el token sin verificar la firma (solo para desarrollo)
             # NOTA: En producción esto debe cambiar para usar las claves de Clerk
-            payload = jwt.decode(token, key="", options={"verify_signature": False})
+            payload = jwt.decode(token, key="", options={"verify_signature": False, "verify_aud": False})
+            
+            # Verificar que el token tiene la estructura esperada de Clerk
+            if not payload.get('sub'):
+                raise ValueError("Token missing 'sub' claim")
+                
+            # Verificar que el issuer es de Clerk (opcional pero recomendado)
+            iss = payload.get('iss', '')
+            if not iss.startswith('https://') or 'clerk' not in iss.lower():
+                logger.warning(f"⚠️ Suspicious issuer in token: {iss}")
             
             logger.info(f"🔑 Clerk token decoded: {payload.get('sub', 'no-sub')}")
             return payload
@@ -206,19 +215,26 @@ class AuthService:
                             status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="User not found. Please sync your account first.",
                         )
-            except:
+            except HTTPException:
+                # Re-raise HTTP exceptions from Clerk verification
+                raise
+            except Exception as e:
                 # Si falla la verificación de Clerk, intentar como JWT interno
                 logger.info("🔄 Trying internal JWT verification...")
-                payload = jwt.decode(
-                    token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-                )
-                token_data = TokenPayload(**payload)
-                
-                user = db.query(User).filter(User.id == token_data.sub).first()
-                if user is None:
+                try:
+                    payload = jwt.decode(
+                        token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+                    )
+                    token_data = TokenPayload(**payload)
+                    
+                    user = db.query(User).filter(User.id == token_data.sub).first()
+                    if user is None:
+                        raise credentials_exception
+                    
+                    return user
+                except JWTError as jwt_error:
+                    logger.error(f"❌ JWT Error: {str(jwt_error)}")
                     raise credentials_exception
-                
-                return user
                 
         except JWTError as e:
             logger.error(f"❌ JWT Error: {str(e)}")
