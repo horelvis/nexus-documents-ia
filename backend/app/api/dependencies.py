@@ -18,17 +18,46 @@ def get_current_user(
     Gets the current authenticated user from the token.
     Uses SQLAlchemy-based AuthService.
     """
-    user = AuthService.get_current_user(db=db, token=token)
-    if not user:
-        # AuthService.get_current_user already raises HTTPException if token is invalid or user not found
-        # However, an additional check here can be for robustness, though likely redundant
-        # if AuthService handles all error cases.
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔐 [DEPENDENCIES] Starting authentication in get_current_user")
+    logger.info(f"🎫 [DEPENDENCIES] Token received: {'YES' if token else 'NO'}")
+    logger.info(f"🎫 [DEPENDENCIES] Token length: {len(token) if token else 0}")
+    logger.info(f"🎫 [DEPENDENCIES] Token prefix: {token[:20]}..." if token else "NO TOKEN")
+    
+    try:
+        user = AuthService.get_current_user(db=db, token=token)
+        if not user:
+            logger.error(f"❌ [DEPENDENCIES] AuthService returned None user")
+            # AuthService.get_current_user already raises HTTPException if token is invalid or user not found
+            # However, an additional check here can be for robustness, though likely redundant
+            # if AuthService handles all error cases.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not authenticate user from token", # Generic message if AuthService didn't raise
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        logger.info(f"✅ [DEPENDENCIES] User authenticated successfully: {user.id}")
+        logger.info(f"👤 [DEPENDENCIES] User email: {user.email}")
+        logger.info(f"🏢 [DEPENDENCIES] User tenant: {user.tenant_id}")
+        logger.info(f"🔑 [DEPENDENCIES] User Clerk ID: {user.clerk_user_id}")
+        return user
+        
+    except HTTPException as e:
+        logger.error(f"❌ [DEPENDENCIES] HTTPException during auth: {e.status_code} - {e.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ [DEPENDENCIES] Unexpected error during auth: {str(e)}")
+        logger.error(f"🐛 [DEPENDENCIES] Exception type: {type(e)}")
+        import traceback
+        logger.error(f"📚 [DEPENDENCIES] Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not authenticate user from token", # Generic message if AuthService didn't raise
+            detail="Authentication failed unexpectedly",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return user
 
 def get_current_tenant_id(
     current_user: User = Depends(get_current_user),
