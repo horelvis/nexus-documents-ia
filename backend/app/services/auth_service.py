@@ -168,13 +168,15 @@ class AuthService:
             logger.info(f"📨 [VERIFY_CLERK_TOKEN] Clerk API responded with: {type(request_state)}")
             
             logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Checking request_state: {request_state}")
-            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] has is_signed_in: {hasattr(request_state, 'is_signed_in') if request_state else False}")
-            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] is_signed_in value: {getattr(request_state, 'is_signed_in', None) if request_state else None}")
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Status: {getattr(request_state, 'status', None) if request_state else None}")
             
-            if request_state and hasattr(request_state, 'is_signed_in') and request_state.is_signed_in:
-                user_id = getattr(request_state, 'user_id', None)
-                session_id = getattr(request_state, 'session_id', None)
+            if request_state and hasattr(request_state, 'status') and 'SIGNED_IN' in str(request_state.status):
+                # Extraer datos del payload en lugar de atributos directos
+                payload = getattr(request_state, 'payload', {})
+                user_id = payload.get('sub')
+                session_id = payload.get('sid')
                 
+                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Payload: {payload}")
                 logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted user_id: {user_id}")
                 logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted session_id: {session_id}")
                 
