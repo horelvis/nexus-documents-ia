@@ -5,14 +5,14 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db # SQLAlchemy session
 from app.db.models import User # SQLAlchemy User model
-from app.services.auth_service import AuthService, oauth2_scheme # AuthService is now SQLAlchemy-based
+from app.services.auth_service import AuthService # AuthService is now SQLAlchemy-based
 from app.core.config import settings
 
 # SQLAlchemy-based dependencies
 
 def get_current_user(
     db: Session = Depends(get_db),
-    token: Optional[str] = Depends(oauth2_scheme)
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ) -> User:
     """
     Gets the current authenticated user from the token.
@@ -21,19 +21,30 @@ def get_current_user(
     import logging
     logger = logging.getLogger(__name__)
     
-    logger.info(f"🔑 [DEPENDENCIES] get_current_user called with token: {'Yes' if token else 'No'}")
+    logger.info(f"🔑 [DEPENDENCIES] get_current_user called with authorization: {'Yes' if authorization else 'No'}")
     
-    if not token:
-        logger.warning("⚠️ No token provided")
+    if not authorization:
+        logger.warning("⚠️ No Authorization header provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail="Not authenticated - missing Authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    if not authorization.startswith("Bearer "):
+        logger.warning("⚠️ Invalid Authorization header format")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated - invalid Authorization header format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    token = authorization.split(" ")[1]
+    logger.info(f"🔑 [DEPENDENCIES] Extracted token: {token[:20]}...")
+    
     try:
-        logger.info(f"📞 [DEPENDENCIES] Calling AuthService.get_current_user")
-        user = AuthService.get_current_user(db=db, token=token)
+        logger.info(f"📞 [DEPENDENCIES] Calling AuthService.verify_clerk_token")
+        user = AuthService.verify_clerk_token(token=token, db=db)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

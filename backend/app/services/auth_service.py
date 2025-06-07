@@ -3,50 +3,19 @@ from datetime import datetime, timedelta
 from typing import Optional, Union, Any
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import HTTPException, status
 # Removido jose - usando clerk-backend-api para JWT
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 # requests y json removidos - no se usan
 
 from app.core.config import settings
-from app.db.database import get_db
 from app.db.models import User, Tenant
 # TokenPayload removido - ya no se usa JWT interno
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Custom OAuth2 scheme that handles OPTIONS requests
-class CustomOAuth2PasswordBearer(OAuth2PasswordBearer):
-    async def __call__(self, request):
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info(f"🔐 [OAUTH2_SCHEME] Called for {request.method} {request.url.path}")
-        
-        # Skip authentication for OPTIONS requests (CORS preflight)
-        if request.method == "OPTIONS":
-            logger.info("🔄 [OAUTH2_SCHEME] Skipping OPTIONS request")
-            return None
-            
-        logger.info("🔍 [OAUTH2_SCHEME] Extracting token from Authorization header")
-        
-        try:
-            token = await super().__call__(request)
-            logger.info(f"🔑 [OAUTH2_SCHEME] Token extracted successfully: {len(token) if token else 0} chars")
-            if token:
-                logger.info(f"🔑 [OAUTH2_SCHEME] Token prefix: {token[:30]}...")
-            return token
-        except Exception as e:
-            logger.error(f"❌ [OAUTH2_SCHEME] Error extracting token: {str(e)}")
-            logger.error(f"🐛 [OAUTH2_SCHEME] Exception type: {type(e)}")
-            raise
-
-oauth2_scheme = CustomOAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"
-)
 
 
 class AuthService:
@@ -242,57 +211,6 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    @staticmethod
-    def get_current_user(
-        db: Session = Depends(get_db),
-        token: str = Depends(oauth2_scheme)
-    ) -> User:
-        """Obtiene el usuario actual basado en el token JWT o Clerk token."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        credentials_exception = HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-        try:
-            logger.info(f"🚀 [AUTH_SERVICE] Starting authentication...")
-            
-            logger.info(f"📞 [AUTH_SERVICE] Calling verify_clerk_token")
-            clerk_payload = AuthService.verify_clerk_token(token)
-            clerk_user_id = clerk_payload.get('sub')
-            logger.info(f"✅ [AUTH_SERVICE] verify_clerk_token returned user_id: {clerk_user_id}")
-            
-            if clerk_user_id:
-                user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
-                if user:
-                    logger.info(f"✅ User authenticated: {user.email}")
-                    return user
-                else:
-                    logger.warning(f"⚠️ User not found for Clerk ID: {clerk_user_id}")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="User not found. Please sync your account first.",
-                    )
-            else:
-                raise credentials_exception
-                
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"❌ Auth Error: {str(e)}")
-            raise credentials_exception
-
-    @staticmethod
-    def get_current_active_user(
-        current_user: User = Depends(get_current_user)
-    ) -> User:
-        """Obtiene el usuario actual si está activo."""
-        if not current_user.is_active:
-            raise HTTPException(status_code=400, detail="Inactive user")
-        return current_user
 
     @staticmethod
     def sync_user_from_clerk(

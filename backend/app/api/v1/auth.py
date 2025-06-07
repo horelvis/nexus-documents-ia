@@ -1,14 +1,10 @@
 # backend/app/api/v1/auth.py
-from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.database import get_db
-from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse, UserSync
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
@@ -20,43 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Log que el router se está cargando
-logger.info("🚀 Auth router loaded with endpoints: login, register, sync-user, me, complete-onboarding")
-
-@router.post("/login/access-token", response_model=TokenResponse)
-async def login_access_token(
-    db: Session = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
-) -> Any:
-    """
-    OAuth2 compatible token login, get an access token for future requests.
-    """
-    user = AuthService.authenticate_user(
-        db=db, email=form_data.username, password=form_data.password
-    )
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
-        
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    
-    return {
-        "access_token": AuthService.create_access_token(
-            subject=str(user.id),
-            tenant_id=str(user.tenant_id),
-            expires_delta=access_token_expires
-        ),
-        "token_type": "bearer"
-    }
+logger.info("🚀 Auth router loaded with endpoints: register, sync-user, me, complete-onboarding")
 
 @router.post("/register", response_model=UserResponse)
 async def register_user(
@@ -100,10 +60,6 @@ async def sync_user(
     
     logger.info(f"✅ User synced successfully: {user.id}")
     return user
-
-
-
-
 
 
 @router.get("/me", response_model=UserResponse)
