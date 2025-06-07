@@ -60,11 +60,52 @@ def get_current_user(
         user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
         if not user:
             logger.warning(f"⚠️ [DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found. Please sync your account first.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            logger.info("🔄 [DEPENDENCIES] Attempting auto-sync from Clerk...")
+            
+            try:
+                # Auto-sync: obtener datos del usuario desde Clerk
+                from clerk_backend_api import Clerk
+                clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+                
+                # Obtener información del usuario desde Clerk
+                clerk_user = clerk.users.get(user_id=clerk_user_id)
+                
+                if clerk_user and clerk_user.email_addresses:
+                    primary_email = next((email.email_address for email in clerk_user.email_addresses if email.id == clerk_user.primary_email_address_id), None)
+                    
+                    if primary_email:
+                        logger.info(f"📧 [DEPENDENCIES] Auto-syncing user: {primary_email}")
+                        
+                        # Crear usuario usando AuthService
+                        user = AuthService.sync_user_from_clerk(
+                            db=db,
+                            clerk_user_id=clerk_user_id,
+                            email=primary_email,
+                            full_name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or primary_email
+                        )
+                        logger.info(f"✅ [DEPENDENCIES] User auto-synced successfully: {user.email}")
+                    else:
+                        logger.error("❌ [DEPENDENCIES] No primary email found in Clerk user")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Unable to sync user - no email found",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                else:
+                    logger.error("❌ [DEPENDENCIES] Unable to fetch user from Clerk")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Unable to sync user from Clerk",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                    
+            except Exception as sync_error:
+                logger.error(f"❌ [DEPENDENCIES] Auto-sync failed: {str(sync_error)}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found. Please register first.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         
         logger.info(f"✅ [DEPENDENCIES] User authenticated: {user.email}")
         return user

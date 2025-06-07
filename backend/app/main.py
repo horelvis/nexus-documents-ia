@@ -26,6 +26,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
     logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
+    
+    # Auto-upgrade de la base de datos
+    try:
+        logger.info("🔧 Iniciando auto-upgrade de base de datos...")
+        from app.db.migrations import auto_upgrade_database
+        auto_upgrade_database()
+        logger.info("✅ Auto-upgrade de BD completado")
+    except Exception as e:
+        logger.error(f"❌ Error en auto-upgrade de BD: {e}")
+        if not settings.DEBUG:
+            logger.error("💥 Aplicación no puede iniciar sin BD actualizada")
+            raise
+        else:
+            logger.warning("⚠️ Continuando en modo DEBUG a pesar del error de BD")
+    
     logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     yield
     # Shutdown:
@@ -344,7 +359,35 @@ async def get_logging_status():
         "loggers": logger_status
     }
 
-# NOTA: Este endpoint es SOLO para desarrollo y debería removerse en producción
+# Debug endpoint para crear migraciones
+@app.post("/debug/create-migration", tags=["debug"])
+async def create_migration_endpoint(message: str):
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Crea una nueva migración con Alembic.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Migration creation endpoint only available in development mode"
+        )
+    
+    try:
+        from app.db.migrations import create_migration
+        create_migration(message)
+        return {
+            "status": "success",
+            "message": f"Migration '{message}' created successfully (DEVELOPMENT ONLY)",
+            "warning": "This endpoint should NOT be used in production"
+        }
+    except Exception as e:
+        logger.error(f"❌ Migration creation failed: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Migration creation failed: {str(e)}"
+        }
+
+
 @app.post("/debug/init-db", tags=["debug"], include_in_schema=False)
 async def init_database():
     """
