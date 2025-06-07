@@ -125,8 +125,7 @@ class AuthService:
         """Verifica un token de Clerk usando la API oficial de Clerk."""
         import logging
         import httpx
-        from clerk_backend_api import Clerk
-        from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
+        from clerk_backend_api import Clerk, AuthenticateRequestOptions
         
         logger = logging.getLogger(__name__)
         
