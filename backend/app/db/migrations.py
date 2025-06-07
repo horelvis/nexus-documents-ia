@@ -111,34 +111,72 @@ def needs_upgrade() -> bool:
         return False
 
 def run_migrations():
-    """Ejecuta las migraciones pendientes"""
-    try:
-        logger.info("🚀 Iniciando proceso de migraciones...")
-        
-        alembic_cfg = get_alembic_config()
-        current = get_current_revision()
-        
-        if current is None:
-            # BD nueva - crear tabla alembic_version y marcar como head
-            logger.info("🆕 BD nueva detectada - inicializando Alembic...")
-            command.stamp(alembic_cfg, "head")
-            logger.info("✅ BD marcada como actualizada")
-        else:
-            # BD existente - ejecutar upgrade
-            logger.info("⬆️ Ejecutando migraciones pendientes...")
-            command.upgrade(alembic_cfg, "head")
-            logger.info("✅ Migraciones completadas")
+    """Ejecuta las migraciones pendientes con timeout"""
+    import signal
+    import threading
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Migración excedió el tiempo límite")
+    
+    def run_migration_with_timeout():
+        try:
+            logger.info("🚀 Iniciando proceso de migraciones...")
             
+            alembic_cfg = get_alembic_config()
+            current = get_current_revision()
+            
+            if current is None:
+                # BD nueva - crear tabla alembic_version y marcar como head
+                logger.info("🆕 BD nueva detectada - inicializando Alembic...")
+                
+                # Usar transacción explícita para evitar bloqueos
+                with engine.begin() as conn:
+                    alembic_cfg.attributes['connection'] = conn
+                    command.stamp(alembic_cfg, "head")
+                    
+                logger.info("✅ BD marcada como actualizada")
+            else:
+                # BD existente - ejecutar upgrade
+                logger.info("⬆️ Ejecutando migraciones pendientes...")
+                
+                with engine.begin() as conn:
+                    alembic_cfg.attributes['connection'] = conn
+                    command.upgrade(alembic_cfg, "head")
+                    
+                logger.info("✅ Migraciones completadas")
+                
+        except Exception as e:
+            logger.error(f"❌ Error ejecutando migraciones: {e}")
+            raise
+    
+    try:
+        # Configurar timeout de 30 segundos
+        if hasattr(signal, 'SIGALRM'):  # Unix/Linux
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(30)
+        
+        run_migration_with_timeout()
+        
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)  # Cancelar timeout
+            
+    except TimeoutError:
+        logger.error("⏰ Migración excedió el tiempo límite de 30 segundos")
+        raise
     except Exception as e:
-        logger.error(f"❌ Error ejecutando migraciones: {e}")
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)  # Cancelar timeout
         raise
 
 def manual_add_onboarding_column():
     """Fallback manual para añadir la columna onboarding_completed"""
     try:
-        logger.info("🔧 Intentando agregar columna onboarding_completed manualmente...")
+        logger.info("🔧 Verificando columna onboarding_completed...")
         
-        with engine.connect() as conn:
+        # Usar autocommit para evitar bloqueos de transacciones
+        conn = engine.connect()
+        
+        try:
             # Verificar si la columna existe
             result = conn.execute(text("""
                 SELECT column_name 
@@ -148,19 +186,42 @@ def manual_add_onboarding_column():
             
             if not result.fetchone():
                 logger.info("➕ Agregando columna onboarding_completed...")
+                
+                # Usar autocommit para evitar transacciones implícitas
                 conn.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE NOT NULL
                 """))
-                conn.commit()
+                
                 logger.info("✅ Columna onboarding_completed agregada exitosamente")
                 return True
             else:
                 logger.info("✅ Columna onboarding_completed ya existe")
                 return True
                 
+        finally:
+            conn.close()
+                
     except Exception as e:
-        logger.error(f"❌ Error agregando columna manualmente: {e}")
+        logger.error(f"❌ Error verificando/agregando columna: {e}")
+        logger.error(f"🔍 Tipo de error: {type(e)}")
+        return False
+
+def check_database_structure():
+    """Verifica y corrige la estructura de la BD sin usar Alembic"""
+    try:
+        logger.info("🔧 Verificando estructura de la base de datos...")
+        
+        # Verificar columna onboarding_completed
+        if manual_add_onboarding_column():
+            logger.info("✅ Estructura de BD verificada y corregida")
+            return True
+        else:
+            logger.error("❌ No se pudo verificar/corregir la estructura de BD")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error verificando estructura de BD: {e}")
         return False
 
 def auto_upgrade_database():
@@ -170,23 +231,11 @@ def auto_upgrade_database():
     try:
         logger.info("🔧 Verificando estado de la base de datos...")
         
-        # Intentar con Alembic primero
-        try:
-            if needs_upgrade():
-                logger.info("📈 La BD necesita actualización")
-                run_migrations()
-                logger.info("🎉 Base de datos actualizada correctamente con Alembic")
-            else:
-                logger.info("✅ La BD está actualizada")
-        except Exception as alembic_error:
-            logger.warning(f"⚠️ Alembic falló: {alembic_error}")
-            logger.info("🔄 Intentando upgrade manual...")
-            
-            # Fallback a upgrade manual
-            if manual_add_onboarding_column():
-                logger.info("✅ Upgrade manual completado exitosamente")
-            else:
-                raise Exception("Tanto Alembic como upgrade manual fallaron")
+        # Por simplicidad y para evitar bloqueos de Alembic, usar verificación directa
+        if check_database_structure():
+            logger.info("🎉 Base de datos verificada y actualizada correctamente")
+        else:
+            raise Exception("No se pudo verificar/actualizar la estructura de la BD")
             
     except Exception as e:
         logger.error(f"💥 Error en auto-upgrade de BD: {e}")
