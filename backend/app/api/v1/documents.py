@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -41,7 +41,7 @@ async def list_documents(
     )
 
 
-@router.post("/", response_model=Document)
+@router.post("", response_model=Document)
 async def create_document(
     db: Session = Depends(get_db),
     title: str = Form(...),
