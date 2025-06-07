@@ -158,14 +158,12 @@ async def options_users_me(request: Request):
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
-    request: Request,
     current_user = Depends(get_current_user)
 ) -> Any:
     """
     Get current user.
     """
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached")
-    logger.info(f"📋 [AUTH_ENDPOINT] Request headers: {dict(request.headers)}")
     logger.info(f"📋 [AUTH_ENDPOINT] User authenticated: {current_user.email}")
     return current_user
 
