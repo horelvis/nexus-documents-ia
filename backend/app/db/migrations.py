@@ -18,17 +18,35 @@ logger = logging.getLogger(__name__)
 
 def get_alembic_config() -> Config:
     """Obtiene la configuración de Alembic"""
-    # Ruta al archivo alembic.ini
-    alembic_cfg_path = Path(__file__).parent.parent.parent / "alembic.ini"
+    # Buscar alembic.ini en múltiples ubicaciones posibles
+    possible_paths = [
+        Path(__file__).parent.parent.parent / "alembic.ini",  # Desarrollo
+        Path("/app/alembic.ini"),  # Docker
+        Path.cwd() / "alembic.ini",  # Working directory
+    ]
     
-    if not alembic_cfg_path.exists():
-        raise FileNotFoundError(f"alembic.ini not found at {alembic_cfg_path}")
+    alembic_cfg_path = None
+    for path in possible_paths:
+        if path.exists():
+            alembic_cfg_path = path
+            break
+    
+    if not alembic_cfg_path:
+        raise FileNotFoundError(f"alembic.ini not found in any of: {[str(p) for p in possible_paths]}")
+    
+    logger.info(f"📁 Using alembic.ini from: {alembic_cfg_path}")
     
     # Crear configuración de Alembic
     alembic_cfg = Config(str(alembic_cfg_path))
     
     # Establecer la URL de la base de datos
     alembic_cfg.set_main_option("sqlalchemy.url", settings.SQLALCHEMY_DATABASE_URI)
+    
+    # Asegurar que script_location sea correcto
+    script_location = alembic_cfg_path.parent / "alembic"
+    alembic_cfg.set_main_option("script_location", str(script_location))
+    
+    logger.info(f"📁 Script location: {script_location}")
     
     return alembic_cfg
 
@@ -115,6 +133,36 @@ def run_migrations():
         logger.error(f"❌ Error ejecutando migraciones: {e}")
         raise
 
+def manual_add_onboarding_column():
+    """Fallback manual para añadir la columna onboarding_completed"""
+    try:
+        logger.info("🔧 Intentando agregar columna onboarding_completed manualmente...")
+        
+        with engine.connect() as conn:
+            # Verificar si la columna existe
+            result = conn.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='onboarding_completed'
+            """))
+            
+            if not result.fetchone():
+                logger.info("➕ Agregando columna onboarding_completed...")
+                conn.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE NOT NULL
+                """))
+                conn.commit()
+                logger.info("✅ Columna onboarding_completed agregada exitosamente")
+                return True
+            else:
+                logger.info("✅ Columna onboarding_completed ya existe")
+                return True
+                
+    except Exception as e:
+        logger.error(f"❌ Error agregando columna manualmente: {e}")
+        return False
+
 def auto_upgrade_database():
     """
     Función principal para auto-upgrade de la BD al inicio de la aplicación
@@ -122,12 +170,23 @@ def auto_upgrade_database():
     try:
         logger.info("🔧 Verificando estado de la base de datos...")
         
-        if needs_upgrade():
-            logger.info("📈 La BD necesita actualización")
-            run_migrations()
-            logger.info("🎉 Base de datos actualizada correctamente")
-        else:
-            logger.info("✅ La BD está actualizada")
+        # Intentar con Alembic primero
+        try:
+            if needs_upgrade():
+                logger.info("📈 La BD necesita actualización")
+                run_migrations()
+                logger.info("🎉 Base de datos actualizada correctamente con Alembic")
+            else:
+                logger.info("✅ La BD está actualizada")
+        except Exception as alembic_error:
+            logger.warning(f"⚠️ Alembic falló: {alembic_error}")
+            logger.info("🔄 Intentando upgrade manual...")
+            
+            # Fallback a upgrade manual
+            if manual_add_onboarding_column():
+                logger.info("✅ Upgrade manual completado exitosamente")
+            else:
+                raise Exception("Tanto Alembic como upgrade manual fallaron")
             
     except Exception as e:
         logger.error(f"💥 Error en auto-upgrade de BD: {e}")
