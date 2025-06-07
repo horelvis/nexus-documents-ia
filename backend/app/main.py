@@ -10,7 +10,7 @@ import time
 from app.api.api import api_router as v1_api_router # Import the central v1 router
 from app.api.docs import router as docs_router  # Importar el router de documentación
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging, enable_auth_debug, disable_auth_debug
 
 from contextlib import asynccontextmanager
 
@@ -235,6 +235,70 @@ async def list_routes():
                 "methods": list(route.methods) if route.methods else []
             })
     return {"routes": routes}
+
+# Debug endpoint para controlar logging
+@app.post("/debug/logging/auth/enable", tags=["debug"])
+async def enable_debug_logging():
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Activa logging DEBUG para componentes de autenticación.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Debug logging endpoints only available in development mode"
+        )
+    
+    enable_auth_debug()
+    return {"status": "success", "message": "Debug logging enabled for authentication"}
+
+@app.post("/debug/logging/auth/disable", tags=["debug"])
+async def disable_debug_logging():
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️ 
+    Desactiva logging DEBUG para componentes de autenticación.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Debug logging endpoints only available in development mode"
+        )
+    
+    disable_auth_debug()
+    return {"status": "success", "message": "Debug logging disabled for authentication"}
+
+@app.get("/debug/logging/status", tags=["debug"])
+async def get_logging_status():
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Muestra el estado actual del logging.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Debug logging endpoints only available in development mode"
+        )
+    
+    import logging
+    auth_loggers = [
+        "app.api.dependencies",
+        "app.services.auth_service", 
+        "app.api.v1.auth",
+        "app.main"
+    ]
+    
+    logger_status = {}
+    for logger_name in auth_loggers:
+        logger = logging.getLogger(logger_name)
+        logger_status[logger_name] = {
+            "level": logging.getLevelName(logger.level),
+            "effective_level": logging.getLevelName(logger.getEffectiveLevel())
+        }
+    
+    return {
+        "debug_mode": settings.DEBUG,
+        "loggers": logger_status
+    }
 
 # NOTA: Este endpoint es SOLO para desarrollo y debería removerse en producción
 @app.post("/debug/init-db", tags=["debug"], include_in_schema=False)
