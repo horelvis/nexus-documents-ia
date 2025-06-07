@@ -156,16 +156,23 @@ async def options_users_me(request: Request):
         }
     )
 
-@router.get("/me", response_model=UserResponse)
-async def read_users_me(
-    current_user = Depends(get_current_user)
-) -> Any:
-    """
-    Get current user.
-    """
-    logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached")
-    logger.info(f"📋 [AUTH_ENDPOINT] User authenticated: {current_user.email}")
+@router.get("/me-test", response_model=UserResponse)
+async def read_users_me_test(current_user = Depends(get_current_user)):
+    """Get current user - test endpoint."""
+    logger.info(f"📋 [AUTH_ENDPOINT] /me-test reached - user: {current_user.email}")
     return current_user
+
+# @router.get("/me", response_model=UserResponse)
+# async def read_users_me(current_user = Depends(get_current_user)):
+#     """Get current user."""
+#     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
+#     return current_user
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user_info(user = Depends(get_current_user)):
+    """Get current authenticated user information."""
+    logger.info(f"📋 [AUTH_ENDPOINT] NEW /me endpoint - user: {user.email}")
+    return user
 
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
