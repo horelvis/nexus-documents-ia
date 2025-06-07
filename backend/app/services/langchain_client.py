@@ -7,37 +7,46 @@ import asyncio
 import logging
 import httpx
 from typing import List, Dict, Any, Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
+# Helper function to determine if an exception should be retried
+def should_retry_exception(exception: BaseException) -> bool:
+    if isinstance(exception, (httpx.NetworkError, httpx.TimeoutException)):
+        return True
+    if isinstance(exception, httpx.HTTPStatusError):
+        return exception.response.status_code >= 500  # Retry on 5xx errors
+    return False
+
+
 class LangChainClient:
     """Cliente simplificado para el microservicio LangChain"""
-    
-    def __init__(self):
+
+    def __init__(self, http_client: httpx.AsyncClient):
+        self.http_client = http_client
         self.base_url = settings.LANGCHAIN_SERVICE_URL
-        self.timeout = 30.0
-        self.http_client = None
-    
-    async def __aenter__(self):
-        """Async context manager entry"""
-        self.http_client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=self.timeout
-        )
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        if self.http_client:
-            await self.http_client.aclose()
-    
+        # self.timeout = 30.0 # Timeout is now managed by the passed client or per-request
+
+    # __aenter__ and __aexit__ removed as client is managed externally
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
     async def get_embeddings(self, texts: List[str], tenant_id: str = None) -> List[List[float]]:
         """Generar embeddings usando LangChain service"""
         
         if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
             payload = {
@@ -46,7 +55,7 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                "/embeddings/generate",
+                f"{self.base_url}/embeddings/generate",
                 json=payload
             )
             
@@ -57,12 +66,21 @@ class LangChainClient:
             
         except httpx.HTTPError as e:
             logger.error(f"HTTP error generating embeddings: {str(e)}")
-            # Fallback: return dummy embeddings for compatibility
-            return [[0.0] * 384 for _ in texts]  # nomic-embed-text dimension
+            raise
         except Exception as e:
             logger.error(f"Error generating embeddings: {str(e)}")
-            return [[0.0] * 384 for _ in texts]
+            raise
     
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
     async def generate_response(
         self,
         query: str,
@@ -73,7 +91,7 @@ class LangChainClient:
         """Generar respuesta usando LangChain service"""
         
         if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
             payload = {
@@ -84,7 +102,7 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                "/chat/generate",
+                f"{self.base_url}/chat/generate",
                 json=payload
             )
             
@@ -108,6 +126,16 @@ class LangChainClient:
                 "error": str(e)
             }
     
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
     async def search_similar(
         self,
         tenant_id: str,
@@ -118,7 +146,7 @@ class LangChainClient:
         """Búsqueda semántica usando LangChain service"""
         
         if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
             payload = {
@@ -129,7 +157,7 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                "/search/similar",
+                f"{self.base_url}/search/similar",
                 json=payload
             )
             
@@ -140,54 +168,76 @@ class LangChainClient:
             
         except httpx.HTTPError as e:
             logger.error(f"HTTP error in semantic search: {str(e)}")
-            return []
+            raise
         except Exception as e:
             logger.error(f"Error in semantic search: {str(e)}")
-            return []
+            raise
     
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
     async def store_document(
         self,
-        content: str,
+        doc_id: str, # Changed signature
+        text: str,   # Changed signature (content -> text)
         metadata: Dict[str, Any],
-        tenant_id: str = None
-    ) -> str:
-        """Almacenar documento en vector store usando LangChain service"""
+        tenant_id: str # Changed signature (Optional str = None -> str)
+    ) -> bool: # Changed return type
+        """Almacenar un solo documento en vector store usando LangChain service."""
         
         if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
             payload = {
-                "content": content,
+                "doc_id": doc_id, # Added doc_id to payload
+                "text": text,     # Changed content to text in payload
                 "metadata": metadata,
-                "tenant_id": tenant_id or settings.DEFAULT_TENANT
+                "tenant_id": tenant_id # No longer uses DEFAULT_TENANT fallback here, expecting explicit tenant_id
             }
             
             response = await self.http_client.post(
-                "/documents/store",
+                f"{self.base_url}/documents/store_one", # Changed endpoint
                 json=payload
             )
             
             response.raise_for_status()
             result = response.json()
             
-            return result.get("document_id", "")
+            return result.get("success", False) # Changed return logic
             
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error storing document: {str(e)}")
-            return ""
+            logger.error(f"HTTP error storing document {doc_id}: {str(e)}") # Added doc_id to log
+            raise
         except Exception as e:
-            logger.error(f"Error storing document: {str(e)}")
-            return ""
+            logger.error(f"Error storing document {doc_id}: {str(e)}") # Added doc_id to log
+            raise
     
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
     async def health_check(self) -> Dict[str, Any]:
         """Verificar estado del LangChain service"""
         
         if not self.http_client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
-            response = await self.http_client.get("/health")
+            response = await self.http_client.get(f"{self.base_url}/health")
             response.raise_for_status()
             return response.json()
             
@@ -197,3 +247,125 @@ class LangChainClient:
                 "status": "unhealthy",
                 "error": str(e)
             }
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
+    async def add_documents(self, tenant_id: str, texts: List[str], metadatas: List[Dict[str, Any]]) -> bool:
+        """Añade documentos en batch al vector store."""
+        if not self.http_client:
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
+
+        try:
+            payload = {
+                "texts": texts,
+                "metadatas": metadatas,
+                "tenant_id": tenant_id or settings.DEFAULT_TENANT
+            }
+            response = await self.http_client.post(
+                f"{self.base_url}/documents/add_batch", # Assuming this endpoint
+                json=payload
+            )
+            response.raise_for_status()
+            # Assuming success is True if no error, or based on response content
+            return response.json().get("success", True)
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error adding documents: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error adding documents: {str(e)}")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
+    async def delete_document(self, tenant_id: str, doc_id: str) -> bool:
+        """Elimina un documento del vector store."""
+        if not self.http_client:
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
+
+        try:
+            payload = {
+                "doc_id": doc_id,
+                "tenant_id": tenant_id or settings.DEFAULT_TENANT
+            }
+            response = await self.http_client.post(
+                f"{self.base_url}/documents/delete_by_id", # Changed endpoint
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json().get("success", False) # Consistent False on failure
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error deleting document {doc_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting document {doc_id}: {str(e)}")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
+    async def chunk_text(self, text: str, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Divide texto en chunks usando el microservicio LangChain."""
+        if not self.http_client:
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
+        try:
+            payload = {"text": text, "tenant_id": tenant_id or settings.DEFAULT_TENANT}
+            response = await self.http_client.post(f"{self.base_url}/text/chunk", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("chunks", [{"text": text}])
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error chunking text: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error chunking text: {str(e)}")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
+    async def get_collection_info(self, tenant_id: str) -> Dict[str, Any]:
+        """Obtiene información sobre la colección del vector store."""
+        if not self.http_client:
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
+        try:
+            # Assuming tenant_id might be a query parameter for GET requests
+            params = {"tenant_id": tenant_id}
+            response = await self.http_client.get(f"{self.base_url}/vectorstore/info", params=params)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error getting collection info for tenant {tenant_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error getting collection info for tenant {tenant_id}: {str(e)}")
+            raise
