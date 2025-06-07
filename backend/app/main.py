@@ -241,6 +241,15 @@ async def cors_test(request: Request):
         "allowed_origins": [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
     }
 
+# Test endpoint directo para auth
+@app.get("/direct-auth-test", tags=["debug"])
+async def direct_auth_test():
+    from app.api.dependencies import get_current_user
+    from app.db.database import get_db
+    
+    logger.info("🔧 [DIRECT_TEST] Direct auth test endpoint called")
+    return {"status": "direct_endpoint_working", "message": "This endpoint works without router"}
+
 # Ruta de test de conectividad
 @app.get("/test-connection", tags=["health"])
 async def test_connection(request: Request):

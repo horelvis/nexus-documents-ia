@@ -102,54 +102,24 @@ async def sync_user(
     return user
 
 @router.get("/debug/token", tags=["debug"])
-async def debug_token(request: Request):
+async def debug_token():
     """
     Debug endpoint para verificar el token sin autenticación
     """
-    auth_header = request.headers.get("authorization")
-    logger.info(f"🔍 [DEBUG] Auth header received: {'Yes' if auth_header else 'No'}")
-    
-    if auth_header:
-        try:
-            scheme, token = auth_header.split(' ', 1)
-            logger.info(f"🔍 [DEBUG] Token scheme: {scheme}")
-            logger.info(f"🔍 [DEBUG] Token length: {len(token)}")
-            logger.info(f"🔍 [DEBUG] Token prefix: {token[:50]}...")
-            
-            # Intentar decodificar JWT para ver el contenido
-            import jwt
-            decoded = jwt.decode(token, options={"verify_signature": False})
-            logger.info(f"🔍 [DEBUG] JWT payload: {decoded}")
-            
-            return {
-                "status": "token_received",
-                "scheme": scheme,
-                "token_length": len(token),
-                "jwt_payload": decoded
-            }
-        except Exception as e:
-            logger.error(f"❌ [DEBUG] Error decoding token: {str(e)}")
-            return {
-                "status": "token_error",
-                "error": str(e),
-                "raw_header": auth_header
-            }
-    else:
-        return {"status": "no_token"}
+    logger.info(f"🔍 [DEBUG] Debug token endpoint called")
+    return {"status": "debug_endpoint_working", "message": "Token debug endpoint active"}
 
 @router.options("/me")
-async def options_users_me(request: Request):
+async def options_users_me():
     """
     Handle CORS preflight for /me endpoint
     """
     logger.info("🔄 OPTIONS request for /me")
-    logger.info(f"🌐 Origin: {request.headers.get('origin')}")
-    logger.info(f"📋 Headers: {dict(request.headers)}")
     
     return Response(
         status_code=200,
         headers={
-            "Access-Control-Allow-Origin": request.headers.get('origin', '*'),
+            "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
             "Access-Control-Allow-Credentials": "true"
@@ -168,11 +138,22 @@ async def read_users_me_test(current_user = Depends(get_current_user)):
 #     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
 #     return current_user
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/simple-test")
+def simple_auth_test():
+    """Simple test without dependencies."""
+    logger.info(f"📋 [AUTH_ENDPOINT] Simple test endpoint reached")
+    return {"status": "ok", "message": "Simple endpoint working"}
+
+@router.get("/me")
 def get_current_user_info(user = Depends(get_current_user)):
     """Get current authenticated user information."""
     logger.info(f"📋 [AUTH_ENDPOINT] NEW /me endpoint - user: {user.email}")
-    return user
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_active": user.is_active
+    }
 
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
