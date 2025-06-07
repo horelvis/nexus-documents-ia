@@ -32,12 +32,12 @@ export function UserProvider({ children }: UserProviderProps) {
   // Helper function to get tenant-aware welcome path
   const getWelcomePath = (userData?: BackendUser) => {
     if (userData?.tenant_id) {
-      return `/${userData.tenant_id}/welcome`
+      return `/welcome/${userData.tenant_id}`
     }
     // Fallback to extract tenantId from pathname if available
     const tenantMatch = pathname.match(/^\/([^\/]+)\//)
     if (tenantMatch) {
-      return `/${tenantMatch[1]}/welcome`
+      return `/welcome/${tenantMatch[1]}`
     }
     return '/welcome' // Fallback
   }
