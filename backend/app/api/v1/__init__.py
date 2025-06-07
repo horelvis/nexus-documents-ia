@@ -9,7 +9,7 @@ from app.api.v1.tenants import router as tenants_router
 # but __all__ can be good practice.
 __all__ = [
     "admin_router",
-    "auth_router",
+    "auth_router", 
     "documents_router",
     "search_router",
     "tenants_router",

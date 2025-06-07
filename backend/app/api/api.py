@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks  # Added new routers
+    agents, signatures, webhooks
 )
 from fastapi import APIRouter
 

@@ -2,9 +2,8 @@
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -13,6 +12,7 @@ from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse, UserSync
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
+from app.db.models import User
 
 import logging
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Log que el router se está cargando
-logger.info("🚀 Auth router loaded with endpoints: login, register, sync-user, me")
+logger.info("🚀 Auth router loaded with endpoints: login, register, sync-user, me, complete-onboarding")
 
 @router.post("/login/access-token", response_model=TokenResponse)
 async def login_access_token(
@@ -101,64 +101,21 @@ async def sync_user(
     logger.info(f"✅ User synced successfully: {user.id}")
     return user
 
-@router.get("/debug/token", tags=["debug"])
-async def debug_token():
-    """
-    Debug endpoint para verificar el token sin autenticación
-    """
-    logger.info(f"🔍 [DEBUG] Debug token endpoint called")
-    return {"status": "debug_endpoint_working", "message": "Token debug endpoint active"}
 
-@router.options("/me")
-async def options_users_me():
-    """
-    Handle CORS preflight for /me endpoint
-    """
-    logger.info("🔄 OPTIONS request for /me")
-    
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
-            "Access-Control-Allow-Credentials": "true"
-        }
-    )
 
-@router.get("/me-test", response_model=UserResponse)
-async def read_users_me_test(current_user = Depends(get_current_user)):
-    """Get current user - test endpoint."""
-    logger.info(f"📋 [AUTH_ENDPOINT] /me-test reached - user: {current_user.email}")
-    return current_user
 
-# @router.get("/me", response_model=UserResponse)
-# async def read_users_me(current_user = Depends(get_current_user)):
-#     """Get current user."""
-#     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
-#     return current_user
 
-@router.get("/simple-test")
-def simple_auth_test():
-    """Simple test without dependencies."""
-    logger.info(f"📋 [AUTH_ENDPOINT] Simple test endpoint reached")
-    return {"status": "ok", "message": "Simple endpoint working"}
 
-@router.get("/me")
-def get_current_user_info(user = Depends(get_current_user)):
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current authenticated user information."""
-    logger.info(f"📋 [AUTH_ENDPOINT] NEW /me endpoint - user: {user.email}")
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "full_name": user.full_name,
-        "is_active": user.is_active
-    }
+    logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
+    return current_user
 
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ) -> Any:
     """
     Mark user onboarding as completed.
