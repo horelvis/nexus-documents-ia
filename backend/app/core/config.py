@@ -22,13 +22,20 @@ class Settings(BaseSettings):
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     
     # CORS - Valores por defecto para desarrollo
+    # CORS Origins - Configuración para desarrollo con IPs dinámicas
+    ALLOW_ALL_CORS: bool = os.getenv("ALLOW_ALL_CORS", "false").lower() == "true"
+    
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000", 
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://192.168.1.47:3000",
-        "http://192.168.1.47:8000"
+        "http://192.168.1.47:8000",
+        "http://192.168.1.45:3000",
+        "http://192.168.1.45:8000",
+        "http://192.168.1.54:3000",
+        "http://192.168.1.54:8000"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")

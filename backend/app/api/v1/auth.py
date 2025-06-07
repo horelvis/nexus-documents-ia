@@ -2,7 +2,7 @@
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -102,12 +102,23 @@ async def sync_user(
     return user
 
 @router.options("/me")
-async def options_users_me():
+async def options_users_me(request: Request):
     """
     Handle CORS preflight for /me endpoint
     """
     logger.info("🔄 OPTIONS request for /me")
-    return Response(status_code=200)
+    logger.info(f"🌐 Origin: {request.headers.get('origin')}")
+    logger.info(f"📋 Headers: {dict(request.headers)}")
+    
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get('origin', '*'),
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(

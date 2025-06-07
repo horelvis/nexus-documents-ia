@@ -107,15 +107,30 @@ app.openapi = custom_openapi
 # Configurar archivos estáticos (logos, favicons, etc.)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# Configurar CORS
-if settings.BACKEND_CORS_ORIGINS:
+# Configurar CORS - Solución simple para IPs dinámicas
+if settings.ALLOW_ALL_CORS and settings.DEBUG:
+    # SOLO para desarrollo - permitir todos los orígenes
+    logger.warning("⚠️ ALLOW_ALL_CORS enabled - permitting all origins (DEVELOPMENT ONLY)")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+        allow_origins=["*"],
+        allow_credentials=False,  # No se puede usar credentials con origins="*"
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info("✅ CORS middleware configured (all origins)")
+else:
+    cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
+    logger.info(f"🌐 Configuring CORS with origins: {cors_origins}")
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    logger.info("✅ CORS middleware configured")
 
 # Middleware para logging detallado
 @app.middleware("http")
@@ -125,9 +140,18 @@ async def log_requests(request: Request, call_next):
     # Handle OPTIONS requests early (CORS preflight)
     if request.method == "OPTIONS":
         logger.info(f"🔄 OPTIONS: {request.url.path}")
+        logger.info(f"🌐 Origin: {request.headers.get('origin')}")
+        logger.info(f"🔍 Request headers: {dict(request.headers)}")
+        
         response = await call_next(request)
         process_time = time.time() - start_time
+        
+        logger.info(f"📨 Response headers: {dict(response.headers)}")
         logger.info(f"✅ OPTIONS completed: {response.status_code} ({process_time:.3f}s)")
+        
+        if response.status_code != 200:
+            logger.error(f"❌ OPTIONS failed with {response.status_code}")
+        
         return response
     
     # Obtener información de la request
@@ -205,6 +229,17 @@ app.include_router(v1_api_router, prefix=settings.API_PREFIX)
 @app.get("/health", tags=["health"])
 async def health_check():
     return {"status": "healthy", "version": "1.0.0"}
+
+# Ruta simple para probar CORS
+@app.get("/cors-test", tags=["health"])
+async def cors_test(request: Request):
+    return {
+        "status": "ok",
+        "origin": request.headers.get("origin"),
+        "method": request.method,
+        "cors_configured": len(settings.BACKEND_CORS_ORIGINS) > 0,
+        "allowed_origins": [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
+    }
 
 # Ruta de test de conectividad
 @app.get("/test-connection", tags=["health"])
@@ -381,12 +416,22 @@ async def init_database():
 # Manejador de errores global
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception on {request.url.path}: {str(exc)}")
+    logger.exception(f"💥 Unhandled exception on {request.url.path}: {str(exc)}")
+    
+    # En DEBUG mode, mostrar más información
+    if settings.DEBUG:
+        logger.error(f"🔍 Request method: {request.method}")
+        logger.error(f"🔍 Request headers: {dict(request.headers)}")
+        logger.error(f"🔍 Exception type: {type(exc)}")
+        import traceback
+        logger.error(f"📚 Full traceback: {traceback.format_exc()}")
+    
     return JSONResponse(
         status_code=500,
         content={
             "detail": "Internal server error",
-            "path": str(request.url.path)
+            "path": str(request.url.path),
+            "debug_info": str(exc) if settings.DEBUG else None
         }
     )
 
