@@ -28,7 +28,7 @@ class DocumentChunk(DocumentChunkBase):
     embedding_id: Optional[str] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquemas para DocumentMetrics
 class DocumentMetricsBase(BaseModel):
@@ -50,7 +50,7 @@ class DocumentMetrics(DocumentMetricsBase):
     updated_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquemas para DocumentTag (relación)
 class DocumentTagBase(BaseModel):
@@ -79,7 +79,7 @@ class DocumentView(DocumentViewBase):
     viewed_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquemas básicos y con métricas
 class DocumentBasic(DocumentBase):
@@ -95,13 +95,13 @@ class DocumentBasic(DocumentBase):
     tags: List[TagBase] = []
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class DocumentWithMetrics(DocumentBasic):
     metrics: Optional[DocumentMetrics] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquemas para creación
 class TagCreate(TagBase):
@@ -126,7 +126,7 @@ class Tag(TagBase):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Document(DocumentBase):
     id: UUID
@@ -141,13 +141,13 @@ class Document(DocumentBase):
     tags: List[Tag] = []
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class DocumentDetail(Document):
     preview_chunks: Optional[List[DocumentChunk]] = []
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquemas para búsqueda
 class SearchQuery(BaseModel):
@@ -181,7 +181,7 @@ class UploadRequest(BaseModel):
     size: int = Field(..., gt=0, lt=settings.MAX_UPLOAD_SIZE)
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "filename": "example.pdf",
                 "content_type": "application/pdf",

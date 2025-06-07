@@ -21,7 +21,7 @@ class Plan(PlanBase):
     # prices: List['Price'] = [] # If you want to show prices related to the plan
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # --- Price Schemas ---
 class PriceBase(BaseModel):
@@ -43,7 +43,7 @@ class Price(PriceBase):
     updated_at: datetime = Field(..., example=datetime.now())
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # --- Subscription Schemas ---
 class SubscriptionBase(BaseModel):
@@ -69,7 +69,7 @@ class Subscription(SubscriptionBase):
     updated_at: datetime = Field(..., example=datetime.now())
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # Update forward references
 # This is crucial if models refer to each other and are defined in the same file or need to resolve circular dependencies.

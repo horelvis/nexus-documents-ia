@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,6 +12,7 @@ from app.db.database import get_db
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse, UserSync
 from app.services.auth_service import AuthService
+from app.api.dependencies import get_current_user
 
 import logging
 
@@ -99,9 +101,24 @@ async def sync_user(
     logger.info(f"✅ User synced successfully: {user.id}")
     return user
 
+@router.options("/me")
+async def options_users_me():
+    """
+    Handle CORS preflight for /me endpoint
+    """
+    logger.info("🔄 [OPTIONS] Handling OPTIONS request for /me")
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        }
+    )
+
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
-    current_user = Depends(AuthService.get_current_user)
+    current_user = Depends(get_current_user)
 ) -> Any:
     """
     Get current user.
@@ -111,7 +128,7 @@ async def read_users_me(
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
     db: Session = Depends(get_db),
-    current_user = Depends(AuthService.get_current_user)
+    current_user = Depends(get_current_user)
 ) -> Any:
     """
     Mark user onboarding as completed.

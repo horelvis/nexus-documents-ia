@@ -18,8 +18,21 @@ from app.db.models import User, Tenant
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(
+# Custom OAuth2 scheme that handles OPTIONS requests
+class CustomOAuth2PasswordBearer(OAuth2PasswordBearer):
+    async def __call__(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Skip authentication for OPTIONS requests (CORS preflight)
+        if request.method == "OPTIONS":
+            logger.info(f"🔄 [OAUTH2] Skipping token extraction for OPTIONS request")
+            return None
+            
+        logger.info(f"🔍 [OAUTH2] Extracting token for {request.method} request")
+        return await super().__call__(request)
+
+oauth2_scheme = CustomOAuth2PasswordBearer(
     tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"
 )
 

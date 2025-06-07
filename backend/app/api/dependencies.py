@@ -12,7 +12,7 @@ from app.core.config import settings
 
 def get_current_user(
     db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    token: Optional[str] = Depends(oauth2_scheme)
 ) -> User:
     """
     Gets the current authenticated user from the token.
@@ -25,6 +25,15 @@ def get_current_user(
     logger.info(f"🎫 [DEPENDENCIES] Token received: {'YES' if token else 'NO'}")
     logger.info(f"🎫 [DEPENDENCIES] Token length: {len(token) if token else 0}")
     logger.info(f"🎫 [DEPENDENCIES] Token prefix: {token[:20]}..." if token else "NO TOKEN")
+    
+    # Handle case where no token is provided (e.g., OPTIONS requests)
+    if not token:
+        logger.warning(f"⚠️ [DEPENDENCIES] No token provided - likely OPTIONS request")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     try:
         user = AuthService.get_current_user(db=db, token=token)

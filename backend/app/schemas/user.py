@@ -26,7 +26,7 @@ class UserImage(UserImageBase):
     updated_at: datetime = Field(..., example=datetime.now())
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # Base schema for User, reflecting database model fields
 class UserBase(BaseModel):
@@ -59,7 +59,7 @@ class UserRead(UserBase):
     updated_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Schema for updating a user (request model)
 class UserUpdate(BaseModel):
@@ -85,7 +85,7 @@ class User(UserBase):
     subscription: Optional[Subscription] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Alias for UserResponse (commonly used in APIs)
 UserResponse = User

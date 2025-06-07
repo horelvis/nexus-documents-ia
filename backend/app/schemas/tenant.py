@@ -39,13 +39,13 @@ class TenantResponse(TenantBase):
     updated_at: datetime = Field(..., example=datetime.now())
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TenantWithUsers(TenantResponse):
     users: List[UserResponse] = []
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Alias for backward compatibility
 Tenant = TenantResponse

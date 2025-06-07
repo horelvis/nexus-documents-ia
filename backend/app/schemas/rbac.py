@@ -22,7 +22,7 @@ class Permission(PermissionBase):
     updated_at: datetime = Field(..., example=datetime.now())
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # --- Role Schemas ---
 class RoleBase(BaseModel):
@@ -42,7 +42,7 @@ class Role(RoleBase):
     updated_at: datetime = Field(..., example=datetime.now())
 
     class Config:
-        from_orm = True
+        from_attributes = True
 
 # Update forward references if necessary, though for self-contained file it might not be
 # However, if other schemas depend on these, it's good practice.

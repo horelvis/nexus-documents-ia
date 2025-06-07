@@ -122,6 +122,14 @@ if settings.BACKEND_CORS_ORIGINS:
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     
+    # Handle OPTIONS requests early (CORS preflight)
+    if request.method == "OPTIONS":
+        logger.info(f"🔄 [CORS] OPTIONS preflight request: {request.url.path}")
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        logger.info(f"✅ [CORS] OPTIONS completed: {response.status_code} - Time: {process_time:.4f}s")
+        return response
+    
     # Obtener información de la request
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")

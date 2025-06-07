@@ -10,7 +10,7 @@ class ErrorResponse(BaseModel):
     detail: str | List[ErrorDetail] = Field(..., title="Error Detail", description="A human-readable message or a list of detailed error messages.")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example_single": {
                 "detail": "Incorrect email or password"
             },
