@@ -101,6 +101,42 @@ async def sync_user(
     logger.info(f"✅ User synced successfully: {user.id}")
     return user
 
+@router.get("/debug/token", tags=["debug"])
+async def debug_token(request: Request):
+    """
+    Debug endpoint para verificar el token sin autenticación
+    """
+    auth_header = request.headers.get("authorization")
+    logger.info(f"🔍 [DEBUG] Auth header received: {'Yes' if auth_header else 'No'}")
+    
+    if auth_header:
+        try:
+            scheme, token = auth_header.split(' ', 1)
+            logger.info(f"🔍 [DEBUG] Token scheme: {scheme}")
+            logger.info(f"🔍 [DEBUG] Token length: {len(token)}")
+            logger.info(f"🔍 [DEBUG] Token prefix: {token[:50]}...")
+            
+            # Intentar decodificar JWT para ver el contenido
+            import jwt
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            logger.info(f"🔍 [DEBUG] JWT payload: {decoded}")
+            
+            return {
+                "status": "token_received",
+                "scheme": scheme,
+                "token_length": len(token),
+                "jwt_payload": decoded
+            }
+        except Exception as e:
+            logger.error(f"❌ [DEBUG] Error decoding token: {str(e)}")
+            return {
+                "status": "token_error",
+                "error": str(e),
+                "raw_header": auth_header
+            }
+    else:
+        return {"status": "no_token"}
+
 @router.options("/me")
 async def options_users_me(request: Request):
     """
@@ -122,12 +158,15 @@ async def options_users_me(request: Request):
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
+    request: Request,
     current_user = Depends(get_current_user)
 ) -> Any:
     """
     Get current user.
     """
-    logger.info(f"📋 [AUTH_ENDPOINT] /me called - returning user: {current_user.email}")
+    logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached")
+    logger.info(f"📋 [AUTH_ENDPOINT] Request headers: {dict(request.headers)}")
+    logger.info(f"📋 [AUTH_ENDPOINT] User authenticated: {current_user.email}")
     return current_user
 
 @router.post("/complete-onboarding", response_model=UserResponse)

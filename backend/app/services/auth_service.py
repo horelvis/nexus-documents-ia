@@ -32,9 +32,17 @@ class CustomOAuth2PasswordBearer(OAuth2PasswordBearer):
             return None
             
         logger.info("🔍 [OAUTH2_SCHEME] Extracting token from Authorization header")
-        token = await super().__call__(request)
-        logger.info(f"🔑 [OAUTH2_SCHEME] Token extracted: {'Yes' if token else 'No'}")
-        return token
+        
+        try:
+            token = await super().__call__(request)
+            logger.info(f"🔑 [OAUTH2_SCHEME] Token extracted successfully: {len(token) if token else 0} chars")
+            if token:
+                logger.info(f"🔑 [OAUTH2_SCHEME] Token prefix: {token[:30]}...")
+            return token
+        except Exception as e:
+            logger.error(f"❌ [OAUTH2_SCHEME] Error extracting token: {str(e)}")
+            logger.error(f"🐛 [OAUTH2_SCHEME] Exception type: {type(e)}")
+            raise
 
 oauth2_scheme = CustomOAuth2PasswordBearer(
     tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"

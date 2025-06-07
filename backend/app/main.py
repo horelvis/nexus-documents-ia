@@ -413,6 +413,28 @@ async def init_database():
             "message": f"Database initialization failed: {str(e)}"
         }
 
+# Manejadores de errores específicos
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(f"🚫 Validation error on {request.url.path}: {str(exc)}")
+    logger.error(f"🔍 Validation errors: {exc.errors()}")
+    
+    if settings.DEBUG:
+        logger.error(f"🔍 Request method: {request.method}")
+        logger.error(f"🔍 Request headers: {dict(request.headers)}")
+        logger.error(f"🔍 Request body: {await request.body() if hasattr(request, 'body') else 'N/A'}")
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "path": str(request.url.path),
+            "debug_info": "Validation error - check logs for details" if settings.DEBUG else None
+        }
+    )
+
 # Manejador de errores global
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
