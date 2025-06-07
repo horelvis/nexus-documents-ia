@@ -44,13 +44,29 @@ def get_current_user(
     
     try:
         logger.info(f"📞 [DEPENDENCIES] Calling AuthService.verify_clerk_token")
-        user = AuthService.verify_clerk_token(token=token, db=db)
-        if not user:
+        clerk_payload = AuthService.verify_clerk_token(token=token)
+        
+        if not clerk_payload or not clerk_payload.get('sub'):
+            logger.warning("⚠️ [DEPENDENCIES] Invalid Clerk token payload")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not authenticate user from token",
+                detail="Invalid token payload",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        clerk_user_id = clerk_payload.get('sub')
+        logger.info(f"🔍 [DEPENDENCIES] Looking for user with Clerk ID: {clerk_user_id}")
+        
+        user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        if not user:
+            logger.warning(f"⚠️ [DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found. Please sync your account first.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        logger.info(f"✅ [DEPENDENCIES] User authenticated: {user.email}")
         return user
         
     except HTTPException:
