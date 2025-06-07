@@ -124,10 +124,10 @@ async def log_requests(request: Request, call_next):
     
     # Handle OPTIONS requests early (CORS preflight)
     if request.method == "OPTIONS":
-        logger.info(f"🔄 [CORS] OPTIONS preflight request: {request.url.path}")
+        logger.info(f"🔄 OPTIONS: {request.url.path}")
         response = await call_next(request)
         process_time = time.time() - start_time
-        logger.info(f"✅ [CORS] OPTIONS completed: {response.status_code} - Time: {process_time:.4f}s")
+        logger.info(f"✅ OPTIONS completed: {response.status_code} ({process_time:.3f}s)")
         return response
     
     # Obtener información de la request
@@ -140,38 +140,20 @@ async def log_requests(request: Request, call_next):
     referer = request.headers.get("referer")
     
     # Log inicial de la request
-    logger.info(
-        f"📨 [REQUEST] Incoming request: {request.method} {request.url.path} "
-        f"from {client_ip} - User-Agent: {user_agent[:50]}... "
-        f"Auth: {'Bearer ***' if auth_header else 'None'} "
-        f"User-ID: {user_id or 'None'}"
-    )
+    logger.info(f"📨 {request.method} {request.url.path} from {client_ip}")
     
     # Log headers adicionales para debugging de auth
     if request.url.path.startswith("/api/v1/auth"):
-        logger.info(f"🔍 [AUTH_REQUEST] Request to auth endpoint: {request.url.path}")
-        logger.info(f"📋 [AUTH_REQUEST] Content-Type: {content_type or 'None'}")
-        logger.info(f"🌐 [AUTH_REQUEST] Origin: {origin or 'None'}")
-        logger.info(f"🔗 [AUTH_REQUEST] Referer: {referer or 'None'}")
-        logger.info(f"🎫 [AUTH_REQUEST] Auth header present: {'Yes' if auth_header else 'No'}")
+        logger.info(f"🔍 Auth endpoint: {request.url.path}")
+        logger.info(f"🔗 Origin: {origin or 'None'}")
+        logger.info(f"🎫 Auth header: {'Yes' if auth_header else 'No'}")
         
-        if auth_header:
-            # Log solo el tipo de token y longitud por seguridad
-            auth_parts = auth_header.split(' ')
-            if len(auth_parts) == 2:
-                auth_type, token = auth_parts
-                logger.info(f"🔐 [AUTH_REQUEST] Auth type: {auth_type}")
-                logger.info(f"🔐 [AUTH_REQUEST] Token length: {len(token)}")
-                logger.info(f"🔐 [AUTH_REQUEST] Token prefix: {token[:20]}..." if len(token) > 20 else f"🔐 [AUTH_REQUEST] Full token: {token}")
-            else:
-                logger.warning(f"⚠️ [AUTH_REQUEST] Invalid auth header format: {len(auth_parts)} parts")
+        if auth_header and len(auth_header.split(' ')) == 2:
+            auth_type, token = auth_header.split(' ')
+            logger.info(f"🔐 Token: {auth_type} {token[:20]}...")
         
-        # Log query parameters if any
-        if request.query_params:
-            logger.info(f"❓ [AUTH_REQUEST] Query params: {dict(request.query_params)}")
-            
-        # Log todas las headers para debugging completo
-        logger.info(f"📋 [AUTH_REQUEST] All headers: {dict(request.headers)}")
+        # Log todas las headers para debugging completo cuando hay problema
+        logger.debug(f"📋 All headers: {dict(request.headers)}")
     
     try:
         # Procesar la solicitud
@@ -184,53 +166,28 @@ async def log_requests(request: Request, call_next):
         response.headers["X-Process-Time"] = str(process_time)
         
         # Log de respuesta exitosa
-        logger.info(
-            f"✅ [RESPONSE] Request completed: {request.method} {request.url.path} - "
-            f"Status: {response.status_code} - "
-            f"Time: {process_time:.4f}s - "
-            f"Client: {client_ip}"
-        )
+        logger.info(f"✅ {response.status_code} {request.method} {request.url.path} ({process_time:.3f}s)")
         
-        # Log adicional para endpoints de auth
-        if request.url.path.startswith("/api/v1/auth"):
-            logger.info(f"🔍 [AUTH_RESPONSE] Auth endpoint response: {response.status_code}")
-            logger.info(f"📋 [AUTH_RESPONSE] Response headers: {dict(response.headers)}")
-            
-            # Log especial para respuestas de error
-            if response.status_code >= 400:
-                logger.error(f"❌ [AUTH_RESPONSE] Auth failed with status: {response.status_code}")
-                if response.status_code == 401:
-                    logger.error(f"🚫 [AUTH_RESPONSE] Unauthorized - likely token validation failed")
-                elif response.status_code == 403:
-                    logger.error(f"🚫 [AUTH_RESPONSE] Forbidden - user authenticated but not authorized")
-                elif response.status_code == 400:
-                    logger.error(f"⚠️ [AUTH_RESPONSE] Bad Request - likely missing or malformed token")
-            else:
-                logger.info(f"✅ [AUTH_RESPONSE] Auth successful")
+        # Log adicional para endpoints de auth con errores
+        if request.url.path.startswith("/api/v1/auth") and response.status_code >= 400:
+            if response.status_code == 401:
+                logger.error("🚫 Unauthorized - token validation failed")
+            elif response.status_code == 403:
+                logger.error("🚫 Forbidden - user authenticated but not authorized")
+            elif response.status_code == 400:
+                logger.error("⚠️ Bad Request - missing or malformed token")
         
         return response
         
     except Exception as e:
         process_time = time.time() - start_time
-        logger.error(
-            f"❌ [EXCEPTION] Request failed: {request.method} {request.url.path} - "
-            f"Error: {str(e)} - "
-            f"Time: {process_time:.4f}s - "
-            f"Client: {client_ip}"
-        )
+        logger.error(f"❌ {request.method} {request.url.path} failed: {str(e)} ({process_time:.3f}s)")
         
         # Log adicional para excepciones en auth endpoints
         if request.url.path.startswith("/api/v1/auth"):
-            logger.error(f"💥 [AUTH_EXCEPTION] Exception in auth endpoint: {str(e)}")
-            logger.error(f"🐛 [AUTH_EXCEPTION] Exception type: {type(e)}")
-            
-            # Log específico para HTTPExceptions
+            logger.error(f"💥 Auth exception: {type(e).__name__}")
             if hasattr(e, 'status_code'):
-                logger.error(f"📋 [AUTH_EXCEPTION] HTTP status: {e.status_code}")
-                logger.error(f"📋 [AUTH_EXCEPTION] HTTP detail: {getattr(e, 'detail', 'No detail')}")
-            
-            import traceback
-            logger.error(f"📚 [AUTH_EXCEPTION] Full traceback: {traceback.format_exc()}")
+                logger.error(f"📋 HTTP {e.status_code}: {getattr(e, 'detail', 'No detail')}")
         
         raise
 

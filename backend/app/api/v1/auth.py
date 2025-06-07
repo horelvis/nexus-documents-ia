@@ -106,15 +106,8 @@ async def options_users_me():
     """
     Handle CORS preflight for /me endpoint
     """
-    logger.info("🔄 [OPTIONS] Handling OPTIONS request for /me")
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type",
-        }
-    )
+    logger.info("🔄 OPTIONS request for /me")
+    return Response(status_code=200)
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
@@ -123,6 +116,7 @@ async def read_users_me(
     """
     Get current user.
     """
+    logger.info(f"📋 [AUTH_ENDPOINT] /me called - returning user: {current_user.email}")
     return current_user
 
 @router.post("/complete-onboarding", response_model=UserResponse)

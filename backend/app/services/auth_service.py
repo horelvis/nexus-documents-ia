@@ -24,13 +24,17 @@ class CustomOAuth2PasswordBearer(OAuth2PasswordBearer):
         import logging
         logger = logging.getLogger(__name__)
         
+        logger.info(f"🔐 [OAUTH2_SCHEME] Called for {request.method} {request.url.path}")
+        
         # Skip authentication for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
-            logger.info(f"🔄 [OAUTH2] Skipping token extraction for OPTIONS request")
+            logger.info("🔄 [OAUTH2_SCHEME] Skipping OPTIONS request")
             return None
             
-        logger.info(f"🔍 [OAUTH2] Extracting token for {request.method} request")
-        return await super().__call__(request)
+        logger.info("🔍 [OAUTH2_SCHEME] Extracting token from Authorization header")
+        token = await super().__call__(request)
+        logger.info(f"🔑 [OAUTH2_SCHEME] Token extracted: {'Yes' if token else 'No'}")
+        return token
 
 oauth2_scheme = CustomOAuth2PasswordBearer(
     tokenUrl=f"{settings.API_PREFIX}/auth/login/access-token"
@@ -150,162 +154,80 @@ class AuthService:
         logger = logging.getLogger(__name__)
         
         try:
-            logger.info(f"🔍 [CLERK_VERIFY] Starting Clerk token verification...")
-            logger.info(f"📝 [CLERK_VERIFY] Token length: {len(token) if token else 0}")
-            logger.info(f"📝 [CLERK_VERIFY] Token preview: {token[:30]}..." if token and len(token) > 30 else f"📝 [CLERK_VERIFY] Full token: {token}")
-            logger.info(f"🔐 [CLERK_VERIFY] Clerk secret key configured: {'Yes' if settings.CLERK_SECRET_KEY else 'No'}")
-            logger.info(f"🔐 [CLERK_VERIFY] Clerk secret preview: {'***' + settings.CLERK_SECRET_KEY[-10:] if settings.CLERK_SECRET_KEY and len(settings.CLERK_SECRET_KEY) > 10 else 'Not set'}")
-            logger.info(f"🌐 [CLERK_VERIFY] Server host: {settings.SERVER_HOST}")
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Starting verification (length: {len(token) if token else 0})")
             
             if not settings.CLERK_SECRET_KEY:
-                logger.error("❌ [CLERK_VERIFY] CLERK_SECRET_KEY not configured")
+                logger.error("❌ [VERIFY_CLERK_TOKEN] CLERK_SECRET_KEY not configured")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Clerk not properly configured",
                 )
             
             if not token:
-                logger.error("❌ [CLERK_VERIFY] No token provided")
+                logger.error("❌ [VERIFY_CLERK_TOKEN] No token provided")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="No token provided",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            
+            # Inicializar cliente de Clerk y verificar token
+            logger.info("🏗️ [VERIFY_CLERK_TOKEN] Initializing Clerk client...")
+            clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+            
+            logger.info("📨 [VERIFY_CLERK_TOKEN] Creating mock request...")
+            mock_request = httpx.Request(
+                method="GET",
+                url="http://localhost:8000",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            logger.info("⚙️ [VERIFY_CLERK_TOKEN] Setting up auth options...")
+            auth_options = AuthenticateRequestOptions(
+                authorized_parties=[settings.SERVER_HOST, "http://localhost:3000", "http://localhost:8000"]
+            )
+            
+            logger.info("🔎 [VERIFY_CLERK_TOKEN] Calling Clerk authenticate_request...")
+            request_state = clerk.authenticate_request(mock_request, auth_options)
+            logger.info(f"📨 [VERIFY_CLERK_TOKEN] Clerk API responded with: {type(request_state)}")
+            
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Checking request_state: {request_state}")
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] has is_signed_in: {hasattr(request_state, 'is_signed_in') if request_state else False}")
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] is_signed_in value: {getattr(request_state, 'is_signed_in', None) if request_state else None}")
+            
+            if request_state and hasattr(request_state, 'is_signed_in') and request_state.is_signed_in:
+                user_id = getattr(request_state, 'user_id', None)
+                session_id = getattr(request_state, 'session_id', None)
                 
-            if not token.startswith("clerk_"):
-                logger.warning(f"⚠️ [CLERK_VERIFY] Token doesn't start with 'clerk_' - may be invalid format")
-                logger.warning(f"🔍 [CLERK_VERIFY] Token starts with: {token[:10]}")
-            
-            # Check token format
-            token_parts = token.split("_")
-            logger.info(f"🔍 [CLERK_VERIFY] Token parts count: {len(token_parts)}")
-            if len(token_parts) >= 2:
-                logger.info(f"🔍 [CLERK_VERIFY] Token type: {token_parts[0]}")
-                logger.info(f"🔍 [CLERK_VERIFY] Token identifier: {token_parts[1][:10]}..." if len(token_parts[1]) > 10 else f"🔍 [CLERK_VERIFY] Token identifier: {token_parts[1]}")
-            else:
-                logger.warning(f"⚠️ [CLERK_VERIFY] Token format seems invalid - expected clerk_xxx format")
-            
-            # Inicializar cliente de Clerk
-            logger.info(f"🏗️ [CLERK_VERIFY] Initializing Clerk client...")
-            try:
-                clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
-                logger.info(f"✅ [CLERK_VERIFY] Clerk client initialized successfully")
-            except Exception as client_error:
-                logger.error(f"❌ [CLERK_VERIFY] Failed to initialize Clerk client: {str(client_error)}")
-                raise
-            
-            # Crear un request mock para usar con authenticate_request
-            logger.info(f"🔧 [CLERK_VERIFY] Creating mock request with Bearer token...")
-            mock_url = "http://localhost:8000"
-            logger.info(f"🔧 [CLERK_VERIFY] Mock URL: {mock_url}")
-            logger.info(f"🔧 [CLERK_VERIFY] Authorization header: Bearer {token[:20]}..." if len(token) > 20 else f"🔧 [CLERK_VERIFY] Authorization header: Bearer {token}")
-            
-            try:
-                mock_request = httpx.Request(
-                    method="GET",
-                    url=mock_url,
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                logger.info(f"📨 [CLERK_VERIFY] Mock request created successfully")
-                logger.info(f"📨 [CLERK_VERIFY] Mock request headers: {dict(mock_request.headers)}")
-            except Exception as request_error:
-                logger.error(f"❌ [CLERK_VERIFY] Failed to create mock request: {str(request_error)}")
-                raise
-            
-            # Configurar opciones de autenticación
-            logger.info(f"⚙️ [CLERK_VERIFY] Setting up authentication options...")
-            authorized_parties = [settings.SERVER_HOST, "http://localhost:3000", "http://localhost:8000"]
-            logger.info(f"🌐 [CLERK_VERIFY] Authorized parties: {authorized_parties}")
-            
-            try:
-                auth_options = AuthenticateRequestOptions(
-                    authorized_parties=authorized_parties
-                )
-                logger.info(f"✅ [CLERK_VERIFY] Auth options configured")
-            except Exception as options_error:
-                logger.error(f"❌ [CLERK_VERIFY] Failed to create auth options: {str(options_error)}")
-                raise
-            
-            # Verificar el token usando authenticate_request
-            logger.info(f"🔎 [CLERK_VERIFY] Calling Clerk authenticate_request...")
-            try:
-                request_state = clerk.authenticate_request(mock_request, auth_options)
-                logger.info(f"📨 [CLERK_VERIFY] Clerk API response received: {type(request_state)}")
-                logger.info(f"📨 [CLERK_VERIFY] Request state object: {request_state}")
-            except Exception as auth_error:
-                logger.error(f"❌ [CLERK_VERIFY] Clerk authenticate_request failed: {str(auth_error)}")
-                logger.error(f"🐛 [CLERK_VERIFY] Auth error type: {type(auth_error)}")
-                raise
-            
-            if request_state:
-                logger.info(f"📊 Request state attributes: {dir(request_state)}")
-                logger.info(f"🔓 Is signed in: {getattr(request_state, 'is_signed_in', 'N/A')}")
+                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted user_id: {user_id}")
+                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted session_id: {session_id}")
                 
-                if hasattr(request_state, 'is_signed_in') and request_state.is_signed_in:
-                    logger.info(f"✅ User is signed in")
-                    
-                    # Obtener información del usuario
-                    user_id = getattr(request_state, 'user_id', None)
-                    session_id = getattr(request_state, 'session_id', None)
-                    
-                    logger.info(f"👤 User ID: {user_id}")
-                    logger.info(f"🎫 Session ID: {session_id}")
-                    
-                    if user_id:
-                        # Crear payload compatible con nuestro sistema
-                        payload = {
-                            'sub': user_id,
-                            'session_id': session_id,
-                            'iss': 'clerk'
-                        }
-                        logger.info(f"🔑 Clerk token verified successfully")
-                        return payload
-                    else:
-                        logger.error(f"❌ No user_id found in request state")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="No user ID in token",
-                            headers={"WWW-Authenticate": "Bearer"},
-                        )
+                if user_id:
+                    logger.info(f"✅ [VERIFY_CLERK_TOKEN] Token verified for user: {user_id}")
+                    return {
+                        'sub': user_id,
+                        'session_id': session_id,
+                        'iss': 'clerk'
+                    }
                 else:
-                    logger.error(f"❌ User is not signed in")
+                    logger.error("❌ [VERIFY_CLERK_TOKEN] No user_id in token")
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="User not signed in",
+                        detail="No user ID in token",
                         headers={"WWW-Authenticate": "Bearer"},
                     )
             else:
-                logger.error("❌ Clerk API returned None/empty result")
+                logger.error("❌ [VERIFY_CLERK_TOKEN] Invalid or expired token")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token",
+                    detail="Invalid or expired token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
                 
-        except HTTPException as he:
-            # Re-raise HTTP exceptions with additional logging
-            logger.error(f"🔄 [CLERK_VERIFY] Re-raising HTTP exception: {he.status_code} - {he.detail}")
-            logger.error(f"📋 [CLERK_VERIFY] HTTP exception headers: {he.headers}")
+        except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"❌ [CLERK_VERIFY] Unexpected error verifying Clerk token: {str(e)}")
-            logger.error(f"🐛 [CLERK_VERIFY] Exception type: {type(e)}")
-            logger.error(f"📜 [CLERK_VERIFY] Exception args: {e.args}")
-            logger.error(f"🔧 [CLERK_VERIFY] Token that failed: {token[:10]}...{token[-10:] if len(token) > 20 else ''}")
-            logger.error(f"⚙️ [CLERK_VERIFY] Clerk secret configured: {'Yes' if settings.CLERK_SECRET_KEY else 'No'}")
-            logger.error(f"🌐 [CLERK_VERIFY] Authorized parties: {auth_options.authorized_parties if 'auth_options' in locals() else 'Not set'}")
-            
-            # Log more specific error types
-            if "Unauthorized" in str(e) or "401" in str(e):
-                logger.error(f"🚫 [CLERK_VERIFY] Authorization error - token may be invalid or expired")
-            elif "Network" in str(e) or "Connection" in str(e):
-                logger.error(f"🌐 [CLERK_VERIFY] Network error - can't reach Clerk API")
-            elif "Key" in str(e) or "Secret" in str(e):
-                logger.error(f"🔑 [CLERK_VERIFY] Key error - check Clerk configuration")
-            
-            import traceback
-            logger.error(f"📚 [CLERK_VERIFY] Full traceback: {traceback.format_exc()}")
-            
+            logger.error(f"❌ Unexpected error: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Token verification failed: {str(e)}",
@@ -328,41 +250,29 @@ class AuthService:
         )
         
         try:
-            logger.info(f"🚀 Starting user authentication process...")
-            logger.info(f"🔑 Token preview: {token[:20]}..." if token else "❌ No token provided")
+            logger.info(f"🚀 [AUTH_SERVICE] Starting authentication...")
             
-            # Intentar verificar como token de Clerk primero
-            try:
-                logger.info(f"🔍 Attempting Clerk token verification...")
-                clerk_payload = AuthService.verify_clerk_token(token)
-                logger.info(f"✅ Clerk verification successful")
-                clerk_user_id = clerk_payload.get('sub')
-                logger.info(f"👤 Clerk user ID extracted: {clerk_user_id}")
-                
-                if clerk_user_id:
-                    # Buscar usuario por clerk_user_id
-                    user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
-                    if user:
-                        logger.info(f"✅ User found by Clerk ID: {user.id}")
-                        return user
-                    else:
-                        logger.warning(f"⚠️ User not found for Clerk ID: {clerk_user_id}")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="User not found. Please sync your account first.",
-                        )
-            except HTTPException:
-                # Re-raise HTTP exceptions from Clerk verification
-                raise
-            except Exception as e:
-                # Si falla la verificación de Clerk, intentar como JWT interno
-                logger.warning(f"⚠️ Clerk verification failed: {str(e)}")
-                logger.info("🔄 Trying internal JWT verification...")
-                # JWT interno ya no se usa - solo Clerk
-                logger.error("❌ Internal JWT not supported - use Clerk authentication")
+            logger.info(f"📞 [AUTH_SERVICE] Calling verify_clerk_token")
+            clerk_payload = AuthService.verify_clerk_token(token)
+            clerk_user_id = clerk_payload.get('sub')
+            logger.info(f"✅ [AUTH_SERVICE] verify_clerk_token returned user_id: {clerk_user_id}")
+            
+            if clerk_user_id:
+                user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+                if user:
+                    logger.info(f"✅ User authenticated: {user.email}")
+                    return user
+                else:
+                    logger.warning(f"⚠️ User not found for Clerk ID: {clerk_user_id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User not found. Please sync your account first.",
+                    )
+            else:
                 raise credentials_exception
                 
-        # JWTError ya no se usa
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"❌ Auth Error: {str(e)}")
             raise credentials_exception

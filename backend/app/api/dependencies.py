@@ -21,14 +21,10 @@ def get_current_user(
     import logging
     logger = logging.getLogger(__name__)
     
-    logger.info(f"🔐 [DEPENDENCIES] Starting authentication in get_current_user")
-    logger.info(f"🎫 [DEPENDENCIES] Token received: {'YES' if token else 'NO'}")
-    logger.info(f"🎫 [DEPENDENCIES] Token length: {len(token) if token else 0}")
-    logger.info(f"🎫 [DEPENDENCIES] Token prefix: {token[:20]}..." if token else "NO TOKEN")
+    logger.info(f"🔑 [DEPENDENCIES] get_current_user called with token: {'Yes' if token else 'No'}")
     
-    # Handle case where no token is provided (e.g., OPTIONS requests)
     if not token:
-        logger.warning(f"⚠️ [DEPENDENCIES] No token provided - likely OPTIONS request")
+        logger.warning("⚠️ No token provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -36,35 +32,23 @@ def get_current_user(
         )
     
     try:
+        logger.info(f"📞 [DEPENDENCIES] Calling AuthService.get_current_user")
         user = AuthService.get_current_user(db=db, token=token)
         if not user:
-            logger.error(f"❌ [DEPENDENCIES] AuthService returned None user")
-            # AuthService.get_current_user already raises HTTPException if token is invalid or user not found
-            # However, an additional check here can be for robustness, though likely redundant
-            # if AuthService handles all error cases.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not authenticate user from token", # Generic message if AuthService didn't raise
+                detail="Could not authenticate user from token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        logger.info(f"✅ [DEPENDENCIES] User authenticated successfully: {user.id}")
-        logger.info(f"👤 [DEPENDENCIES] User email: {user.email}")
-        logger.info(f"🏢 [DEPENDENCIES] User tenant: {user.tenant_id}")
-        logger.info(f"🔑 [DEPENDENCIES] User Clerk ID: {user.clerk_user_id}")
         return user
         
-    except HTTPException as e:
-        logger.error(f"❌ [DEPENDENCIES] HTTPException during auth: {e.status_code} - {e.detail}")
+    except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [DEPENDENCIES] Unexpected error during auth: {str(e)}")
-        logger.error(f"🐛 [DEPENDENCIES] Exception type: {type(e)}")
-        import traceback
-        logger.error(f"📚 [DEPENDENCIES] Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Authentication error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed unexpectedly",
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
