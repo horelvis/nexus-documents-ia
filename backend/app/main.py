@@ -359,6 +359,95 @@ async def get_logging_status():
         "loggers": logger_status
     }
 
+# Debug endpoint para verificar estructura de tabla
+@app.get("/debug/check-users-table", tags=["debug"])
+async def check_users_table():
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Verifica la estructura de la tabla users.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Debug endpoint only available in development mode"
+        )
+    
+    try:
+        from app.db.database import engine
+        from sqlalchemy import text
+        
+        with engine.connect() as conn:
+            # Obtener todas las columnas de la tabla users
+            result = conn.execute(text("""
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns 
+                WHERE table_name='users'
+                ORDER BY ordinal_position
+            """))
+            
+            columns = []
+            for row in result.fetchall():
+                columns.append({
+                    "name": row[0],
+                    "type": row[1], 
+                    "nullable": row[2],
+                    "default": row[3]
+                })
+            
+            # Verificar específicamente onboarding_completed
+            onboarding_exists = any(col["name"] == "onboarding_completed" for col in columns)
+            
+            return {
+                "status": "success",
+                "table_exists": len(columns) > 0,
+                "onboarding_completed_exists": onboarding_exists,
+                "total_columns": len(columns),
+                "columns": columns
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error checking users table: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error checking users table: {str(e)}"
+        }
+
+# Debug endpoint para forzar adición de columna
+@app.post("/debug/force-add-onboarding-column", tags=["debug"])
+async def force_add_onboarding_column():
+    """
+    ⚠️ SOLO PARA DESARROLLO ⚠️
+    Fuerza la adición de la columna onboarding_completed.
+    """
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Debug endpoint only available in development mode"
+        )
+    
+    try:
+        from app.db.migrations import manual_add_onboarding_column
+        
+        success = manual_add_onboarding_column()
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Columna onboarding_completed procesada exitosamente"
+            }
+        else:
+            return {
+                "status": "error", 
+                "message": "No se pudo agregar la columna onboarding_completed"
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error forcing column addition: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error forcing column addition: {str(e)}"
+        }
+
 # Debug endpoint para crear migraciones
 @app.post("/debug/create-migration", tags=["debug"])
 async def create_migration_endpoint(message: str):

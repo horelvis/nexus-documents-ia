@@ -173,10 +173,8 @@ def manual_add_onboarding_column():
     try:
         logger.info("🔧 Verificando columna onboarding_completed...")
         
-        # Usar autocommit para evitar bloqueos de transacciones
-        conn = engine.connect()
-        
-        try:
+        # Usar transacción explícita para asegurar el commit
+        with engine.begin() as conn:
             # Verificar si la columna existe
             result = conn.execute(text("""
                 SELECT column_name 
@@ -187,24 +185,46 @@ def manual_add_onboarding_column():
             if not result.fetchone():
                 logger.info("➕ Agregando columna onboarding_completed...")
                 
-                # Usar autocommit para evitar transacciones implícitas
+                # Agregar la columna con transacción explícita
                 conn.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE NOT NULL
                 """))
                 
-                logger.info("✅ Columna onboarding_completed agregada exitosamente")
-                return True
+                # Verificar que se agregó correctamente
+                verification = conn.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='users' AND column_name='onboarding_completed'
+                """))
+                
+                if verification.fetchone():
+                    logger.info("✅ Columna onboarding_completed agregada y verificada exitosamente")
+                    return True
+                else:
+                    logger.error("❌ La columna no se agregó correctamente")
+                    return False
             else:
                 logger.info("✅ Columna onboarding_completed ya existe")
                 return True
                 
-        finally:
-            conn.close()
-                
     except Exception as e:
         logger.error(f"❌ Error verificando/agregando columna: {e}")
         logger.error(f"🔍 Tipo de error: {type(e)}")
+        
+        # Intentar una verificación adicional para debug
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='users'
+                """))
+                columns = [row[0] for row in result.fetchall()]
+                logger.info(f"🔍 Columnas actuales en tabla users: {columns}")
+        except Exception as debug_error:
+            logger.error(f"❌ Error en verificación de debug: {debug_error}")
+        
         return False
 
 def check_database_structure():
