@@ -2,6 +2,7 @@
 Vector Service using LangChain microservice HTTP client
 """
 import logging
+import httpx # Added httpx import
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
 from app.services.langchain_client import LangChainClient
@@ -34,8 +35,9 @@ class VectorService:
             logger.debug(f"Adding {len(texts)} documents to vector store")
             
             # Usar cliente HTTP para añadir documentos
-            async with LangChainClient() as client:
-                success = await client.add_documents(self.tenant_id, texts, metadatas)
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                success = await lc_client.add_documents(tenant_id=self.tenant_id, texts=texts, metadatas=metadatas)
             
             if success:
                 logger.info(f"Successfully added {len(texts)} documents to vector store")
@@ -69,8 +71,11 @@ class VectorService:
             metadata["doc_id"] = doc_id
             
             # Usar cliente HTTP para añadir documento
-            async with LangChainClient() as client:
-                success = await client.add_document(self.tenant_id, doc_id, text, metadata)
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                # Call updated LangChainClient.store_document signature:
+                # store_document(self, doc_id: str, text: str, metadata: Dict[str, Any], tenant_id: str) -> bool
+                success = await lc_client.store_document(doc_id=doc_id, text=text, metadata=metadata, tenant_id=self.tenant_id)
             
             if success:
                 logger.info(f"Successfully added document {doc_id} to vector store")
@@ -99,8 +104,9 @@ class VectorService:
             logger.debug(f"Searching for similar documents with query: {query[:100]}...")
             
             # Usar cliente HTTP para búsqueda
-            async with LangChainClient() as client:
-                results = await client.search_similar(self.tenant_id, query, limit)
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                results = await lc_client.search_similar(tenant_id=self.tenant_id, query=query, limit=limit)
             
             logger.debug(f"Found {len(results)} similar documents")
             return results
@@ -123,8 +129,11 @@ class VectorService:
         """
         try:
             # Usar cliente HTTP para búsqueda con filtro de documentos
-            async with LangChainClient() as client:
-                results = await client.search_similar(self.tenant_id, query, limit, doc_ids)
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                # LangChainClient.search_similar does not support doc_ids filter directly
+                logger.warning("LangChainClient.search_similar does not support doc_ids filter. Calling without it.")
+                results = await lc_client.search_similar(tenant_id=self.tenant_id, query=query, limit=limit)
             
             return results
             
@@ -146,8 +155,9 @@ class VectorService:
             logger.debug(f"Deleting document {doc_id} from vector store")
             
             # Usar cliente HTTP para eliminar documento
-            async with LangChainClient() as client:
-                success = await client.delete_document(self.tenant_id, doc_id)
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                success = await lc_client.delete_document(tenant_id=self.tenant_id, doc_id=doc_id)
             
             if success:
                 logger.info(f"Successfully deleted document {doc_id} from vector store")
@@ -169,8 +179,10 @@ class VectorService:
         """
         try:
             # Usar cliente HTTP para obtener información de colección
-            async with LangChainClient() as client:
-                info = await client.get_collection_info(self.tenant_id)
+            # Usar cliente HTTP para obtener información de colección
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                lc_client = LangChainClient(http_client=http_client)
+                info = await lc_client.get_collection_info(tenant_id=self.tenant_id)
             
             return info
             

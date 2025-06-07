@@ -101,6 +101,7 @@ async def get_document(
 @router.get("/{doc_id}/download-url", response_model=SignedUrlResponse)
 async def get_download_url(
     doc_id: str,
+    db: Session = Depends(get_db), # Added db session
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -108,7 +109,7 @@ async def get_download_url(
     Genera una URL firmada para descargar un documento específico.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_signed_download_url(doc_id=doc_id)
+    return document_service.get_signed_download_url(db=db, doc_id=doc_id) # Pass db
 
 
 @router.delete("/{doc_id}", response_model=dict)
@@ -143,6 +144,7 @@ async def get_document_summary(
 async def add_document_tag(
     doc_id: str,
     tag: str = Body(..., embed=True),
+    db: Session = Depends(get_db), # Added db session
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -150,13 +152,14 @@ async def add_document_tag(
     Añade una etiqueta a un documento.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.add_tag(doc_id=doc_id, tag_name=tag)
+    return document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Pass db
 
 
 @router.delete("/{doc_id}/tag/{tag_name}", response_model=dict)
 async def remove_document_tag(
     doc_id: str,
     tag_name: str,
+    db: Session = Depends(get_db), # Added db session
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
@@ -164,4 +167,4 @@ async def remove_document_tag(
     Elimina una etiqueta de un documento.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.remove_tag(doc_id=doc_id, tag_name=tag_name)
+    return document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db

@@ -3,6 +3,7 @@ import os
 import uuid
 import datetime
 import io
+import asyncio
 from typing import List, Dict, Any, Optional, BinaryIO, Union
 from fastapi import UploadFile, HTTPException
 import PyPDF2
@@ -18,6 +19,7 @@ from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
 from app.services.embedding_service import EmbeddingService
+from app.services.vector_service import VectorService # Added VectorService import
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class DocumentService:
         self.user_id = user_id
         self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, self.user_id)
         self.embedding_service = EmbeddingService(self.tenant_id)
+        self.vector_service = VectorService(self.tenant_id) # Instantiate VectorService
         self.llm_service = LLMService()
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -134,12 +137,12 @@ class DocumentService:
         db.refresh(db_document)
         return db_document
 
-    def _upload_file_to_storage(
-        self, 
-        file_contents: bytes, 
-        file_path: str, 
-        doc_id: str, 
-        title: str, 
+    async def _upload_file_to_storage(
+        self,
+        file_contents: bytes,
+        file_path: str,
+        doc_id: str,
+        title: str,
         file_ext: str
     ):
         """
@@ -151,17 +154,18 @@ class DocumentService:
             "title": title,
             "content_type": f"application/{file_ext}"
         }
-        
-        upload_success = self.storage_service.upload_file(
+
+        upload_success = await asyncio.to_thread(
+            self.storage_service.upload_file,
             file=file_obj,
             object_name=file_path,
             metadata=storage_metadata
         )
-        
+
         if not upload_success:
             raise Exception("Failed to store document file in cloud storage.")
 
-    def _extract_and_index_text(
+    async def _extract_and_index_text(
         self, 
         db: Session, 
         db_document: Document, 
@@ -174,10 +178,10 @@ class DocumentService:
         the document's indexed status. Adds to session but does not commit.
         """
         file_obj_for_text = io.BytesIO(file_contents)
-        document_text = self._extract_text(file_obj_for_text, file_ext)
+        document_text = await asyncio.to_thread(self._extract_text, file_obj_for_text, file_ext)
         
         if document_text:
-            chunks_data = self.embedding_service.chunk_text(document_text)
+            chunks_data = await self.embedding_service.chunk_text(document_text)
             for i, chunk_data in enumerate(chunks_data):
                 chunk = DocumentChunk(
                     document_id=db_document.id,
@@ -188,15 +192,28 @@ class DocumentService:
             
             db.flush()
 
-            indexing_success = self.embedding_service.add_document(
-                doc_id=str(db_document.id),
-                text=document_text,
-                metadata={
-                    "doc_id": str(db_document.id),
+            # Prepare texts and metadatas for VectorService.add_documents
+            # This was previously done inside EmbeddingService.add_document
+            chunk_texts_for_vector_service = [chunk["text"] for chunk in chunks_data]
+            chunk_metadatas_for_vector_service = []
+            for i, chunk_info in enumerate(chunks_data):
+                # Base metadata for each chunk
+                meta = {
+                    "doc_id": str(db_document.id), # Link chunk to parent document
+                    "chunk_index": i,
+                    "tenant_id": self.tenant_id,
+                    # Potentially add other db_document fields if relevant for search/filtering
                     "title": title,
                     "file_type": file_ext,
-                    "tenant_id": self.tenant_id
                 }
+                # Add any original metadata from the chunk itself (e.g. page numbers if chunker provides it)
+                # For now, chunk_info from embedding_service.chunk_text is just {"text":...}
+                # If chunk_info contained more, we'd spread it: **chunk_info
+                chunk_metadatas_for_vector_service.append(meta)
+
+            indexing_success = await self.vector_service.add_documents(
+                texts=chunk_texts_for_vector_service,
+                metadatas=chunk_metadatas_for_vector_service
             )
             db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
         else:
@@ -234,7 +251,7 @@ class DocumentService:
             file_path_str = db_document.file_path
 
             # 3. Upload file to storage
-            self._upload_file_to_storage(
+            await self._upload_file_to_storage(
                 file_contents=file_contents,
                 file_path=file_path_str,
                 doc_id=doc_id_str,
@@ -243,7 +260,7 @@ class DocumentService:
             )
 
             # 4. Extract text and index
-            self._extract_and_index_text(
+            await self._extract_and_index_text(
                 db=db,
                 db_document=db_document,
                 file_contents=file_contents,
@@ -276,13 +293,14 @@ class DocumentService:
             logger.exception(f"Error processing document: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the document.")
         finally:
-            db.close()
+            # db.close() # Removed: Session should be managed by the caller
+            pass
     
-    def get_document(self, doc_id: str) -> Dict[str, Any]:
+    def get_document(self, db: Session, doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Obtiene información detallada de un documento.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             document = db.query(Document).options(
@@ -333,14 +351,14 @@ class DocumentService:
         except Exception as e:
             logger.exception(f"Error getting document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving the document.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
-    def delete_document(self, doc_id: str) -> Dict[str, Any]:
+    async def delete_document(self, db: Session, doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Elimina un documento y todos sus datos asociados.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             document = db.query(Document).filter(
@@ -352,12 +370,14 @@ class DocumentService:
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Eliminar archivo del almacenamiento
-            self.storage_service.delete_file(document.file_path)
+            await asyncio.to_thread(self.storage_service.delete_file, document.file_path)
             
             # Eliminar del vector store
-            self.embedding_service.delete_document(doc_id)
+            await self.vector_service.delete_document(doc_id=doc_id) # Ensure single call to vector_service
             
-            # Eliminar de la base de datos
+            # Eliminar chunks de la base de datos
+            db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
+            # Eliminar documento de la base de datos
             db.delete(document)
             db.commit()
             
@@ -369,14 +389,14 @@ class DocumentService:
             db.rollback()
             logger.exception(f"Error deleting document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the document.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
-    def generate_summary(self, doc_id: str) -> Dict[str, str]:
+    def generate_summary(self, db: Session, doc_id: str) -> Dict[str, str]: # Added db: Session
         """
         Genera un resumen del documento utilizando el LLM.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             # Verificar acceso al documento
@@ -416,14 +436,14 @@ class DocumentService:
         except Exception as e:
             logger.exception(f"Error generating summary for document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the summary.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
-    def add_tag(self, doc_id: str, tag_name: str) -> Dict[str, str]:
+    def add_tag(self, db: Session, doc_id: str, tag_name: str) -> Dict[str, str]: # Added db: Session
         """
         Añade una etiqueta a un documento.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             document = db.query(Document).options(
@@ -463,14 +483,14 @@ class DocumentService:
             db.rollback()
             logger.exception(f"Error adding tag to document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while adding the tag.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
-    def remove_tag(self, doc_id: str, tag_name: str) -> Dict[str, str]:
+    def remove_tag(self, db: Session, doc_id: str, tag_name: str) -> Dict[str, str]: # Added db: Session
         """
         Elimina una etiqueta de un documento.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             document = db.query(Document).options(
@@ -506,14 +526,14 @@ class DocumentService:
             db.rollback()
             logger.exception(f"Error removing tag from document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while removing the tag.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
-    def get_signed_download_url(self, doc_id: str) -> Dict[str, Any]:
+    def get_signed_download_url(self, db: Session, doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Genera una URL firmada para descargar un documento.
         """
-        db = SessionLocal()
+        # db = SessionLocal() # Removed
         
         try:
             document = db.query(Document).filter(
@@ -540,8 +560,8 @@ class DocumentService:
         except Exception as e:
             logger.exception(f"Error generating signed URL for document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the download URL.")
-        finally:
-            db.close()
+        # finally: # Removed
+            # db.close() # Removed
     
     def get_signed_upload_url(self, filename: str, content_type: str) -> Dict[str, Any]:
         """
@@ -831,7 +851,7 @@ class DocumentService:
             logger.exception(f"Error getting document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving the document.")
     
-    def delete_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
+    async def delete_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
         """
         Elimina un documento y todos sus datos asociados.
         
@@ -854,12 +874,14 @@ class DocumentService:
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Eliminar archivo del almacenamiento
-            self.storage_service.delete_file(document.file_path)
+            await asyncio.to_thread(self.storage_service.delete_file, document.file_path)
             
             # Eliminar del vector store
-            self.embedding_service.delete_document(doc_id)
+            await self.vector_service.delete_document(doc_id=doc_id) # Use VectorService
             
-            # Eliminar de la base de datos
+            # Eliminar chunks de la base de datos
+            db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
+            # Eliminar documento de la base de datos
             db.delete(document)
             db.commit()
             
