@@ -46,7 +46,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
   const [syncStatus, setSyncStatus] = useState<'pending' | 'success' | 'error'>('pending')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  async function handleUserSync(): Promise<void> {
+  const handleUserSync = useCallback(async (): Promise<void> => {
     try {
       setIsProcessing(true)
       setSyncStatus('pending')
@@ -61,7 +61,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
     } finally {
       setIsProcessing(false)
     }
-  }
+  }, [syncUserWithBackend])
 
   const [steps, setSteps] = useState<OnboardingStep[]>([
     {
@@ -102,12 +102,6 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
     }
   ])
 
-  useEffect(() => {
-    if (isClerkLoaded && clerkUser) {
-      handleStepAction(0)
-    }
-  }, [isClerkLoaded, clerkUser, handleStepAction])
-
   const handleStepAction = useCallback(async (stepIndex: number) => {
     const step = steps[stepIndex]
     
@@ -116,6 +110,35 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
         setIsProcessing(true)
         await step.action()
         
+        // Save scroll position before updating
+        const currentScrollPosition = window.scrollY
+        
+        // Batch state updates to prevent multiple re-renders
+        requestAnimationFrame(() => {
+          const updatedSteps = [...steps]
+          updatedSteps[stepIndex].completed = true
+          setSteps(updatedSteps)
+          
+          if (stepIndex < steps.length - 1) {
+            setCurrentStep(stepIndex + 1)
+          }
+          
+          // Restore scroll position after DOM update
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: currentScrollPosition, behavior: 'auto' })
+          })
+        })
+      } catch (error) {
+        console.error(`Error in step ${step.id}:`, error)
+      } finally {
+        setIsProcessing(false)
+      }
+    } else {
+      // Save scroll position before updating
+      const currentScrollPosition = window.scrollY
+      
+      // Batch state updates to prevent multiple re-renders
+      requestAnimationFrame(() => {
         const updatedSteps = [...steps]
         updatedSteps[stepIndex].completed = true
         setSteps(updatedSteps)
@@ -123,21 +146,20 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
         if (stepIndex < steps.length - 1) {
           setCurrentStep(stepIndex + 1)
         }
-      } catch (error) {
-        console.error(`Error in step ${step.id}:`, error)
-      } finally {
-        setIsProcessing(false)
-      }
-    } else {
-      const updatedSteps = [...steps]
-      updatedSteps[stepIndex].completed = true
-      setSteps(updatedSteps)
-      
-      if (stepIndex < steps.length - 1) {
-        setCurrentStep(stepIndex + 1)
-      }
+        
+        // Restore scroll position after DOM update
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: currentScrollPosition, behavior: 'auto' })
+        })
+      })
     }
   }, [steps])
+
+  useEffect(() => {
+    if (isClerkLoaded && clerkUser && currentStep === 0 && !isProcessing) {
+      handleStepAction(0)
+    }
+  }, [isClerkLoaded, clerkUser, currentStep, isProcessing, handleStepAction])
 
   const handleCompleteOnboarding = async () => {
     try {
@@ -158,7 +180,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
 
   if (!isClerkLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center space-y-4">
           <Loader2 className="h-12 w-12 animate-spin mx-auto text-blue-400" />
           <p className="text-lg font-medium text-gray-300">Cargando...</p>
@@ -168,8 +190,8 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-gray-200">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-black text-gray-200 overflow-x-hidden">
+      <div className="container mx-auto px-4 py-8 min-h-screen">
         {/* Header */}
         <div className="text-center mb-12">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full mb-6">
@@ -201,7 +223,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
             {steps.map((step, index) => (
               <div
                 key={step.id}
-                className={`relative p-4 rounded-xl text-center transition-all ${
+                className={`relative p-4 rounded-xl text-center transition-all duration-300 ease-in-out transform ${
                   step.completed
                     ? 'bg-green-700/30 border-2 border-green-600' // Darker green, less opacity
                     : index === currentStep
@@ -235,7 +257,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
           </div>
 
           {/* Current Step Content */}
-          <Card className="border-0 shadow-xl bg-slate-800/80 backdrop-blur-sm text-gray-200">
+          <Card className="border-0 shadow-xl bg-slate-800/80 backdrop-blur-sm text-gray-200 will-change-auto">
             <CardHeader className="text-center pb-6">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full mb-4">
                 {steps[currentStep]?.icon && (
@@ -248,7 +270,7 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
               <CardDescription className="text-lg text-gray-300">{steps[currentStep]?.description}</CardDescription>
             </CardHeader>
             
-            <CardContent className="pt-0">
+            <CardContent className="pt-0 h-[500px] overflow-y-auto">
               {/* Step Content */}
               {currentStep === 0 && (
                 <div className="text-center py-8">
@@ -472,9 +494,9 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
                 </div>
               )}
 
-              {/* Skip option */}
-              {currentStep < steps.length - 1 && syncStatus !== 'pending' && (
-                <div className="text-center pt-8 border-t border-slate-700">
+              {/* Skip option - always reserve space */}
+              <div className="text-center pt-8 border-t border-slate-700 h-16 flex items-center justify-center">
+                {currentStep < steps.length - 1 && syncStatus !== 'pending' ? (
                   <Button 
                     variant="ghost" 
                     onClick={handleCompleteOnboarding}
@@ -482,8 +504,14 @@ export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {
                   >
                     Omitir configuración y continuar
                   </Button>
-                </div>
-              )}
+                ) : (
+                  <div className="invisible">
+                    <Button variant="ghost">
+                      Omitir configuración y continuar
+                    </Button>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

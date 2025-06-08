@@ -11,7 +11,7 @@ export default function WelcomeLayout({
     <AuthGuard>
       <NotificationsProvider>
         <UploadProvider>
-          <div className="min-h-screen">
+          <div className="h-screen overflow-y-auto">
             {children}
           </div>
         </UploadProvider>
