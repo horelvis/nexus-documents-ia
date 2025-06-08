@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
-from app.api.dependencies import get_current_active_superuser
+from app.api.dependencies import get_current_active_superuser, get_current_active_user
 from app.db.models import User
 from app.db.database import get_db
 from app.core.config import settings
@@ -180,7 +180,7 @@ async def get_checkout_session(
 
 @router.post("/create-customer-portal")
 async def create_customer_portal(
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, str]:
     """
@@ -236,7 +236,7 @@ async def create_customer_portal(
 
 @router.get("/subscription")
 async def get_current_subscription(
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -285,7 +285,7 @@ async def get_current_subscription(
 
 @router.post("/sync-subscription")
 async def sync_subscription_from_stripe(
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """

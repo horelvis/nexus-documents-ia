@@ -196,6 +196,10 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
           ...subItem,
           url: `${basePath}${subItem.url}`
         }))
+      })),
+      navSecondary: data.navSecondary.map(item => ({
+        ...item,
+        url: `${basePath}${item.url}`
       }))
     };
   };
