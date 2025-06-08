@@ -51,11 +51,21 @@ async def sync_user(
     """
     logger.info(f"🔄 Syncing user from Clerk: {user_data.clerk_user_id}")
     
+    # Prepare subscription data if provided
+    subscription_data = None
+    if user_data.subscription_data:
+        subscription_data = {
+            'stripe_subscription_id': user_data.subscription_data.stripe_subscription_id,
+            'plan_id': user_data.subscription_data.plan_id
+        }
+    
     user = AuthService.sync_user_from_clerk(
         db=db,
         clerk_user_id=user_data.clerk_user_id,
         email=user_data.email,
-        full_name=user_data.full_name
+        full_name=user_data.full_name,
+        stripe_customer_id=user_data.stripe_customer_id,
+        subscription_data=subscription_data
     )
     
     logger.info(f"✅ User synced successfully: {user.id}")

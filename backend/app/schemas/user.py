@@ -41,11 +41,20 @@ class UserCreate(UserBase):
     is_superuser: bool = Field(False, example=False)
     is_active: bool = Field(True, example=True)
 
-# Schema for syncing user from Clerk
+# Schema for Stripe subscription data
+class StripeSubscriptionData(BaseModel):
+    stripe_subscription_id: str = Field(..., example="sub_1234567890")
+    plan_id: str = Field(..., example="pro")
+
+# Schema for syncing user from Clerk (with optional Stripe data)
 class UserSync(BaseModel):
     clerk_user_id: str = Field(..., example="user_2aBcDeFgHiJkLmNoPqRsTuVwXyZ")
     email: EmailStr = Field(..., example="user@example.com")
     full_name: str = Field(..., example="John Doe")
+    # Stripe integration fields (optional)
+    stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
+    stripe_session_id: Optional[str] = Field(None, example="cs_1234567890")
+    subscription_data: Optional[StripeSubscriptionData] = None
 
 # Schema for reading/returning user data (response model)
 class UserRead(UserBase):
@@ -77,6 +86,7 @@ class User(UserBase):
     is_active: bool = Field(..., example=True)
     is_superuser: bool = Field(..., example=False)
     onboarding_completed: bool = Field(False, example=False)
+    stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
     tenant_id: uuid.UUID = Field(..., example=uuid.uuid4())
     created_at: datetime = Field(..., example=datetime.now())
     updated_at: datetime = Field(..., example=datetime.now())
