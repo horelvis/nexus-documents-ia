@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
     STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
+    STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
+    STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode

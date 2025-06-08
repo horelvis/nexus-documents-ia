@@ -48,15 +48,31 @@ export function UserProvider({ children }: UserProviderProps) {
   }
 
   // Sync user with backend
-  const syncUserWithBackend = async (): Promise<void> => {
+  const syncUserWithBackend = async (stripeData?: {
+    sessionId?: string
+    customerId?: string
+    subscriptionId?: string
+    planId?: string
+  }): Promise<void> => {
     if (!clerkUser) throw new Error('No user found')
 
     try {
-      const response = await apiClient.post('/auth/sync-user', {
+      const payload = {
         clerk_user_id: clerkUser.id,
         email: clerkUser.emailAddresses[0]?.emailAddress,
-        full_name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
-      })
+        full_name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim(),
+        // Include Stripe data if available
+        ...(stripeData && {
+          stripe_customer_id: stripeData.customerId,
+          stripe_session_id: stripeData.sessionId,
+          subscription_data: stripeData.subscriptionId ? {
+            stripe_subscription_id: stripeData.subscriptionId,
+            plan_id: stripeData.planId
+          } : undefined
+        })
+      }
+
+      const response = await apiClient.post('/auth/sync-user', payload)
 
       if (response.error) {
         throw new Error(response.error)

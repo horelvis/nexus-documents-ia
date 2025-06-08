@@ -1,10 +1,11 @@
-# backend/app/api/v1/stripe.py - Endpoint para Customer Portal
+# backend/app/api/v1/stripe.py - Stripe endpoints
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy.orm import Session
 import stripe
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from pydantic import BaseModel
 
 from app.api.dependencies import get_current_active_superuser
 from app.db.models import User
@@ -17,11 +18,141 @@ from app.db.models import Subscription
 import time
 from datetime import datetime
 
+# Schemas para los requests
+class CheckoutSessionRequest(BaseModel):
+    priceId: str
+    planId: str
+    email: Optional[str] = None
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Configurar Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+@router.post("/create-checkout-session")
+async def create_checkout_session(
+    request: CheckoutSessionRequest,
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    """
+    Crea una sesión de checkout de Stripe para nuevos usuarios.
+    Este endpoint se llama ANTES del registro de usuario.
+    """
+    try:
+        # Mapeo de precios (esto debería estar en configuración)
+        price_mapping = {
+            "price_pro_monthly": settings.STRIPE_PRO_PRICE_ID,
+            "price_enterprise_monthly": settings.STRIPE_ENTERPRISE_PRICE_ID,
+        }
+        
+        stripe_price_id = price_mapping.get(request.priceId)
+        if not stripe_price_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid price ID: {request.priceId}"
+            )
+
+        # Crear sesión de checkout
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': stripe_price_id,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.FRONTEND_URL}/pricing",
+            metadata={
+                'plan_id': request.planId,
+            },
+            # Pre-rellenar email si se proporciona
+            customer_email=request.email,
+            # Recopilar información adicional
+            billing_address_collection='auto',
+            # Permitir códigos promocionales
+            allow_promotion_codes=True,
+            # Configurar el trial si aplica
+            subscription_data={
+                'trial_period_days': 14 if request.planId == 'pro' else None,
+                'metadata': {
+                    'plan_id': request.planId,
+                }
+            }
+        )
+
+        logger.info(f"Checkout session created: {checkout_session.id} for plan {request.planId}")
+
+        return {"url": checkout_session.url}
+
+    except stripe.error.InvalidRequestError as e:
+        logger.error(f"Stripe invalid request: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error con la configuración de Stripe: {str(e)}"
+        )
+    
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error interno de Stripe. Inténtalo de nuevo."
+        )
+    
+    except Exception as e:
+        logger.error(f"Unexpected error creating checkout session: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error interno del servidor"
+        )
+
+
+@router.get("/checkout-session/{session_id}")
+async def get_checkout_session(
+    session_id: str,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Obtiene información de la sesión de checkout completada.
+    Se usa después del pago exitoso para el registro del usuario.
+    """
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session_id,
+            expand=['customer', 'subscription']
+        )
+
+        if session.payment_status != 'paid':
+            raise HTTPException(
+                status_code=400,
+                detail="Payment not completed"
+            )
+
+        return {
+            "session_id": session.id,
+            "customer_id": session.customer,
+            "customer_email": session.customer_details.email,
+            "subscription_id": session.subscription,
+            "plan_id": session.metadata.get('plan_id'),
+            "payment_status": session.payment_status,
+            "amount_total": session.amount_total,
+            "currency": session.currency,
+        }
+
+    except stripe.error.InvalidRequestError as e:
+        logger.error(f"Invalid session ID {session_id}: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail="Sesión de checkout no encontrada"
+        )
+    
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error retrieving session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error obteniendo información de pago"
+        )
 
 
 @router.post("/create-customer-portal")

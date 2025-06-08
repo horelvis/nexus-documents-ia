@@ -126,6 +126,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     clerk_user_id = Column(String(255), nullable=True, unique=True, index=True)
+    stripe_customer_id = Column(String(255), nullable=True, unique=True, index=True)
     is_active = Column(Boolean(), default=True, nullable=False)
     is_superuser = Column(Boolean(), default=False, nullable=False)
     onboarding_completed = Column(Boolean(), default=False, nullable=False)
@@ -463,20 +464,19 @@ class Subscription(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False, index=True)
-    price_id = Column(UUID(as_uuid=True), ForeignKey("prices.id"), nullable=False, index=True)
+    stripe_customer_id = Column(String(255), nullable=True, index=True)
+    stripe_subscription_id = Column(String(255), nullable=True, unique=True, index=True)
+    plan_id = Column(String(50), nullable=False, index=True)  # Cambiado a String para planes como 'pro', 'enterprise'
+    interval = Column(String(20), nullable=False, default='month')  # 'month', 'year'
     status = Column(String(20), nullable=False, index=True)
     current_period_start = Column(DateTime, nullable=False)
     current_period_end = Column(DateTime, nullable=False)
     cancel_at_period_end = Column(Boolean, default=False, nullable=False)
-    stripe_subscription_id = Column(String(255), nullable=True, unique=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="subscription")
-    plan = relationship("Plan", back_populates="subscriptions")
-    price = relationship("Price", back_populates="subscriptions")
     
     __table_args__ = (
         Index('idx_subscriptions_status_period', 'status', 'current_period_end'),

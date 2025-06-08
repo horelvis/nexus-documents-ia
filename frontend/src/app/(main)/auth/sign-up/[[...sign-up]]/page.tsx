@@ -1,5 +1,10 @@
-import { SignUp } from '@clerk/nextjs'
+import { Suspense } from 'react'
+import { SignUpWithCheckout } from '@/components/auth/signup-with-checkout'
 
 export default function Page() {
-  return <div className="flex min-h-screen items-center justify-center"><SignUp /></div>
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SignUpWithCheckout />
+    </Suspense>
+  )
 }
