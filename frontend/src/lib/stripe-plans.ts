@@ -21,10 +21,8 @@ export const STRIPE_PLANS = {
     ],
     cta: 'Empezar Gratis',
     popular: false,
-    stripeData: {
-      priceId: '', // No price ID for free plan
-      productId: 'nexus_free',
-    }
+    // Free plan handled locally, no Stripe integration
+    backend: false
   },
   pro: {
     id: 'pro',
@@ -47,13 +45,8 @@ export const STRIPE_PLANS = {
     ],
     cta: 'Probar Pro',
     popular: true,
-    stripeData: {
-      priceId: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID || '',
-      yearlyPriceId: process.env.NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID || '',
-      productId: 'nexus_pro',
-      lookupKey: 'nexus_pro_monthly',
-      yearlyLookupKey: 'nexus_pro_yearly',
-    }
+    // Stripe data is handled by backend
+    backend: true
   },
   enterprise: {
     id: 'enterprise',
@@ -78,13 +71,8 @@ export const STRIPE_PLANS = {
     ],
     cta: 'Contactar Ventas',
     popular: false,
-    stripeData: {
-      priceId: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID || '',
-      yearlyPriceId: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_YEARLY_PRICE_ID || '',
-      productId: 'nexus_enterprise',
-      lookupKey: 'nexus_enterprise_monthly',
-      yearlyLookupKey: 'nexus_enterprise_yearly',
-    }
+    // Stripe data is handled by backend
+    backend: true
   }
 } as const
 
@@ -116,12 +104,9 @@ export const calculateYearlyDiscount = (monthlyPrice: number, yearlyPrice: numbe
   return Math.round(discount)
 }
 
-// Mapeo de lookup keys a plan IDs para el backend
-export const LOOKUP_KEY_TO_PLAN: Record<string, PlanId> = {
-  'nexus_pro_monthly': 'pro',
-  'nexus_pro_yearly': 'pro',
-  'nexus_enterprise_monthly': 'enterprise',
-  'nexus_enterprise_yearly': 'enterprise',
+// Helper functions for paid plans
+export const isPaidPlan = (planId: PlanId): boolean => {
+  return planId !== 'free'
 }
 
 // Feature flags por plan

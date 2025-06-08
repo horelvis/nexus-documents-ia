@@ -3,7 +3,7 @@ import { Check, Star, Zap, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { getAllPlans, formatPrice, calculateYearlyDiscount, type Plan } from '@/lib/stripe-plans'
+import { getAllPlans, formatPrice, calculateYearlyDiscount, isPaidPlan, type Plan } from '@/lib/stripe-plans'
 
 export default function PricingPage() {
   const plans = getAllPlans()
@@ -23,18 +23,14 @@ export default function PricingPage() {
 
     // For paid plans, create Stripe checkout session
     try {
-      const priceId = isYearly 
-        ? plan.stripeData.yearlyLookupKey 
-        : plan.stripeData.lookupKey
-
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          priceId,
           planId: plan.id,
+          interval: isYearly ? 'year' : 'month',
         }),
       })
 

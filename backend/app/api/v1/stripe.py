@@ -20,8 +20,8 @@ from datetime import datetime
 
 # Schemas para los requests
 class CheckoutSessionRequest(BaseModel):
-    priceId: str
-    planId: str
+    planId: str  # Only plan ID needed, backend handles price mapping
+    interval: str = 'month'  # 'month' or 'year'
     email: Optional[str] = None
 
 logger = logging.getLogger(__name__)
@@ -41,35 +41,40 @@ async def create_checkout_session(
     Este endpoint se llama ANTES del registro de usuario.
     """
     try:
-        # Mapeo de lookup keys a price IDs (esto debería estar en configuración)
-        price_mapping = {
-            "nexus_pro_monthly": settings.STRIPE_PRO_PRICE_ID,
-            "nexus_enterprise_monthly": settings.STRIPE_ENTERPRISE_PRICE_ID,
-            # Backward compatibility
-            "price_pro_monthly": settings.STRIPE_PRO_PRICE_ID,
-            "price_enterprise_monthly": settings.STRIPE_ENTERPRISE_PRICE_ID,
+        # Validate plan ID
+        if request.planId not in ['pro', 'enterprise']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid plan ID: {request.planId}. Must be 'pro' or 'enterprise'"
+            )
+        
+        # Validate interval
+        if request.interval not in ['month', 'year']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid interval: {request.interval}. Must be 'month' or 'year'"
+            )
+        
+        # Centralized plan to price mapping
+        plan_price_mapping = {
+            'pro': {
+                'month': settings.STRIPE_PRO_PRICE_ID,
+                'year': getattr(settings, 'STRIPE_PRO_YEARLY_PRICE_ID', None)
+            },
+            'enterprise': {
+                'month': settings.STRIPE_ENTERPRISE_PRICE_ID,
+                'year': getattr(settings, 'STRIPE_ENTERPRISE_YEARLY_PRICE_ID', None)
+            }
         }
         
-        # Try to use as lookup key first, then as direct price ID
-        stripe_price_id = price_mapping.get(request.priceId, request.priceId)
+        # Get the appropriate price ID
+        stripe_price_id = plan_price_mapping.get(request.planId, {}).get(request.interval)
         
-        if not stripe_price_id or stripe_price_id.startswith("price_") == False:
-            # If no mapping found, try to use as lookup key directly
-            try:
-                # Search by lookup key
-                prices = stripe.Price.list(lookup_keys=[request.priceId], limit=1)
-                if prices.data:
-                    stripe_price_id = prices.data[0].id
-                else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid price ID or lookup key: {request.priceId}"
-                    )
-            except stripe.error.StripeError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid price ID: {request.priceId}"
-                )
+        if not stripe_price_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Price not configured for plan '{request.planId}' with interval '{request.interval}'"
+            )
 
         # Crear sesión de checkout
         checkout_session = stripe.checkout.Session.create(
@@ -95,6 +100,7 @@ async def create_checkout_session(
                 'trial_period_days': 14 if request.planId == 'pro' else None,
                 'metadata': {
                     'plan_id': request.planId,
+                    'interval': request.interval,
                 }
             }
         )
