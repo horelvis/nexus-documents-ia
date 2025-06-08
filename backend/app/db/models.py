@@ -466,7 +466,8 @@ class Subscription(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
     stripe_customer_id = Column(String(255), nullable=True, index=True)
     stripe_subscription_id = Column(String(255), nullable=True, unique=True, index=True)
-    plan_id = Column(String(50), nullable=False, index=True)  # Cambiado a String para planes como 'pro', 'enterprise'
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=True, index=True)  # Mantener original para compatibilidad
+    stripe_plan_id = Column(String(50), nullable=True, index=True)  # Para planes de Stripe como 'pro', 'enterprise'
     interval = Column(String(20), nullable=False, default='month')  # 'month', 'year'
     status = Column(String(20), nullable=False, index=True)
     current_period_start = Column(DateTime, nullable=False)
@@ -477,6 +478,7 @@ class Subscription(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="subscription")
+    plan = relationship("Plan", back_populates="subscriptions")
     
     __table_args__ = (
         Index('idx_subscriptions_status_period', 'status', 'current_period_end'),

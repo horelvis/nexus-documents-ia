@@ -51,8 +51,9 @@ class SubscriptionBase(BaseModel):
     current_period_start: datetime = Field(..., example=datetime.now())
     current_period_end: datetime = Field(..., example=datetime.now())
     cancel_at_period_end: bool = Field(False, example=False)
-    plan_id: uuid.UUID = Field(..., example=uuid.uuid4())
-    price_id: uuid.UUID = Field(..., example=uuid.uuid4())
+    plan_id: Optional[uuid.UUID] = Field(None, example=uuid.uuid4())
+    stripe_plan_id: Optional[str] = Field(None, example="pro")
+    interval: str = Field("month", example="month")
 
 class SubscriptionCreate(SubscriptionBase):
     user_id: uuid.UUID = Field(..., example=uuid.uuid4())
@@ -63,8 +64,9 @@ class SubscriptionUpdate(SubscriptionBase):
 class Subscription(SubscriptionBase):
     id: uuid.UUID = Field(..., example=uuid.uuid4())
     user_id: uuid.UUID = Field(..., example=uuid.uuid4())
-    plan: Optional[Plan] = None # Relation to Plan
-    price: Optional[Price] = None # Relation to Price
+    stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
+    stripe_subscription_id: Optional[str] = Field(None, example="sub_1234567890")
+    plan: Optional[Plan] = None # Relation to Plan (legacy)
     created_at: datetime = Field(..., example=datetime.now())
     updated_at: datetime = Field(..., example=datetime.now())
 

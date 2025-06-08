@@ -324,7 +324,7 @@ class AuthService:
             if existing_subscription:
                 # Update existing subscription
                 existing_subscription.stripe_subscription_id = subscription_data.get('stripe_subscription_id')
-                existing_subscription.plan_id = subscription_data.get('plan_id')
+                existing_subscription.stripe_plan_id = subscription_data.get('plan_id')
                 existing_subscription.status = 'active'
                 existing_subscription.stripe_customer_id = user.stripe_customer_id
                 logger.info(f"🔄 Updated subscription for user: {user.id}")
@@ -334,7 +334,7 @@ class AuthService:
                     user_id=user.id,
                     stripe_customer_id=user.stripe_customer_id,
                     stripe_subscription_id=subscription_data.get('stripe_subscription_id'),
-                    plan_id=subscription_data.get('plan_id'),
+                    stripe_plan_id=subscription_data.get('plan_id'),
                     interval='month',  # Default to monthly
                     status='active',
                     current_period_start=datetime.utcnow(),

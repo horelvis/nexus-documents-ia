@@ -41,18 +41,35 @@ async def create_checkout_session(
     Este endpoint se llama ANTES del registro de usuario.
     """
     try:
-        # Mapeo de precios (esto debería estar en configuración)
+        # Mapeo de lookup keys a price IDs (esto debería estar en configuración)
         price_mapping = {
+            "nexus_pro_monthly": settings.STRIPE_PRO_PRICE_ID,
+            "nexus_enterprise_monthly": settings.STRIPE_ENTERPRISE_PRICE_ID,
+            # Backward compatibility
             "price_pro_monthly": settings.STRIPE_PRO_PRICE_ID,
             "price_enterprise_monthly": settings.STRIPE_ENTERPRISE_PRICE_ID,
         }
         
-        stripe_price_id = price_mapping.get(request.priceId)
-        if not stripe_price_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid price ID: {request.priceId}"
-            )
+        # Try to use as lookup key first, then as direct price ID
+        stripe_price_id = price_mapping.get(request.priceId, request.priceId)
+        
+        if not stripe_price_id or stripe_price_id.startswith("price_") == False:
+            # If no mapping found, try to use as lookup key directly
+            try:
+                # Search by lookup key
+                prices = stripe.Price.list(lookup_keys=[request.priceId], limit=1)
+                if prices.data:
+                    stripe_price_id = prices.data[0].id
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid price ID or lookup key: {request.priceId}"
+                    )
+            except stripe.error.StripeError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid price ID: {request.priceId}"
+                )
 
         # Crear sesión de checkout
         checkout_session = stripe.checkout.Session.create(
