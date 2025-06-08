@@ -20,7 +20,7 @@ export function CTASection() {
     if (isSignedIn) {
       router.push('/dashboard')
     } else {
-      router.push('/auth/sign-up')
+      router.push('/pricing')
     }
   }
 

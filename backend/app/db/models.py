@@ -415,49 +415,8 @@ class DocumentMetrics(Base):
 
 
 # =====================================
-# SISTEMA DE SUSCRIPCIONES
+# SISTEMA DE SUSCRIPCIONES (Simplificado para Stripe)
 # =====================================
-
-class Plan(Base):
-    __tablename__ = "plans"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(100), nullable=False, unique=True)
-    description = Column(Text, nullable=True)
-    max_users = Column(Integer, nullable=True)
-    max_storage_mb = Column(Integer, nullable=True)
-    max_documents = Column(Integer, nullable=True)
-    features = Column(JSONB, nullable=False, default={})
-    is_active = Column(Boolean, default=True, nullable=False)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    prices = relationship("Price", back_populates="plan", cascade="all, delete-orphan")
-    subscriptions = relationship("Subscription", back_populates="plan")
-
-
-class Price(Base):
-    __tablename__ = "prices"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False, index=True)
-    amount = Column(Integer, nullable=False)
-    currency = Column(String(3), nullable=False)
-    interval = Column(String(20), nullable=False)
-    stripe_price_id = Column(String(255), nullable=True, unique=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    plan = relationship("Plan", back_populates="prices")
-    subscriptions = relationship("Subscription", back_populates="price")
-    
-    __table_args__ = (
-        Index('idx_prices_plan_active', 'plan_id', 'is_active'),
-    )
-
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -466,10 +425,9 @@ class Subscription(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
     stripe_customer_id = Column(String(255), nullable=True, index=True)
     stripe_subscription_id = Column(String(255), nullable=True, unique=True, index=True)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=True, index=True)  # Mantener original para compatibilidad
-    stripe_plan_id = Column(String(50), nullable=True, index=True)  # Para planes de Stripe como 'pro', 'enterprise'
+    stripe_plan_id = Column(String(50), nullable=True, index=True)  # 'free', 'pro', 'enterprise'
     interval = Column(String(20), nullable=False, default='month')  # 'month', 'year'
-    status = Column(String(20), nullable=False, index=True)
+    status = Column(String(20), nullable=False, index=True)  # 'active', 'canceled', 'past_due'
     current_period_start = Column(DateTime, nullable=False)
     current_period_end = Column(DateTime, nullable=False)
     cancel_at_period_end = Column(Boolean, default=False, nullable=False)
@@ -478,10 +436,10 @@ class Subscription(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="subscription")
-    plan = relationship("Plan", back_populates="subscriptions")
     
     __table_args__ = (
         Index('idx_subscriptions_status_period', 'status', 'current_period_end'),
+        Index('idx_subscriptions_stripe_plan', 'stripe_plan_id'),
     )
 
 

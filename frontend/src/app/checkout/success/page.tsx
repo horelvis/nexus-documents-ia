@@ -36,7 +36,8 @@ export default function CheckoutSuccessPage() {
 
     const fetchCheckoutSession = async () => {
       try {
-        const response = await fetch(`/api/stripe/checkout-session/${sessionId}`)
+        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const response = await fetch(`${API_BASE}/api/v1/stripe/checkout-session/${sessionId}`)
         
         if (!response.ok) {
           throw new Error('Failed to fetch checkout session')
@@ -56,13 +57,8 @@ export default function CheckoutSuccessPage() {
 
   const handleContinueToSignup = () => {
     if (checkoutData) {
-      // Redirect to signup with checkout session data
-      const params = new URLSearchParams({
-        session_id: checkoutData.session_id,
-        email: checkoutData.customer_email,
-        plan: checkoutData.plan_id,
-      })
-      router.push(`/auth/sign-up?${params.toString()}`)
+      // Redirect directly to welcome/onboarding with session data
+      router.push(`/welcome?session_id=${checkoutData.session_id}`)
     }
   }
 

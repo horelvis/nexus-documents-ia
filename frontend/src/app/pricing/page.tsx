@@ -1,3 +1,5 @@
+'use client'
+
 import React from 'react'
 import { Check, Star, Zap, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -23,7 +25,8 @@ export default function PricingPage() {
 
     // For paid plans, create Stripe checkout session
     try {
-      const response = await fetch('/api/stripe/create-checkout-session', {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await fetch(`${API_BASE}/api/v1/stripe/create-checkout-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -33,6 +36,10 @@ export default function PricingPage() {
           interval: isYearly ? 'year' : 'month',
         }),
       })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
 
       const { url } = await response.json()
       

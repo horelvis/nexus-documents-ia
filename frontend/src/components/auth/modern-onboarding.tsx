@@ -31,7 +31,7 @@ interface OnboardingStep {
 }
 
 interface ModernOnboardingProps {
-  onComplete?: () => void
+  onComplete?: (tenantId?: string) => void
 }
 
 export function ModernOnboarding({ onComplete }: ModernOnboardingProps) {

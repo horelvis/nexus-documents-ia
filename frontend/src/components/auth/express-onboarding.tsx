@@ -40,9 +40,10 @@ interface ExpressOnboardingProps {
     amount_total: number
     currency: string
   }
+  onComplete?: (tenantId?: string) => void
 }
 
-export function ExpressOnboarding({ checkoutData }: ExpressOnboardingProps) {
+export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardingProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { 
@@ -136,10 +137,15 @@ export function ExpressOnboarding({ checkoutData }: ExpressOnboardingProps) {
   }
 
   const handleGoToDashboard = () => {
-    if (backendUser?.tenant_id) {
-      router.push(`/${backendUser.tenant_id}/dashboard`)
+    const tenantId = backendUser?.tenant_id
+    if (onComplete) {
+      onComplete(tenantId)
     } else {
-      router.push('/dashboard')
+      if (tenantId) {
+        router.push(`/${tenantId}/dashboard`)
+      } else {
+        router.push('/dashboard')
+      }
     }
   }
 

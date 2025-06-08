@@ -8,6 +8,7 @@ import {
   HeroSection, 
   FeaturesSection, 
   StatsSection, 
+  PricingSection,
   CTASection, 
   LandingHeader, 
   LandingFooter 
@@ -45,6 +46,7 @@ export default function Home() {
         <HeroSection />
         <FeaturesSection />
         <StatsSection />
+        <PricingSection />
         <CTASection />
       </main>
       <LandingFooter />

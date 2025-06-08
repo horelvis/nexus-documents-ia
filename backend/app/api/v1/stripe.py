@@ -266,7 +266,7 @@ async def get_current_subscription(
         # Retornar datos de la suscripción
         return {
             "id": subscription.stripe_subscription_id,
-            "plan_id": subscription.plan_id,
+            "plan_id": subscription.stripe_plan_id,
             "status": subscription.status,
             "interval": subscription.interval,
             "current_period_start": int(subscription.current_period_start.timestamp()),
@@ -338,7 +338,7 @@ async def sync_subscription_from_stripe(
                 user_id=current_user.id,
                 stripe_subscription_id=stripe_sub.id,
                 stripe_customer_id=current_user.stripe_customer_id,
-                plan_id=stripe_sub.items.data[0].price.lookup_key or "pro",
+                stripe_plan_id=stripe_sub.items.data[0].price.lookup_key or "pro",
                 status=stripe_sub.status,
                 interval=stripe_sub.items.data[0].price.recurring.interval,
                 current_period_start=datetime.fromtimestamp(stripe_sub.current_period_start),
@@ -360,7 +360,7 @@ async def sync_subscription_from_stripe(
 
         return {
             "id": local_sub.stripe_subscription_id,
-            "plan_id": local_sub.plan_id,
+            "plan_id": local_sub.stripe_plan_id,
             "status": local_sub.status,
             "interval": local_sub.interval,
             "current_period_start": int(local_sub.current_period_start.timestamp()),
