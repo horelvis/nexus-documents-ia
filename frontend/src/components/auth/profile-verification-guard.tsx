@@ -77,6 +77,10 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       
       const user = response.data
       
+      console.log('🔍 [PROFILE_GUARD] User data from /auth/me:', user)
+      console.log('🔍 [PROFILE_GUARD] onboarding_completed:', user.onboarding_completed)
+      console.log('🔍 [PROFILE_GUARD] subscription:', user.subscription)
+      
       // Check if user has completed onboarding AND has a selected plan
       // For the new flow, we'll use onboarding_completed as the flag
       // If onboarding_completed is true, we assume they went through the new flow
@@ -90,6 +94,9 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       if (subscription && subscription.status === 'active') {
         planType = subscription.plan?.name || 'premium'
       }
+      
+      console.log('🔍 [PROFILE_GUARD] hasCompletedOnboarding:', hasCompletedOnboarding)
+      console.log('🔍 [PROFILE_GUARD] planType:', planType)
       
       setProfileStatus(prev => ({
         ...prev,
@@ -127,9 +134,18 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       }))
       
       // Redirect if profile is incomplete and not on allowed paths
+      console.log('🔍 [PROFILE_GUARD] Final verification result:', isFullyVerified)
+      console.log('🔍 [PROFILE_GUARD] Current path:', pathname)
+      console.log('🔍 [PROFILE_GUARD] Is allowed path:', isAllowedPath())
+      
       if (!isFullyVerified && !isAllowedPath()) {
         const tenantId = backendUser.tenant_id
+        console.log('🚀 [PROFILE_GUARD] Redirecting to welcome:', `/welcome/${tenantId}`)
         router.push(`/welcome/${tenantId}`)
+      } else if (isFullyVerified) {
+        console.log('✅ [PROFILE_GUARD] User fully verified, allowing access to:', pathname)
+      } else {
+        console.log('➡️ [PROFILE_GUARD] On allowed path, allowing access')
       }
       
     } catch (error) {
@@ -288,25 +304,57 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
               Contactar Soporte
             </Button>
             
-            {/* Temporary reset button for development */}
-            <div className="pt-4 border-t">
-              <p className="text-xs text-muted-foreground mb-2">
-                ¿Ya completaste el onboarding anterior? Resetea para probar el nuevo flujo:
+            {/* Development tools */}
+            <div className="pt-4 border-t space-y-3">
+              <p className="text-xs text-muted-foreground">
+                🚧 Herramientas de Desarrollo:
               </p>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={async () => {
-                  const success = await resetOnboarding()
-                  if (success) {
-                    // Redirect to welcome page after reset
-                    const tenantId = backendUser?.tenant_id
-                    router.push(`/welcome/${tenantId}`)
-                  }
-                }}
-              >
-                Resetear Onboarding (Desarrollo)
-              </Button>
+              
+              <div className="flex flex-col space-y-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={async () => {
+                    const success = await resetOnboarding()
+                    if (success) {
+                      // Redirect to welcome page after reset
+                      const tenantId = backendUser?.tenant_id
+                      router.push(`/welcome/${tenantId}`)
+                    }
+                  }}
+                >
+                  🔄 Resetear Onboarding
+                </Button>
+                
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={async () => {
+                    if (!confirm('⚠️ PELIGRO: Esto eliminará tu usuario completamente de la base de datos. ¿Estás seguro?')) {
+                      return
+                    }
+                    
+                    try {
+                      const response = await apiClient.delete('/auth/dev/delete-user')
+                      if (!response.error) {
+                        alert('✅ Usuario eliminado. Serás redirigido al login.')
+                        // Redirect to sign out and then to home
+                        window.location.href = '/auth/sign-in'
+                      } else {
+                        alert(`❌ Error: ${response.error}`)
+                      }
+                    } catch (error) {
+                      alert(`❌ Error eliminando usuario: ${error.message}`)
+                    }
+                  }}
+                >
+                  🗑️ Eliminar Usuario Completamente
+                </Button>
+                
+                <p className="text-xs text-red-500">
+                  ⚠️ El botón rojo elimina TODO: usuario, documentos, suscripciones, etc.
+                </p>
+              </div>
             </div>
           </div>
         </div>

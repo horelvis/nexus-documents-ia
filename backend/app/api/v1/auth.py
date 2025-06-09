@@ -160,15 +160,63 @@ async def reset_onboarding(
         # Reset onboarding status
         current_user.onboarding_completed = False
         
+        # Delete existing profile if it exists
+        existing_profile = db.query(UserProfile).filter(
+            UserProfile.user_id == current_user.id
+        ).first()
+        
+        if existing_profile:
+            db.delete(existing_profile)
+            logger.info(f"🗑️ Deleted existing profile for user: {current_user.id}")
+        
         db.commit()
         db.refresh(current_user)
         
-        logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
+        logger.info(f"🔄 Onboarding and profile reset for user: {current_user.id}")
         return current_user
         
     except Exception as e:
         logger.error(f"Error resetting onboarding: {str(e)}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error resetting onboarding"
+        )
+
+@router.delete("/dev/delete-user", status_code=204)
+async def delete_user_dev(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> None:
+    """
+    DEVELOPMENT ONLY: Delete current user completely from database.
+    WARNING: This will delete ALL user data including documents, subscriptions, etc.
+    """
+    try:
+        logger.warning(f"🚨 [DEV] Deleting user completely: {current_user.id} - {current_user.email}")
+        
+        # Delete all related data (cascade should handle most, but let's be explicit)
+        # Delete user profile
+        db.query(UserProfile).filter(UserProfile.user_id == current_user.id).delete()
+        
+        # Delete user subscriptions
+        from app.db.models import Subscription
+        db.query(Subscription).filter(Subscription.user_id == current_user.id).delete()
+        
+        # Delete user image
+        from app.db.models import UserImage
+        db.query(UserImage).filter(UserImage.user_id == current_user.id).delete()
+        
+        # Delete the user (this should cascade delete other relationships)
+        db.delete(current_user)
+        
+        db.commit()
+        logger.info(f"✅ [DEV] User {current_user.email} deleted completely")
+        
+    except Exception as e:
+        logger.error(f"❌ [DEV] Error deleting user: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting user"
         )
