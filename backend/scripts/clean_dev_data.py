@@ -12,7 +12,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 from app.db.database import get_db
-from app.db.models import User, UserProfile, Subscription, UserImage, Document, Tenant
+from app.db.models import User, Subscription, UserImage, Document, Tenant
 
 
 def clean_user_by_email(db: Session, email: str) -> bool:
@@ -27,7 +27,6 @@ def clean_user_by_email(db: Session, email: str) -> bool:
     
     try:
         # Eliminar datos relacionados explícitamente
-        db.query(UserProfile).filter(UserProfile.user_id == user.id).delete()
         db.query(Subscription).filter(Subscription.user_id == user.id).delete()
         db.query(UserImage).filter(UserImage.user_id == user.id).delete()
         
@@ -61,11 +60,7 @@ def reset_user_onboarding(db: Session, email: str) -> bool:
         # Resetear onboarding
         user.onboarding_completed = False
         
-        # Eliminar perfil existente
-        existing_profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
-        if existing_profile:
-            db.delete(existing_profile)
-            print(f"🗑️ Perfil eliminado")
+        # Reset completo del onboarding
         
         db.commit()
         
@@ -91,7 +86,6 @@ def list_users(db: Session, tenant_name: Optional[str] = None):
     print("-" * 80)
     
     for user in users:
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
         subscription = db.query(Subscription).filter(Subscription.user_id == user.id).first()
         
         print(f"Email: {user.email}")
@@ -99,10 +93,7 @@ def list_users(db: Session, tenant_name: Optional[str] = None):
         print(f"  Nombre: {user.full_name or 'N/A'}")
         print(f"  Onboarding: {'✅' if user.onboarding_completed else '❌'}")
         print(f"  Clerk ID: {user.clerk_user_id or 'N/A'}")
-        print(f"  Perfil: {'✅' if profile else '❌'}")
-        if profile:
-            print(f"    Plan: {profile.selected_plan or 'N/A'}")
-            print(f"    Empresa: {profile.company_name or 'N/A'}")
+        print(f"  Stripe Customer: {user.stripe_customer_id or 'N/A'}")
         print(f"  Suscripción: {'✅' if subscription else '❌'}")
         if subscription:
             print(f"    Estado: {subscription.status}")
@@ -128,7 +119,6 @@ def clean_all_dev_data(db: Session, confirm: bool = False):
             print(f"Eliminando: {user.email}")
             
             # Eliminar datos relacionados
-            db.query(UserProfile).filter(UserProfile.user_id == user.id).delete()
             db.query(Subscription).filter(Subscription.user_id == user.id).delete()
             db.query(UserImage).filter(UserImage.user_id == user.id).delete()
             db.query(Document).filter(Document.created_by == user.id).delete()

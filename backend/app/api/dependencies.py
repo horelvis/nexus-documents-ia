@@ -158,3 +158,106 @@ def get_current_active_superuser(
             detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+def require_subscription_permission(permission: str):
+    """
+    Dependencia para verificar permisos de suscripción.
+    
+    Args:
+        permission: El permiso a verificar (ej: 'can_upload_documents', 'can_use_chat')
+    
+    Returns:
+        Function que puede ser usada como dependencia en FastAPI
+    """
+    def permission_checker(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ) -> User:
+        from app.services.subscription_service import SubscriptionService
+        
+        can_perform, error_message = SubscriptionService.can_user_perform_action(
+            db, current_user, permission
+        )
+        
+        if not can_perform:
+            # Obtener información de suscripción para personalizar la respuesta
+            subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+            
+            if subscription_status["is_limited"]:
+                # Usuario con suscripción expirada
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "message": error_message,
+                        "subscription_status": subscription_status,
+                        "action_required": "reactivate_subscription"
+                    }
+                )
+            else:
+                # Usuario necesita upgrade de plan
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "message": error_message,
+                        "subscription_status": subscription_status,
+                        "action_required": "upgrade_plan"
+                    }
+                )
+        
+        return current_user
+    
+    return permission_checker
+
+
+def require_document_upload_permission(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Dependencia específica para verificar permisos de subida de documentos.
+    Incluye verificación de límites de documentos.
+    """
+    from app.services.subscription_service import SubscriptionService
+    
+    can_upload, error_message = SubscriptionService.can_user_upload_document(db, current_user)
+    
+    if not can_upload:
+        subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+        
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["is_limited"] else status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": error_message,
+                "subscription_status": subscription_status,
+                "action_required": "upgrade_plan" if not subscription_status["is_limited"] else "reactivate_subscription",
+                "current_document_count": SubscriptionService.get_document_count_for_user(db, current_user),
+                "max_documents": subscription_status["permissions"]["max_documents"]
+            }
+        )
+    
+    return current_user
+
+
+def require_active_subscription(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Dependencia para verificar que el usuario tenga una suscripción activa (no limitada).
+    """
+    from app.services.subscription_service import SubscriptionService
+    
+    subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+    
+    if subscription_status["is_limited"]:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "message": subscription_status["message"],
+                "subscription_status": subscription_status,
+                "action_required": "reactivate_subscription"
+            }
+        )
+    
+    return current_user

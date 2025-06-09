@@ -240,14 +240,17 @@ async def get_current_subscription(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Obtiene la suscripción actual del usuario.
-    Datos mínimos necesarios para mostrar en el frontend.
+    Obtiene la suscripción actual del usuario con estado detallado y permisos.
     """
     try:
-        # Buscar suscripción en nuestra base de datos
+        from app.services.subscription_service import SubscriptionService
+        
+        # Obtener estado completo de la suscripción
+        subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+        
+        # Buscar datos de suscripción en la base de datos
         subscription = db.query(Subscription).filter(
-            Subscription.user_id == current_user.id,
-            Subscription.status.in_(["active", "past_due", "unpaid"])
+            Subscription.user_id == current_user.id
         ).first()
 
         if not subscription:
@@ -260,10 +263,12 @@ async def get_current_subscription(
                 "current_period_start": int(time.time()),
                 "current_period_end": int(time.time() + (30 * 24 * 60 * 60)),
                 "cancel_at_period_end": False,
-                "customer_id": current_user.stripe_customer_id
+                "customer_id": current_user.stripe_customer_id,
+                # Información adicional del servicio de suscripciones
+                "subscription_status": subscription_status
             }
 
-        # Retornar datos de la suscripción
+        # Retornar datos completos de la suscripción
         return {
             "id": subscription.stripe_subscription_id,
             "plan_id": subscription.stripe_plan_id,
@@ -272,7 +277,9 @@ async def get_current_subscription(
             "current_period_start": int(subscription.current_period_start.timestamp()),
             "current_period_end": int(subscription.current_period_end.timestamp()),
             "cancel_at_period_end": subscription.cancel_at_period_end,
-            "customer_id": current_user.stripe_customer_id
+            "customer_id": current_user.stripe_customer_id,
+            # Información adicional del servicio de suscripciones
+            "subscription_status": subscription_status
         }
 
     except Exception as e:

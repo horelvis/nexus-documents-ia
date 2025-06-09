@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
-from app.api.dependencies import get_current_user, get_current_tenant_id
+from app.api.dependencies import get_current_user, get_current_tenant_id, require_document_upload_permission
 from app.db.models import User
 from app.schemas.document import (
     Document, DocumentDetail,
@@ -48,7 +48,7 @@ async def create_document(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_document_upload_permission),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """
@@ -71,7 +71,7 @@ async def create_document(
 @router.get("/upload-url", response_model=SignedUrlResponse)
 async def get_upload_url(
     request: UploadRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_document_upload_permission),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """

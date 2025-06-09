@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 import json
 
-from app.api.dependencies import get_current_active_user
+from app.api.dependencies import get_current_active_user, require_subscription_permission
 from app.db.models import User
 from app.services.langroid_client import langroid_client
 
@@ -120,7 +120,7 @@ async def chat_with_agent(
     message: str,
     conversation_id: Optional[str] = None,
     context: Dict[str, Any] = None,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_subscription_permission("can_use_agents"))
 ):
     """Chat con un agente (streaming)"""
     async def event_stream():

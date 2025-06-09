@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingComplete
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
-from app.db.models import User, UserProfile
+from app.db.models import User
 
 import logging
 
@@ -85,8 +85,8 @@ async def complete_onboarding(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Mark user onboarding as completed with additional profile data.
-    Creates or updates the user profile with extended information.
+    Mark user onboarding as completed. 
+    Datos de perfil se obtienen de Clerk y Stripe, no necesitamos duplicarlos.
     """
     try:
         # Update user onboarding status
@@ -97,41 +97,14 @@ async def complete_onboarding(
             if onboarding_data.first_name and onboarding_data.last_name:
                 current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
             
-            # Create or update user profile with extended data
-            existing_profile = db.query(UserProfile).filter(
-                UserProfile.user_id == current_user.id
-            ).first()
-            
-            if existing_profile:
-                # Update existing profile
-                logger.info(f"🔄 Updating existing profile for user: {current_user.id}")
-                existing_profile.phone = onboarding_data.phone
-                existing_profile.role = onboarding_data.role
-                existing_profile.company_name = onboarding_data.company_name
-                existing_profile.industry = onboarding_data.industry
-                existing_profile.team_size = onboarding_data.team_size
-                existing_profile.use_case = onboarding_data.use_case
-                existing_profile.selected_plan = onboarding_data.selected_plan
-                existing_profile.payment_interval = onboarding_data.payment_interval
-                existing_profile.onboarding_step = onboarding_data.onboarding_step
-            else:
-                # Create new profile
-                logger.info(f"✨ Creating new profile for user: {current_user.id}")
-                new_profile = UserProfile(
-                    user_id=current_user.id,
-                    phone=onboarding_data.phone,
-                    role=onboarding_data.role,
-                    company_name=onboarding_data.company_name,
-                    industry=onboarding_data.industry,
-                    team_size=onboarding_data.team_size,
-                    use_case=onboarding_data.use_case,
-                    selected_plan=onboarding_data.selected_plan,
-                    payment_interval=onboarding_data.payment_interval,
-                    onboarding_step=onboarding_data.onboarding_step
-                )
-                db.add(new_profile)
-            
-            logger.info(f"📝 Saved onboarding profile data for user {current_user.id}: plan={onboarding_data.selected_plan}, step={onboarding_data.onboarding_step}")
+            # Solo loguear datos adicionales para referencia, no guardarlos
+            # Los datos de perfil se obtienen de Clerk
+            # Los datos de plan se obtienen de Stripe
+            logger.info(f"📝 Onboarding completed for user {current_user.id}")
+            logger.info(f"  - Plan seleccionado: {onboarding_data.selected_plan}")
+            logger.info(f"  - Empresa: {onboarding_data.company_name}")
+            logger.info(f"  - Industria: {onboarding_data.industry}")
+            logger.info(f"  - Datos disponibles en Clerk y Stripe")
         
         db.commit()
         db.refresh(current_user)
@@ -160,19 +133,10 @@ async def reset_onboarding(
         # Reset onboarding status
         current_user.onboarding_completed = False
         
-        # Delete existing profile if it exists
-        existing_profile = db.query(UserProfile).filter(
-            UserProfile.user_id == current_user.id
-        ).first()
-        
-        if existing_profile:
-            db.delete(existing_profile)
-            logger.info(f"🗑️ Deleted existing profile for user: {current_user.id}")
-        
         db.commit()
         db.refresh(current_user)
         
-        logger.info(f"🔄 Onboarding and profile reset for user: {current_user.id}")
+        logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
         return current_user
         
     except Exception as e:
@@ -196,9 +160,6 @@ async def delete_user_dev(
         logger.warning(f"🚨 [DEV] Deleting user completely: {current_user.id} - {current_user.email}")
         
         # Delete all related data (cascade should handle most, but let's be explicit)
-        # Delete user profile
-        db.query(UserProfile).filter(UserProfile.user_id == current_user.id).delete()
-        
         # Delete user subscriptions
         from app.db.models import Subscription
         db.query(Subscription).filter(Subscription.user_id == current_user.id).delete()
@@ -207,7 +168,7 @@ async def delete_user_dev(
         from app.db.models import UserImage
         db.query(UserImage).filter(UserImage.user_id == current_user.id).delete()
         
-        # Delete the user (this should cascade delete other relationships)
+        # Delete the user (this should cascade delete other relationships like documents)
         db.delete(current_user)
         
         db.commit()

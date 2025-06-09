@@ -141,7 +141,7 @@ class User(Base):
     # Relaciones
     tenant = relationship("Tenant", back_populates="users")
     image = relationship("UserImage", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    # profile eliminado - datos se obtienen de Clerk y Stripe
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
@@ -172,37 +172,8 @@ class UserImage(Base):
     user = relationship("User", back_populates="image")
 
 
-class UserProfile(Base):
-    """Extended user profile information from onboarding"""
-    __tablename__ = "user_profiles"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
-    
-    # Personal information
-    phone = Column(String(50), nullable=True)
-    role = Column(String(100), nullable=True)
-    
-    # Company information
-    company_name = Column(String(255), nullable=True)
-    industry = Column(String(100), nullable=True)
-    team_size = Column(String(50), nullable=True)
-    use_case = Column(Text, nullable=True)
-    
-    # Plan and payment information
-    selected_plan = Column(String(50), nullable=True)
-    payment_interval = Column(String(20), nullable=True)  # 'month' or 'year'
-    onboarding_step = Column(String(50), nullable=True)  # Track onboarding progress
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    user = relationship("User", back_populates="profile")
-    
-    __table_args__ = (
-        Index('idx_user_profiles_user_id', 'user_id'),
-        Index('idx_user_profiles_selected_plan', 'selected_plan'),
-    )
+# UserProfile eliminado - Los datos de perfil se obtienen de Clerk y Stripe
+# No necesitamos duplicar datos entre servicios externos y nuestra DB
 
 
 class Role(Base):

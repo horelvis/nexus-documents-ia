@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from uuid import UUID
 import logging
-from app.api.dependencies import get_current_user, get_current_tenant_id
+from app.api.dependencies import get_current_user, get_current_tenant_id, require_subscription_permission
 from app.db.database import get_db
 from app.db.models import User
 from app.schemas.document import ChatMessage
@@ -18,7 +18,7 @@ router = APIRouter()
 async def chat_with_documents(
     message: ChatMessage,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_subscription_permission("can_use_chat")),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """
