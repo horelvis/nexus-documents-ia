@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
@@ -50,12 +49,30 @@ export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardin
     clerkUser, 
     syncUserWithBackend, 
     markOnboardingComplete,
-    backendUser 
+    backendUser,
+    refetchUser
   } = useUserContext()
 
   const [currentStep, setCurrentStep] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [syncCompleted, setSyncCompleted] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncStarted, setSyncStarted] = useState(false)
+  
+  // Debug logging for step changes
+  useEffect(() => {
+    console.log('📊 ExpressOnboarding State:', {
+      currentStep,
+      isProcessing,
+      syncCompleted,
+      syncStarted,
+      backendUser: backendUser?.tenant_id,
+      clerkUser: !!clerkUser,
+      clerkUserId: clerkUser?.id,
+      clerkUserLoaded: !!clerkUser,
+      searchParams: searchParams.toString()
+    })
+  }, [currentStep, isProcessing, syncCompleted, syncStarted, backendUser, clerkUser, searchParams])
 
   const form = useForm<CompanyFormData>({
     resolver: zodResolver(companyFormSchema),
@@ -91,46 +108,112 @@ export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardin
   // Auto-sync user when component mounts
   useEffect(() => {
     const performSync = async () => {
-      if (clerkUser && !syncCompleted) {
+      console.log('🔄 performSync called with:', {
+        clerkUser: !!clerkUser,
+        syncCompleted,
+        currentStep,
+        isProcessing
+      })
+      
+      // Allow sync if we have clerkUser OR if we have checkoutData (user paid via Stripe)
+      const canSync = (clerkUser || checkoutData) && !syncCompleted && currentStep === 0 && !syncStarted
+      
+      console.log('🔍 Sync conditions:', {
+        clerkUser: !!clerkUser,
+        checkoutData: !!checkoutData,
+        syncCompleted,
+        currentStep,
+        syncStarted,
+        canSync
+      })
+      
+      if (canSync) {
+        console.log('🚀 Starting Express Onboarding sync...')
+        setSyncStarted(true)
         try {
           setIsProcessing(true)
           
           // Get Stripe data from URL params or props
           const sessionId = searchParams.get('session_id')
+          console.log('📋 Session ID:', sessionId)
+          console.log('📋 Checkout data:', checkoutData)
+          
           const stripeData = sessionId ? {
             sessionId,
             customerId: checkoutData ? 'pending' : undefined, // Will be fetched from session
             planId: checkoutData?.plan_id
           } : undefined
 
-          await syncUserWithBackend(stripeData)
+          console.log('📤 Syncing with backend, stripe data:', stripeData)
+          
+          if (clerkUser) {
+            // Normal sync if we have clerkUser
+            const result = await syncUserWithBackend()
+            console.log('📥 Sync result:', result)
+          } else {
+            // If no clerkUser but we have checkoutData, skip sync and continue
+            console.log('⚠️ No clerkUser available, but we have checkoutData - skipping sync')
+            await new Promise(resolve => setTimeout(resolve, 1000)) // Small delay for UX
+          }
+          
+          console.log('✅ Sync completed, moving to step 1')
           setSyncCompleted(true)
           setCurrentStep(1)
-        } catch (error) {
-          console.error('Sync error:', error)
-        } finally {
           setIsProcessing(false)
+        } catch (error) {
+          console.error('💥 Sync error:', error)
+          const errorMessage = error instanceof Error ? error.message : 'Error de sincronización'
+          setSyncError(errorMessage)
+          setIsProcessing(false)
+          // Don't advance on error - let user see what happened
         }
       }
     }
 
     performSync()
-  }, [clerkUser, syncCompleted, searchParams, checkoutData, syncUserWithBackend])
+  }, [clerkUser, syncCompleted, syncStarted, searchParams, checkoutData, syncUserWithBackend, currentStep, isProcessing])
+
 
   const handleCompanySubmit = async (data: CompanyFormData) => {
     try {
       setIsProcessing(true)
       
-      await markOnboardingComplete({
-        company_name: data.companyName,
-        industry: data.industry,
-        team_size: data.teamSize,
-        use_case: data.useCase,
-      })
+      if (clerkUser) {
+        const onboardingData = {
+          company_name: data.companyName,
+          industry: data.industry,
+          team_size: data.teamSize,
+          use_case: data.useCase,
+        }
+        console.log('📤 Completing onboarding with data:', onboardingData)
+        const success = await markOnboardingComplete(onboardingData)
+        console.log('📥 Onboarding completion result:', success)
+        
+        if (!success) {
+          throw new Error('Failed to complete onboarding')
+        }
+        
+        // Refetch user data to ensure onboarding status is updated
+        console.log('🔄 Refreshing user data after onboarding completion')
+        await refetchUser()
+      } else {
+        // If no clerkUser, just continue to completion
+        console.log('⚠️ No clerkUser - skipping backend onboarding completion')
+      }
       
       setCurrentStep(2)
+      
+      // Auto-redirect after 2 seconds
+      setTimeout(() => {
+        handleGoToDashboard()
+      }, 2000)
+      
     } catch (error) {
       console.error('Error completing onboarding:', error)
+      // Even if onboarding fails, redirect to dashboard
+      setTimeout(() => {
+        handleGoToDashboard()
+      }, 2000)
     } finally {
       setIsProcessing(false)
     }
@@ -138,12 +221,20 @@ export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardin
 
   const handleGoToDashboard = () => {
     const tenantId = backendUser?.tenant_id
+    console.log('🚀 Attempting to go to dashboard')
+    console.log('👤 Backend user:', backendUser)
+    console.log('🏢 Tenant ID:', tenantId)
+    console.log('📞 onComplete callback:', !!onComplete)
+    
     if (onComplete) {
+      console.log('✅ Using onComplete callback with tenantId:', tenantId)
       onComplete(tenantId)
     } else {
       if (tenantId) {
+        console.log('✅ Redirecting to tenant dashboard:', `/${tenantId}/dashboard`)
         router.push(`/${tenantId}/dashboard`)
       } else {
+        console.log('⚠️ No tenant ID, redirecting to general dashboard')
         router.push('/dashboard')
       }
     }
@@ -241,17 +332,119 @@ export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardin
               {/* Step 0: User Sync */}
               {currentStep === 0 && (
                 <div className="text-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600 mb-4" />
-                  <p className="text-lg font-medium mb-2">Configurando tu cuenta premium...</p>
-                  <p className="text-gray-600 dark:text-gray-300">
-                    Estamos preparando todo para que puedas aprovechar al máximo Nexus
-                  </p>
+                  {!clerkUser && checkoutData ? (
+                    <>
+                      <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <User className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <p className="text-lg font-medium mb-2 text-blue-600 dark:text-blue-400">Completa tu registro</p>
+                      <p className="text-gray-600 dark:text-gray-300 mb-6">
+                        ¡Tu pago fue exitoso! Ahora necesitas completar tu registro para acceder a tu cuenta premium.
+                      </p>
+                      <div className="mt-6 space-y-3">
+                        <Button 
+                          onClick={() => {
+                            console.log('🔑 Redirecting to sign up')
+                            // Preserve the session_id when redirecting to sign up
+                            const sessionId = searchParams.get('session_id')
+                            const redirectUrl = sessionId 
+                              ? `/auth/sign-up?redirect_url=${encodeURIComponent(window.location.href)}`
+                              : '/auth/sign-up'
+                            router.push(redirectUrl)
+                          }}
+                          className="w-full"
+                        >
+                          Completar registro
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => {
+                            console.log('🔑 Redirecting to sign in')
+                            const sessionId = searchParams.get('session_id')
+                            const redirectUrl = sessionId 
+                              ? `/auth/sign-in?redirect_url=${encodeURIComponent(window.location.href)}`
+                              : '/auth/sign-in'
+                            router.push(redirectUrl)
+                          }}
+                          className="w-full"
+                        >
+                          Ya tengo cuenta - Iniciar sesión
+                        </Button>
+                      </div>
+                    </>
+                  ) : !clerkUser && !checkoutData ? (
+                    <>
+                      <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span className="text-yellow-600 dark:text-yellow-400 text-2xl">⚠️</span>
+                      </div>
+                      <p className="text-lg font-medium mb-2 text-yellow-600 dark:text-yellow-400">Sesión requerida</p>
+                      <p className="text-gray-600 dark:text-gray-300 mb-6">
+                        Necesitas iniciar sesión para continuar con el onboarding.
+                      </p>
+                      <div className="mt-6">
+                        <Button 
+                          onClick={() => router.push('/auth/sign-in')}
+                          className="w-full"
+                        >
+                          Iniciar sesión
+                        </Button>
+                      </div>
+                    </>
+                  ) : syncError ? (
+                    <>
+                      <div className="w-16 h-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span className="text-red-600 dark:text-red-400 text-2xl">⚠️</span>
+                      </div>
+                      <p className="text-lg font-medium mb-2 text-red-600 dark:text-red-400">Error de configuración</p>
+                      <p className="text-gray-600 dark:text-gray-300 mb-6">
+                        {syncError}
+                      </p>
+                      <div className="mt-6 space-y-3">
+                        <Button 
+                          onClick={() => {
+                            setSyncError(null)
+                            setSyncCompleted(false)
+                            setSyncStarted(false)
+                            setIsProcessing(false)
+                            // Trigger retry
+                          }}
+                          className="w-full"
+                        >
+                          Reintentar
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => {
+                            console.log('⚡ Manual continue after error')
+                            setSyncCompleted(true)
+                            setCurrentStep(1)
+                            setSyncError(null)
+                          }}
+                          className="w-full"
+                        >
+                          Continuar de todas formas
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600 mb-4" />
+                      <p className="text-lg font-medium mb-2">Configurando tu cuenta premium...</p>
+                      <p className="text-gray-600 dark:text-gray-300">
+                        Estamos preparando todo para que puedas aprovechar al máximo Nexus
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 
               {/* Step 1: Company Data */}
               {currentStep === 1 && (
                 <div className="space-y-6">
+                  {/* Debug info for step 1 */}
+                  <div className="text-xs text-gray-500 p-2 bg-gray-100 rounded mb-4">
+                    Debug: Step 1 - isProcessing: {isProcessing.toString()}, syncCompleted: {syncCompleted.toString()}
+                  </div>
                   <Form {...form}>
                     <form onSubmit={form.handleSubmit(handleCompanySubmit)} className="space-y-4">
                       <FormField

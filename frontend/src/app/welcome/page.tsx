@@ -1,6 +1,6 @@
 'use client'
 
-import { ModernOnboarding } from "@/components/auth"
+import { NewUserOnboarding } from "@/components/auth"
 import { ExpressOnboarding } from "@/components/auth/express-onboarding"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
@@ -25,23 +25,31 @@ function WelcomeContent() {
   
   useEffect(() => {
     if (sessionId) {
+      console.log('🔍 Fetching checkout data for session:', sessionId)
+      
       const fetchCheckoutData = async () => {
         try {
           setIsLoadingCheckout(true)
           const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
           const response = await fetch(`${API_BASE}/api/v1/stripe/checkout-session/${sessionId}`)
           
+          console.log('📡 Checkout data response status:', response.status)
+          
           if (response.ok) {
             const data = await response.json()
+            console.log('✅ Checkout data received:', data)
+            
             setCheckoutData({
               plan_id: data.plan_id,
               customer_email: data.customer_email,
               amount_total: data.amount_total,
               currency: data.currency,
             })
+          } else {
+            console.error('❌ Failed to fetch checkout data:', response.status)
           }
         } catch (error) {
-          console.error('Error fetching checkout data:', error)
+          console.error('💥 Error fetching checkout data:', error)
         } finally {
           setIsLoadingCheckout(false)
         }
@@ -71,13 +79,20 @@ function WelcomeContent() {
     )
   }
 
+  console.log('🎯 Render decision:')
+  console.log('  - fromCheckout:', fromCheckout)
+  console.log('  - checkoutData:', checkoutData)
+  console.log('  - sessionId:', sessionId)
+
   // Use ExpressOnboarding for paid users
   if (fromCheckout && checkoutData) {
+    console.log('🏃‍♂️ Using ExpressOnboarding')
     return <ExpressOnboarding checkoutData={checkoutData} onComplete={handleOnboardingComplete} />
   }
 
-  // Use regular onboarding for free users
-  return <ModernOnboarding onComplete={handleOnboardingComplete} />
+  // Use new structured onboarding for free users
+  console.log('👤 Using NewUserOnboarding (structured flow)')
+  return <NewUserOnboarding onComplete={handleOnboardingComplete} />
 }
 
 export default function WelcomePage() {

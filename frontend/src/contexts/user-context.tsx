@@ -99,15 +99,16 @@ export function UserProvider({ children }: UserProviderProps) {
   // Mark onboarding as completed
   const markOnboardingComplete = async (onboardingData?: any): Promise<boolean> => {
     try {
-      const payload = onboardingData ? { company_profile: onboardingData } : undefined
-      const response = await apiClient.post('/auth/complete-onboarding', payload)
+      // Send the onboarding data directly as the request body
+      const response = await apiClient.post('/auth/complete-onboarding', onboardingData)
       
       if (response.error) {
         throw new Error(response.error)
       }
 
-      // Update local state
-      setBackendUser(prev => prev ? { ...prev, onboarding_completed: true } : null)
+      // Update local state with the returned user data
+      const updatedUser: BackendUser = response.data
+      setBackendUser(updatedUser)
       setOnboarding(prev => ({
         ...prev,
         needsOnboarding: false

@@ -160,7 +160,7 @@ export interface UserContextType {
   
   // Actions
   syncUserWithBackend: () => Promise<void>
-  markOnboardingComplete: () => Promise<boolean>
+  markOnboardingComplete: (onboardingData?: any) => Promise<boolean>
   checkOnboardingStatus: () => Promise<void>
   refetchUser: () => Promise<void>
 }

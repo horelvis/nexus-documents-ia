@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.user import UserCreate, UserResponse, UserSync
+from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingComplete
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
 from app.db.models import User
@@ -80,15 +80,26 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
+    onboarding_data: OnboardingComplete = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Mark user onboarding as completed.
+    Mark user onboarding as completed with optional additional data.
     """
     try:
         # Update user onboarding status
         current_user.onboarding_completed = True
+        
+        # Update user with additional onboarding data if provided
+        if onboarding_data:
+            if onboarding_data.first_name and onboarding_data.last_name:
+                current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
+            
+            # Store additional data in user profile (could be extended to store in separate profile table)
+            # For now, we'll just log this data - you can extend this to store in user metadata
+            logger.info(f"📝 Onboarding data for user {current_user.id}: {onboarding_data.dict()}")
+        
         db.commit()
         db.refresh(current_user)
         

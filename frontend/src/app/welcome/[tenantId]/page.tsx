@@ -1,6 +1,6 @@
 'use client'
 
-import { ModernOnboarding } from "@/components/auth"
+import { NewUserOnboarding } from "@/components/auth"
 import { ExpressOnboarding } from "@/components/auth/express-onboarding"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
@@ -24,6 +24,13 @@ function WelcomeContent() {
   // Check if user comes from Stripe checkout
   const sessionId = searchParams.get('session_id')
   const fromCheckout = !!sessionId
+  
+  console.log('🔍 WelcomeContent Debug:')
+  console.log('  - tenantId from params:', tenantId)
+  console.log('  - sessionId:', sessionId)
+  console.log('  - fromCheckout:', fromCheckout)
+  console.log('  - checkoutData:', checkoutData)
+  console.log('  - isLoadingCheckout:', isLoadingCheckout)
   
   useEffect(() => {
     if (sessionId) {
@@ -52,8 +59,10 @@ function WelcomeContent() {
     }
   }, [sessionId])
   
-  const handleOnboardingComplete = () => {
-    router.push(`/${tenantId}/dashboard`)
+  const handleOnboardingComplete = (completedTenantId?: string) => {
+    const targetTenantId = completedTenantId || tenantId
+    console.log('🎯 Redirecting to dashboard with tenantId:', targetTenantId)
+    router.push(`/${targetTenantId}/dashboard`)
   }
 
   // Show loading while fetching checkout data
@@ -72,11 +81,11 @@ function WelcomeContent() {
 
   // Use ExpressOnboarding for paid users
   if (fromCheckout && checkoutData) {
-    return <ExpressOnboarding checkoutData={checkoutData} />
+    return <ExpressOnboarding checkoutData={checkoutData} onComplete={handleOnboardingComplete} />
   }
 
-  // Use regular onboarding for free users
-  return <ModernOnboarding onComplete={handleOnboardingComplete} />
+  // Use new structured onboarding for free users
+  return <NewUserOnboarding onComplete={handleOnboardingComplete} />
 }
 
 export default function WelcomePage() {

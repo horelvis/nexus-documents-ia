@@ -84,7 +84,7 @@ async def create_checkout_session(
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+            success_url=f"{settings.FRONTEND_URL}/welcome?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.FRONTEND_URL}/pricing",
             metadata={
                 'plan_id': request.planId,

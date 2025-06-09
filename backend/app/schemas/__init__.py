@@ -1,7 +1,7 @@
 # Auth
 from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm, LoginRequest
 
-# Billing
+# Billing - Solo Subscription schemas
 from .billing import (
     SubscriptionBase, SubscriptionCreate, SubscriptionUpdate, Subscription
 )
@@ -50,7 +50,7 @@ __all__ = [
     "PasswordResetRequest",
     "PasswordResetConfirm",
     
-    # Billing
+    # Billing - Solo Subscriptions
     "SubscriptionBase",
     "SubscriptionCreate",
     "SubscriptionUpdate",

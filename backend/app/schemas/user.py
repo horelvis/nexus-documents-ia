@@ -56,6 +56,18 @@ class UserSync(BaseModel):
     stripe_session_id: Optional[str] = Field(None, example="cs_1234567890")
     subscription_data: Optional[StripeSubscriptionData] = None
 
+# Schema for completing onboarding with additional user data
+class OnboardingComplete(BaseModel):
+    first_name: Optional[str] = Field(None, example="John")
+    last_name: Optional[str] = Field(None, example="Doe")
+    phone: Optional[str] = Field(None, example="+34 123 456 789")
+    role: Optional[str] = Field(None, example="CEO")
+    company_name: Optional[str] = Field(None, example="Mi Empresa SL")
+    industry: Optional[str] = Field(None, example="Tecnología")
+    team_size: Optional[str] = Field(None, example="1-10")
+    use_case: Optional[str] = Field(None, example="Gestión documental")
+    selected_plan: Optional[str] = Field(None, example="pro")
+
 # Schema for reading/returning user data (response model)
 class UserRead(UserBase):
     id: uuid.UUID
