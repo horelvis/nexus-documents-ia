@@ -121,6 +121,30 @@ export function UserProvider({ children }: UserProviderProps) {
     }
   }
 
+  // Reset onboarding (for development/testing)
+  const resetOnboarding = async (): Promise<boolean> => {
+    try {
+      const response = await apiClient.post('/auth/reset-onboarding')
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      // Update local state
+      const updatedUser: BackendUser = response.data
+      setBackendUser(updatedUser)
+      setOnboarding(prev => ({
+        ...prev,
+        needsOnboarding: true
+      }))
+      
+      return true
+    } catch (error) {
+      console.error('Error resetting onboarding:', error)
+      return false
+    }
+  }
+
   // Check onboarding status
   const checkOnboardingStatus = async (): Promise<void> => {
     if (!clerkUser) return
@@ -232,6 +256,7 @@ export function UserProvider({ children }: UserProviderProps) {
     // Actions
     syncUserWithBackend,
     markOnboardingComplete,
+    resetOnboarding,
     checkOnboardingStatus,
     refetchUser
   }

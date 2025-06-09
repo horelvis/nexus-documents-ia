@@ -22,8 +22,12 @@ export function PricingSection() {
         router.push('/auth/sign-up?plan=free')
       }
     } else {
-      // Paid plans: always go to pricing page for full experience
-      router.push('/pricing')
+      // Paid plans: go to signup to start onboarding flow with plan selection
+      if (isSignedIn) {
+        router.push('/dashboard')
+      } else {
+        router.push('/auth/sign-up')
+      }
     }
   }
 

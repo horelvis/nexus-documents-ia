@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingComplete
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
-from app.db.models import User
+from app.db.models import User, UserProfile
 
 import logging
 
@@ -85,20 +85,53 @@ async def complete_onboarding(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Mark user onboarding as completed with optional additional data.
+    Mark user onboarding as completed with additional profile data.
+    Creates or updates the user profile with extended information.
     """
     try:
         # Update user onboarding status
         current_user.onboarding_completed = True
         
-        # Update user with additional onboarding data if provided
+        # Update user with basic information if provided
         if onboarding_data:
             if onboarding_data.first_name and onboarding_data.last_name:
                 current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
             
-            # Store additional data in user profile (could be extended to store in separate profile table)
-            # For now, we'll just log this data - you can extend this to store in user metadata
-            logger.info(f"📝 Onboarding data for user {current_user.id}: {onboarding_data.dict()}")
+            # Create or update user profile with extended data
+            existing_profile = db.query(UserProfile).filter(
+                UserProfile.user_id == current_user.id
+            ).first()
+            
+            if existing_profile:
+                # Update existing profile
+                logger.info(f"🔄 Updating existing profile for user: {current_user.id}")
+                existing_profile.phone = onboarding_data.phone
+                existing_profile.role = onboarding_data.role
+                existing_profile.company_name = onboarding_data.company_name
+                existing_profile.industry = onboarding_data.industry
+                existing_profile.team_size = onboarding_data.team_size
+                existing_profile.use_case = onboarding_data.use_case
+                existing_profile.selected_plan = onboarding_data.selected_plan
+                existing_profile.payment_interval = onboarding_data.payment_interval
+                existing_profile.onboarding_step = onboarding_data.onboarding_step
+            else:
+                # Create new profile
+                logger.info(f"✨ Creating new profile for user: {current_user.id}")
+                new_profile = UserProfile(
+                    user_id=current_user.id,
+                    phone=onboarding_data.phone,
+                    role=onboarding_data.role,
+                    company_name=onboarding_data.company_name,
+                    industry=onboarding_data.industry,
+                    team_size=onboarding_data.team_size,
+                    use_case=onboarding_data.use_case,
+                    selected_plan=onboarding_data.selected_plan,
+                    payment_interval=onboarding_data.payment_interval,
+                    onboarding_step=onboarding_data.onboarding_step
+                )
+                db.add(new_profile)
+            
+            logger.info(f"📝 Saved onboarding profile data for user {current_user.id}: plan={onboarding_data.selected_plan}, step={onboarding_data.onboarding_step}")
         
         db.commit()
         db.refresh(current_user)
@@ -108,7 +141,34 @@ async def complete_onboarding(
         
     except Exception as e:
         logger.error(f"Error completing onboarding: {str(e)}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error completing onboarding"
+        )
+
+@router.post("/reset-onboarding", response_model=UserResponse)
+async def reset_onboarding(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Reset user onboarding status for testing the new flow.
+    TEMPORARY ENDPOINT FOR DEVELOPMENT.
+    """
+    try:
+        # Reset onboarding status
+        current_user.onboarding_completed = False
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
+        return current_user
+        
+    except Exception as e:
+        logger.error(f"Error resetting onboarding: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error resetting onboarding"
         )

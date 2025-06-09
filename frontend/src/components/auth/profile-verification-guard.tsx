@@ -19,10 +19,9 @@ import {
 } from 'lucide-react'
 
 interface ProfileVerificationStatus {
-  hasSubscription: boolean
-  subscriptionStatus?: string
-  planName?: string
-  hasCompletedOnboarding: boolean
+  hasCompletedNewOnboarding: boolean
+  selectedPlan?: string
+  hasValidPlan: boolean
   isVerified: boolean
   loading: boolean
 }
@@ -38,7 +37,8 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     isSignedIn, 
     backendUser,
     userLoading,
-    onboarding
+    onboarding,
+    resetOnboarding
   } = useUserContext()
   const router = useRouter()
   const pathname = usePathname()
@@ -50,8 +50,8 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
   }
   
   const [profileStatus, setProfileStatus] = useState<ProfileVerificationStatus>({
-    hasSubscription: false,
-    hasCompletedOnboarding: false,
+    hasCompletedNewOnboarding: false,
+    hasValidPlan: false,
     isVerified: false,
     loading: true
   })
@@ -69,36 +69,38 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     return allowedPaths.some(path => pathname.includes(path))
   }
 
-  // Check subscription status
-  const checkSubscriptionStatus = async (): Promise<boolean> => {
+  // Check if user has completed the new onboarding flow
+  const checkNewOnboardingStatus = async (): Promise<boolean> => {
     try {
       const response = await apiClient.get('/auth/me')
       if (response.error) return false
       
       const user = response.data
-      const subscription = user.subscription
       
-      if (!subscription) {
-        setProfileStatus(prev => ({
-          ...prev,
-          hasSubscription: false,
-          subscriptionStatus: 'none',
-          planName: 'No Plan'
-        }))
-        return false
+      // Check if user has completed onboarding AND has a selected plan
+      // For the new flow, we'll use onboarding_completed as the flag
+      // If onboarding_completed is true, we assume they went through the new flow
+      const hasCompletedOnboarding = user.onboarding_completed || false
+      
+      // Check subscription status to determine plan
+      const subscription = user.subscription
+      let planType = 'free'
+      let hasValidPlan = true
+      
+      if (subscription && subscription.status === 'active') {
+        planType = subscription.plan?.name || 'premium'
       }
       
-      const isActive = subscription.status === 'active'
       setProfileStatus(prev => ({
         ...prev,
-        hasSubscription: isActive,
-        subscriptionStatus: subscription.status,
-        planName: subscription.plan?.name || 'Unknown Plan'
+        hasCompletedNewOnboarding: hasCompletedOnboarding,
+        selectedPlan: planType,
+        hasValidPlan: hasValidPlan
       }))
       
-      return isActive
+      return hasCompletedOnboarding
     } catch (error) {
-      console.error('Error checking subscription:', error)
+      console.error('Error checking new onboarding status:', error)
       return false
     }
   }
@@ -112,30 +114,22 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     setProfileStatus(prev => ({ ...prev, loading: true }))
     
     try {
-      // Check subscription
-      const hasValidSubscription = await checkSubscriptionStatus()
+      // Check if user completed the new onboarding flow
+      const hasCompletedNewOnboarding = await checkNewOnboardingStatus()
       
-      // Check onboarding
-      const hasCompletedOnboarding = backendUser.onboarding_completed || false
-      
-      const isFullyVerified = hasValidSubscription && hasCompletedOnboarding
+      // User is verified if they completed the new onboarding (which includes plan selection)
+      const isFullyVerified = hasCompletedNewOnboarding
       
       setProfileStatus(prev => ({
         ...prev,
-        hasCompletedOnboarding,
         isVerified: isFullyVerified,
         loading: false
       }))
       
       // Redirect if profile is incomplete and not on allowed paths
       if (!isFullyVerified && !isAllowedPath()) {
-        if (!hasCompletedOnboarding) {
-          const tenantId = backendUser.tenant_id
-          router.push(`/welcome/${tenantId}`)
-        } else if (!hasValidSubscription) {
-          const tenantId = backendUser.tenant_id
-          router.push(`/${tenantId}/billing`)
-        }
+        const tenantId = backendUser.tenant_id
+        router.push(`/welcome/${tenantId}`)
       }
       
     } catch (error) {
@@ -180,10 +174,10 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Completar Configuración de Perfil
+              Completar Configuración de Cuenta
             </h1>
             <p className="text-lg text-gray-600">
-              Completa los siguientes pasos para acceder a todas las funcionalidades
+              Para acceder al dashboard, necesitas completar el proceso de configuración
             </p>
           </div>
 
@@ -199,49 +193,49 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Onboarding Status */}
+              {/* New Onboarding Status */}
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex items-center space-x-3">
-                  {profileStatus.hasCompletedOnboarding ? (
+                  {profileStatus.hasCompletedNewOnboarding ? (
                     <CheckCircle className="h-5 w-5 text-green-600" />
                   ) : (
                     <AlertCircle className="h-5 w-5 text-orange-600" />
                   )}
                   <div>
-                    <p className="font-medium">Proceso de Bienvenida</p>
+                    <p className="font-medium">Configuración de Cuenta</p>
                     <p className="text-sm text-muted-foreground">
-                      Configuración inicial de tu cuenta
+                      Datos personales, empresa y selección de plan
                     </p>
                   </div>
                 </div>
                 <Badge 
-                  variant={profileStatus.hasCompletedOnboarding ? "default" : "secondary"}
-                  className={profileStatus.hasCompletedOnboarding ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}
+                  variant={profileStatus.hasCompletedNewOnboarding ? "default" : "secondary"}
+                  className={profileStatus.hasCompletedNewOnboarding ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}
                 >
-                  {profileStatus.hasCompletedOnboarding ? "Completado" : "Pendiente"}
+                  {profileStatus.hasCompletedNewOnboarding ? "Completado" : "Pendiente"}
                 </Badge>
               </div>
 
-              {/* Subscription Status */}
+              {/* Selected Plan Status */}
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex items-center space-x-3">
-                  {profileStatus.hasSubscription ? (
+                  {profileStatus.selectedPlan ? (
                     <CheckCircle className="h-5 w-5 text-green-600" />
                   ) : (
-                    <AlertCircle className="h-5 w-5 text-red-600" />
+                    <AlertCircle className="h-5 w-5 text-orange-600" />
                   )}
                   <div>
-                    <p className="font-medium">Plan de Suscripción</p>
+                    <p className="font-medium">Plan Seleccionado</p>
                     <p className="text-sm text-muted-foreground">
-                      {profileStatus.planName} - {profileStatus.subscriptionStatus || 'No activo'}
+                      {profileStatus.selectedPlan ? `Plan ${profileStatus.selectedPlan}` : 'Sin plan seleccionado'}
                     </p>
                   </div>
                 </div>
                 <Badge 
-                  variant={profileStatus.hasSubscription ? "default" : "destructive"}
-                  className={profileStatus.hasSubscription ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                  variant={profileStatus.selectedPlan ? "default" : "secondary"}
+                  className={profileStatus.selectedPlan ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}
                 >
-                  {profileStatus.hasSubscription ? "Activo" : "Inactivo"}
+                  {profileStatus.selectedPlan ? "Configurado" : "Pendiente"}
                 </Badge>
               </div>
 
@@ -250,11 +244,11 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
                 <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
                   <span>Progreso de Configuración</span>
                   <span>
-                    {(profileStatus.hasCompletedOnboarding ? 1 : 0) + (profileStatus.hasSubscription ? 1 : 0)} de 2 completados
+                    {profileStatus.hasCompletedNewOnboarding ? '1' : '0'} de 1 completado
                   </span>
                 </div>
                 <Progress 
-                  value={((profileStatus.hasCompletedOnboarding ? 1 : 0) + (profileStatus.hasSubscription ? 1 : 0)) * 50} 
+                  value={profileStatus.hasCompletedNewOnboarding ? 100 : 0} 
                   className="w-full" 
                 />
               </div>
@@ -263,7 +257,7 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
 
           {/* Action Buttons */}
           <div className="flex flex-col space-y-3">
-            {!profileStatus.hasCompletedOnboarding && (
+            {!profileStatus.hasCompletedNewOnboarding && (
               <Button 
                 onClick={() => {
                   const tenantId = backendUser?.tenant_id
@@ -273,30 +267,14 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
                 size="lg"
               >
                 <User className="h-4 w-4 mr-2" />
-                Completar Proceso de Bienvenida
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            )}
-            
-            {!profileStatus.hasSubscription && (
-              <Button 
-                onClick={() => {
-                  const tenantId = backendUser?.tenant_id
-                  router.push(`/${tenantId}/billing`)
-                }}
-                variant={profileStatus.hasCompletedOnboarding ? "default" : "outline"}
-                className="w-full"
-                size="lg"
-              >
-                <CreditCard className="h-4 w-4 mr-2" />
-                Configurar Plan de Suscripción
+                Completar Configuración de Cuenta
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             )}
           </div>
 
           {/* Help Section */}
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center space-y-4">
             <p className="text-sm text-muted-foreground mb-2">
               ¿Necesitas ayuda con la configuración?
             </p>
@@ -309,6 +287,27 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
             >
               Contactar Soporte
             </Button>
+            
+            {/* Temporary reset button for development */}
+            <div className="pt-4 border-t">
+              <p className="text-xs text-muted-foreground mb-2">
+                ¿Ya completaste el onboarding anterior? Resetea para probar el nuevo flujo:
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={async () => {
+                  const success = await resetOnboarding()
+                  if (success) {
+                    // Redirect to welcome page after reset
+                    const tenantId = backendUser?.tenant_id
+                    router.push(`/welcome/${tenantId}`)
+                  }
+                }}
+              >
+                Resetear Onboarding (Desarrollo)
+              </Button>
+            </div>
           </div>
         </div>
       </div>

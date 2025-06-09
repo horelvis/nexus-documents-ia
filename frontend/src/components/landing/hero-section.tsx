@@ -13,7 +13,7 @@ export function HeroSection() {
     if (isSignedIn) {
       router.push('/dashboard')
     } else {
-      router.push('/pricing')
+      router.push('/auth/sign-up')
     }
   }
 

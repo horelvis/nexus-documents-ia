@@ -67,6 +67,8 @@ class OnboardingComplete(BaseModel):
     team_size: Optional[str] = Field(None, example="1-10")
     use_case: Optional[str] = Field(None, example="Gestión documental")
     selected_plan: Optional[str] = Field(None, example="pro")
+    payment_interval: Optional[str] = Field(None, example="month")
+    onboarding_step: Optional[str] = Field(None, example="payment_pending")
 
 # Schema for reading/returning user data (response model)
 class UserRead(UserBase):

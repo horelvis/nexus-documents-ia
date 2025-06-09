@@ -23,6 +23,7 @@ import {
   Check
 } from 'lucide-react'
 import { useUserContext } from '@/contexts/user-context'
+import { useApiClient } from '@/lib/api-client'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -53,6 +54,7 @@ interface NewUserOnboardingProps {
 export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const apiClient = useApiClient()
   const { 
     clerkUser, 
     syncUserWithBackend, 
@@ -160,14 +162,24 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     }
 
     if (currentStep === 3) {
-      if (!selectedPlan) return
+      // Validate that a plan is selected
+      if (!selectedPlan) {
+        alert('Por favor, selecciona un plan para continuar')
+        return
+      }
+      
+      console.log('🎯 Plan seleccionado:', selectedPlan.id, selectedPlan.name)
       
       // If free plan selected, skip payment step
       if (selectedPlan.id === 'free') {
+        console.log('💰 Plan gratuito seleccionado - saltando pago')
         setCurrentStep(5) // Go directly to complete
         await handleComplete()
         return
       }
+      
+      console.log('💳 Plan premium seleccionado - ir a pago')
+      // For premium plans, continue to payment step
     }
 
     if (currentStep < steps.length - 1) {
@@ -193,47 +205,86 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   }
 
   const handlePayment = async () => {
-    if (!selectedPlan || selectedPlan.id === 'free') return
+    if (!selectedPlan || selectedPlan.id === 'free') {
+      console.log('❌ No plan selected or free plan selected')
+      return
+    }
+
+    console.log('🚀 Iniciando proceso de pago para:', selectedPlan.id, selectedInterval)
 
     try {
       setIsProcessing(true)
       
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${API_BASE}/api/v1/stripe/create-checkout-session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          planId: selectedPlan.id,
-          interval: selectedInterval,
-          email: clerkUser?.emailAddresses[0]?.emailAddress,
-        }),
-      })
+      // STEP 1: Save onboarding data to backend FIRST (including plan selection)
+      console.log('💾 Step 1: Saving onboarding data to backend...')
+      const personalData = personalForm.getValues()
+      const companyData = companyForm.getValues()
+      
+      const onboardingData = {
+        first_name: personalData.firstName,
+        last_name: personalData.lastName,
+        phone: personalData.phone,
+        role: personalData.role,
+        company_name: companyData.companyName,
+        industry: companyData.industry,
+        team_size: companyData.teamSize,
+        use_case: companyData.useCase,
+        selected_plan: selectedPlan.id,
+        payment_interval: selectedInterval,
+        onboarding_step: 'payment_pending' // Track where user is in the flow
+      }
+      
+      console.log('📝 Saving onboarding data:', onboardingData)
+      
+      // Save to backend first - this ensures data persistence
+      const onboardingResponse = await markOnboardingComplete(onboardingData)
+      if (!onboardingResponse) {
+        throw new Error('Failed to save onboarding data to backend')
+      }
+      
+      console.log('✅ Onboarding data saved to backend successfully')
+      
+      // STEP 2: Create Stripe checkout session
+      console.log('💳 Step 2: Creating Stripe checkout session...')
+      const requestBody = {
+        planId: selectedPlan.id,
+        interval: selectedInterval,
+        email: clerkUser?.emailAddresses[0]?.emailAddress,
+      }
+      
+      console.log('📤 Stripe request body:', requestBody)
+      
+      const response = await apiClient.post('/stripe/create-checkout-session', requestBody)
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+      console.log('📥 Stripe response status:', response.status)
+
+      if (response.error) {
+        console.error('❌ Stripe error response:', response.error)
+        throw new Error(response.error)
       }
 
-      const { url } = await response.json()
+      console.log('✅ Stripe response data:', response.data)
       
-      if (url) {
-        // Save onboarding data before redirecting to payment
-        const personalData = personalForm.getValues()
-        const companyData = companyForm.getValues()
-        
-        // Store in sessionStorage to preserve across redirect
-        sessionStorage.setItem('onboarding_data', JSON.stringify({
+      if (response.data?.url) {
+        // STEP 3: Store backup data in sessionStorage for redundancy
+        const backupData = {
           personal: personalData,
           company: companyData,
           plan: selectedPlan.id,
-          interval: selectedInterval
-        }))
+          interval: selectedInterval,
+          timestamp: new Date().toISOString()
+        }
         
-        window.location.href = url
+        sessionStorage.setItem('onboarding_backup', JSON.stringify(backupData))
+        
+        console.log('🔗 Redirecting to Stripe payment:', response.data.url)
+        window.location.href = response.data.url
+      } else {
+        throw new Error('No checkout URL received from server')
       }
     } catch (error) {
-      console.error('Error creating checkout session:', error)
+      console.error('💥 Error in payment process:', error)
+      alert(`Error al procesar el pago: ${error.message}`)
     } finally {
       setIsProcessing(false)
     }
@@ -720,11 +771,17 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                   <Button
                     onClick={handleNext}
                     disabled={isProcessing || (currentStep === 3 && !selectedPlan)}
+                    className={currentStep === 3 && !selectedPlan ? 'opacity-50 cursor-not-allowed' : ''}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                         Procesando...
+                      </>
+                    ) : currentStep === 3 && !selectedPlan ? (
+                      <>
+                        Selecciona un Plan
+                        <ArrowRight className="h-4 w-4 ml-2" />
                       </>
                     ) : (
                       <>
