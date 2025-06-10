@@ -17,7 +17,7 @@ services:
     networks:
       - backend-network
     env_file:
-      - ../.env
+      - ./.env
     environment:
       # Database
       - POSTGRES_SERVER=db
@@ -201,17 +201,17 @@ services:
     volumes:
       - ../credentials:/app/credentials:ro
     env_file:
-      - ../.env
+      - ./.env
     environment:
-      - API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID:-nexus-dev-project}
-      - GCS_CREDENTIALS=${GCS_CREDENTIALS:-}
-      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-nexus-documents}
-      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
-      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-104857600}
-      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
-      - DEBUG=${DEBUG:-true}
-      - TESTING=${TESTING:-false}
+      - API_KEY=dev-storage-api-key-12345
+      - GCS_PROJECT_ID=nexus-document-ia
+      - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
+      - GCS_BUCKET_NAME=nexus-docs-eu
+      - SIGNED_URL_EXPIRATION=3600
+      - MAX_UPLOAD_SIZE=104857600
+      - RATE_LIMIT_PER_MINUTE=10
+      - DEBUG=true
+      - TESTING=false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
