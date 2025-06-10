@@ -27,7 +27,7 @@ class StorageService:
         
         # Inicializar cliente GCS
         import os
-        if settings.GCS_CREDENTIALS and os.path.exists(settings.GCS_CREDENTIALS):
+        if settings.GCS_CREDENTIALS and settings.GCS_CREDENTIALS.strip() and os.path.exists(settings.GCS_CREDENTIALS):
             # Usar credenciales explícitas si están configuradas y el archivo existe
             credentials = service_account.Credentials.from_service_account_file(
                 settings.GCS_CREDENTIALS
@@ -37,8 +37,12 @@ class StorageService:
                 project=settings.GCS_PROJECT_ID
             )
         else:
-            # Usar credenciales por defecto del entorno
-            self.client = storage.Client(project=settings.GCS_PROJECT_ID)
+            # Usar credenciales por defecto del entorno o levantar error si no están disponibles
+            try:
+                self.client = storage.Client(project=settings.GCS_PROJECT_ID)
+            except Exception as e:
+                logger.error(f"Failed to initialize GCS client: {e}")
+                raise Exception(f"GCS credentials not configured properly: {e}")
         
         # Determinar nombre del bucket (añadir sufijo -test en modo testing)
         base_bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"

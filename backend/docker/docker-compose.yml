@@ -16,6 +16,23 @@ services:
       - storage-service
     networks:
       - backend-network
+    environment:
+      # Database
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-nexus_db}
+      # Services URLs
+      - STORAGE_SERVICE_URL=http://storage-service:8001
+      - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
+      - LANGROID_SERVICE_URL=http://langroid-service:8002
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+      # Infrastructure
+      - REDIS_HOST=redis
+      - QDRANT_HOST=qdrant
+      # General
+      - DEBUG=${DEBUG:-true}
+      - TESTING=${TESTING:-false}
     volumes:
       - ../:/app  # Esto monta toda la carpeta backend en /app
     restart: unless-stopped
