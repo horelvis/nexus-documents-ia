@@ -112,50 +112,54 @@ class GCSService:
         metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Sube un archivo al bucket.
+        Uploads bytes from a stream or other file-like object to a blob.
         
-        Args:
-            file: Archivo a subir
-            object_name: Nombre del objeto en el bucket
-            metadata: Metadatos opcionales
-            
-        Returns:
-            Información del archivo subido
+        Based on official Google Cloud documentation:
+        https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-from-stream-python
         """
         try:
-            blob = self.bucket.blob(object_name)
+            # Construct a client-side representation of the blob
+            storage_client = self.client
+            bucket = storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(object_name)
             
-            # Añadir metadatos si existen
+            # Set metadata if provided
             if metadata:
                 blob.metadata = metadata
             
-            # Procesar diferentes tipos de entrada
-            if isinstance(file, bytes):
-                file_obj = io.BytesIO(file)
-                file_size = len(file)
-            elif isinstance(file, UploadFile):
+            logger.info(f"Uploading {object_name} to bucket {self.bucket_name}")
+            
+            # Convert all inputs to file-like objects for consistent handling
+            if isinstance(file, UploadFile):
+                # For FastAPI UploadFile, read content and create BytesIO
                 content = file.file.read()
                 file_obj = io.BytesIO(content)
                 file_size = len(content)
-                file.file.seek(0)  # Reset para uso posterior si es necesario
+                
+            elif isinstance(file, bytes):
+                # For bytes, create BytesIO stream
+                file_obj = io.BytesIO(file)
+                file_size = len(file)
+                
             else:
+                # For file-like objects, use directly
                 file_obj = file
-                # Para otros tipos de archivo, obtener tamaño de forma segura
+                # Get file size
                 try:
                     current_pos = file_obj.tell()
-                    file_obj.seek(0, 2)  # Ir al final
+                    file_obj.seek(0, 2)  # Seek to end
                     file_size = file_obj.tell()
-                    file_obj.seek(current_pos)  # Volver a posición original
-                except (AttributeError, OSError):
-                    # Si no se puede hacer seek, leer todo el contenido
-                    content = file_obj.read()
-                    file_obj = io.BytesIO(content)
-                    file_size = len(content)
+                    file_obj.seek(current_pos)  # Reset position
+                except:
+                    file_size = 0
             
-            # Subir el archivo
-            blob.upload_from_file(file_obj, rewind=True)
+            # Rewind the stream to the beginning (as per official docs)
+            file_obj.seek(0)
             
-            logger.info(f"File uploaded successfully: {object_name} ({file_size} bytes)")
+            # Upload data from the stream to your bucket
+            blob.upload_from_file(file_obj)
+            
+            logger.info(f"Stream data uploaded to {object_name} in bucket {self.bucket_name} ({file_size} bytes)")
             
             return {
                 "object_name": object_name,
