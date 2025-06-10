@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Optional, Union
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 
@@ -10,7 +11,7 @@ class StorageServiceFactory:
     """Factory que decide qué implementación de storage usar basado en la disponibilidad"""
     
     @staticmethod
-    def create_storage_service(tenant_id: str, user_id: Optional[str] = None):
+    def create_storage_service(tenant_id: str, user_id: Optional[str] = None, db: Optional[Session] = None):
         """
         Crea la instancia apropiada de storage service.
         
@@ -22,6 +23,7 @@ class StorageServiceFactory:
         Args:
             tenant_id: ID del tenant
             user_id: ID del usuario (opcional)
+            db: Sesión de base de datos (opcional)
             
         Returns:
             Instancia del storage service
@@ -64,7 +66,7 @@ class StorageServiceFactory:
             try:
                 from app.services.storage_service import StorageService
                 logger.info("Using original StorageService as fallback")
-                return StorageService(tenant_id)
+                return StorageService(tenant_id, db)
                 
             except Exception as e:
                 logger.error(f"Original StorageService also failed: {e}")

@@ -100,17 +100,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Mock de GCS para desarrollo
-  gcs-mock:
-    image: fsouza/fake-gcs-server
-    ports:
-      - "4443:4443"
-    command: ["-scheme", "http", "-port", "4443"]
-    volumes:
-      - gcs_data:/storage
-    networks:
-      - backend-network
-    restart: unless-stopped
 
   # LangChain microservice
   langchain-service:
@@ -207,8 +196,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8003:8001"
-    depends_on:
-      - gcs-mock
     networks:
       - backend-network
     volumes:
@@ -242,4 +229,3 @@ volumes:
   redis_data:
   qdrant_data:
   ollama_data:
-  gcs_data:

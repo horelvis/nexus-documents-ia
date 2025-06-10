@@ -28,16 +28,8 @@ class GCSService:
     def _init_client(self):
         """Inicializa el cliente de GCS"""
         try:
-            # Para desarrollo: usar fake-gcs-server solo si estamos en modo DEBUG sin credenciales
-            if settings.DEBUG and not settings.GCS_CREDENTIALS:
-                logger.info("Using development mode - fake GCS server")
-                import os
-                os.environ["STORAGE_EMULATOR_HOST"] = "gcs-mock:4443"
-                self.client = storage.Client(
-                    project=settings.GCS_PROJECT_ID,
-                    client_options={"api_endpoint": "http://gcs-mock:4443"}
-                )
-            elif settings.GCS_CREDENTIALS and settings.GCS_CREDENTIALS.strip():
+            # Siempre usar GCS real - verificar si hay credenciales configuradas
+            if settings.GCS_CREDENTIALS and settings.GCS_CREDENTIALS.strip():
                 # Usar credenciales explícitas para producción
                 if settings.GCS_CREDENTIALS.startswith("/"):
                     # Es un path a archivo
@@ -55,7 +47,8 @@ class GCSService:
                     project=settings.GCS_PROJECT_ID
                 )
             else:
-                # Usar credenciales por defecto del entorno
+                # Usar credenciales por defecto del entorno (ADC)
+                logger.info("Using Application Default Credentials")
                 self.client = storage.Client(project=settings.GCS_PROJECT_ID)
             
             logger.info("GCS client initialized successfully")

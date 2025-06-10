@@ -7,6 +7,7 @@ from typing import Optional, Tuple, BinaryIO, Union, Dict, Any
 from fastapi import UploadFile
 from google.cloud import storage
 from google.oauth2 import service_account
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 
@@ -16,12 +17,13 @@ logger = logging.getLogger(__name__)
 class StorageService:
     """Servicio para gestión de almacenamiento en Google Cloud Storage"""
     
-    def __init__(self, tenant_id: str = None):
+    def __init__(self, tenant_id: str = None, db: Session = None):
         """
         Inicializa el servicio de almacenamiento.
         
         Args:
             tenant_id: ID del tenant para separar buckets
+            db: Sesión de base de datos para obtener el bucket_name del tenant
         """
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         
@@ -44,8 +46,20 @@ class StorageService:
                 logger.error(f"Failed to initialize GCS client: {e}")
                 raise Exception(f"GCS credentials not configured properly: {e}")
         
-        # Determinar nombre del bucket (añadir sufijo -test en modo testing)
-        base_bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"
+        # Obtener bucket_name del tenant desde la base de datos
+        if db:
+            from app.db.models import Tenant
+            tenant = db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
+            if tenant and tenant.bucket_name:
+                base_bucket_name = tenant.bucket_name
+            else:
+                # Fallback al patrón anterior si no se encuentra el tenant
+                base_bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"
+        else:
+            # Fallback al patrón anterior si no hay sesión de BD
+            base_bucket_name = f"{settings.GCS_BUCKET_NAME}-{self.tenant_id}"
+        
+        # Añadir sufijo -test en modo testing
         if os.getenv("TESTING") == "true":
             self.bucket_name = f"{base_bucket_name}-test"
         else:

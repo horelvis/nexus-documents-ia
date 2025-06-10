@@ -47,13 +47,22 @@ class DocumentService:
                     self.tenant_id = str(default_tenant.id)
                 else:
                     raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
+                
+                # Crear storage service con la sesión de BD para obtener bucket_name
+                self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, user_id, db)
             finally:
                 db.close()
         else:
             self.tenant_id = tenant_id
+            # Para tenants existentes, crear nueva sesión para el storage service
+            from app.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, user_id, db)
+            finally:
+                db.close()
             
         self.user_id = user_id
-        self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, self.user_id)
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.vector_service = VectorService(self.tenant_id) # Instantiate VectorService
         self.llm_service = LLMService()

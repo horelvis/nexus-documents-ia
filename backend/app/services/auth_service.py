@@ -104,8 +104,9 @@ class AuthService:
         settings: Optional[dict] = None
     ) -> Tenant:
         """Crea un nuevo tenant."""
-        # Generar bucket name único
-        bucket_name = f"tenant-{name.lower().replace(' ', '-')}-{uuid4().hex[:8]}"
+        # Generar bucket name único para el tenant (organización)
+        sanitized_name = name.lower().replace(' ', '-').replace('_', '-')
+        bucket_name = f"{sanitized_name}-{uuid4().hex[:8]}"
         
         db_tenant = Tenant(
             id=uuid4(),
@@ -268,19 +269,17 @@ class AuthService:
         # Usuario no existe, crear uno nuevo
         logger.info(f"👤 Creating new user from Clerk: {clerk_user_id}")
         
-        # Obtener tenant por defecto
-        default_tenant = db.query(Tenant).filter(
-            Tenant.name == settings.DEFAULT_TENANT
-        ).first()
+        # TODO: Verificar si hay una invitación pendiente para este email
+        # Por ahora, crear nuevo tenant para cada usuario (su propia organización)
+        user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
+        tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
         
-        if not default_tenant:
-            # Crear tenant por defecto si no existe
-            logger.info("🏢 Creating default tenant")
-            default_tenant = AuthService.create_tenant(
-                db=db,
-                name=settings.DEFAULT_TENANT,
-                description="Default tenant for new users"
-            )
+        logger.info(f"🏢 Creating new organization for user: {tenant_name}")
+        user_tenant = AuthService.create_tenant(
+            db=db,
+            name=tenant_name,
+            description=f"Organization for {full_name or email}"
+        )
         
         # Crear usuario con password temporal (no se usará con Clerk)
         new_user = User(
@@ -289,7 +288,7 @@ class AuthService:
             hashed_password=AuthService.get_password_hash("temp_password_from_clerk"),
             full_name=full_name,
             is_superuser=False,
-            tenant_id=default_tenant.id,
+            tenant_id=user_tenant.id,
             clerk_user_id=clerk_user_id,
             stripe_customer_id=stripe_customer_id,
             is_active=True

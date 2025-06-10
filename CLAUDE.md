@@ -119,12 +119,24 @@ This is a **multi-tenant intelligent document management system** with a microse
 - GCS credentials must be mounted at `./credentials:/app/credentials:ro` for tests
 
 ### Storage Configuration
-- **Development mode**: Uses fake-gcs-server (mock) when `DEBUG=true` and no credentials
-- **Test mode**: Uses real GCS with credentials mounted from `./credentials` directory
+- **All environments use real GCS** (no mocks for realistic testing)
+- **Multi-tenant architecture**: One bucket per tenant (team/organization)
+- **Multiple users per tenant**: Users share the same bucket within their organization
+- **Development mode**: Uses real GCS with credentials mounted from `./credentials` directory
+- **Test mode**: Uses real GCS with credentials mounted from `./credentials` directory  
 - **Production mode**: Uses real GCS with service account credentials
 - Place GCS service account JSON file in `/credentials/nexus-document-ia-04252dae0146.json`
-- Test bucket: `test-docs-eu` for isolated testing
-- Development bucket: configurable via environment variables
+
+#### Bucket Naming Convention
+- **Per-tenant buckets**: `{org-name}-{hash}` (e.g., `org-john-doe-abc12345`)
+- **Test buckets**: Same name + `-test` suffix for testing isolation
+- **Automatic creation**: Buckets created when new user registers (creates new org)
+- **File organization**: Within bucket, files are organized by user paths for access control
+
+#### User Registration Flow
+- **New user signup**: Creates new tenant (organization) + bucket automatically
+- **Invited user**: TODO - Should join existing tenant when invited by admin
+- **Multi-user tenants**: Multiple users can belong to same tenant/bucket
 
 ### Code Quality Standards
 - Use async/await patterns consistently in backend
