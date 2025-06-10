@@ -111,37 +111,48 @@ class GCSService:
         object_name: str,
         metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
+        """
+        Uploads bytes from a stream or other file-like object to a blob.
+        
+        Based on official documentation:
+        https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-from-stream-python
+        """
         try:
-            storage_client = self.client
-            bucket = storage_client.bucket(self.bucket_name)
-            blob = bucket.blob(object_name)
-
+            # Construct a client-side representation of the blob
+            blob = self.bucket.blob(object_name)
+            
+            # Set metadata if provided
             if metadata:
                 blob.metadata = metadata
-
+            
             logger.info(f"Uploading {object_name} to bucket {self.bucket_name}")
-
-            # Normalize to file-like object
+            
+            # Convert to BytesIO stream (official pattern)
             if isinstance(file, UploadFile):
-                file.file.seek(0)
-                file_obj = file.file
-                file_size = 0  # optional
+                # For FastAPI UploadFile, read content and create stream
+                content = file.file.read()
+                file_obj = io.BytesIO(content)
+                file_size = len(content)
+                
             elif isinstance(file, bytes):
+                # For bytes, create stream
                 file_obj = io.BytesIO(file)
                 file_size = len(file)
+                
             else:
-                try:
-                    file.seek(0)
-                    file_obj = file
-                    file_size = 0
-                except Exception:
-                    content = file.read()
-                    file_obj = io.BytesIO(content)
-                    file_size = len(content)
-
+                # For other file-like objects, read content
+                content = file.read()
+                file_obj = io.BytesIO(content)
+                file_size = len(content)
+            
+            # Rewind the stream to the beginning (as per official docs)
+            file_obj.seek(0)
+            
+            # Upload data from the stream to your bucket
             blob.upload_from_file(file_obj)
-
-            logger.info(f"Uploaded {object_name} ({file_size} bytes) to {self.bucket_name}")
+            
+            logger.info(f"Stream data uploaded to {object_name} in bucket {self.bucket_name} ({file_size} bytes)")
+            
             return {
                 "object_name": object_name,
                 "size": file_size,
@@ -149,10 +160,13 @@ class GCSService:
                 "uploaded_at": datetime.utcnow().isoformat(),
                 "metadata": metadata or {}
             }
-
+            
         except Exception as e:
             logger.error(f"Failed to upload file {object_name}: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload file: {str(e)}"
+            )
 
         
     def download_file(self, object_name: str) -> Optional[bytes]:
