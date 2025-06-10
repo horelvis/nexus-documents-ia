@@ -150,3 +150,105 @@ This is a **multi-tenant intelligent document management system** with a microse
 3. Implement proper TypeScript typing
 4. Use React Context for state that crosses component boundaries
 5. Integrate with API using the configured client in `lib/api-client.ts`
+
+## Simple UI Pattern (MANDATORY)
+
+**ALWAYS follow this simple pattern for any data loading in React components:**
+
+### The Simple Pattern
+```typescript
+// 1. SHOW LOADER
+setIsLoading(true)
+setError(null)
+
+try {
+  // 2. CALL BACKEND
+  const response = await service.getData(params)
+  
+  // 3. AWAIT RESPONSE
+  if (response.error) {
+    setError(response.error)
+  } else {
+    setData(response.data)
+  }
+} catch (err) {
+  setError(err.message)
+} finally {
+  // 4. HIDE LOADER (always)
+  setIsLoading(false)
+}
+```
+
+### What NOT to do
+❌ **NEVER use these patterns:**
+- `useCallback` for data loading functions
+- `useMemo` for simple data transformations
+- Complex dependency arrays in `useEffect`
+- Debounce for automatic search
+- Multiple simultaneous API calls
+- Intervals or timers for progress simulation
+- Complex state management for simple operations
+
+### What TO do
+✅ **ALWAYS use these patterns:**
+- Simple async functions
+- `useEffect(() => { loadData() }, [])` for mount
+- `useEffect(() => { loadData() }, [filter])` for filter changes
+- Manual search with button click or Enter key
+- One operation at a time
+- Clear error handling with try/catch/finally
+- Explicit user actions (no automatic behaviors)
+
+### Example Implementation
+```typescript
+export function MyComponent() {
+  const [data, setData] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const service = useService()
+
+  // Simple data loading function
+  const loadData = async () => {
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const response = await service.getData()
+      if (response.error) {
+        setError(response.error)
+      } else {
+        setData(response.data)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Load on mount
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  // Load when filter changes
+  useEffect(() => {
+    loadData()
+  }, [filter])
+
+  return (
+    <div>
+      {isLoading && <Loader />}
+      {error && <ErrorMessage error={error} retry={loadData} />}
+      {!isLoading && !error && <DataDisplay data={data} />}
+    </div>
+  )
+}
+```
+
+### Key Principles
+1. **One source of truth**: Single loading state per component
+2. **Explicit actions**: User controls when data loads
+3. **Simple dependencies**: Minimal useEffect dependencies
+4. **Clear error handling**: Always handle errors explicitly
+5. **Predictable behavior**: No background processes or automatic updates

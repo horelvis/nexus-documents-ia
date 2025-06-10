@@ -1,6 +1,7 @@
 import httpx
 import logging
 import io
+import mimetypes
 from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 from datetime import datetime
 from fastapi import UploadFile, HTTPException
@@ -33,6 +34,57 @@ class StorageClient:
         
         if self.user_id:
             self.headers["X-User-ID"] = self.user_id
+    
+    def _get_mimetype(self, filename: str, fallback: str = "application/octet-stream") -> str:
+        """
+        Detecta el mimetype basado en la extensión del archivo.
+        
+        Args:
+            filename: Nombre del archivo
+            fallback: Mimetype por defecto si no se puede detectar
+            
+        Returns:
+            Mimetype detectado o fallback
+        """
+        # Mapeo manual para tipos comunes de documentos
+        common_mimetypes = {
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.txt': 'text/plain',
+            '.csv': 'text/csv',
+            '.json': 'application/json',
+            '.xml': 'application/xml',
+            '.html': 'text/html',
+            '.md': 'text/markdown',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.mp4': 'video/mp4',
+            '.avi': 'video/x-msvideo',
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.zip': 'application/zip',
+            '.rar': 'application/vnd.rar',
+            '.7z': 'application/x-7z-compressed',
+        }
+        
+        # Obtener extensión en minúsculas
+        ext = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
+        
+        # Buscar en mapeo manual primero
+        if ext in common_mimetypes:
+            return common_mimetypes[ext]
+        
+        # Fallback a mimetypes estándar
+        mimetype, _ = mimetypes.guess_type(filename)
+        return mimetype or fallback
     
     def _make_request(
         self, 
@@ -98,23 +150,26 @@ class StorageClient:
             Información del archivo subido
         """
         try:
+            # Detectar mimetype
+            detected_mimetype = self._get_mimetype(filename)
+            
             # Preparar archivo para upload
             if isinstance(file, bytes):
-                file_data = ("file", (filename, io.BytesIO(file), "application/octet-stream"))
+                files = {"file": (filename, io.BytesIO(file), detected_mimetype)}
             elif isinstance(file, UploadFile):
                 content = file.file.read()
                 file.file.seek(0)  # Reset para uso posterior
-                file_data = ("file", (filename, io.BytesIO(content), file.content_type or "application/octet-stream"))
+                # Usar mimetype del UploadFile si está disponible, sino el detectado
+                mimetype = file.content_type or detected_mimetype
+                files = {"file": (filename, io.BytesIO(content), mimetype)}
             else:
                 file.seek(0)
                 content = file.read()
                 file.seek(0)  # Reset
-                file_data = ("file", (filename, io.BytesIO(content), "application/octet-stream"))
+                files = {"file": (filename, io.BytesIO(content), detected_mimetype)}
             
             # Preparar form data
-            files = {"file": file_data}
             data = {}
-            
             if metadata:
                 import json
                 data["metadata"] = json.dumps(metadata)

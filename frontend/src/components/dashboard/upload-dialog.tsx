@@ -68,7 +68,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
     },
   })
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = (acceptedFiles: File[]) => {
     const newFiles: UploadFile[] = acceptedFiles.map(file => ({
       file,
       id: Math.random().toString(36).substr(2, 9),
@@ -82,7 +82,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       form.setValue('files', updatedFiles.map(f => f.file))
       return updatedFiles
     })
-  }, [form])
+  }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -120,25 +120,16 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
     try {
       // Mark all files as uploading
       setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-        f.status === 'pending' ? { ...f, status: 'uploading' as const, progress: 0 } : f
+        f.status === 'pending' ? { ...f, status: 'uploading' as const, progress: 50 } : f
       ))
 
-      // Simulate progress for UX
-      const progressInterval = setInterval(() => {
-        setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-          f.status === 'uploading' && f.progress < 90 ? { ...f, progress: f.progress + 10 } : f
-        ))
-      }, 300)
-
-      // Upload to backend
+      // Upload to backend - simple pattern: loader -> call -> await -> result
       const response = await documentService.uploadDocuments({
         files: pendingFiles.map(f => f.file),
         category: values.category,
         tags: values.tags,
         description: values.description,
       })
-
-      clearInterval(progressInterval)
 
       if (response.error) {
         // Mark all uploading files as error

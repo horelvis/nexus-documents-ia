@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 function CompanyLogo({ className }: { className?: string }) {
   return (
     <div className={cn("flex items-center justify-center", className)}>
-      <div className="bg-gradient-to-br from-blue-600 to-purple-600 text-white rounded-lg p-2">
+      <div className="bg-gradient-to-br from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500 text-white rounded-lg p-2 shadow-lg">
         <span className="font-bold text-xl">N</span>
       </div>
     </div>

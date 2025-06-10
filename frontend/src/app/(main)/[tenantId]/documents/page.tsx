@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { 
   IconPlus, 
   IconSearch, 
@@ -36,23 +36,17 @@ export default function DocumentsPage() {
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
   const { openUploadDialog, setOnUploadComplete } = useUpload()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
 
-  // Load documents from API
-  const loadDocuments = useCallback(async () => {
+  // Load documents from API - simple pattern
+  const loadDocuments = async () => {
+    setIsLoading(true)
+    setError(null)
+    
     try {
-      setIsLoading(true)
-      setError(null)
-      
-      console.log('Loading documents with params:', {
-        search: searchQuery || undefined,
-        status: selectedFilter !== 'all' ? selectedFilter : undefined,
-        per_page: 50,
-        page: 1
-      })
-      
       const response = await documentService.getDocuments({
         search: searchQuery || undefined,
         status: selectedFilter !== 'all' ? selectedFilter : undefined,
@@ -60,29 +54,27 @@ export default function DocumentsPage() {
         page: 1
       })
       
-      console.log('API Response:', response)
-      
       if (response.error) {
-        console.error('API Error:', response.error)
         setError(response.error)
       } else {
-        // Backend returns {documents: [...], pagination: {...}}
-        const documentsData = response.data?.documents || []
-        console.log('Documents data:', documentsData)
-        setDocuments(documentsData)
+        setDocuments(response.data?.documents || [])
       }
     } catch (err) {
-      console.error('Exception in loadDocuments:', err)
       setError(err instanceof Error ? err.message : 'Failed to load documents')
     } finally {
       setIsLoading(false)
     }
-  }, [documentService, searchQuery, selectedFilter])
+  }
 
-  // Load documents on mount and when filters change
+  // Load on mount
   useEffect(() => {
     loadDocuments()
-  }, [loadDocuments])
+  }, [])
+
+  // Reload when filters change
+  useEffect(() => {
+    loadDocuments()
+  }, [selectedFilter])
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes'
@@ -124,9 +116,7 @@ export default function DocumentsPage() {
     return matchesSearch && doc.indexed === selectedFilter
   })
 
-  const handleUploadComplete = useCallback((uploadedFiles: Array<{file: File, id: string, status: string}>) => {
-    console.log('handleUploadComplete called with:', uploadedFiles)
-    
+  const handleUploadComplete = (uploadedFiles: Array<{file: File, id: string, status: string}>) => {
     // Reload documents from server to get the latest data
     loadDocuments()
     
@@ -138,22 +128,19 @@ export default function DocumentsPage() {
       fileCount: uploadedFiles.length,
       action: {
         label: 'View Documents',
-        href: '/dashboard/documents'
+        href: '/documents'
       }
     })
-  }, [addNotification, loadDocuments])
+  }
 
   // Register upload completion handler for this page
   useEffect(() => {
-    console.log('Registering upload complete handler for documents page')
     setOnUploadComplete(handleUploadComplete)
     
-    // Cleanup on unmount
     return () => {
-      console.log('Cleaning up upload complete handler for documents page')
       setOnUploadComplete(undefined)
     }
-  }, [setOnUploadComplete, handleUploadComplete])
+  }, [])
 
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -235,14 +222,20 @@ export default function DocumentsPage() {
         <Card className="mb-6">
           <CardContent className="p-6">
             <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 relative">
-                <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Search documents..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
+              <div className="flex-1 flex gap-2">
+                <div className="flex-1 relative">
+                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                  <Input
+                    placeholder="Search documents..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
+                    className="pl-10"
+                  />
+                </div>
+                <Button onClick={loadDocuments} variant="outline">
+                  Search
+                </Button>
               </div>
               
               <DropdownMenu>

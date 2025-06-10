@@ -6,7 +6,7 @@ export const EditUserProfileSchema = z.object({
 })
 
 export const UploadDocumentSchema = z.object({
-  category: z.string().min(1, 'Category is required'),
+  category: z.string().optional(),
   tags: z.string().optional(),
   description: z.string().optional(),
   files: z.array(z.instanceof(File)).min(1, 'At least one file is required'),

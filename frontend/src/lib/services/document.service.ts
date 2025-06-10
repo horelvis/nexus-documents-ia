@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useApiClient } from '../api-client'
 import { API_CONFIG } from '../config'
 import { Document, DocumentUploadResponse, SearchResponse } from '../types'
@@ -13,7 +14,7 @@ export interface DocumentListParams {
 
 export interface UploadDocumentParams {
   files: File[]
-  category: string
+  category?: string
   tags?: string
   description?: string
 }
@@ -43,26 +44,51 @@ export class DocumentService {
   }
 
   async uploadDocuments(params: UploadDocumentParams) {
-    const formData = new FormData()
+    const results = []
+    let hasError = false
     
-    // Agregar archivos
-    params.files.forEach((file, index) => {
-      formData.append('files', file)
-    })
-    
-    // Agregar metadatos
-    formData.append('category', params.category)
-    if (params.tags) {
-      formData.append('tags', params.tags)
-    }
-    if (params.description) {
-      formData.append('description', params.description)
-    }
+    // Upload each file individually
+    for (const file of params.files) {
+      try {
+        const formData = new FormData()
+        
+        // Add single file
+        formData.append('file', file)
+        
+        // Add metadata - use filename as title if no title provided
+        formData.append('title', file.name)
+        if (params.tags) {
+          formData.append('tags', params.tags)
+        }
+        if (params.description) {
+          formData.append('description', params.description)
+        }
 
-    return this.apiClient.upload<DocumentUploadResponse[]>(
-      API_CONFIG.ENDPOINTS.DOCUMENTS,
-      formData
-    )
+        const result = await this.apiClient.upload<DocumentUploadResponse>(
+          API_CONFIG.ENDPOINTS.DOCUMENTS,
+          formData
+        )
+        
+        if (result.error) {
+          hasError = true
+        }
+        
+        results.push(result)
+      } catch (error) {
+        hasError = true
+        results.push({
+          error: error instanceof Error ? error.message : 'Upload failed',
+          status: 500,
+          data: null
+        })
+      }
+    }
+    
+    return { 
+      data: results, 
+      error: hasError ? 'Some files failed to upload' : null, 
+      status: hasError ? 207 : 200 // 207 = Multi-Status
+    }
   }
 
   async deleteDocument(id: string) {
@@ -106,5 +132,5 @@ export class DocumentService {
 // Hook para usar el servicio de documentos
 export function useDocumentService() {
   const apiClient = useApiClient()
-  return new DocumentService(apiClient)
+  return useMemo(() => new DocumentService(apiClient), [apiClient])
 }

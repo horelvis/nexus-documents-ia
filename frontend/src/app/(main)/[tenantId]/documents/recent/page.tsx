@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { 
   IconPlus, 
   IconClock,
@@ -25,23 +25,24 @@ export default function RecentDocumentsPage() {
   const [error, setError] = useState<string | null>(null)
   const documentService = useDocumentService()
 
-  // Load recent documents from API
-  const loadRecentDocuments = useCallback(async () => {
+  // Load recent documents from API - simple pattern
+  const loadRecentDocuments = async () => {
+    setIsLoading(true)
+    setError(null)
+    
     try {
-      setIsLoading(true)
-      setError(null)
-      
       // Get processed documents, sorted by created_at desc
       const response = await documentService.getDocuments({
         status: 'processed',
-        limit: 20
+        per_page: 20,
+        page: 1
       })
       
       if (response.error) {
         setError(response.error)
       } else {
         // Sort by created_at to get most recent first
-        const sortedDocs = (response.data || []).sort((a, b) => 
+        const sortedDocs = (response.data?.documents || []).sort((a, b) => 
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
         setDocuments(sortedDocs)
@@ -51,11 +52,12 @@ export default function RecentDocumentsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [documentService])
+  }
 
+  // Load on mount
   useEffect(() => {
     loadRecentDocuments()
-  }, [loadRecentDocuments])
+  }, [])
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes'
