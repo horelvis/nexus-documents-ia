@@ -2,6 +2,7 @@ import io
 import logging
 import tempfile
 import os
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 
@@ -134,8 +135,12 @@ class GCSService:
                 # For FastAPI UploadFile - save directly to temp file
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                     try:
-                        # Copy file content to temp file
+                        # Copy file content to temp file - FastAPI UploadFile
+                        logger.info(f"Reading UploadFile content...")
                         content = await file.read()
+                        logger.info(f"Content type: {type(content)}")
+                        logger.info(f"Content length: {len(content) if not asyncio.iscoroutine(content) else 'COROUTINE!'}")
+                        
                         temp_file.write(content)
                         temp_file.flush()
                         file_size = len(content)
