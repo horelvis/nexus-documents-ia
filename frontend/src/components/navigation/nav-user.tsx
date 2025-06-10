@@ -8,6 +8,8 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react"
 import { useUser, useClerk } from "@clerk/nextjs"
+import { useApiClient } from "@/lib/api-client"
+import { useState } from "react"
 
 import {
   Avatar,
@@ -41,7 +43,9 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const { user: clerkUser } = useUser()
-  const { signOut } = useClerk()
+  const { signOut, openUserProfile } = useClerk()
+  const apiClient = useApiClient()
+  const [isLoadingBilling, setIsLoadingBilling] = useState(false)
 
   // Use Clerk user data if available, fallback to prop
   const user = clerkUser ? {
@@ -52,6 +56,46 @@ export function NavUser({
 
   const handleSignOut = () => {
     signOut()
+  }
+
+  const handleAccountSettings = () => {
+    // Use Clerk's hook to open user profile
+    // This will open Clerk's UserProfile modal/component
+    try {
+      if (openUserProfile) {
+        openUserProfile()
+      } else {
+        // Fallback: redirect to user profile page in your app
+        window.location.href = '/user-profile'
+      }
+    } catch (error) {
+      console.error('Error opening user profile:', error)
+      // Fallback: redirect to user profile page in your app
+      window.location.href = '/user-profile'
+    }
+  }
+
+  const handleBillingPortal = async () => {
+    if (isLoadingBilling) return
+    
+    setIsLoadingBilling(true)
+    try {
+      const response = await apiClient.post<{ portal_url: string }>('/stripe/create-customer-portal')
+      
+      if (response.data?.portal_url) {
+        window.open(response.data.portal_url, '_blank')
+      } else {
+        console.error('No portal URL received')
+        // Fallback to billing page
+        window.location.href = '/billing'
+      }
+    } catch (error) {
+      console.error('Error opening billing portal:', error)
+      // Fallback to billing page
+      window.location.href = '/billing'
+    } finally {
+      setIsLoadingBilling(false)
+    }
   }
 
   return (
@@ -98,13 +142,13 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleAccountSettings}>
                 <IconUserCircle />
                 Account
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleBillingPortal} disabled={isLoadingBilling}>
                 <IconCreditCard />
-                Billing
+                {isLoadingBilling ? 'Opening...' : 'Billing'}
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <IconNotification />

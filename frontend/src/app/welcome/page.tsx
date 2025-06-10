@@ -1,7 +1,7 @@
 'use client'
 
 import { NewUserOnboarding } from "@/components/auth"
-import { ExpressOnboarding } from "@/components/auth/express-onboarding"
+import { SimplifiedOnboarding } from "@/components/auth/simplified-onboarding"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
 
@@ -84,10 +84,16 @@ function WelcomeContent() {
   console.log('  - checkoutData:', checkoutData)
   console.log('  - sessionId:', sessionId)
 
-  // Use ExpressOnboarding for paid users
+  // Use SimplifiedOnboarding for paid users (post-payment)
   if (fromCheckout && checkoutData) {
-    console.log('🏃‍♂️ Using ExpressOnboarding')
-    return <ExpressOnboarding checkoutData={checkoutData} onComplete={handleOnboardingComplete} />
+    console.log('🏃‍♂️ Using SimplifiedOnboarding (post-payment)')
+    return (
+      <SimplifiedOnboarding 
+        checkoutData={checkoutData} 
+        onComplete={handleOnboardingComplete}
+        isPostPayment={true}
+      />
+    )
   }
 
   // Use new structured onboarding for free users

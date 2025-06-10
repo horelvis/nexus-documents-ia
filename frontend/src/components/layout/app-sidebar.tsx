@@ -51,16 +51,16 @@ const data = {
     },
     {
       title: "Documents",
-      url: "/dashboard/documents",
+      url: "/documents",
       icon: IconFiles,
       items: [
         {
           title: "Document Library",
-          url: "/dashboard/documents",
+          url: "/documents",
         },
         {
           title: "Recent Documents",
-          url: "/dashboard/documents/recent",
+          url: "/documents/recent",
         },
       ],
     },
@@ -71,15 +71,15 @@ const data = {
       items: [
         {
           title: "Semantic Search",
-          url: "/dashboard/search",
+          url: "/search",
         },
         {
           title: "AI Chat",
-          url: "/dashboard/chat",
+          url: "/chat",
         },
         {
           title: "Document Insights",
-          url: "/dashboard/insights",
+          url: "/insights",
         },
       ],
     },
@@ -90,11 +90,11 @@ const data = {
       items: [
         {
           title: "Agent Library",
-          url: "/dashboard/agents",
+          url: "/agents",
         },
         {
           title: "Conversations",
-          url: "/dashboard/agents/conversations",
+          url: "/agents/conversations",
         },
       ],
     },
@@ -105,17 +105,17 @@ const data = {
       items: [
         {
           title: "Signature Requests",
-          url: "/dashboard/signatures/requests",
+          url: "/signatures/requests",
         },
         {
           title: "Signature History",
-          url: "/dashboard/signatures/history",
+          url: "/signatures/history",
         },
       ],
     },
     {
       title: "Analytics",
-      url: "/dashboard/analytics",
+      url: "/analytics",
       icon: IconChartBar,
     },
   ],
@@ -127,39 +127,39 @@ const data = {
     },
     {
       name: "Search",
-      url: "/dashboard/search",
+      url: "/search",
       icon: IconSearch,
     },
     {
       name: "Start AI Chat",
-      url: "/dashboard/chat",
+      url: "/chat",
       icon: IconMessages,
     },
   ],
   navSecondary: [
     {
       title: "Tenant Settings",
-      url: "/dashboard/settings/tenant",
+      url: "/settings/tenant",
       icon: IconSettings,
     },
     {
       title: "User Management",
-      url: "/dashboard/admin/users",
+      url: "/admin/users",
       icon: IconUsers,
     },
     {
       title: "Billing",
-      url: "/dashboard/billing",
+      url: "/billing",
       icon: IconCreditCard,
     },
     {
       title: "Storage",
-      url: "/dashboard/storage",
+      url: "/storage",
       icon: IconDatabase,
     },
     {
       title: "Help",
-      url: "/dashboard/help",
+      url: "/help",
       icon: IconHelp,
     },
   ],

@@ -9,6 +9,7 @@ from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingCompl
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_current_user
 from app.db.models import User
+from app.core.config import settings
 
 import logging
 
@@ -77,6 +78,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current authenticated user information."""
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
     return current_user
+
 
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(

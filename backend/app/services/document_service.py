@@ -707,6 +707,7 @@ class DocumentService:
         db: "Session", # Added db: Session
         page: int = 1, 
         per_page: int = 10, 
+        search: str = None,
         tags: List[str] = None, 
         date_from: str = None, 
         date_to: str = None
@@ -718,6 +719,7 @@ class DocumentService:
             db: SQLAlchemy Session
             page: Número de página
             per_page: Documentos por página
+            search: Texto para buscar en título, descripción y filename
             tags: Lista de etiquetas para filtrar
             date_from: Fecha inicial (formato ISO)
             date_to: Fecha final (formato ISO)
@@ -731,6 +733,14 @@ class DocumentService:
             query = db.query(Document).filter(Document.tenant_id == self.tenant_id)
             
             # Aplicar filtros
+            if search:
+                search_filter = f"%{search}%"
+                query = query.filter(
+                    (Document.title.ilike(search_filter)) |
+                    (Document.description.ilike(search_filter)) |
+                    (Document.filename.ilike(search_filter))
+                )
+            
             if tags:
                 for tag_name in tags:
                     query = query.filter(Document.tags.any(Tag.name == tag_name))

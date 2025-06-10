@@ -23,6 +23,7 @@ async def list_documents(
     tenant_id: str = Depends(get_current_tenant_id),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
+    search: Optional[str] = Query(None),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None)
@@ -35,6 +36,7 @@ async def list_documents(
         db=db,
         page=page,
         per_page=per_page,
+        search=search,
         tags=tags,
         date_from=date_from,
         date_to=date_to

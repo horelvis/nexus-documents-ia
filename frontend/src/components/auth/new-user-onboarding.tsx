@@ -30,22 +30,15 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { getAllPlans, formatPrice, calculateYearlyDiscount, type Plan } from '@/lib/stripe-plans'
 
-const personalDataSchema = z.object({
+// Schema simplificado - solo datos esenciales
+const unifiedDataSchema = z.object({
   firstName: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
-  phone: z.string().optional(),
-  role: z.string().min(2, "El rol es requerido"),
+  companyName: z.string().min(2, "El nombre de la empresa es requerido"),
+  cif: z.string().min(8, "El CIF debe tener al menos 8 caracteres"),
 })
 
-const companyDataSchema = z.object({
-  companyName: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
-  industry: z.string().optional(),
-  teamSize: z.string().optional(),
-  useCase: z.string().optional(),
-})
-
-type PersonalFormData = z.infer<typeof personalDataSchema>
-type CompanyFormData = z.infer<typeof companyDataSchema>
+type UnifiedFormData = z.infer<typeof unifiedDataSchema>
 
 interface NewUserOnboardingProps {
   onComplete?: (tenantId?: string) => void
@@ -69,23 +62,13 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [selectedInterval, setSelectedInterval] = useState<'month' | 'year'>('month')
 
-  const personalForm = useForm<PersonalFormData>({
-    resolver: zodResolver(personalDataSchema),
+  const unifiedForm = useForm<UnifiedFormData>({
+    resolver: zodResolver(unifiedDataSchema),
     defaultValues: {
       firstName: clerkUser?.firstName || '',
       lastName: clerkUser?.lastName || '',
-      phone: '',
-      role: '',
-    }
-  })
-
-  const companyForm = useForm<CompanyFormData>({
-    resolver: zodResolver(companyDataSchema),
-    defaultValues: {
       companyName: '',
-      industry: '',
-      teamSize: '',
-      useCase: '',
+      cif: '',
     }
   })
 
@@ -99,15 +82,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       icon: <User className="h-5 w-5" />
     },
     {
-      id: 'personal',
-      title: 'Datos Personales',
-      description: 'Información personal y de contacto',
-      icon: <User className="h-5 w-5" />
-    },
-    {
-      id: 'company',
-      title: 'Datos de Empresa',
-      description: 'Información de tu organización',
+      id: 'data',
+      title: 'Información de Facturación',
+      description: 'Datos personales y de empresa',
       icon: <Building className="h-5 w-5" />
     },
     {
@@ -152,16 +129,12 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
   const handleNext = async () => {
     if (currentStep === 1) {
-      const isValid = await personalForm.trigger()
-      if (!isValid) return
-    }
-    
-    if (currentStep === 2) {
-      const isValid = await companyForm.trigger()
+      // Validar el formulario unificado
+      const isValid = await unifiedForm.trigger()
       if (!isValid) return
     }
 
-    if (currentStep === 3) {
+    if (currentStep === 2) {
       // Validate that a plan is selected
       if (!selectedPlan) {
         alert('Por favor, selecciona un plan para continuar')
@@ -173,7 +146,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       // If free plan selected, skip payment step
       if (selectedPlan.id === 'free') {
         console.log('💰 Plan gratuito seleccionado - saltando pago')
-        setCurrentStep(5) // Go directly to complete
+        setCurrentStep(4) // Go directly to complete
         await handleComplete()
         return
       }
@@ -217,18 +190,13 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       
       // STEP 1: Save onboarding data to backend FIRST (including plan selection)
       console.log('💾 Step 1: Saving onboarding data to backend...')
-      const personalData = personalForm.getValues()
-      const companyData = companyForm.getValues()
+      const formData = unifiedForm.getValues()
       
       const onboardingData = {
-        first_name: personalData.firstName,
-        last_name: personalData.lastName,
-        phone: personalData.phone,
-        role: personalData.role,
-        company_name: companyData.companyName,
-        industry: companyData.industry,
-        team_size: companyData.teamSize,
-        use_case: companyData.useCase,
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        company_name: formData.companyName,
+        cif: formData.cif,
         selected_plan: selectedPlan.id,
         payment_interval: selectedInterval,
         onboarding_step: 'payment_pending' // Track where user is in the flow
@@ -268,8 +236,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       if (response.data?.url) {
         // STEP 3: Store backup data in sessionStorage for redundancy
         const backupData = {
-          personal: personalData,
-          company: companyData,
+          formData: formData,
           plan: selectedPlan.id,
           interval: selectedInterval,
           timestamp: new Date().toISOString()
@@ -294,19 +261,14 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     try {
       setIsProcessing(true)
       
-      // Combine all form data
-      const personalData = personalForm.getValues()
-      const companyData = companyForm.getValues()
+      // Get form data
+      const formData = unifiedForm.getValues()
       
       const onboardingData = {
-        first_name: personalData.firstName,
-        last_name: personalData.lastName,
-        phone: personalData.phone,
-        role: personalData.role,
-        company_name: companyData.companyName,
-        industry: companyData.industry,
-        team_size: companyData.teamSize,
-        use_case: companyData.useCase,
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        company_name: formData.companyName,
+        cif: formData.cif,
         selected_plan: selectedPlan?.id || 'free',
       }
       
@@ -438,20 +400,64 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                 </div>
               )}
 
-              {/* Step 1: Personal Data */}
+              {/* Step 1: Unified Data Form */}
               {currentStep === 1 && (
                 <div className="space-y-6">
-                  <Form {...personalForm}>
-                    <form className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Form {...unifiedForm}>
+                    <form className="space-y-6">
+                      {/* Datos personales */}
+                      <div className="space-y-4">
+                        <div className="flex items-center space-x-2 mb-3">
+                          <User className="h-4 w-4 text-gray-500" />
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">Datos Personales</h3>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={unifiedForm.control}
+                            name="firstName"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Nombre *</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Tu nombre" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          
+                          <FormField
+                            control={unifiedForm.control}
+                            name="lastName"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Apellidos *</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Tus apellidos" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Datos de empresa */}
+                      <div className="space-y-4 border-t pt-6">
+                        <div className="flex items-center space-x-2 mb-3">
+                          <Building className="h-4 w-4 text-gray-500" />
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">Datos de Facturación</h3>
+                        </div>
+                        
                         <FormField
-                          control={personalForm.control}
-                          name="firstName"
+                          control={unifiedForm.control}
+                          name="companyName"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Nombre *</FormLabel>
+                              <FormLabel>Nombre de la Empresa *</FormLabel>
                               <FormControl>
-                                <Input placeholder="Tu nombre" {...field} />
+                                <Input placeholder="Ej: Mi Empresa SL" {...field} />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -459,123 +465,26 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                         />
                         
                         <FormField
-                          control={personalForm.control}
-                          name="lastName"
+                          control={unifiedForm.control}
+                          name="cif"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Apellidos *</FormLabel>
+                              <FormLabel>CIF/NIF *</FormLabel>
                               <FormControl>
-                                <Input placeholder="Tus apellidos" {...field} />
+                                <Input placeholder="Ej: B12345678" {...field} />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
                       </div>
-                      
-                      <FormField
-                        control={personalForm.control}
-                        name="phone"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Teléfono</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ej: +34 123 456 789" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={personalForm.control}
-                        name="role"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Tu rol *</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ej: CEO, Manager, Developer, etc." {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                     </form>
                   </Form>
                 </div>
               )}
 
-              {/* Step 2: Company Data */}
+              {/* Step 2: Plan Selection */}
               {currentStep === 2 && (
-                <div className="space-y-6">
-                  <Form {...companyForm}>
-                    <form className="space-y-4">
-                      <FormField
-                        control={companyForm.control}
-                        name="companyName"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Nombre de la Empresa *</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ej: Mi Empresa SL" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={companyForm.control}
-                        name="industry"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Industria</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ej: Tecnología, Consultoría, etc." {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={companyForm.control}
-                        name="teamSize"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Tamaño del Equipo</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ej: 1-10, 11-50, 50+, etc." {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={companyForm.control}
-                        name="useCase"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>¿Cómo planeas usar Nexus?</FormLabel>
-                            <FormControl>
-                              <Textarea 
-                                placeholder="Cuéntanos brevemente cómo planeas usar la plataforma..."
-                                rows={3}
-                                {...field} 
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </form>
-                  </Form>
-                </div>
-              )}
-
-              {/* Step 3: Plan Selection */}
-              {currentStep === 3 && (
                 <div className="space-y-6">
                   <div className="text-center mb-6">
                     <h3 className="text-xl font-semibold mb-2">Elige el plan perfecto para ti</h3>
@@ -676,8 +585,8 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                 </div>
               )}
 
-              {/* Step 4: Payment */}
-              {currentStep === 4 && (
+              {/* Step 3: Payment */}
+              {currentStep === 3 && (
                 <div className="text-center py-8 space-y-6">
                   <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mx-auto">
                     {getPlanIcon(selectedPlan?.id || 'pro')}
@@ -729,8 +638,8 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                 </div>
               )}
 
-              {/* Step 5: Complete */}
-              {currentStep === 5 && (
+              {/* Step 4: Complete */}
+              {currentStep === 4 && (
                 <div className="text-center py-8 space-y-6">
                   <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto">
                     <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
@@ -770,15 +679,15 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
                   <Button
                     onClick={handleNext}
-                    disabled={isProcessing || (currentStep === 3 && !selectedPlan)}
-                    className={currentStep === 3 && !selectedPlan ? 'opacity-50 cursor-not-allowed' : ''}
+                    disabled={isProcessing || (currentStep === 2 && !selectedPlan)}
+                    className={currentStep === 2 && !selectedPlan ? 'opacity-50 cursor-not-allowed' : ''}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                         Procesando...
                       </>
-                    ) : currentStep === 3 && !selectedPlan ? (
+                    ) : currentStep === 2 && !selectedPlan ? (
                       <>
                         Selecciona un Plan
                         <ArrowRight className="h-4 w-4 ml-2" />
