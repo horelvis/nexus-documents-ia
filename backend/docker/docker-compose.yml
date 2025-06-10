@@ -26,6 +26,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-nexus_db}
       # Services URLs
       - STORAGE_SERVICE_URL=http://storage-service:8001
+      - STORAGE_API_KEY=dev-storage-api-key-12345
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGROID_SERVICE_URL=http://langroid-service:8002
       - OLLAMA_BASE_URL=http://ollama-service:11434

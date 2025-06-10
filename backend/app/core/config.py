@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     
     # Microservices - Usando la misma API_KEY para todos
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
+    STORAGE_API_KEY: str = os.getenv("STORAGE_API_KEY", "dev-storage-api-key-12345")
     
     model_config = {
         "case_sensitive": True,

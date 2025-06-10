@@ -28,24 +28,37 @@ class GCSService:
     def _init_client(self):
         """Inicializa el cliente de GCS"""
         try:
+            logger.info(f"=== GCS CLIENT INITIALIZATION ===")
+            logger.info(f"GCS_CREDENTIALS: {settings.GCS_CREDENTIALS}")
+            logger.info(f"GCS_PROJECT_ID: {settings.GCS_PROJECT_ID}")
+            
+            # Verificar si el archivo de credenciales existe
+            if settings.GCS_CREDENTIALS and settings.GCS_CREDENTIALS.startswith("/"):
+                import os
+                exists = os.path.exists(settings.GCS_CREDENTIALS)
+                logger.info(f"Credentials file exists: {exists}")
+                if exists:
+                    import stat
+                    file_stat = os.stat(settings.GCS_CREDENTIALS)
+                    logger.info(f"Credentials file size: {file_stat.st_size} bytes")
+                    logger.info(f"Credentials file permissions: {oct(file_stat.st_mode)}")
+            
             # Siempre usar GCS real - verificar si hay credenciales configuradas
             if settings.GCS_CREDENTIALS and settings.GCS_CREDENTIALS.strip():
-                # Usar credenciales explícitas para producción
+                # Usar credenciales explícitas
                 if settings.GCS_CREDENTIALS.startswith("/"):
-                    # Es un path a archivo
-                    credentials = service_account.Credentials.from_service_account_file(
-                        settings.GCS_CREDENTIALS
-                    )
+                    # Es un path a archivo - usar método recomendado
+                    logger.info(f"Using service account file: {settings.GCS_CREDENTIALS}")
+                    self.client = storage.Client.from_service_account_json(settings.GCS_CREDENTIALS)
                 else:
                     # Es JSON directo
                     import json
                     creds_info = json.loads(settings.GCS_CREDENTIALS)
                     credentials = service_account.Credentials.from_service_account_info(creds_info)
-                
-                self.client = storage.Client(
-                    credentials=credentials,
-                    project=settings.GCS_PROJECT_ID
-                )
+                    self.client = storage.Client(
+                        credentials=credentials,
+                        project=settings.GCS_PROJECT_ID
+                    )
             else:
                 # Usar credenciales por defecto del entorno (ADC)
                 logger.info("Using Application Default Credentials")
@@ -63,22 +76,34 @@ class GCSService:
     def _ensure_bucket_exists(self):
         """Asegura que el bucket exista, creándolo si es necesario"""
         try:
-            self.bucket = self.client.get_bucket(self.bucket_name)
+            self.bucket = self.client.bucket(self.bucket_name)
+            if not self.bucket.exists():
+                raise Exception("Bucket does not exist")
             logger.info(f"Bucket {self.bucket_name} found")
         except Exception:
             try:
-                logger.info(f"Creating bucket {self.bucket_name}")
-                self.bucket = self.client.create_bucket(
-                    self.bucket_name,
-                    location="europe-west1"
-                )
+                logger.info(f"Creating bucket {self.bucket_name} in location europe-west1")
+                logger.info(f"Using project: {settings.GCS_PROJECT_ID}")
+                self.bucket = self.client.bucket(self.bucket_name)
+                self.bucket.create(location="europe-west1")
                 logger.info(f"Bucket {self.bucket_name} created successfully")
             except Exception as e:
                 logger.error(f"Failed to create bucket {self.bucket_name}: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to setup storage bucket"
-                )
+                logger.error(f"Error type: {type(e).__name__}")
+                logger.error(f"Error details: {str(e)}")
+                
+                # Intentar crear sin especificar ubicación
+                try:
+                    logger.info(f"Retrying bucket creation without location...")
+                    self.bucket = self.client.bucket(self.bucket_name)
+                    self.bucket.create()
+                    logger.info(f"Bucket {self.bucket_name} created successfully (default location)")
+                except Exception as e2:
+                    logger.error(f"Second attempt also failed: {e2}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to setup storage bucket: {str(e)}"
+                    )
     
     def upload_file(
         self,
