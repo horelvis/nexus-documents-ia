@@ -164,14 +164,14 @@ class DocumentService:
             "content_type": f"application/{file_ext}"
         }
 
-        upload_success = await asyncio.to_thread(
+        upload_result = await asyncio.to_thread(
             self.storage_service.upload_file,
             file=file_obj,
-            object_name=file_path,
+            filename=file_path,
             metadata=storage_metadata
         )
 
-        if not upload_success:
+        if not upload_result:
             raise Exception("Failed to store document file in cloud storage.")
 
     async def _extract_and_index_text(

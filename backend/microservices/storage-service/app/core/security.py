@@ -70,13 +70,6 @@ def validate_tenant_access(
             detail="Invalid tenant ID"
         )
     
-    # Log del acceso para auditoria y debugging
-    logger.info(f"=== TENANT ACCESS ===")
-    logger.info(f"Tenant ID: {tenant_id}")
-    logger.info(f"User ID: {user_id or 'system'}")
-    logger.info(f"Bucket Name from header: {bucket_name or 'NOT_PROVIDED'}")
-    logger.info(f"=== END TENANT ACCESS ===")
-    
     return {
         "tenant_id": tenant_id,
         "user_id": user_id,
@@ -86,11 +79,6 @@ def validate_tenant_access(
 
 def get_bucket_name(tenant_id: str, bucket_name: Optional[str] = None) -> str:
     """Genera nombre del bucket basado en tenant (un bucket por tenant para LGPD)"""
-    logger.info(f"=== BUCKET NAME GENERATION ===")
-    logger.info(f"Tenant ID: {tenant_id}")
-    logger.info(f"Provided bucket name (ignored): {bucket_name or 'NONE'}")
-    logger.info(f"TESTING mode: {settings.TESTING}")
-    
     # Siempre usar patrón tenant-specific para LGPD compliance
     # Un bucket por tenant, no bucket compartido
     base_name = f"{settings.GCS_BUCKET_NAME}-{tenant_id}"
@@ -99,7 +87,6 @@ def get_bucket_name(tenant_id: str, bucket_name: Optional[str] = None) -> str:
     else:
         final_name = base_name
     
-    logger.info(f"Using tenant-specific bucket: {final_name}")
     return final_name
 
 def get_object_path(tenant_id: str, user_id: Optional[str], filename: str) -> str:

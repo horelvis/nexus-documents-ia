@@ -1,8 +1,6 @@
-import io
 import logging
 import tempfile
 import os
-import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 
@@ -121,8 +119,6 @@ class GCSService:
         https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-from-stream-python
         """
         try:
-            logger.info(f"upload_file called with file type: {type(file)}")
-            
             # Construct a client-side representation of the blob
             blob = self.bucket.blob(object_name)
             
@@ -136,25 +132,13 @@ class GCSService:
             file_size = 0
             
             # Use temporary files for all uploads (consistent and memory-efficient)
-            logger.info(f"Checking instance: UploadFile={isinstance(file, UploadFile)}, hasattr read={hasattr(file, 'read')}")
-            
             if isinstance(file, UploadFile) or hasattr(file, 'read') and hasattr(file, 'file'):
                 # For FastAPI UploadFile - save directly to temp file
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                     try:
-                        # Copy file content to temp file - FastAPI UploadFile
-                        logger.info(f"Reading UploadFile content...")
+                        # Copy file content to temp file
                         content = await file.read()
-                        logger.info(f"Content type: {type(content)}")
-                        
-                        # Check if content is coroutine
-                        if asyncio.iscoroutine(content):
-                            logger.error("Content is still a coroutine!")
-                            content = await content
-                        
                         file_size = len(content)
-                        logger.info(f"Content length: {file_size}")
-                        
                         temp_file.write(content)
                         temp_file.flush()
                         
@@ -164,7 +148,6 @@ class GCSService:
                         os.unlink(temp_file.name)
                         
             elif isinstance(file, bytes):
-                logger.info("Processing bytes file")
                 # For bytes
                 file_size = len(file)
                 
@@ -177,10 +160,8 @@ class GCSService:
                         os.unlink(temp_file.name)
                         
             else:
-                logger.info(f"Processing other file type: {type(file)}")
                 # For other file-like objects
                 content = file.read()
-                logger.info(f"Read content type: {type(content)}")
                 file_size = len(content)
                 
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
@@ -191,7 +172,7 @@ class GCSService:
                     finally:
                         os.unlink(temp_file.name)
             
-            logger.info(f"Stream data uploaded to {object_name} in bucket {self.bucket_name} ({file_size} bytes)")
+            logger.info(f"File uploaded successfully: {object_name} ({file_size} bytes)")
             
             return {
                 "object_name": object_name,

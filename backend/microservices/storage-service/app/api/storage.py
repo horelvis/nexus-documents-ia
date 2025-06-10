@@ -87,10 +87,6 @@ async def upload_file(
     - **file**: Archivo a subir
     - **metadata**: Metadatos JSON opcionales (como string)
     """
-    logger.info(f"=== UPLOAD ENDPOINT REACHED ===")
-    logger.info(f"Auth context: {auth_context}")
-    logger.info(f"File: {file.filename}")
-    logger.info(f"=== END UPLOAD ENDPOINT ===")
     
     # Validaciones
     if not file.filename:
