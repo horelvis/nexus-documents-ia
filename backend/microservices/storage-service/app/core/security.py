@@ -85,29 +85,22 @@ def validate_tenant_access(
     }
 
 def get_bucket_name(tenant_id: str, bucket_name: Optional[str] = None) -> str:
-    """Genera nombre del bucket basado en tenant y modo, o usa el proporcionado"""
+    """Genera nombre del bucket basado en tenant (un bucket por tenant para LGPD)"""
     logger.info(f"=== BUCKET NAME GENERATION ===")
     logger.info(f"Tenant ID: {tenant_id}")
-    logger.info(f"Provided bucket name: {bucket_name or 'NONE'}")
+    logger.info(f"Provided bucket name (ignored): {bucket_name or 'NONE'}")
     logger.info(f"TESTING mode: {settings.TESTING}")
     
-    if bucket_name:
-        # Usar bucket name proporcionado en header
-        if settings.TESTING:
-            final_name = f"{bucket_name}-test"
-        else:
-            final_name = bucket_name
-        logger.info(f"Using provided bucket: {final_name}")
-        return final_name
+    # Siempre usar patrón tenant-specific para LGPD compliance
+    # Un bucket por tenant, no bucket compartido
+    base_name = f"{settings.GCS_BUCKET_NAME}-{tenant_id}"
+    if settings.TESTING:
+        final_name = f"{base_name}-test"
     else:
-        # Fallback al patrón anterior
-        base_name = f"{settings.GCS_BUCKET_NAME}-{tenant_id}"
-        if settings.TESTING:
-            final_name = f"{base_name}-test"
-        else:
-            final_name = base_name
-        logger.info(f"Using fallback bucket: {final_name}")
-        return final_name
+        final_name = base_name
+    
+    logger.info(f"Using tenant-specific bucket: {final_name}")
+    return final_name
 
 def get_object_path(tenant_id: str, user_id: Optional[str], filename: str) -> str:
     """Genera path del objeto con aislamiento por tenant/usuario"""
