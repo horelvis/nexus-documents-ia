@@ -24,13 +24,13 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - TESTING=true
-      - GCS_PROJECT_ID=tu-project-id
-      - GCS_BUCKET_NAME=test-docs-eu  # ← Nombre que indique región
-      - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
-      - GCS_REGION=europe-west1  # ← Agregar variable de región
+      - GCS_PROJECT_ID=test-project-id
+      - GCS_BUCKET_NAME=test-bucket
+      - GCS_CREDENTIALS=
+      - GCS_REGION=europe-west1
       # Storage microservice configuration
       - STORAGE_SERVICE_URL=http://test-storage-service:8001
-      - STORAGE_API_KEY=test-storage-api-key-12345
+      - API_KEY=test-storage-api-key-12345
     depends_on:
       test-db:
         condition: service_healthy

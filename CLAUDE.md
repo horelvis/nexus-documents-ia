@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Initialize database**: `cd backend && python -m scripts.init_db`
 - **Database migrations**: `cd backend && alembic upgrade head`
 - **Run tests**: `cd backend/tests && ./run_tests.sh`
+- **Run tests (with real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
 - **Clean rebuild**: `./clean_and_rebuild.sh` (from project root)
 
 ### Frontend Development
@@ -114,6 +115,16 @@ This is a **multi-tenant intelligent document management system** with a microse
 - Run full test suite with `./tests/run_tests.sh` from backend/tests directory
 - Tests include API integration tests and service unit tests
 - Coverage reports generated in `backend/tests/coverage_report/`
+- **Test environment uses real GCS** (not mocks) for realistic testing
+- GCS credentials must be mounted at `./credentials:/app/credentials:ro` for tests
+
+### Storage Configuration
+- **Development mode**: Uses fake-gcs-server (mock) when `DEBUG=true` and no credentials
+- **Test mode**: Uses real GCS with credentials mounted from `./credentials` directory
+- **Production mode**: Uses real GCS with service account credentials
+- Place GCS service account JSON file in `/credentials/nexus-document-ia-04252dae0146.json`
+- Test bucket: `test-docs-eu` for isolated testing
+- Development bucket: configurable via environment variables
 
 ### Code Quality Standards
 - Use async/await patterns consistently in backend

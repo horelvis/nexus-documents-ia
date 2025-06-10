@@ -188,17 +188,19 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8003:8001"
+    depends_on:
+      - gcs-mock
     networks:
       - backend-network
     environment:
-      - STORAGE_API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS=${GCS_CREDENTIALS}
+      - API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID:-nexus-dev-project}
+      - GCS_CREDENTIALS=${GCS_CREDENTIALS:-}
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-nexus-documents}
       - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-104857600}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
-      - DEBUG=${DEBUG:-false}
+      - DEBUG=${DEBUG:-true}
       - TESTING=${TESTING:-false}
     restart: unless-stopped
     healthcheck:
