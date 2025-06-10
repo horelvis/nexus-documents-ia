@@ -332,7 +332,7 @@ class LangChainClient:
             raise RuntimeError("HTTP client not provided to LangChainClient.")
         try:
             payload = {"text": text, "tenant_id": tenant_id or settings.DEFAULT_TENANT}
-            response = await self.http_client.post(f"{self.base_url}/text/chunk", json=payload)
+            response = await self.http_client.post(f"{self.base_url}/chunk", json=payload)
             response.raise_for_status()
             result = response.json()
             return result.get("chunks", [{"text": text}])
