@@ -167,7 +167,7 @@ class DocumentService:
         upload_result = await asyncio.to_thread(
             self.storage_service.upload_file,
             file=file_obj,
-            filename=file_path,
+            object_name=file_path,
             metadata=storage_metadata
         )
 
