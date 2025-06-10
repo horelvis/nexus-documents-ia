@@ -209,6 +209,9 @@ services:
       - gcs-mock
     networks:
       - backend-network
+    voolumes:
+      - ../credentials:/app/credentials:ro
+    restart: unless-stopped
     environment:
       - API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
       - GCS_PROJECT_ID=${GCS_PROJECT_ID:-nexus-dev-project}
