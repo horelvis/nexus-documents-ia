@@ -64,7 +64,7 @@ class DocumentService:
             
         self.user_id = user_id
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorService(self.tenant_id) # Instantiate VectorService
+        self.vector_service = VectorService(self.tenant_id, self.user_id) # Pass user_id to VectorService
         self.llm_service = LLMService()
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -288,8 +288,11 @@ class DocumentService:
                 "filename": db_document.filename,
                 "file_type": db_document.file_type,
                 "file_size": db_document.file_size,
+                "tenant_id": str(db_document.tenant_id),
+                "created_by": str(db_document.created_by),
                 "indexed": db_document.indexed,
                 "created_at": db_document.created_at.isoformat(),
+                "updated_at": db_document.updated_at.isoformat(),
                 "tags": [tag.name for tag in db_document.tags]
             }
             

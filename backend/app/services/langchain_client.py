@@ -25,10 +25,25 @@ def should_retry_exception(exception: BaseException) -> bool:
 class LangChainClient:
     """Cliente simplificado para el microservicio LangChain"""
 
-    def __init__(self, http_client: httpx.AsyncClient):
+    def __init__(self, http_client: httpx.AsyncClient, tenant_id: str = None, user_id: str = None):
         self.http_client = http_client
         self.base_url = settings.LANGCHAIN_SERVICE_URL
+        self.tenant_id = tenant_id
+        self.user_id = user_id
         # self.timeout = 30.0 # Timeout is now managed by the passed client or per-request
+    
+    def _get_auth_headers(self, tenant_id: str = None, user_id: str = None) -> dict:
+        """Get authentication headers for microservice requests"""
+        headers = {
+            "X-API-Key": getattr(settings, 'API_KEY', 'your-secret-api-key-here'),
+            "X-Tenant-ID": tenant_id or self.tenant_id or getattr(settings, 'DEFAULT_TENANT', 'default')
+        }
+        
+        user_id_to_use = user_id or self.user_id
+        if user_id_to_use:
+            headers["X-User-ID"] = user_id_to_use
+            
+        return headers
 
     # __aenter__ and __aexit__ removed as client is managed externally
 
@@ -54,9 +69,12 @@ class LangChainClient:
                 "tenant_id": tenant_id or settings.DEFAULT_TENANT
             }
             
+            headers = self._get_auth_headers(tenant_id)
+            
             response = await self.http_client.post(
                 f"{self.base_url}/embeddings/generate",
-                json=payload
+                json=payload,
+                headers=headers
             )
             
             response.raise_for_status()
@@ -203,9 +221,12 @@ class LangChainClient:
                 "tenant_id": tenant_id # No longer uses DEFAULT_TENANT fallback here, expecting explicit tenant_id
             }
             
+            headers = self._get_auth_headers(tenant_id)
+            
             response = await self.http_client.post(
-                f"{self.base_url}/documents/store_one", # Changed endpoint
-                json=payload
+                f"{self.base_url}/documents/add-single", # Correct endpoint
+                json=payload,
+                headers=headers
             )
             
             response.raise_for_status()
@@ -332,7 +353,8 @@ class LangChainClient:
             raise RuntimeError("HTTP client not provided to LangChainClient.")
         try:
             payload = {"text": text, "tenant_id": tenant_id or settings.DEFAULT_TENANT}
-            response = await self.http_client.post(f"{self.base_url}/chunk", json=payload)
+            headers = self._get_auth_headers(tenant_id)
+            response = await self.http_client.post(f"{self.base_url}/chunk", json=payload, headers=headers)
             response.raise_for_status()
             result = response.json()
             return result.get("chunks", [{"text": text}])

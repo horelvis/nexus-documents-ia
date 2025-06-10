@@ -6,6 +6,9 @@ from typing import Optional
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    # Security configuration
+    API_KEY: str = "your-secret-api-key-here"
+    
     # LangChain/Ollama configuration
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
     OLLAMA_MODEL: str = "llama3.2"

@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 class VectorService:
     """Servicio para gestión de vectores usando el microservicio LangChain"""
     
-    def __init__(self, tenant_id: str = None):
+    def __init__(self, tenant_id: str = None, user_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
+        self.user_id = user_id
         logger.info(f"VectorService initialized for tenant: {self.tenant_id}")
     
     async def add_documents(self, texts: List[str], metadatas: List[Dict[str, Any]]) -> bool:
@@ -36,7 +37,7 @@ class VectorService:
             
             # Usar cliente HTTP para añadir documentos
             async with httpx.AsyncClient(timeout=30.0) as http_client:
-                lc_client = LangChainClient(http_client=http_client)
+                lc_client = LangChainClient(http_client=http_client, tenant_id=self.tenant_id, user_id=self.user_id)
                 success = await lc_client.add_documents(tenant_id=self.tenant_id, texts=texts, metadatas=metadatas)
             
             if success:
@@ -72,7 +73,7 @@ class VectorService:
             
             # Usar cliente HTTP para añadir documento
             async with httpx.AsyncClient(timeout=30.0) as http_client:
-                lc_client = LangChainClient(http_client=http_client)
+                lc_client = LangChainClient(http_client=http_client, tenant_id=self.tenant_id, user_id=self.user_id)
                 # Call updated LangChainClient.store_document signature:
                 # store_document(self, doc_id: str, text: str, metadata: Dict[str, Any], tenant_id: str) -> bool
                 success = await lc_client.store_document(doc_id=doc_id, text=text, metadata=metadata, tenant_id=self.tenant_id)
