@@ -142,15 +142,13 @@ class GCSService:
                 file_size = len(file)
                 
             else:
-                # For file-like objects, use directly
-                file_obj = file
-                # Get file size
+                # For file-like objects, read content to get size
                 try:
-                    current_pos = file_obj.tell()
-                    file_obj.seek(0, 2)  # Seek to end
-                    file_size = file_obj.tell()
-                    file_obj.seek(current_pos)  # Reset position
+                    content = file.read()
+                    file_obj = io.BytesIO(content)
+                    file_size = len(content)
                 except:
+                    file_obj = file
                     file_size = 0
             
             # Rewind the stream to the beginning (as per official docs)
