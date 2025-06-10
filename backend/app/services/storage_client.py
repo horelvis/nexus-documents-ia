@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 class StorageClient:
     """Cliente para comunicarse con el storage microservice"""
     
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None):
+    def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
         """
         Inicializa el cliente de storage.
         
         Args:
             tenant_id: ID del tenant
             user_id: ID del usuario (opcional)
+            bucket_name: Nombre del bucket (opcional, se obtiene del tenant si no se proporciona)
         """
         self.tenant_id = tenant_id
         self.user_id = user_id
@@ -34,6 +35,10 @@ class StorageClient:
         
         if self.user_id:
             self.headers["X-User-ID"] = self.user_id
+            
+        # Añadir bucket name si se proporciona
+        if bucket_name:
+            self.headers["X-Bucket-Name"] = bucket_name
     
     def _get_mimetype(self, filename: str, fallback: str = "application/octet-stream") -> str:
         """

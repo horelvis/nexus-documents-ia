@@ -33,6 +33,10 @@ def get_user_id_from_header(request: Request) -> Optional[str]:
     """Extrae user ID del header X-User-ID (opcional)"""
     return request.headers.get("X-User-ID")
 
+def get_bucket_name_from_header(request: Request) -> Optional[str]:
+    """Extrae bucket name del header X-Bucket-Name (opcional)"""
+    return request.headers.get("X-Bucket-Name")
+
 def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
     """Valida la API key"""
     if api_key != settings.API_KEY:
@@ -46,6 +50,7 @@ def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
 def validate_tenant_access(
     tenant_id: str = Depends(get_tenant_id_from_header),
     user_id: Optional[str] = Depends(get_user_id_from_header),
+    bucket_name: Optional[str] = Depends(get_bucket_name_from_header),
     api_key_valid: bool = Depends(validate_api_key)
 ) -> dict:
     """Valida acceso del tenant y retorna contexto de seguridad"""

@@ -16,9 +16,8 @@ class StorageServiceFactory:
         Crea la instancia apropiada de storage service.
         
         Prioridad:
-        1. StorageServiceV2 (microservicio) - si está disponible
-        2. StorageService original - como fallback
-        3. MockStorageService - solo para testing
+        1. StorageService (microservicio) - principal
+        2. MockStorageService - solo para testing
         
         Args:
             tenant_id: ID del tenant
@@ -41,37 +40,33 @@ class StorageServiceFactory:
             os.path.exists(os.getenv("GCS_CREDENTIALS", ""))
         ) or os.getenv("GCS_PROJECT_ID")
         
-        # Intentar usar microservicio primero
+        # Obtener bucket_name del tenant si hay sesión de BD
+        bucket_name = None
+        if db:
+            from app.db.models import Tenant
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            if tenant and tenant.bucket_name:
+                bucket_name = tenant.bucket_name
+
+        # Usar storage service (microservicio)
         try:
-            from app.services.storage_service_v2 import StorageServiceV2
+            from app.services.storage_service import StorageService
             
-            # Test rápido de conectividad (solo si las credenciales están disponibles)
+            # Test rápido de conectividad
             if not testing_mode or credentials_available:
-                storage = StorageServiceV2(tenant_id, user_id)
+                storage = StorageService(tenant_id, user_id, bucket_name)
                 health = storage.health_check()
                 
                 if health.get("status") == "healthy":
-                    logger.info("Using StorageServiceV2 (microservice)")
+                    logger.info("Using StorageService (microservice)")
                     return storage
                 else:
-                    logger.warning("Storage microservice unhealthy, falling back")
+                    logger.warning("Storage microservice unhealthy")
             else:
                 logger.info("Testing mode without credentials, skipping microservice")
                 
         except Exception as e:
-            logger.warning(f"Storage microservice unavailable: {e}, falling back")
-        
-        # Fallback al servicio original (solo si las credenciales están disponibles)
-        if credentials_available:
-            try:
-                from app.services.storage_service import StorageService
-                logger.info("Using original StorageService as fallback")
-                return StorageService(tenant_id, db)
-                
-            except Exception as e:
-                logger.error(f"Original StorageService also failed: {e}")
-        else:
-            logger.info("Credentials not available, skipping original StorageService")
+            logger.warning(f"Storage microservice unavailable: {e}")
         
         # Si estamos en testing, usar mock como último recurso
         if testing_mode:
