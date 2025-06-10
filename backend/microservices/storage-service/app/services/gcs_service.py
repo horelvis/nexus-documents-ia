@@ -2,6 +2,8 @@ import io
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
+import tempfile
+import os
 
 from google.cloud import storage
 from google.oauth2 import service_account
@@ -129,27 +131,45 @@ class GCSService:
             
             # Convert to BytesIO stream (official pattern)
             if isinstance(file, UploadFile):
-                # For FastAPI UploadFile, read content and create stream
                 content = await file.read()
-                file_obj = io.BytesIO(content)
                 file_size = len(content)
+                temp_file = None
+                try:
+                    temp_file = tempfile.NamedTemporaryFile(delete=False)
+                    temp_file.write(content)
+                    temp_file.seek(0) # Ensure pointer is at the beginning
+                    blob.upload_from_filename(temp_file.name)
+                finally:
+                    if temp_file:
+                        temp_file.close()
+                        os.remove(temp_file.name)
                 
             elif isinstance(file, bytes):
-                # For bytes, create stream
-                file_obj = io.BytesIO(file)
                 file_size = len(file)
+                temp_file = None
+                try:
+                    temp_file = tempfile.NamedTemporaryFile(delete=False)
+                    temp_file.write(file)
+                    temp_file.seek(0) # Ensure pointer is at the beginning
+                    blob.upload_from_filename(temp_file.name)
+                finally:
+                    if temp_file:
+                        temp_file.close()
+                        os.remove(temp_file.name)
                 
-            else:
-                # For other file-like objects, read content
+            else: # Handles other BinaryIO types
                 content = file.read()
-                file_obj = io.BytesIO(content)
                 file_size = len(content)
-            
-            # Rewind the stream to the beginning (as per official docs)
-            file_obj.seek(0)
-            
-            # Upload data from the stream to your bucket
-            blob.upload_from_file(file_obj)
+                temp_file = None
+                try:
+                    temp_file = tempfile.NamedTemporaryFile(delete=False)
+                    temp_file.write(content)
+                    temp_file.seek(0) # Ensure pointer is at the beginning
+                    blob.upload_from_filename(temp_file.name)
+                finally:
+                    if temp_file:
+                        temp_file.close()
+                        os.remove(temp_file.name)
             
             logger.info(f"Stream data uploaded to {object_name} in bucket {self.bucket_name} ({file_size} bytes)")
             
