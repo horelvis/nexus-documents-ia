@@ -136,7 +136,9 @@ class GCSService:
             file_size = 0
             
             # Use temporary files for all uploads (consistent and memory-efficient)
-            if isinstance(file, UploadFile):
+            logger.info(f"Checking instance: UploadFile={isinstance(file, UploadFile)}, hasattr read={hasattr(file, 'read')}")
+            
+            if isinstance(file, UploadFile) or hasattr(file, 'read') and hasattr(file, 'file'):
                 # For FastAPI UploadFile - save directly to temp file
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                     try:
@@ -162,6 +164,7 @@ class GCSService:
                         os.unlink(temp_file.name)
                         
             elif isinstance(file, bytes):
+                logger.info("Processing bytes file")
                 # For bytes
                 file_size = len(file)
                 
@@ -174,8 +177,10 @@ class GCSService:
                         os.unlink(temp_file.name)
                         
             else:
+                logger.info(f"Processing other file type: {type(file)}")
                 # For other file-like objects
                 content = file.read()
+                logger.info(f"Read content type: {type(content)}")
                 file_size = len(content)
                 
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
