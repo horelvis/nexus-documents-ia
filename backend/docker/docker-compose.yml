@@ -16,6 +16,8 @@ services:
       - storage-service
     networks:
       - backend-network
+    env_file:
+      - ../.env
     environment:
       # Database
       - POSTGRES_SERVER=db
@@ -211,6 +213,8 @@ services:
       - backend-network
     volumes:
       - ../credentials:/app/credentials:ro
+    env_file:
+      - ../.env
     environment:
       - API_KEY=${STORAGE_API_KEY:-your-secret-api-key-here}
       - GCS_PROJECT_ID=${GCS_PROJECT_ID:-nexus-dev-project}
