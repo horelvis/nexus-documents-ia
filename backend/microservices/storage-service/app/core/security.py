@@ -12,7 +12,11 @@ security = HTTPBearer()
 def get_api_key_from_header(request: Request) -> str:
     """Extrae API key del header X-API-Key"""
     api_key = request.headers.get("X-API-Key")
+    logger.info(f"=== API KEY VALIDATION ===")
+    logger.info(f"Received API key: {api_key[:10] if api_key else 'NONE'}...")
+    logger.info(f"Expected API key: {settings.API_KEY[:10]}...")
     if not api_key:
+        logger.error("Missing X-API-Key header")
         raise HTTPException(
             status_code=401,
             detail="Missing X-API-Key header"
@@ -21,8 +25,12 @@ def get_api_key_from_header(request: Request) -> str:
 
 def get_tenant_id_from_header(request: Request) -> str:
     """Extrae tenant ID del header X-Tenant-ID"""
+    logger.info(f"=== EXTRACTING HEADERS ===")
+    logger.info(f"All headers: {dict(request.headers)}")
     tenant_id = request.headers.get("X-Tenant-ID")
+    logger.info(f"Tenant ID: {tenant_id}")
     if not tenant_id:
+        logger.error("Missing X-Tenant-ID header")
         raise HTTPException(
             status_code=400,
             detail="Missing X-Tenant-ID header"

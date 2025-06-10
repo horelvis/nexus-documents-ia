@@ -140,9 +140,17 @@ class GCSService:
                 file.file.seek(0)  # Reset para uso posterior si es necesario
             else:
                 file_obj = file
-                file_obj.seek(0, 2)  # Ir al final para obtener tamaño
-                file_size = file_obj.tell()
-                file_obj.seek(0)  # Volver al inicio
+                # Para otros tipos de archivo, obtener tamaño de forma segura
+                try:
+                    current_pos = file_obj.tell()
+                    file_obj.seek(0, 2)  # Ir al final
+                    file_size = file_obj.tell()
+                    file_obj.seek(current_pos)  # Volver a posición original
+                except (AttributeError, OSError):
+                    # Si no se puede hacer seek, leer todo el contenido
+                    content = file_obj.read()
+                    file_obj = io.BytesIO(content)
+                    file_size = len(content)
             
             # Subir el archivo
             blob.upload_from_file(file_obj, rewind=True)
