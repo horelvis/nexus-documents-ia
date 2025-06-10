@@ -132,7 +132,7 @@ async def upload_file(
             logger.warning("Invalid metadata JSON provided")
     
     # Subir archivo
-    result = gcs_service.upload_file(
+    result = await gcs_service.upload_file(
         file=file,
         object_name=object_name,
         metadata=file_metadata

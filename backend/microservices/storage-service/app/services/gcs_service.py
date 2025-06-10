@@ -105,7 +105,7 @@ class GCSService:
                         detail=f"Failed to setup storage bucket: {str(e)}"
                     )
     
-    def upload_file(
+    async def upload_file(
         self,
         file: Union[UploadFile, BinaryIO, bytes],
         object_name: str,
@@ -130,7 +130,7 @@ class GCSService:
             # Convert to BytesIO stream (official pattern)
             if isinstance(file, UploadFile):
                 # For FastAPI UploadFile, read content and create stream
-                content = file.file.read()
+                content = await file.read()
                 file_obj = io.BytesIO(content)
                 file_size = len(content)
                 
