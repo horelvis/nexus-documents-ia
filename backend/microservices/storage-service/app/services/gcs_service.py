@@ -131,14 +131,16 @@ class GCSService:
             
             # Use temporary files for all uploads (consistent and memory-efficient)
             if isinstance(file, UploadFile):
-                # For FastAPI UploadFile
-                content = await file.read()
-                file_size = len(content)
-                
+                # For FastAPI UploadFile - save directly to temp file
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                     try:
+                        # Copy file content to temp file
+                        content = await file.read()
                         temp_file.write(content)
                         temp_file.flush()
+                        file_size = len(content)
+                        
+                        # Upload from temp file
                         blob.upload_from_filename(temp_file.name)
                     finally:
                         os.unlink(temp_file.name)
