@@ -16,14 +16,9 @@ services:
       - storage-service
     networks:
       - backend-network
-    # env_file:
-    #   - ./.env
+    env_file:
+      - ./.env
     environment:
-      # Database
-      - POSTGRES_SERVER=db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=nexus_db
       # Services URLs
       - STORAGE_SERVICE_URL=http://storage-service:8001
       - STORAGE_API_KEY=dev-storage-api-key-12345
@@ -51,9 +46,9 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=nexus_db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-nexus_db}
     ports:
       - "5432:5432"
     volumes:
@@ -62,7 +57,7 @@ services:
       - backend-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d nexus_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nexus_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -201,8 +196,8 @@ services:
       - backend-network
     volumes:
       - ../credentials:/app/credentials:ro
-    # env_file:
-    #   - ./.env
+    env_file:
+      - ./.env
     environment:
       - API_KEY=dev-storage-api-key-12345
       - GCS_PROJECT_ID=nexus-document-ia
