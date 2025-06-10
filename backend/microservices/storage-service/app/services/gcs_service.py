@@ -121,6 +121,8 @@ class GCSService:
         https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-from-stream-python
         """
         try:
+            logger.info(f"upload_file called with file type: {type(file)}")
+            
             # Construct a client-side representation of the blob
             blob = self.bucket.blob(object_name)
             
@@ -129,6 +131,9 @@ class GCSService:
                 blob.metadata = metadata
             
             logger.info(f"Uploading {object_name} to bucket {self.bucket_name}")
+            
+            # Initialize file_size
+            file_size = 0
             
             # Use temporary files for all uploads (consistent and memory-efficient)
             if isinstance(file, UploadFile):
@@ -139,11 +144,17 @@ class GCSService:
                         logger.info(f"Reading UploadFile content...")
                         content = await file.read()
                         logger.info(f"Content type: {type(content)}")
-                        logger.info(f"Content length: {len(content) if not asyncio.iscoroutine(content) else 'COROUTINE!'}")
+                        
+                        # Check if content is coroutine
+                        if asyncio.iscoroutine(content):
+                            logger.error("Content is still a coroutine!")
+                            content = await content
+                        
+                        file_size = len(content)
+                        logger.info(f"Content length: {file_size}")
                         
                         temp_file.write(content)
                         temp_file.flush()
-                        file_size = len(content)
                         
                         # Upload from temp file
                         blob.upload_from_filename(temp_file.name)

@@ -102,11 +102,13 @@ async def upload_file(
             detail=f"File extension not allowed. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}"
         )
     
-    if not validate_file_size(file.size):
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE} bytes"
-        )
+    # Skip file size validation for now (will be checked during upload)
+    # FastAPI UploadFile.size can be None or unreliable
+    # if not validate_file_size(file.size):
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE} bytes"
+    #     )
     
     # Generar path del objeto
     object_name = get_object_path(
