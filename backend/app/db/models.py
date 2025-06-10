@@ -270,7 +270,6 @@ class Document(Base):
     tenant = relationship("Tenant", back_populates="documents")
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_documents")
     tags = relationship("Tag", secondary=document_tags, back_populates="documents")
-    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
     metrics = relationship("DocumentMetrics", back_populates="document", uselist=False, cascade="all, delete-orphan")
     views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
     
@@ -349,27 +348,6 @@ class DocumentView(Base):
         Index('idx_document_views_user_date', 'user_id', 'viewed_at'),
     )
 
-
-class DocumentChunk(Base):
-    __tablename__ = "document_chunks"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, index=True)
-    chunk_index = Column(Integer, nullable=False)
-    content = Column(Text, nullable=False)
-    embedding_id = Column(String(255), nullable=True, index=True)
-    chunk_type = Column(String(50), nullable=True)
-    word_count = Column(Integer, nullable=True)
-    char_count = Column(Integer, nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    document = relationship("Document", back_populates="chunks")
-    
-    __table_args__ = (
-        UniqueConstraint('document_id', 'chunk_index', name='uq_document_chunk_index'),
-        Index('idx_chunks_doc_index', 'document_id', 'chunk_index'),
-    )
 
 
 class Tag(Base):

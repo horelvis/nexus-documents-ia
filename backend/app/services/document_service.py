@@ -14,7 +14,7 @@ import chardet
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, DocumentChunk, Tag
+from app.db.models import Document, Tag
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
@@ -183,46 +183,28 @@ class DocumentService:
         title: str
     ):
         """
-        Extracts text, creates chunks, generates embeddings, and updates 
-        the document's indexed status. Adds to session but does not commit.
+        Extracts text and indexes it directly via LangChain/Qdrant.
+        No local database storage of chunks - everything goes to vector store.
         """
         file_obj_for_text = io.BytesIO(file_contents)
         document_text = await asyncio.to_thread(self._extract_text, file_obj_for_text, file_ext)
         
         if document_text:
-            chunks_data = await self.embedding_service.chunk_text(document_text)
-            for i, chunk_data in enumerate(chunks_data):
-                chunk = DocumentChunk(
-                    document_id=db_document.id,
-                    chunk_index=i,
-                    content=chunk_data["text"]
-                )
-                db.add(chunk)
-            
-            db.flush()
+            # Prepare metadata for the document
+            document_metadata = {
+                "doc_id": str(db_document.id),
+                "tenant_id": self.tenant_id,
+                "title": title,
+                "filename": db_document.filename,
+                "file_type": file_ext,
+                "created_by": self.user_id or "system"
+            }
 
-            # Prepare texts and metadatas for VectorService.add_documents
-            # This was previously done inside EmbeddingService.add_document
-            chunk_texts_for_vector_service = [chunk["text"] for chunk in chunks_data]
-            chunk_metadatas_for_vector_service = []
-            for i, chunk_info in enumerate(chunks_data):
-                # Base metadata for each chunk
-                meta = {
-                    "doc_id": str(db_document.id), # Link chunk to parent document
-                    "chunk_index": i,
-                    "tenant_id": self.tenant_id,
-                    # Potentially add other db_document fields if relevant for search/filtering
-                    "title": title,
-                    "file_type": file_ext,
-                }
-                # Add any original metadata from the chunk itself (e.g. page numbers if chunker provides it)
-                # For now, chunk_info from embedding_service.chunk_text is just {"text":...}
-                # If chunk_info contained more, we'd spread it: **chunk_info
-                chunk_metadatas_for_vector_service.append(meta)
-
-            indexing_success = await self.vector_service.add_documents(
-                texts=chunk_texts_for_vector_service,
-                metadatas=chunk_metadatas_for_vector_service
+            # Let LangChain handle chunking, embeddings, and vector storage
+            indexing_success = await self.vector_service.add_document(
+                doc_id=str(db_document.id),
+                text=document_text,
+                metadata=document_metadata
             )
             db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
         else:
@@ -237,11 +219,13 @@ class DocumentService:
         tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Procesa un documento: lo valida, crea el registro en BD, lo almacena en GCS, 
-        extrae texto, genera embeddings y lo indexa.
+        Procesa un documento con commits parciales para evitar que la vectorización bloquee la subida.
         """
+        db_document = None
+        
         try:
             filename = file.filename
+            
             # 1. Validate file
             file_ext, file_contents, file_size = await self._validate_file(file, filename)
 
@@ -268,20 +252,35 @@ class DocumentService:
                 file_ext=db_document.file_type
             )
 
-            # 4. Extract text and index
-            await self._extract_and_index_text(
-                db=db,
-                db_document=db_document,
-                file_contents=file_contents,
-                file_ext=db_document.file_type,
-                title=db_document.title
-            )
-            
-            # 5. Commit all DB changes
+            # 4. COMMIT PARTIAL - Document is now successfully uploaded and available
             db.commit()
             db.refresh(db_document)
+            logger.info(f"Document {doc_id_str} uploaded successfully, starting vectorization...")
+
+            # 5. Try vectorization (separate operation - won't block upload success)
+            try:
+                await self._extract_and_index_text(
+                    db=db,
+                    db_document=db_document,
+                    file_contents=file_contents,
+                    file_ext=db_document.file_type,
+                    title=db_document.title
+                )
+                # If vectorization succeeds, status is already set to INDEXED
+                db.commit()
+                logger.info(f"Document {doc_id_str} vectorization completed successfully")
+                
+            except Exception as vector_error:
+                # Vectorization failed, but document upload was successful
+                logger.error(f"Vectorization failed for document {doc_id_str}: {vector_error}")
+                db_document.indexed = IndexingStatus.INDEXING_ERROR
+                db.commit()
+                
+                # Don't raise the error - document upload was successful
+                logger.warning(f"Document {doc_id_str} uploaded but vectorization failed - can retry later")
             
-            # 6. Format and return response
+            # 6. Return successful response (regardless of vectorization outcome)
+            db.refresh(db_document)
             return {
                 "id": str(db_document.id),
                 "title": db_document.title,
@@ -295,15 +294,26 @@ class DocumentService:
             }
             
         except HTTPException:
-            db.rollback()
+            # HTTP exceptions should be re-raised as-is
+            if db_document:
+                db.rollback()
             raise
+            
         except Exception as e:
-            db.rollback()
+            # Only rollback if we haven't committed the document yet
+            if db_document:
+                try:
+                    # Check if document was committed (has an ID and is in DB)
+                    existing = db.query(Document).filter(Document.id == db_document.id).first()
+                    if not existing:
+                        db.rollback()
+                except:
+                    db.rollback()
+            else:
+                db.rollback()
+                
             logger.exception(f"Error processing document: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the document.")
-        finally:
-            # db.close() # Removed: Session should be managed by the caller
-            pass
     
     def get_document(self, db: Session, doc_id: str) -> Dict[str, Any]: # Added db: Session
         """

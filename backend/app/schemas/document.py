@@ -14,21 +14,6 @@ class DocumentBase(BaseModel):
     title: str
     description: Optional[str] = None
 
-# Esquemas para DocumentChunk
-class DocumentChunkBase(BaseModel):
-    document_id: UUID
-    chunk_index: int
-    content: str
-
-class DocumentChunkCreate(DocumentChunkBase):
-    pass
-
-class DocumentChunk(DocumentChunkBase):
-    id: int
-    embedding_id: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
 
 # Esquemas para DocumentMetrics
 class DocumentMetricsBase(BaseModel):
@@ -144,8 +129,7 @@ class Document(DocumentBase):
         from_attributes = True
 
 class DocumentDetail(Document):
-    preview_chunks: Optional[List[DocumentChunk]] = []
-    
+    # DocumentDetail is now same as Document since chunks are handled by vector store
     class Config:
         from_attributes = True
 

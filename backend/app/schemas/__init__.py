@@ -9,7 +9,6 @@ from .billing import (
 # Document
 from .document import (
     DocumentBase, DocumentCreate, DocumentUpdate, Document, DocumentDetail, DocumentBasic, DocumentWithMetrics,
-    DocumentChunkBase, DocumentChunkCreate, DocumentChunk,
     DocumentMetricsBase, DocumentMetricsCreate, DocumentMetrics,
     DocumentTagBase, DocumentTagCreate, DocumentTag,
     DocumentViewBase, DocumentViewCreate, DocumentView,
@@ -64,9 +63,6 @@ __all__ = [
     "DocumentDetail",
     "DocumentBasic",
     "DocumentWithMetrics",
-    "DocumentChunkBase",
-    "DocumentChunkCreate",
-    "DocumentChunk",
     "DocumentMetricsBase",
     "DocumentMetricsCreate",
     "DocumentMetrics",
