@@ -1,5 +1,10 @@
 import os
+import logging
 from typing import Optional
+
+# Configurar logging temprano
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class Settings:
     """Configuración del storage microservice"""
@@ -30,4 +35,24 @@ class Settings:
     # Testing
     TESTING: bool = os.getenv("TESTING", "false").lower() == "true"
 
+# Crear instancia y log de configuración
 settings = Settings()
+
+# Log de variables importantes para debugging
+logger.info("=== STORAGE SERVICE CONFIGURATION ===")
+logger.info(f"API_KEY: {settings.API_KEY[:10]}... (masked)")
+logger.info(f"GCS_PROJECT_ID: {settings.GCS_PROJECT_ID}")
+logger.info(f"GCS_CREDENTIALS: {settings.GCS_CREDENTIALS}")
+logger.info(f"GCS_BUCKET_NAME: {settings.GCS_BUCKET_NAME}")
+logger.info(f"DEBUG: {settings.DEBUG}")
+logger.info(f"TESTING: {settings.TESTING}")
+logger.info("=== END CONFIGURATION ===")
+
+# Log de variables de entorno raw
+logger.info("=== RAW ENVIRONMENT VARIABLES ===")
+for key in ["API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING"]:
+    value = os.getenv(key, "NOT_SET")
+    if key == "API_KEY" and value != "NOT_SET":
+        value = f"{value[:10]}... (masked)"
+    logger.info(f"ENV {key}: {value}")
+logger.info("=== END RAW ENV VARS ===")

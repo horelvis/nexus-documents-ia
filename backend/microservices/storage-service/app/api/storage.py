@@ -66,7 +66,10 @@ class CleanupResponse(BaseModel):
 
 def get_gcs_service(auth_context: dict = Depends(validate_tenant_access)) -> GCSService:
     """Dependency que retorna el servicio GCS configurado para el tenant"""
-    bucket_name = get_bucket_name(auth_context["tenant_id"])
+    bucket_name = get_bucket_name(
+        auth_context["tenant_id"], 
+        auth_context.get("bucket_name")
+    )
     return GCSService(bucket_name)
 
 @router.post("/upload", response_model=UploadResponse)
