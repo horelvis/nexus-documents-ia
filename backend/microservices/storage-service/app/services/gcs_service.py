@@ -1,9 +1,9 @@
 import io
 import logging
-from datetime import datetime, timedelta
-from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 import tempfile
 import os
+from datetime import datetime, timedelta
+from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 
 from google.cloud import storage
 from google.oauth2 import service_account
@@ -129,47 +129,44 @@ class GCSService:
             
             logger.info(f"Uploading {object_name} to bucket {self.bucket_name}")
             
-            # Convert to BytesIO stream (official pattern)
+            # Use temporary files for all uploads (consistent and memory-efficient)
             if isinstance(file, UploadFile):
+                # For FastAPI UploadFile
                 content = await file.read()
                 file_size = len(content)
-                temp_file = None
-                try:
-                    temp_file = tempfile.NamedTemporaryFile(delete=False)
-                    temp_file.write(content)
-                    temp_file.seek(0) # Ensure pointer is at the beginning
-                    blob.upload_from_filename(temp_file.name)
-                finally:
-                    if temp_file:
-                        temp_file.close()
-                        os.remove(temp_file.name)
                 
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    try:
+                        temp_file.write(content)
+                        temp_file.flush()
+                        blob.upload_from_filename(temp_file.name)
+                    finally:
+                        os.unlink(temp_file.name)
+                        
             elif isinstance(file, bytes):
+                # For bytes
                 file_size = len(file)
-                temp_file = None
-                try:
-                    temp_file = tempfile.NamedTemporaryFile(delete=False)
-                    temp_file.write(file)
-                    temp_file.seek(0) # Ensure pointer is at the beginning
-                    blob.upload_from_filename(temp_file.name)
-                finally:
-                    if temp_file:
-                        temp_file.close()
-                        os.remove(temp_file.name)
                 
-            else: # Handles other BinaryIO types
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    try:
+                        temp_file.write(file)
+                        temp_file.flush()
+                        blob.upload_from_filename(temp_file.name)
+                    finally:
+                        os.unlink(temp_file.name)
+                        
+            else:
+                # For other file-like objects
                 content = file.read()
                 file_size = len(content)
-                temp_file = None
-                try:
-                    temp_file = tempfile.NamedTemporaryFile(delete=False)
-                    temp_file.write(content)
-                    temp_file.seek(0) # Ensure pointer is at the beginning
-                    blob.upload_from_filename(temp_file.name)
-                finally:
-                    if temp_file:
-                        temp_file.close()
-                        os.remove(temp_file.name)
+                
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    try:
+                        temp_file.write(content)
+                        temp_file.flush()
+                        blob.upload_from_filename(temp_file.name)
+                    finally:
+                        os.unlink(temp_file.name)
             
             logger.info(f"Stream data uploaded to {object_name} in bucket {self.bucket_name} ({file_size} bytes)")
             
