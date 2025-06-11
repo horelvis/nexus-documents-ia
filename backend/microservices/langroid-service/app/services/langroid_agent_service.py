@@ -39,7 +39,7 @@ except ImportError:
         USE_OLLAMA_CONFIG = False
 
 from app.core.config import settings as app_settings
-from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
+# from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,11 @@ class LangroidAgentService:
     def __init__(self):
         self.active_agents: Dict[str, Dict[str, Any]] = {}
         self.agent_classes = {
-            "digital_signature": DigitalSignatureLangroidAgent,
+            "digital_signature": self._create_signature_agent,
             "document_analyzer": self._create_document_analyzer,
             "rag_assistant": self._create_rag_assistant,
+            "legal_compliance": self._create_legal_compliance_agent,
+            "financial_analysis": self._create_financial_analysis_agent,
             "generic": self._create_generic_agent
         }
         self.llm_config = None
@@ -83,8 +85,8 @@ class LangroidAgentService:
                 "cloud": False,
                 "host": app_settings.QDRANT_HOST,
                 "port": app_settings.QDRANT_PORT,
-                "storage_path": None,  # Use server mode
-                "embedding_model": app_settings.DEFAULT_EMBEDDING_MODEL
+                # Don't set storage_path for server mode
+                # "embedding_model": app_settings.DEFAULT_EMBEDDING_MODEL  # Will set this per tenant
             }
             logger.info(f"Configured vector store: {app_settings.QDRANT_HOST}:{app_settings.QDRANT_PORT}")
         except Exception as e:
@@ -98,10 +100,14 @@ class LangroidAgentService:
         try:
             collection_name = f"nexus_langroid_agents_{tenant_id}"
             
-            return QdrantDBConfig(
-                **self.base_vector_store_config,
+            # Create minimal config that works
+            config = QdrantDBConfig(
+                cloud=False,
+                host=app_settings.QDRANT_HOST,
+                port=app_settings.QDRANT_PORT,
                 collection_name=collection_name
             )
+            return config
         except Exception as e:
             logger.warning(f"Failed to create vector store config for tenant {tenant_id}: {e}")
             # Return None to indicate no vector store available
@@ -134,15 +140,10 @@ class LangroidAgentService:
         
         try:
             # Create agent instance based on type
-            if agent_type == "digital_signature":
-                agent_instance = await self._create_signature_agent(
-                    agent_id, tenant_id, user_id, config
-                )
-            else:
-                agent_creator = self.agent_classes[agent_type]
-                agent_instance = await agent_creator(
-                    agent_id, tenant_id, user_id, config
-                )
+            agent_creator = self.agent_classes[agent_type]
+            agent_instance = await agent_creator(
+                agent_id, tenant_id, user_id, config
+            )
             
             # Store agent info
             self.active_agents[agent_id] = {
@@ -343,17 +344,40 @@ class LangroidAgentService:
         tenant_id: str,
         user_id: str,
         config: Dict[str, Any]
-    ) -> DigitalSignatureLangroidAgent:
+    ) -> ChatAgent:
         """Create digital signature agent"""
         
-        return DigitalSignatureLangroidAgent(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            llm_config=self.llm_config,
-            vector_config=self._get_tenant_vector_store_config(tenant_id),
-            config=config
-        )
+        try:
+            # For now, create a simple ChatAgent instead of complex DigitalSignatureLangroidAgent
+            # to avoid LLMFunctionSpec validation errors
+            vector_config = self._get_tenant_vector_store_config(tenant_id)
+            
+            agent_config = ChatAgentConfig(
+                name="DigitalSignatureAgent",
+                llm=self.llm_config,
+                vecdb=vector_config,  # May be None if vector store unavailable
+                system_message="""You are a digital signature assistant specialized in managing signature workflows.
+
+Your capabilities include:
+- Creating signature requests for documents
+- Managing multi-party signature workflows
+- Tracking signature status and completion
+- Handling sequential and parallel signature processes
+- Providing updates on signature requests
+
+Always provide clear guidance on signature processes and help users manage their document signature workflows efficiently."""
+            )
+            
+            return ChatAgent(agent_config)
+            
+        except Exception as e:
+            logger.error(f"Failed to create signature agent: {e}")
+            # Fallback to minimal agent
+            agent_config = ChatAgentConfig(
+                name="DigitalSignatureAgent",
+                system_message="You are a digital signature assistant."
+            )
+            return ChatAgent(agent_config)
     
     async def _create_document_analyzer(
         self,
@@ -399,9 +423,7 @@ Always provide clear, structured analysis with specific examples from the docume
                 cloud=False,
                 host=app_settings.QDRANT_HOST,
                 port=app_settings.QDRANT_PORT,
-                storage_path=None,
-                collection_name=f"{app_settings.QDRANT_COLLECTION_PREFIX}_{tenant_id}",
-                embedding_model=app_settings.DEFAULT_EMBEDDING_MODEL
+                collection_name=f"{app_settings.QDRANT_COLLECTION_PREFIX}_{tenant_id}"
             )
         except Exception as e:
             logger.warning(f"Failed to create vector config for RAG assistant: {e}")
@@ -453,6 +475,103 @@ Always cite your sources and indicate confidence levels in your answers."""
             )
         
         return ChatAgent(agent_config)
+    
+    async def _create_legal_compliance_agent(
+        self,
+        agent_id: str,
+        tenant_id: str,
+        user_id: str,
+        config: Dict[str, Any]
+    ) -> ChatAgent:
+        """Create legal compliance agent"""
+        
+        try:
+            vector_config = self._get_tenant_vector_store_config(tenant_id)
+            
+            agent_config = ChatAgentConfig(
+                name="LegalComplianceAgent",
+                llm=self.llm_config,
+                vecdb=vector_config,
+                system_message="""You are a Legal Compliance Expert specialized in contract analysis and regulatory compliance.
+
+Your expertise includes:
+- Contract review and risk assessment
+- Regulatory compliance verification
+- Legal clause analysis and recommendations
+- Due diligence document review
+- Terms and conditions evaluation
+- Legal precedent research
+- Compliance audit support
+- Risk identification and mitigation
+
+Analysis Framework:
+1. COMPLIANCE CHECK: Verify adherence to applicable laws and regulations
+2. RISK ASSESSMENT: Identify potential legal risks and liabilities
+3. CLAUSE ANALYSIS: Review critical terms, conditions, and obligations
+4. RECOMMENDATIONS: Provide actionable legal guidance
+5. PRECEDENT REVIEW: Reference relevant legal cases when applicable
+
+Always provide structured analysis with clear risk levels (LOW/MEDIUM/HIGH) and specific recommendations."""
+            )
+            
+            return ChatAgent(agent_config)
+            
+        except Exception as e:
+            logger.error(f"Failed to create legal compliance agent: {e}")
+            agent_config = ChatAgentConfig(
+                name="LegalComplianceAgent",
+                system_message="You are a legal compliance expert. Analyze documents for legal risks and compliance issues."
+            )
+            return ChatAgent(agent_config)
+    
+    async def _create_financial_analysis_agent(
+        self,
+        agent_id: str,
+        tenant_id: str,
+        user_id: str,
+        config: Dict[str, Any]
+    ) -> ChatAgent:
+        """Create financial analysis agent"""
+        
+        try:
+            vector_config = self._get_tenant_vector_store_config(tenant_id)
+            
+            agent_config = ChatAgentConfig(
+                name="FinancialAnalysisAgent",
+                llm=self.llm_config,
+                vecdb=vector_config,
+                system_message="""You are a Financial Analysis Expert specialized in financial document processing and analysis.
+
+Your capabilities include:
+- Financial statement analysis (P&L, Balance Sheet, Cash Flow)
+- Invoice validation and processing
+- Budget analysis and variance reporting
+- Expense categorization and audit
+- Financial ratio calculations
+- Cost-benefit analysis
+- Revenue recognition review
+- Tax compliance verification
+
+Analysis Framework:
+1. DATA EXTRACTION: Extract key financial figures and metrics
+2. VALIDATION: Verify calculations and identify discrepancies
+3. TREND ANALYSIS: Analyze historical patterns and trends
+4. RATIO ANALYSIS: Calculate and interpret financial ratios
+5. RISK ASSESSMENT: Identify financial risks and red flags
+6. RECOMMENDATIONS: Provide actionable financial insights
+
+Always present findings with clear metrics, percentages, and structured financial summaries."""
+            )
+            
+            return ChatAgent(agent_config)
+            
+        except Exception as e:
+            logger.error(f"Failed to create financial analysis agent: {e}")
+            agent_config = ChatAgentConfig(
+                name="FinancialAnalysisAgent",
+                system_message="You are a financial analysis expert. Analyze financial documents and provide insights."
+            )
+            return ChatAgent(agent_config)
     
     # =====================================
     # HELPER METHODS

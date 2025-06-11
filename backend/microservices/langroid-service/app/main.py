@@ -14,7 +14,7 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.services.langroid_agent_service import LangroidAgentService
-from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
+# from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
 
 # Configure logging
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL))
@@ -130,6 +130,8 @@ async def service_status():
             "digital_signature",
             "document_analyzer", 
             "rag_assistant",
+            "legal_compliance",
+            "financial_analysis",
             "generic"
         ],
         "models": {

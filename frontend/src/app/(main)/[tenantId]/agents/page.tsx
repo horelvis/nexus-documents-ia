@@ -72,6 +72,10 @@ export default function AgentsPage() {
         return <FileText className="h-5 w-5" />
       case 'rag_assistant':
         return <Bot className="h-5 w-5" />
+      case 'legal_compliance':
+        return <MessageCircle className="h-5 w-5" />
+      case 'financial_analysis':
+        return <Activity className="h-5 w-5" />
       default:
         return <MessageCircle className="h-5 w-5" />
     }
@@ -85,6 +89,10 @@ export default function AgentsPage() {
         return 'bg-green-100 text-green-800'
       case 'rag_assistant':
         return 'bg-purple-100 text-purple-800'
+      case 'legal_compliance':
+        return 'bg-red-100 text-red-800'
+      case 'financial_analysis':
+        return 'bg-orange-100 text-orange-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -221,7 +229,7 @@ export default function AgentsPage() {
                       <p className="text-muted-foreground mb-4">
                         Crea agentes de IA para automatizar tareas y procesar documentos.
                       </p>
-                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                         <Button 
                           onClick={async () => {
                             try {
@@ -251,9 +259,139 @@ export default function AgentsPage() {
                           variant="default"
                         >
                           <FileSignature className="h-4 w-4 mr-2" />
-                          Crear Agente de Firmas
+                          Firma Digital
                         </Button>
-                        <Button onClick={loadAgents} variant="outline">
+
+                        <Button 
+                          onClick={async () => {
+                            try {
+                              const response = await agentsService.createLegalComplianceAgent()
+                              if (response.error) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Error',
+                                  message: response.error
+                                })
+                              } else {
+                                addNotification({
+                                  type: 'success',
+                                  title: 'Agente creado',
+                                  message: 'Agente legal creado exitosamente'
+                                })
+                                loadAgents()
+                              }
+                            } catch (error) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'No se pudo crear el agente'
+                              })
+                            }
+                          }}
+                          variant="outline"
+                        >
+                          <MessageCircle className="h-4 w-4 mr-2" />
+                          Legal Compliance
+                        </Button>
+
+                        <Button 
+                          onClick={async () => {
+                            try {
+                              const response = await agentsService.createFinancialAnalysisAgent()
+                              if (response.error) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Error',
+                                  message: response.error
+                                })
+                              } else {
+                                addNotification({
+                                  type: 'success',
+                                  title: 'Agente creado',
+                                  message: 'Agente financiero creado exitosamente'
+                                })
+                                loadAgents()
+                              }
+                            } catch (error) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'No se pudo crear el agente'
+                              })
+                            }
+                          }}
+                          variant="outline"
+                        >
+                          <Activity className="h-4 w-4 mr-2" />
+                          Análisis Financiero
+                        </Button>
+
+                        <Button 
+                          onClick={async () => {
+                            try {
+                              const response = await agentsService.createDocumentAnalyzerAgent()
+                              if (response.error) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Error',
+                                  message: response.error
+                                })
+                              } else {
+                                addNotification({
+                                  type: 'success',
+                                  title: 'Agente creado',
+                                  message: 'Analizador de documentos creado exitosamente'
+                                })
+                                loadAgents()
+                              }
+                            } catch (error) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'No se pudo crear el agente'
+                              })
+                            }
+                          }}
+                          variant="outline"
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          Análisis Documentos
+                        </Button>
+
+                        <Button 
+                          onClick={async () => {
+                            try {
+                              const response = await agentsService.createRAGAssistantAgent()
+                              if (response.error) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Error',
+                                  message: response.error
+                                })
+                              } else {
+                                addNotification({
+                                  type: 'success',
+                                  title: 'Agente creado',
+                                  message: 'Asistente RAG creado exitosamente'
+                                })
+                                loadAgents()
+                              }
+                            } catch (error) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'No se pudo crear el agente'
+                              })
+                            }
+                          }}
+                          variant="outline"
+                        >
+                          <Bot className="h-4 w-4 mr-2" />
+                          Asistente RAG
+                        </Button>
+
+                        <Button onClick={loadAgents} variant="secondary">
+                          <MessageCircle className="h-4 w-4 mr-2" />
                           Recargar
                         </Button>
                       </div>

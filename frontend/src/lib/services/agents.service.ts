@@ -153,6 +153,22 @@ export class AgentsService {
     return response
   }
 
+  async createLegalComplianceAgent() {
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/create`, {
+      agent_type: 'legal_compliance',
+      configuration: {}
+    })
+    return response
+  }
+
+  async createFinancialAnalysisAgent() {
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/create`, {
+      agent_type: 'financial_analysis',
+      configuration: {}
+    })
+    return response
+  }
+
   // Get conversation history
   async getConversations(agentId?: string) {
     const params = agentId ? `?agent_id=${agentId}` : ''
