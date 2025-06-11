@@ -27,6 +27,7 @@ import { NavDocuments } from "@/components/navigation/nav-documents"
 import { NavMain } from "@/components/navigation/nav-main"
 import { NavSecondary } from "@/components/navigation/nav-secondary"
 import { NavUser } from "@/components/navigation/nav-user"
+import { NavAgents } from "@/components/navigation/nav-agents"
 import {
   Sidebar,
   SidebarContent,
@@ -226,6 +227,7 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       <SidebarContent>
         <NavMain items={navData.navMain} />
         <NavDocuments items={navData.quickActions} />
+        <NavAgents />
         <NavSecondary items={navData.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>

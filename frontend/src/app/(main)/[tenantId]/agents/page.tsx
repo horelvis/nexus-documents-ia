@@ -1,24 +1,23 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useAgentSelection } from '@/hooks/use-agent-selection'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap } from 'lucide-react'
 import { Agent, useAgentsService } from '@/lib/services/agents.service'
 import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
-import { AgentHealthCheck } from '@/components/agents/agent-health-check'
 import { useNotifications } from '@/contexts/notifications-context'
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
-  const [activeTab, setActiveTab] = useState('library')
   
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
+  const { selectedAgent, selectAgent, clearSelection } = useAgentSelection(agents)
 
   useEffect(() => {
     loadAgents()
@@ -103,7 +102,7 @@ export default function AgentsPage() {
       return (
         <DigitalSignatureAssistant 
           agent={selectedAgent}
-          onBack={() => setSelectedAgent(null)}
+          onBack={() => clearSelection()}
         />
       )
     }
@@ -113,7 +112,7 @@ export default function AgentsPage() {
       <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
         <div className="px-4 lg:px-6">
           <div className="flex items-center gap-4 mb-6">
-            <Button variant="outline" onClick={() => setSelectedAgent(null)}>
+            <Button variant="outline" onClick={() => clearSelection()}>
               ← Volver
             </Button>
             <div>
@@ -139,21 +138,113 @@ export default function AgentsPage() {
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">AI Agent Library</h1>
-          <p className="text-muted-foreground">
-            Gestiona y despliega agentes de IA para procesamiento de documentos y automatización
-          </p>
+        {/* Header with Actions */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">AI Agent Library</h1>
+            <p className="text-muted-foreground">
+              Gestiona y despliega agentes de IA especializados para automatización de documentos
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button 
+              onClick={async () => {
+                try {
+                  const result = await agentsService.checkLangroidHealth()
+                  if (result.error) {
+                    addNotification({
+                      type: 'error',
+                      title: 'Health Check Fallido',
+                      message: result.error
+                    })
+                  } else {
+                    addNotification({
+                      type: 'success', 
+                      title: 'Sistema Funcionando',
+                      message: 'Todos los servicios están operativos'
+                    })
+                  }
+                } catch (error) {
+                  addNotification({
+                    type: 'error',
+                    title: 'Error de Conexión',
+                    message: 'No se pudo verificar el estado del sistema'
+                  })
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Estado del Sistema
+            </Button>
+            <Button onClick={loadAgents} variant="outline" size="sm">
+              <MessageCircle className="h-4 w-4 mr-2" />
+              Recargar
+            </Button>
+          </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="library">Biblioteca de Agentes</TabsTrigger>
-            <TabsTrigger value="test">Pruebas de Integración</TabsTrigger>
-            <TabsTrigger value="health">Estado del Sistema</TabsTrigger>
-          </TabsList>
+        {/* Stats Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <Bot className="h-8 w-8 text-blue-500" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Agentes Activos</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '...' : agents.length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <FileSignature className="h-8 w-8 text-green-500" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Firma Digital</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '...' : agents.filter(a => a.type === 'digital_signature').length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <MessageCircle className="h-8 w-8 text-red-500" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Legal & Compliance</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '...' : agents.filter(a => a.type === 'legal_compliance').length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <Activity className="h-8 w-8 text-orange-500" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Análisis Financiero</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '...' : agents.filter(a => a.type === 'financial_analysis').length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-          <TabsContent value="library" className="space-y-6">
+        <div className="space-y-6">
             {isLoading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[1, 2, 3].map((i) => (
@@ -203,7 +294,7 @@ export default function AgentsPage() {
                               </span>
                             </div>
                             <Button 
-                              onClick={() => setSelectedAgent(agent)}
+                              onClick={() => selectAgent(agent)}
                               className="w-full"
                               variant={agent.type === 'digital_signature' ? 'default' : 'outline'}
                             >
@@ -400,101 +491,7 @@ export default function AgentsPage() {
                 )}
               </>
             )}
-          </TabsContent>
-
-          <TabsContent value="test" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Prueba de Integración Langroid</CardTitle>
-                <CardDescription>
-                  Prueba la conectividad y funcionalidad del sistema de agentes
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="space-y-3">
-                    <Button 
-                      onClick={async () => {
-                        try {
-                          const result = await agentsService.checkLangroidHealth()
-                          if (result.error) {
-                            addNotification({
-                              type: 'error',
-                              title: 'Health Check Fallido',
-                              message: result.error
-                            })
-                          } else {
-                            addNotification({
-                              type: 'success',
-                              title: 'Health Check Exitoso',
-                              message: 'El servicio Langroid está funcionando correctamente'
-                            })
-                          }
-                        } catch (error) {
-                          addNotification({
-                            type: 'error',
-                            title: 'Error en Health Check',
-                            message: error instanceof Error ? error.message : 'Error desconocido'
-                          })
-                        }
-                      }}
-                      className="w-full"
-                      variant="outline"
-                    >
-                      <Activity className="h-4 w-4 mr-2" />
-                      Health Check
-                    </Button>
-
-                    <Button 
-                      onClick={async () => {
-                        try {
-                          const result = await agentsService.testLangroidAgent()
-                          if (result.error) {
-                            addNotification({
-                              type: 'error',
-                              title: 'Prueba de integración fallida',
-                              message: result.error
-                            })
-                          } else {
-                            addNotification({
-                              type: 'success',
-                              title: 'Prueba de integración exitosa',
-                              message: 'El sistema de agentes está funcionando correctamente'
-                            })
-                          }
-                        } catch (error) {
-                          addNotification({
-                            type: 'error',
-                            title: 'Error en la prueba',
-                            message: error instanceof Error ? error.message : 'Error desconocido'
-                          })
-                        }
-                      }}
-                      className="w-full"
-                    >
-                      <Activity className="h-4 w-4 mr-2" />
-                      Ejecutar Prueba de Integración
-                    </Button>
-                  </div>
-                  
-                  <div className="text-sm text-muted-foreground">
-                    Esta prueba verificará:
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>Conectividad con el microservicio Langroid</li>
-                      <li>Creación y eliminación de agentes</li>
-                      <li>Ejecución de tareas básicas</li>
-                      <li>Streaming de respuestas</li>
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="health" className="space-y-6">
-            <AgentHealthCheck />
-          </TabsContent>
-        </Tabs>
+        </div>
       </div>
     </div>
   )
