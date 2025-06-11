@@ -92,7 +92,7 @@ export function AgentsMainSidebar({
   return (
     <Sidebar
       collapsible="none"
-      className="w-[calc(var(--sidebar-width-icon)+1px)] border-r"
+      className="w-16 border-r"
       {...props}
     >
       <SidebarHeader>
@@ -108,7 +108,7 @@ export function AgentsMainSidebar({
                   <span className="truncate text-xs">Agents Hub</span>
                 </div>
               </button>
-            </SidebarMenuItem>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
