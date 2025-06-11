@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 import json
 
 from app.api.dependencies import get_current_active_user, require_subscription_permission
@@ -13,6 +14,35 @@ from app.services.langroid_client import langroid_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# =====================================
+# PYDANTIC MODELS
+# =====================================
+
+class CreateAgentRequest(BaseModel):
+    agent_type: str
+    configuration: Optional[Dict[str, Any]] = None
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+class ExecuteTaskRequest(BaseModel):
+    task_type: str
+    parameters: Dict[str, Any]
+    context: Optional[Dict[str, Any]] = None
+
+class SignatureRequest(BaseModel):
+    title: str
+    document_name: str
+    signers: list
+    message: Optional[str] = None
+    signature_type: str = "sequential"
+
+class DocumentAnalysisRequest(BaseModel):
+    document_content: str
+    analysis_type: str = "general"
 
 # =====================================
 # HEALTH AND STATUS
@@ -54,17 +84,16 @@ async def get_service_status():
 
 @router.post("/create")
 async def create_agent(
-    agent_type: str,
-    configuration: Dict[str, Any] = None,
+    request: CreateAgentRequest,
     current_user: User = Depends(get_current_active_user)
 ):
     """Crear un nuevo agente en Langroid"""
     try:
         result = await langroid_client.create_agent(
-            agent_type=agent_type,
+            agent_type=request.agent_type,
             tenant_id=str(current_user.tenant_id),
             user_id=str(current_user.id),
-            configuration=configuration or {}
+            configuration=request.configuration or {}
         )
         return result
     except Exception as e:
@@ -117,9 +146,7 @@ async def list_agents(
 @router.post("/{agent_id}/chat")
 async def chat_with_agent(
     agent_id: str,
-    message: str,
-    conversation_id: Optional[str] = None,
-    context: Dict[str, Any] = None,
+    request: ChatRequest,
     current_user: User = Depends(require_subscription_permission("can_use_agents"))
 ):
     """Chat con un agente (streaming)"""
@@ -128,10 +155,10 @@ async def chat_with_agent(
             async for response in langroid_client.chat_with_agent(
                 agent_id=agent_id,
                 tenant_id=str(current_user.tenant_id),
-                message=message,
+                message=request.message,
                 user_id=str(current_user.id),
-                conversation_id=conversation_id,
-                context=context or {}
+                conversation_id=request.conversation_id,
+                context=request.context or {}
             ):
                 yield f"data: {json.dumps(response)}\n\n"
         except Exception as e:
@@ -151,9 +178,7 @@ async def chat_with_agent(
 @router.post("/{agent_id}/execute")
 async def execute_agent_task(
     agent_id: str,
-    task_type: str,
-    parameters: Dict[str, Any],
-    context: Dict[str, Any] = None,
+    request: ExecuteTaskRequest,
     current_user: User = Depends(get_current_active_user)
 ):
     """Ejecutar una tarea con un agente (streaming)"""
@@ -162,9 +187,9 @@ async def execute_agent_task(
             async for response in langroid_client.execute_agent_task(
                 agent_id=agent_id,
                 tenant_id=str(current_user.tenant_id),
-                task_type=task_type,
-                parameters=parameters,
-                context=context or {}
+                task_type=request.task_type,
+                parameters=request.parameters,
+                context=request.context or {}
             ):
                 yield f"data: {json.dumps(response)}\n\n"
         except Exception as e:
@@ -187,11 +212,7 @@ async def execute_agent_task(
 
 @router.post("/signature/create-request")
 async def create_signature_request(
-    title: str,
-    document_name: str,
-    signers: list,
-    message: Optional[str] = None,
-    signature_type: str = "sequential",
+    request: SignatureRequest,
     current_user: User = Depends(get_current_active_user)
 ):
     """Crear una solicitud de firma digital (streaming)"""
@@ -200,11 +221,11 @@ async def create_signature_request(
             async for response in langroid_client.create_signature_request(
                 tenant_id=str(current_user.tenant_id),
                 user_id=str(current_user.id),
-                title=title,
-                document_name=document_name,
-                signers=signers,
-                message=message,
-                signature_type=signature_type
+                title=request.title,
+                document_name=request.document_name,
+                signers=request.signers,
+                message=request.message,
+                signature_type=request.signature_type
             ):
                 yield f"data: {json.dumps(response)}\n\n"
         except Exception as e:
@@ -255,16 +276,15 @@ async def get_signature_status(
 
 @router.post("/document/analyze")
 async def analyze_document(
-    document_content: str,
-    analysis_type: str = "general",
+    request: DocumentAnalysisRequest,
     current_user: User = Depends(get_current_active_user)
 ):
     """Analizar documento con agentes (streaming)"""
     async def event_stream():
         try:
             async for response in langroid_client.analyze_document(
-                document_content=document_content,
-                analysis_type=analysis_type,
+                document_content=request.document_content,
+                analysis_type=request.analysis_type,
                 tenant_id=str(current_user.tenant_id),
                 user_id=str(current_user.id)
             ):

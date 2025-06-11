@@ -27,10 +27,13 @@ export default function AgentsPage() {
   const loadAgents = async () => {
     try {
       setIsLoading(true)
+      console.log('🔄 Loading agents...')
       const response = await agentsService.getAgents()
       
+      console.log('📊 Agents response:', response)
+      
       if (response.error) {
-        console.error('Error loading agents:', response.error)
+        console.error('❌ Error loading agents:', response.error)
         setAgents([])
         addNotification({
           type: 'error',
@@ -38,10 +41,17 @@ export default function AgentsPage() {
           message: response.error
         })
       } else {
-        setAgents(response.data || [])
+        // La respuesta puede ser { agents: [...], total: ... } o directamente un array
+        const agentsData = response.data?.agents || response.data || []
+        console.log('✅ Loaded agents:', agentsData)
+        setAgents(agentsData)
+        
+        if (agentsData.length === 0) {
+          console.log('ℹ️ No agents found for tenant')
+        }
       }
     } catch (error) {
-      console.error('Error loading agents:', error)
+      console.error('❌ Error loading agents:', error)
       setAgents([])
       addNotification({
         type: 'error',
@@ -209,11 +219,44 @@ export default function AgentsPage() {
                       <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                       <h3 className="text-lg font-semibold mb-2">No hay agentes disponibles</h3>
                       <p className="text-muted-foreground mb-4">
-                        Los agentes de IA aparecerán aquí una vez que estén configurados en el sistema.
+                        Crea agentes de IA para automatizar tareas y procesar documentos.
                       </p>
-                      <Button onClick={loadAgents} variant="outline">
-                        Recargar
-                      </Button>
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                        <Button 
+                          onClick={async () => {
+                            try {
+                              const response = await agentsService.createDigitalSignatureAgent()
+                              if (response.error) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Error',
+                                  message: response.error
+                                })
+                              } else {
+                                addNotification({
+                                  type: 'success',
+                                  title: 'Agente creado',
+                                  message: 'Agente de firma digital creado exitosamente'
+                                })
+                                loadAgents()
+                              }
+                            } catch (error) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'No se pudo crear el agente'
+                              })
+                            }
+                          }}
+                          variant="default"
+                        >
+                          <FileSignature className="h-4 w-4 mr-2" />
+                          Crear Agente de Firmas
+                        </Button>
+                        <Button onClick={loadAgents} variant="outline">
+                          Recargar
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -231,36 +274,70 @@ export default function AgentsPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <Button 
-                    onClick={async () => {
-                      try {
-                        const result = await agentsService.testLangroidAgent()
-                        if (result.error) {
+                  <div className="space-y-3">
+                    <Button 
+                      onClick={async () => {
+                        try {
+                          const result = await agentsService.checkLangroidHealth()
+                          if (result.error) {
+                            addNotification({
+                              type: 'error',
+                              title: 'Health Check Fallido',
+                              message: result.error
+                            })
+                          } else {
+                            addNotification({
+                              type: 'success',
+                              title: 'Health Check Exitoso',
+                              message: 'El servicio Langroid está funcionando correctamente'
+                            })
+                          }
+                        } catch (error) {
                           addNotification({
                             type: 'error',
-                            title: 'Prueba de integración fallida',
-                            message: result.error
-                          })
-                        } else {
-                          addNotification({
-                            type: 'success',
-                            title: 'Prueba de integración exitosa',
-                            message: 'El sistema de agentes está funcionando correctamente'
+                            title: 'Error en Health Check',
+                            message: error instanceof Error ? error.message : 'Error desconocido'
                           })
                         }
-                      } catch (error) {
-                        addNotification({
-                          type: 'error',
-                          title: 'Error en la prueba',
-                          message: error instanceof Error ? error.message : 'Error desconocido'
-                        })
-                      }
-                    }}
-                    className="w-full"
-                  >
-                    <Activity className="h-4 w-4 mr-2" />
-                    Ejecutar Prueba de Integración
-                  </Button>
+                      }}
+                      className="w-full"
+                      variant="outline"
+                    >
+                      <Activity className="h-4 w-4 mr-2" />
+                      Health Check
+                    </Button>
+
+                    <Button 
+                      onClick={async () => {
+                        try {
+                          const result = await agentsService.testLangroidAgent()
+                          if (result.error) {
+                            addNotification({
+                              type: 'error',
+                              title: 'Prueba de integración fallida',
+                              message: result.error
+                            })
+                          } else {
+                            addNotification({
+                              type: 'success',
+                              title: 'Prueba de integración exitosa',
+                              message: 'El sistema de agentes está funcionando correctamente'
+                            })
+                          }
+                        } catch (error) {
+                          addNotification({
+                            type: 'error',
+                            title: 'Error en la prueba',
+                            message: error instanceof Error ? error.message : 'Error desconocido'
+                          })
+                        }
+                      }}
+                      className="w-full"
+                    >
+                      <Activity className="h-4 w-4 mr-2" />
+                      Ejecutar Prueba de Integración
+                    </Button>
+                  </div>
                   
                   <div className="text-sm text-muted-foreground">
                     Esta prueba verificará:

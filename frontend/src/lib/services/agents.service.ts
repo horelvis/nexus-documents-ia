@@ -48,7 +48,7 @@ export class AgentsService {
   constructor(private apiClient: ReturnType<typeof useApiClient>) {}
 
   async getAgents() {
-    const response = await this.apiClient.get<Agent[]>(API_CONFIG.ENDPOINTS.AGENTS)
+    const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/list`)
     return response
   }
 
@@ -112,13 +112,44 @@ export class AgentsService {
 
   // Health check for Langroid integration
   async checkLangroidHealth() {
-    const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/langroid/health`)
+    const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/health`)
     return response
   }
 
   // Test Langroid integration
   async testLangroidAgent() {
-    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/langroid/test-agent`)
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/test`)
+    return response
+  }
+
+  // Get service status
+  async getServiceStatus() {
+    const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/status`)
+    return response
+  }
+
+  // Create specific agent types
+  async createDigitalSignatureAgent() {
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/create`, {
+      agent_type: 'digital_signature',
+      configuration: {}
+    })
+    return response
+  }
+
+  async createDocumentAnalyzerAgent() {
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/create`, {
+      agent_type: 'document_analyzer', 
+      configuration: {}
+    })
+    return response
+  }
+
+  async createRAGAssistantAgent() {
+    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/create`, {
+      agent_type: 'rag_assistant',
+      configuration: {}
+    })
     return response
   }
 
