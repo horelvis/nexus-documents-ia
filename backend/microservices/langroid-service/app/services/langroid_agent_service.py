@@ -15,25 +15,28 @@ from langroid.agent.task import Task
 
 # Handle different Langroid versions with compatibility imports
 try:
-    # Try new import path first
-    from langroid.language_models.openai_gpt import OpenAIGPTConfig as LLMConfig
+    # Try to use proper Ollama configuration
+    from langroid.language_models.openai_gpt import OpenAIGPTConfig
     from langroid.language_models.base import LLMMessage, Role
     from langroid.utils.configuration import Settings
     from langroid.vector_store.qdrantdb import QdrantDBConfig
+    USE_OLLAMA_CONFIG = True
 except ImportError:
     try:
         # Fallback to older import paths
-        from langroid.language_models.openai_gpt import OpenAIGPTConfig as LLMConfig
+        from langroid.language_models.openai_gpt import OpenAIGPTConfig
         from langroid.language_models.base import LLMMessage, Role
         from langroid.utils.configuration import settings as Settings
         QdrantDBConfig = lr.vector_store.QdrantDBConfig
+        USE_OLLAMA_CONFIG = True
     except ImportError:
         # Last resort compatibility
         import langroid.language_models as lm
-        LLMConfig = lm.OpenAIGPTConfig
+        OpenAIGPTConfig = lm.OpenAIGPTConfig
         from langroid.language_models.base import LLMMessage, Role
         Settings = None
         QdrantDBConfig = lr.vector_store.QdrantDBConfig
+        USE_OLLAMA_CONFIG = False
 
 from app.core.config import settings as app_settings
 from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
@@ -58,36 +61,51 @@ class LangroidAgentService:
         """Initialize the service"""
         logger.info("Initializing Langroid Agent Service...")
         
-        # Configure LLM (Ollama)
-        self.llm_config = LLMConfig(
-            chat_model=f"ollama/{app_settings.DEFAULT_LLM_MODEL}",
-            chat_context_length=16000,
-            max_output_tokens=2000,
-            temperature=0.1,
-            stream=True,
-            timeout=60,
-            base_url=app_settings.OLLAMA_BASE_URL
-        )
+        # Configure LLM with minimal required parameters
+        try:
+            # Use minimal OpenAI config that works with Langroid
+            self.llm_config = OpenAIGPTConfig(
+                chat_model=app_settings.DEFAULT_LLM_MODEL,
+                temperature=0.1,
+                max_output_tokens=2000,
+                # Use dummy API key since Ollama doesn't require authentication
+                api_key="dummy-key-for-ollama"
+            )
+            logger.info(f"Configured LLM with model: {app_settings.DEFAULT_LLM_MODEL}")
+        except Exception as e:
+            logger.error(f"Failed to create LLM config: {e}")
+            # Try even more minimal config
+            self.llm_config = OpenAIGPTConfig()
         
         # Configure base vector store config (will be customized per tenant)
-        self.base_vector_store_config = {
-            "cloud": False,
-            "host": app_settings.QDRANT_HOST,
-            "port": app_settings.QDRANT_PORT,
-            "storage_path": None,  # Use server mode
-            "embedding_model": app_settings.DEFAULT_EMBEDDING_MODEL
-        }
+        try:
+            self.base_vector_store_config = {
+                "cloud": False,
+                "host": app_settings.QDRANT_HOST,
+                "port": app_settings.QDRANT_PORT,
+                "storage_path": None,  # Use server mode
+                "embedding_model": app_settings.DEFAULT_EMBEDDING_MODEL
+            }
+            logger.info(f"Configured vector store: {app_settings.QDRANT_HOST}:{app_settings.QDRANT_PORT}")
+        except Exception as e:
+            logger.error(f"Failed to configure vector store: {e}")
+            self.base_vector_store_config = {"cloud": False}
         
         logger.info("Langroid Agent Service initialized successfully")
     
-    def _get_tenant_vector_store_config(self, tenant_id: str) -> QdrantDBConfig:
+    def _get_tenant_vector_store_config(self, tenant_id: str):
         """Get vector store config isolated by tenant"""
-        collection_name = f"nexus_langroid_agents_{tenant_id}"
-        
-        return QdrantDBConfig(
-            **self.base_vector_store_config,
-            collection_name=collection_name
-        )
+        try:
+            collection_name = f"nexus_langroid_agents_{tenant_id}"
+            
+            return QdrantDBConfig(
+                **self.base_vector_store_config,
+                collection_name=collection_name
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create vector store config for tenant {tenant_id}: {e}")
+            # Return None to indicate no vector store available
+            return None
     
     async def cleanup(self):
         """Cleanup resources"""
@@ -346,10 +364,12 @@ class LangroidAgentService:
     ) -> ChatAgent:
         """Create document analyzer agent"""
         
+        vector_config = self._get_tenant_vector_store_config(tenant_id)
+        
         agent_config = ChatAgentConfig(
             name="DocumentAnalyzer",
             llm=self.llm_config,
-            vecdb=self._get_tenant_vector_store_config(tenant_id),
+            vecdb=vector_config,  # May be None if vector store unavailable
             system_message="""You are an expert document analyzer.
             
 Your capabilities include:
@@ -374,14 +394,18 @@ Always provide clear, structured analysis with specific examples from the docume
         """Create RAG assistant agent"""
         
         # Configure collection name for tenant
-        vector_config = QdrantDBConfig(
-            cloud=False,
-            host=app_settings.QDRANT_HOST,
-            port=app_settings.QDRANT_PORT,
-            storage_path=None,
-            collection_name=f"{app_settings.QDRANT_COLLECTION_PREFIX}_{tenant_id}",
-            embedding_model=app_settings.DEFAULT_EMBEDDING_MODEL
-        )
+        try:
+            vector_config = QdrantDBConfig(
+                cloud=False,
+                host=app_settings.QDRANT_HOST,
+                port=app_settings.QDRANT_PORT,
+                storage_path=None,
+                collection_name=f"{app_settings.QDRANT_COLLECTION_PREFIX}_{tenant_id}",
+                embedding_model=app_settings.DEFAULT_EMBEDDING_MODEL
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create vector config for RAG assistant: {e}")
+            vector_config = None
         
         agent_config = ChatAgentConfig(
             name="RAGAssistant",
@@ -414,11 +438,19 @@ Always cite your sources and indicate confidence levels in your answers."""
             "You are a helpful AI assistant. Answer questions clearly and concisely."
         )
         
-        agent_config = ChatAgentConfig(
-            name="GenericAgent",
-            llm=self.llm_config,
-            system_message=system_message
-        )
+        try:
+            agent_config = ChatAgentConfig(
+                name="GenericAgent",
+                llm=self.llm_config,
+                system_message=system_message
+            )
+        except Exception as e:
+            logger.error(f"Failed to create generic agent config: {e}")
+            # Fallback to minimal config
+            agent_config = ChatAgentConfig(
+                name="GenericAgent",
+                system_message=system_message
+            )
         
         return ChatAgent(agent_config)
     
