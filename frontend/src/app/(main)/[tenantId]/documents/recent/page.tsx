@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useDocumentService } from "@/lib/services/document.service"
 import { Document as ApiDocument } from "@/lib/types"
+import { getFileIcon, formatFileSize, getRelativeTime } from "@/lib/document-utils"
 
 export default function RecentDocumentsPage() {
   const [documents, setDocuments] = useState<ApiDocument[]>([])
@@ -59,36 +60,6 @@ export default function RecentDocumentsPage() {
     loadRecentDocuments()
   }, [])
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  const getRelativeTime = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    const diffDays = Math.floor(diffHours / 24)
-
-    if (diffHours < 1) return 'Less than an hour ago'
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
-    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
-    return date.toLocaleDateString()
-  }
-
-  const getFileIcon = (mimeType: string) => {
-    if (mimeType.includes('pdf')) {
-      return <IconFileTypePdf className="h-5 w-5 text-red-500" />
-    } else if (mimeType.includes('word') || mimeType.includes('officedocument')) {
-      return <IconFileText className="h-5 w-5 text-blue-500" />
-    } else {
-      return <IconFile className="h-5 w-5 text-gray-500" />
-    }
-  }
 
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -174,7 +145,7 @@ export default function RecentDocumentsPage() {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4 min-w-0 flex-1">
-                      {getFileIcon(document.mime_type)}
+                      {getFileIcon(document.file_type, document.mime_type, document.filename)}
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold truncate" title={document.filename}>
                           {document.title || document.filename}

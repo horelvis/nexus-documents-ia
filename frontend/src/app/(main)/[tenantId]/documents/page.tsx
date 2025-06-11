@@ -29,6 +29,8 @@ import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useDocumentService } from "@/lib/services/document.service"
 import { Document as ApiDocument } from "@/lib/types"
+import { EditDocumentDialog, DocumentViewerDialog, DeleteDocumentDialog } from "@/components/documents"
+import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<ApiDocument[]>([])
@@ -36,6 +38,12 @@ export default function DocumentsPage() {
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // Dialog states
+  const [viewDialogOpen, setViewDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
   const { openUploadDialog, setOnUploadComplete } = useUpload()
   const { addNotification } = useNotifications()
@@ -76,36 +84,6 @@ export default function DocumentsPage() {
     loadDocuments()
   }, [selectedFilter])
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  const getFileIcon = (fileType: string) => {
-    if (fileType.includes('pdf')) {
-      return <IconFileTypePdf className="h-5 w-5 text-red-500" />
-    } else if (fileType.includes('word') || fileType.includes('doc')) {
-      return <IconFileText className="h-5 w-5 text-blue-500" />
-    } else {
-      return <IconFile className="h-5 w-5 text-gray-500" />
-    }
-  }
-
-  const getStatusColor = (indexed: string) => {
-    switch (indexed) {
-      case 'INDEXED':
-        return 'bg-green-100 text-green-800'
-      case 'PROCESSING':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'INDEXING_ERROR':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
 
   const filteredDocuments = (documents || []).filter((doc: any) => {
     const matchesSearch = doc.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -141,6 +119,149 @@ export default function DocumentsPage() {
       setOnUploadComplete(undefined)
     }
   }, [])
+
+  // Document operations
+  const handleViewDocument = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setViewDialogOpen(true)
+  }
+
+  const handleEditDocument = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setEditDialogOpen(true)
+  }
+
+  const handleDeleteDocument = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleDownloadDocument = async (document: ApiDocument) => {
+    try {
+      const result = await documentService.downloadDocument(document.id)
+      
+      if ('error' in result) {
+        addNotification({
+          type: 'error',
+          title: 'Download Failed',
+          message: result.error
+        })
+        return
+      }
+
+      // Create download link
+      const url = URL.createObjectURL(result.blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = result.filename
+      document.body.appendChild(link)
+      link.click()
+      
+      // Cleanup
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      addNotification({
+        type: 'success',
+        title: 'Download Started',
+        message: `${result.filename} is being downloaded`
+      })
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Download Failed',
+        message: error instanceof Error ? error.message : 'Unknown error occurred'
+      })
+    }
+  }
+
+  const handleSaveDocument = async (id: string, updates: Partial<Pick<ApiDocument, 'title' | 'description' | 'tags' | 'category'>>) => {
+    try {
+      const response = await documentService.updateDocument(id, updates)
+      
+      if (response.error) {
+        addNotification({
+          type: 'error',
+          title: 'Update Failed',
+          message: response.error
+        })
+        return
+      }
+
+      // Update local state
+      setDocuments(prev => prev.map(doc => 
+        doc.id === id ? { ...doc, ...updates } : doc
+      ))
+
+      addNotification({
+        type: 'success',
+        title: 'Document Updated',
+        message: 'Document information has been updated successfully'
+      })
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Update Failed',
+        message: error instanceof Error ? error.message : 'Unknown error occurred'
+      })
+      throw error // Re-throw to prevent dialog from closing
+    }
+  }
+
+  const handleConfirmDelete = async (id: string) => {
+    try {
+      const response = await documentService.deleteDocument(id)
+      
+      if (response.error) {
+        addNotification({
+          type: 'error',
+          title: 'Delete Failed',
+          message: response.error
+        })
+        return
+      }
+
+      // Remove from local state
+      setDocuments(prev => prev.filter(doc => doc.id !== id))
+
+      addNotification({
+        type: 'success',
+        title: 'Document Deleted',
+        message: 'Document has been deleted successfully'
+      })
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Delete Failed',
+        message: error instanceof Error ? error.message : 'Unknown error occurred'
+      })
+      throw error // Re-throw to prevent dialog from closing
+    }
+  }
+
+  const handleGetDocumentContent = async (id: string) => {
+    try {
+      const response = await documentService.getDocumentContent(id)
+      if (response.error) {
+        return { error: response.error }
+      }
+      return { content: response.data?.content }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Failed to load content' }
+    }
+  }
+
+  const handleGetDocumentSummary = async (id: string) => {
+    try {
+      const response = await documentService.getDocumentSummary(id)
+      if (response.error) {
+        return { error: response.error }
+      }
+      return { summary: response.data?.summary }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Failed to load summary' }
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -292,7 +413,7 @@ export default function DocumentsPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {getFileIcon(document.file_type)}
+                      {getFileIcon(document.file_type, document.mime_type, document.filename)}
                       <div className="min-w-0 flex-1">
                         <CardTitle className="text-base truncate" title={document.filename}>
                           {document.title || document.filename}
@@ -325,17 +446,38 @@ export default function DocumentsPage() {
                     
                     <div className="flex justify-between pt-2">
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => handleViewDocument(document)}
+                          title="View document"
+                        >
                           <IconEye className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => handleDownloadDocument(document)}
+                          title="Download document"
+                        >
                           <IconDownload className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => handleEditDocument(document)}
+                          title="Edit document"
+                        >
                           <IconEdit className="h-4 w-4" />
                         </Button>
                       </div>
-                      <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="text-red-600 hover:text-red-700"
+                        onClick={() => handleDeleteDocument(document)}
+                        title="Delete document"
+                      >
                         <IconTrash className="h-4 w-4" />
                       </Button>
                     </div>
@@ -367,6 +509,29 @@ export default function DocumentsPage() {
           </Card>
         )}
 
+        {/* Document Dialogs */}
+        <DocumentViewerDialog
+          document={selectedDocument}
+          open={viewDialogOpen}
+          onOpenChange={setViewDialogOpen}
+          onGetContent={handleGetDocumentContent}
+          onGetSummary={handleGetDocumentSummary}
+          onDownload={handleDownloadDocument}
+        />
+
+        <EditDocumentDialog
+          document={selectedDocument}
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          onSave={handleSaveDocument}
+        />
+
+        <DeleteDocumentDialog
+          document={selectedDocument}
+          open={deleteDialogOpen}
+          onOpenChange={setDeleteDialogOpen}
+          onConfirm={handleConfirmDelete}
+        />
 
       </div>
     </div>

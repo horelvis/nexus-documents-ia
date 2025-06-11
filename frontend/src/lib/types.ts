@@ -39,22 +39,26 @@ export interface Tenant {
 export interface Document {
   id: string
   filename: string
-  original_filename: string
+  original_filename?: string
   title?: string
   description?: string
   file_size: number
-  mime_type: string
+  file_type: string
+  mime_type?: string
   category?: string
   tags: string[]
-  status: 'uploading' | 'processing' | 'processed' | 'error'
+  indexed: 'PENDING' | 'PROCESSING' | 'INDEXED' | 'INDEXING_ERROR'
+  status?: 'uploading' | 'processing' | 'processed' | 'error' // Keep for backward compatibility
   summary?: string
   language?: string
   tenant_id: string
-  user_id: string
+  created_by: string
+  user_id?: string // Keep for backward compatibility
   created_at: string
   updated_at: string
   processed_at?: string
   gcs_path?: string
+  storage_path?: string
   download_url?: string
   error_message?: string
 }

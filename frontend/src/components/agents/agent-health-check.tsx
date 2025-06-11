@@ -17,7 +17,7 @@ import {
   Cpu,
   Clock
 } from 'lucide-react'
-import { agentsService } from '@/lib/services/agents.service'
+import { useAgentsService } from '@/lib/services/agents.service'
 
 interface ServiceStatus {
   name: string
@@ -49,6 +49,8 @@ export function AgentHealthCheck() {
       status: 'unknown',
     }
   ])
+
+  const agentsService = useAgentsService()
 
   useEffect(() => {
     checkAllServices()
@@ -111,13 +113,20 @@ export function AgentHealthCheck() {
     const startTime = Date.now()
     try {
       const result = await agentsService.checkLangroidHealth()
+      if (result.error) {
+        return {
+          status: 'unhealthy',
+          response_time: Date.now() - startTime,
+          error: result.error
+        }
+      }
       return {
-        status: result.status || 'healthy',
+        status: result.data?.status || 'healthy',
         response_time: Date.now() - startTime,
-        details: result,
-        ollama_status: result.langroid_service?.models ? 'healthy' : 'unknown',
+        details: result.data,
+        ollama_status: result.data?.langroid_service?.models ? 'healthy' : 'unknown',
         ollama_response_time: 50, // Mock
-        qdrant_status: result.langroid_service?.active_agents !== undefined ? 'healthy' : 'unknown',
+        qdrant_status: result.data?.langroid_service?.active_agents !== undefined ? 'healthy' : 'unknown',
         qdrant_response_time: 30, // Mock
       }
     } catch (error) {
@@ -133,7 +142,11 @@ export function AgentHealthCheck() {
     setIsChecking(true)
     try {
       const result = await agentsService.testLangroidAgent()
-      alert('✅ Integration test successful!\n\n' + JSON.stringify(result, null, 2))
+      if (result.error) {
+        alert('❌ Integration test failed!\n\n' + result.error)
+      } else {
+        alert('✅ Integration test successful!\n\n' + JSON.stringify(result.data, null, 2))
+      }
     } catch (error) {
       alert('❌ Integration test failed!\n\n' + (error instanceof Error ? error.message : 'Unknown error'))
     } finally {

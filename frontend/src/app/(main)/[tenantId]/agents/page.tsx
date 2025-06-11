@@ -6,15 +6,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap } from 'lucide-react'
-import { Agent, agentsService } from '@/lib/services/agents.service'
+import { Agent, useAgentsService } from '@/lib/services/agents.service'
 import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
 import { AgentHealthCheck } from '@/components/agents/agent-health-check'
+import { useNotifications } from '@/contexts/notifications-context'
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [activeTab, setActiveTab] = useState('library')
+  
+  const agentsService = useAgentsService()
+  const { addNotification } = useNotifications()
 
   useEffect(() => {
     loadAgents()
@@ -23,56 +27,32 @@ export default function AgentsPage() {
   const loadAgents = async () => {
     try {
       setIsLoading(true)
-      const agentList = await agentsService.getAgents()
-      setAgents(agentList)
+      const response = await agentsService.getAgents()
+      
+      if (response.error) {
+        console.error('Error loading agents:', response.error)
+        setAgents([])
+        addNotification({
+          type: 'error',
+          title: 'Error cargando agentes',
+          message: response.error
+        })
+      } else {
+        setAgents(response.data || [])
+      }
     } catch (error) {
       console.error('Error loading agents:', error)
+      setAgents([])
+      addNotification({
+        type: 'error',
+        title: 'Error de conexión',
+        message: 'No se pudo conectar con el servicio de agentes'
+      })
     } finally {
       setIsLoading(false)
     }
   }
 
-  const mockAgents = [
-    {
-      id: 'digital-signature-assistant',
-      name: 'Asistente de Firma Digital',
-      description: 'Agente inteligente para gestionar solicitudes de firma digital y analizar documentos',
-      type: 'digital_signature',
-      configuration: { use_langroid: true },
-      tools: ['create_signature_request', 'get_signature_status', 'search_documents'],
-      is_active: true,
-      is_public: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      created_by: 'system'
-    },
-    {
-      id: 'document-analyzer',
-      name: 'Analizador de Documentos',
-      description: 'Especialista en análisis semántico y extracción de información de documentos',
-      type: 'document_analyzer',
-      configuration: { use_langroid: true },
-      tools: ['analyze_document', 'extract_entities', 'summarize'],
-      is_active: true,
-      is_public: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      created_by: 'system'
-    },
-    {
-      id: 'rag-assistant',
-      name: 'Asistente RAG',
-      description: 'Asistente con capacidades de búsqueda y recuperación de información',
-      type: 'rag_assistant',
-      configuration: { use_langroid: true },
-      tools: ['search_similar', 'answer_questions', 'cite_sources'],
-      is_active: true,
-      is_public: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      created_by: 'system'
-    }
-  ]
 
   const getAgentIcon = (type: string) => {
     switch (type) {
@@ -156,65 +136,88 @@ export default function AgentsPage() {
           </TabsList>
 
           <TabsContent value="library" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {mockAgents.map((agent) => (
-                <Card key={agent.id} className="hover:shadow-lg transition-shadow cursor-pointer">
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {getAgentIcon(agent.type)}
-                        <CardTitle className="text-lg">{agent.name}</CardTitle>
+            {isLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardHeader>
+                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                      <div className="h-3 bg-gray-200 rounded w-1/2 mt-2"></div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div className="h-3 bg-gray-200 rounded"></div>
+                        <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+                        <div className="h-8 bg-gray-200 rounded"></div>
                       </div>
-                      <Badge className={getAgentBadgeColor(agent.type)}>
-                        {agent.type.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                    <CardDescription>{agent.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Zap className="h-4 w-4" />
-                        <span>{agent.tools.length} herramientas disponibles</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
-                        <span className="text-sm text-muted-foreground">
-                          {agent.is_active ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </div>
-                      <Button 
-                        onClick={() => setSelectedAgent(agent)}
-                        className="w-full"
-                        variant={agent.type === 'digital_signature' ? 'default' : 'outline'}
-                      >
-                        {agent.type === 'digital_signature' ? (
-                          <>
-                            <MessageCircle className="h-4 w-4 mr-2" />
-                            Probar Asistente
-                          </>
-                        ) : (
-                          'Ver Detalles'
-                        )}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            {agents.length === 0 && !isLoading && (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center py-12">
-                    <Bot className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="text-lg font-semibold mb-2">No hay agentes configurados</h3>
-                    <p className="text-muted-foreground mb-4">
-                      Los agentes se muestran arriba como ejemplos. En producción, se cargarían desde el backend.
-                    </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <>
+                {agents.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {agents.map((agent) => (
+                      <Card key={agent.id} className="hover:shadow-lg transition-shadow cursor-pointer">
+                        <CardHeader>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {getAgentIcon(agent.type)}
+                              <CardTitle className="text-lg">{agent.name}</CardTitle>
+                            </div>
+                            <Badge className={getAgentBadgeColor(agent.type)}>
+                              {agent.type.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                          <CardDescription>{agent.description}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Zap className="h-4 w-4" />
+                              <span>{agent.tools?.length || 0} herramientas disponibles</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className={`h-2 w-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
+                              <span className="text-sm text-muted-foreground">
+                                {agent.is_active ? 'Activo' : 'Inactivo'}
+                              </span>
+                            </div>
+                            <Button 
+                              onClick={() => setSelectedAgent(agent)}
+                              className="w-full"
+                              variant={agent.type === 'digital_signature' ? 'default' : 'outline'}
+                            >
+                              {agent.type === 'digital_signature' ? (
+                                <>
+                                  <MessageCircle className="h-4 w-4 mr-2" />
+                                  Probar Asistente
+                                </>
+                              ) : (
+                                'Ver Detalles'
+                              )}
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
-                </CardContent>
-              </Card>
+                ) : (
+                  <Card className="text-center py-12">
+                    <CardContent>
+                      <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">No hay agentes disponibles</h3>
+                      <p className="text-muted-foreground mb-4">
+                        Los agentes de IA aparecerán aquí una vez que estén configurados en el sistema.
+                      </p>
+                      <Button onClick={loadAgents} variant="outline">
+                        Recargar
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
             )}
           </TabsContent>
 
@@ -232,9 +235,25 @@ export default function AgentsPage() {
                     onClick={async () => {
                       try {
                         const result = await agentsService.testLangroidAgent()
-                        alert('Prueba exitosa: ' + JSON.stringify(result, null, 2))
+                        if (result.error) {
+                          addNotification({
+                            type: 'error',
+                            title: 'Prueba de integración fallida',
+                            message: result.error
+                          })
+                        } else {
+                          addNotification({
+                            type: 'success',
+                            title: 'Prueba de integración exitosa',
+                            message: 'El sistema de agentes está funcionando correctamente'
+                          })
+                        }
                       } catch (error) {
-                        alert('Error en la prueba: ' + error)
+                        addNotification({
+                          type: 'error',
+                          title: 'Error en la prueba',
+                          message: error instanceof Error ? error.message : 'Error desconocido'
+                        })
                       }
                     }}
                     className="w-full"

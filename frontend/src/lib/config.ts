@@ -14,6 +14,7 @@ export const API_CONFIG = {
     DOCUMENTS: '/documents',
     DOCUMENT_SUMMARY: (id: string) => `/documents/${id}/summary`,
     DOCUMENT_DOWNLOAD: (id: string) => `/documents/${id}/download-url`,
+    DOCUMENT_CONTENT: (id: string) => `/documents/${id}/content`,
     
     // Search
     SEARCH: '/search',

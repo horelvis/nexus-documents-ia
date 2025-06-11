@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { ChatMessage, ChatRequest, StreamingEvent, agentsService } from '@/lib/services/agents.service'
+import { ChatMessage, ChatRequest, StreamingEvent, useAgentsService } from '@/lib/services/agents.service'
 
 export interface UseAgentChatOptions {
   agentId: string
@@ -16,6 +16,7 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAg
   const [isStreaming, setIsStreaming] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const agentsService = useAgentsService()
 
   const addMessage = useCallback((message: ChatMessage) => {
     setMessages(prev => [...prev, message])
@@ -75,7 +76,7 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAg
       setIsLoading(false)
       setIsStreaming(false)
     }
-  }, [agentId, conversationId, addMessage, onError])
+  }, [agentId, conversationId, addMessage, onError, agentsService])
 
   const sendMessageStreaming = useCallback(async (content: string, context?: Record<string, any>) => {
     if (!content.trim()) return

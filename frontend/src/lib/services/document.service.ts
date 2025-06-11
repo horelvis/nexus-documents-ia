@@ -96,6 +96,51 @@ export class DocumentService {
     return this.apiClient.delete(endpoint)
   }
 
+  async updateDocument(id: string, updates: Partial<Pick<Document, 'title' | 'description' | 'tags' | 'category'>>) {
+    const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}/${id}`
+    return this.apiClient.put<Document>(endpoint, updates)
+  }
+
+  async getDocumentContent(id: string) {
+    const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_CONTENT(id)
+    return this.apiClient.get<{ content: string }>(endpoint)
+  }
+
+  async downloadDocument(id: string): Promise<{ blob: Blob; filename: string } | { error: string }> {
+    try {
+      // First get the download URL
+      const urlResponse = await this.getDocumentDownloadUrl(id)
+      if (urlResponse.error || !urlResponse.data?.download_url) {
+        return { error: urlResponse.error || 'Failed to get download URL' }
+      }
+
+      // Download the file using the signed URL
+      const response = await fetch(urlResponse.data.download_url)
+      if (!response.ok) {
+        return { error: `Download failed: ${response.statusText}` }
+      }
+
+      const blob = await response.blob()
+      
+      // Try to get filename from headers or fall back to document info
+      let filename = 'document'
+      const disposition = response.headers.get('content-disposition')
+      if (disposition && disposition.includes('filename=')) {
+        filename = disposition.split('filename=')[1].replace(/"/g, '')
+      } else {
+        // Get document info to get the filename
+        const docResponse = await this.getDocument(id)
+        if (docResponse.data?.filename) {
+          filename = docResponse.data.filename
+        }
+      }
+
+      return { blob, filename }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Download failed' }
+    }
+  }
+
   async getDocumentSummary(id: string) {
     const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_SUMMARY(id)
     return this.apiClient.get<{ summary: string }>(endpoint)
