@@ -3,17 +3,34 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAgentSelection } from '@/hooks/use-agent-selection'
+import { AgentsMainSidebar } from '@/components/layout/agents-main-sidebar'
+import { AgentsSidebar } from '@/components/layout/agents-sidebar'
+import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { Separator } from "@/components/ui/separator"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap } from 'lucide-react'
+import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap, Plus } from 'lucide-react'
 import { Agent, useAgentsService } from '@/lib/services/agents.service'
-import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
 import { useNotifications } from '@/contexts/notifications-context'
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
   
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
@@ -97,36 +114,66 @@ export default function AgentsPage() {
     }
   }
 
-  if (selectedAgent) {
-    if (selectedAgent.type === 'digital_signature') {
+  const handleCreateAgent = () => {
+    setShowCreateDialog(true)
+  }
+
+  // Agent interaction content based on selection
+  const renderAgentContent = () => {
+    if (!selectedAgent) {
       return (
-        <DigitalSignatureAssistant 
-          agent={selectedAgent}
-          onBack={() => clearSelection()}
-        />
+        <div className="flex flex-1 flex-col gap-4 p-4">
+          <div className="mx-auto max-w-2xl text-center">
+            <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Selecciona un Agente</h2>
+            <p className="text-muted-foreground mb-6">
+              Elige un agente de IA del panel lateral para interactuar con él o crear uno nuevo.
+            </p>
+            <Button onClick={handleCreateAgent} size="lg">
+              <Plus className="h-4 w-4 mr-2" />
+              Crear Nuevo Agente
+            </Button>
+          </div>
+        </div>
       )
     }
-    
-    // For other agent types, show a generic interface
+
+    if (selectedAgent.type === 'digital_signature') {
+      return <DigitalSignatureAssistant agent={selectedAgent} onBack={clearSelection} />
+    }
+
+    // Generic agent interface for other types
     return (
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-        <div className="px-4 lg:px-6">
-          <div className="flex items-center gap-4 mb-6">
-            <Button variant="outline" onClick={() => clearSelection()}>
-              ← Volver
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold">{selectedAgent.name}</h1>
-              <p className="text-muted-foreground">{selectedAgent.description}</p>
-            </div>
+      <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold">{selectedAgent.name}</h1>
+            <p className="text-muted-foreground">{selectedAgent.description}</p>
           </div>
           
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {getAgentIcon(selectedAgent.type)}
+                Interfaz del Agente
+              </CardTitle>
+              <CardDescription>
+                Configuración y interacción con {selectedAgent.name}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="flex items-center justify-center py-12">
-                <p className="text-muted-foreground">
-                  Interfaz para {selectedAgent.name} en desarrollo...
-                </p>
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                    {getAgentIcon(selectedAgent.type)}
+                  </div>
+                  <p className="text-muted-foreground">
+                    Interfaz para {selectedAgent.name} en desarrollo...
+                  </p>
+                  <Button variant="outline" onClick={clearSelection}>
+                    ← Volver a la lista
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -136,363 +183,45 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-      <div className="px-4 lg:px-6">
-        {/* Header with Actions */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">AI Agent Library</h1>
-            <p className="text-muted-foreground">
-              Gestiona y despliega agentes de IA especializados para automatización de documentos
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button 
-              onClick={async () => {
-                try {
-                  const result = await agentsService.checkLangroidHealth()
-                  if (result.error) {
-                    addNotification({
-                      type: 'error',
-                      title: 'Health Check Fallido',
-                      message: result.error
-                    })
-                  } else {
-                    addNotification({
-                      type: 'success', 
-                      title: 'Sistema Funcionando',
-                      message: 'Todos los servicios están operativos'
-                    })
-                  }
-                } catch (error) {
-                  addNotification({
-                    type: 'error',
-                    title: 'Error de Conexión',
-                    message: 'No se pudo verificar el estado del sistema'
-                  })
-                }
-              }}
-              variant="outline"
-              size="sm"
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Estado del Sistema
-            </Button>
-            <Button onClick={loadAgents} variant="outline" size="sm">
-              <MessageCircle className="h-4 w-4 mr-2" />
-              Recargar
-            </Button>
-          </div>
-        </div>
-
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <Bot className="h-8 w-8 text-blue-500" />
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Agentes Activos</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? '...' : agents.length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <FileSignature className="h-8 w-8 text-green-500" />
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Firma Digital</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? '...' : agents.filter(a => a.type === 'digital_signature').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <MessageCircle className="h-8 w-8 text-red-500" />
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Legal & Compliance</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? '...' : agents.filter(a => a.type === 'legal_compliance').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <Activity className="h-8 w-8 text-orange-500" />
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Análisis Financiero</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? '...' : agents.filter(a => a.type === 'financial_analysis').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-            {isLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1, 2, 3].map((i) => (
-                  <Card key={i} className="animate-pulse">
-                    <CardHeader>
-                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                      <div className="h-3 bg-gray-200 rounded w-1/2 mt-2"></div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="h-3 bg-gray-200 rounded"></div>
-                        <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                        <div className="h-8 bg-gray-200 rounded"></div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <>
-                {agents.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {agents.map((agent) => (
-                      <Card key={agent.id} className="hover:shadow-lg transition-shadow cursor-pointer">
-                        <CardHeader>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {getAgentIcon(agent.type)}
-                              <CardTitle className="text-lg">{agent.name}</CardTitle>
-                            </div>
-                            <Badge className={getAgentBadgeColor(agent.type)}>
-                              {agent.type.replace('_', ' ')}
-                            </Badge>
-                          </div>
-                          <CardDescription>{agent.description}</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Zap className="h-4 w-4" />
-                              <span>{agent.tools?.length || 0} herramientas disponibles</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className={`h-2 w-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
-                              <span className="text-sm text-muted-foreground">
-                                {agent.is_active ? 'Activo' : 'Inactivo'}
-                              </span>
-                            </div>
-                            <Button 
-                              onClick={() => selectAgent(agent)}
-                              className="w-full"
-                              variant={agent.type === 'digital_signature' ? 'default' : 'outline'}
-                            >
-                              {agent.type === 'digital_signature' ? (
-                                <>
-                                  <MessageCircle className="h-4 w-4 mr-2" />
-                                  Probar Asistente
-                                </>
-                              ) : (
-                                'Ver Detalles'
-                              )}
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <Card className="text-center py-12">
-                    <CardContent>
-                      <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                      <h3 className="text-lg font-semibold mb-2">No hay agentes disponibles</h3>
-                      <p className="text-muted-foreground mb-4">
-                        Crea agentes de IA para automatizar tareas y procesar documentos.
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-                        <Button 
-                          onClick={async () => {
-                            try {
-                              const response = await agentsService.createDigitalSignatureAgent()
-                              if (response.error) {
-                                addNotification({
-                                  type: 'error',
-                                  title: 'Error',
-                                  message: response.error
-                                })
-                              } else {
-                                addNotification({
-                                  type: 'success',
-                                  title: 'Agente creado',
-                                  message: 'Agente de firma digital creado exitosamente'
-                                })
-                                loadAgents()
-                              }
-                            } catch (error) {
-                              addNotification({
-                                type: 'error',
-                                title: 'Error',
-                                message: 'No se pudo crear el agente'
-                              })
-                            }
-                          }}
-                          variant="default"
-                        >
-                          <FileSignature className="h-4 w-4 mr-2" />
-                          Firma Digital
-                        </Button>
-
-                        <Button 
-                          onClick={async () => {
-                            try {
-                              const response = await agentsService.createLegalComplianceAgent()
-                              if (response.error) {
-                                addNotification({
-                                  type: 'error',
-                                  title: 'Error',
-                                  message: response.error
-                                })
-                              } else {
-                                addNotification({
-                                  type: 'success',
-                                  title: 'Agente creado',
-                                  message: 'Agente legal creado exitosamente'
-                                })
-                                loadAgents()
-                              }
-                            } catch (error) {
-                              addNotification({
-                                type: 'error',
-                                title: 'Error',
-                                message: 'No se pudo crear el agente'
-                              })
-                            }
-                          }}
-                          variant="outline"
-                        >
-                          <MessageCircle className="h-4 w-4 mr-2" />
-                          Legal Compliance
-                        </Button>
-
-                        <Button 
-                          onClick={async () => {
-                            try {
-                              const response = await agentsService.createFinancialAnalysisAgent()
-                              if (response.error) {
-                                addNotification({
-                                  type: 'error',
-                                  title: 'Error',
-                                  message: response.error
-                                })
-                              } else {
-                                addNotification({
-                                  type: 'success',
-                                  title: 'Agente creado',
-                                  message: 'Agente financiero creado exitosamente'
-                                })
-                                loadAgents()
-                              }
-                            } catch (error) {
-                              addNotification({
-                                type: 'error',
-                                title: 'Error',
-                                message: 'No se pudo crear el agente'
-                              })
-                            }
-                          }}
-                          variant="outline"
-                        >
-                          <Activity className="h-4 w-4 mr-2" />
-                          Análisis Financiero
-                        </Button>
-
-                        <Button 
-                          onClick={async () => {
-                            try {
-                              const response = await agentsService.createDocumentAnalyzerAgent()
-                              if (response.error) {
-                                addNotification({
-                                  type: 'error',
-                                  title: 'Error',
-                                  message: response.error
-                                })
-                              } else {
-                                addNotification({
-                                  type: 'success',
-                                  title: 'Agente creado',
-                                  message: 'Analizador de documentos creado exitosamente'
-                                })
-                                loadAgents()
-                              }
-                            } catch (error) {
-                              addNotification({
-                                type: 'error',
-                                title: 'Error',
-                                message: 'No se pudo crear el agente'
-                              })
-                            }
-                          }}
-                          variant="outline"
-                        >
-                          <FileText className="h-4 w-4 mr-2" />
-                          Análisis Documentos
-                        </Button>
-
-                        <Button 
-                          onClick={async () => {
-                            try {
-                              const response = await agentsService.createRAGAssistantAgent()
-                              if (response.error) {
-                                addNotification({
-                                  type: 'error',
-                                  title: 'Error',
-                                  message: response.error
-                                })
-                              } else {
-                                addNotification({
-                                  type: 'success',
-                                  title: 'Agente creado',
-                                  message: 'Asistente RAG creado exitosamente'
-                                })
-                                loadAgents()
-                              }
-                            } catch (error) {
-                              addNotification({
-                                type: 'error',
-                                title: 'Error',
-                                message: 'No se pudo crear el agente'
-                              })
-                            }
-                          }}
-                          variant="outline"
-                        >
-                          <Bot className="h-4 w-4 mr-2" />
-                          Asistente RAG
-                        </Button>
-
-                        <Button onClick={loadAgents} variant="secondary">
-                          <MessageCircle className="h-4 w-4 mr-2" />
-                          Recargar
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </>
-            )}
-        </div>
-      </div>
-    </div>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "350px",
+        } as React.CSSProperties
+      }
+    >
+      {/* Main Navigation Sidebar */}
+      <AgentsMainSidebar onCreateAgent={handleCreateAgent} />
+      
+      {/* Agents List Sidebar */}
+      <AgentsSidebar 
+        selectedAgent={selectedAgent}
+        onAgentSelect={selectAgent}
+        onCreateAgent={handleCreateAgent}
+      />
+      
+      {/* Main Content */}
+      <SidebarInset>
+        <header className="bg-background sticky top-0 flex shrink-0 items-center gap-2 border-b p-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem className="hidden md:block">
+                <BreadcrumbLink href="#">AI Hub</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden md:block" />
+              <BreadcrumbItem>
+                <BreadcrumbPage>
+                  {selectedAgent ? selectedAgent.name : 'Agentes'}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </header>
+        
+        {renderAgentContent()}
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
