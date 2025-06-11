@@ -1,29 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter, useParams } from 'next/navigation'
 import { useAgentSelection } from '@/hooks/use-agent-selection'
-import { AgentsMainSidebar } from '@/components/layout/agents-main-sidebar'
-import { AgentsSidebar } from '@/components/layout/agents-sidebar'
 import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap, Plus } from 'lucide-react'
+import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap, Plus, CheckCircle } from 'lucide-react'
 import { Agent, useAgentsService } from '@/lib/services/agents.service'
 import { useNotifications } from '@/contexts/notifications-context'
 
@@ -32,6 +16,8 @@ export default function AgentsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   
+  const router = useRouter()
+  const params = useParams()
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
   const { selectedAgent, selectAgent, clearSelection } = useAgentSelection(agents)
@@ -183,45 +169,122 @@ export default function AgentsPage() {
   }
 
   return (
-    <SidebarProvider
-      style={
-        {
-          "--sidebar-width": "350px",
-        } as React.CSSProperties
-      }
-    >
-      {/* Main Navigation Sidebar */}
-      <AgentsMainSidebar onCreateAgent={handleCreateAgent} />
-      
-      {/* Agents List Sidebar */}
-      <AgentsSidebar 
-        selectedAgent={selectedAgent}
-        onAgentSelect={selectAgent}
-        onCreateAgent={handleCreateAgent}
-      />
-      
-      {/* Main Content */}
-      <SidebarInset>
-        <header className="bg-background sticky top-0 flex shrink-0 items-center gap-2 border-b p-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="#">AI Hub</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>
-                  {selectedAgent ? selectedAgent.name : 'Agentes'}
-                </BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
+    <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+      {/* Agents Sidebar */}
+      <div className="fixed inset-y-0 left-[--sidebar-width] z-10 hidden h-svh w-80 border-r bg-sidebar md:flex flex-col">
+        <div className="gap-3.5 border-b p-4">
+          <div className="flex w-full items-center justify-between">
+            <div className="text-foreground text-base font-medium flex items-center gap-2">
+              <Bot className="h-5 w-5" />
+              AI Agents
+              {agents.length > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  {agents.length}
+                </Badge>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleCreateAgent}
+              className="h-8 px-2"
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="mt-4">
+            <input 
+              placeholder="Buscar agentes..." 
+              className="bg-background h-8 w-full shadow-none border rounded-md px-3 text-sm"
+            />
+          </div>
+        </div>
         
+        <div className="flex-1 overflow-auto">
+          <div className="w-full text-sm">
+            {isLoading ? (
+              <div className="p-4">
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-3 animate-pulse">
+                      <div className="h-8 w-8 bg-gray-200 rounded" />
+                      <div className="flex-1">
+                        <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
+                        <div className="h-3 bg-gray-200 rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : agents.length === 0 ? (
+              <div className="p-4 text-center">
+                <div className="space-y-4">
+                  <Bot className="h-12 w-12 mx-auto text-muted-foreground" />
+                  <h3 className="font-medium">No hay agentes</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Crea tu primer agente de IA
+                  </p>
+                  <Button onClick={handleCreateAgent} size="sm">
+                    <Plus className="h-3 w-3 mr-1" />
+                    Crear Agente
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              agents.map((agent) => {
+                const isSelected = selectedAgent?.id === agent.id
+                return (
+                  <button
+                    key={agent.id}
+                    onClick={() => selectAgent(agent)}
+                    className={`w-full flex flex-col items-start gap-2 border-b p-4 text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left ${
+                      isSelected ? 'bg-sidebar-accent border-l-2 border-l-blue-500' : ''
+                    }`}
+                  >
+                    <div className="flex w-full items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        {isSelected ? (
+                          <CheckCircle className="h-4 w-4 text-blue-600" />
+                        ) : (
+                          getAgentIcon(agent.type)
+                        )}
+                        <span className={`font-medium ${isSelected ? 'text-blue-700' : ''}`}>
+                          {agent.name || getAgentDisplayName(agent.type)}
+                        </span>
+                      </div>
+                      <div className="ml-auto flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${
+                          agent.is_active ? 'bg-green-500' : 'bg-gray-400'
+                        }`} />
+                      </div>
+                    </div>
+                    
+                    {agent.description && (
+                      <span className="line-clamp-2 w-full text-xs text-muted-foreground text-left">
+                        {agent.description}
+                      </span>
+                    )}
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+        
+        <div className="p-4 border-t">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Total:</span>
+              <Badge variant="outline" className="text-xs">{agents.length}</Badge>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content with left margin for sidebar */}
+      <div className="ml-80 flex flex-1 flex-col">
         {renderAgentContent()}
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </div>
   )
 }
