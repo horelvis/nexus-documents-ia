@@ -10,6 +10,7 @@ from uuid import UUID
 import httpx
 
 import langroid as lr
+import langroid.language_models as lm
 from langroid.agent.chat_agent import ChatAgent, ChatAgentConfig
 from langroid.agent.tools.orchestration import AgentDoneTool
 from langroid.language_models.base import LLMMessage, Role
@@ -35,8 +36,8 @@ class ContractAnalysisLangroidAgent(ChatAgent):
         agent_id: str,
         tenant_id: str,
         user_id: str,
-        llm_config: lr.language_models.openai_gpt.OpenAIGPTConfig,
-        vector_config: lr.vector_store.qdrantdb.QdrantDBConfig = None,
+        llm_config: lm.OpenAIGPTConfig,
+        vector_config: lr.vector_store.QdrantDBConfig = None,
         config: Dict[str, Any] = None
     ):
         self.agent_id = agent_id

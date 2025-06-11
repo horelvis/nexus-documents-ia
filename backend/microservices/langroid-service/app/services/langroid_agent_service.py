@@ -10,12 +10,30 @@ import json
 
 import langroid as lr
 from langroid.agent.base import Agent
-from langroid.agent.chat_agent import ChatAgent
+from langroid.agent.chat_agent import ChatAgent, ChatAgentConfig
 from langroid.agent.task import Task
-from langroid.language_models.ollama_chat import OllamaChatConfig
-from langroid.language_models.base import LLMMessage, Role
-from langroid.utils.configuration import settings
-from langroid.vector_store.qdrantdb import QdrantDBConfig
+
+# Handle different Langroid versions with compatibility imports
+try:
+    # Try new import path first
+    from langroid.language_models.openai_gpt import OpenAIGPTConfig as LLMConfig
+    from langroid.language_models.base import LLMMessage, Role
+    from langroid.utils.configuration import Settings
+    from langroid.vector_store.qdrantdb import QdrantDBConfig
+except ImportError:
+    try:
+        # Fallback to older import paths
+        from langroid.language_models.openai_gpt import OpenAIGPTConfig as LLMConfig
+        from langroid.language_models.base import LLMMessage, Role
+        from langroid.utils.configuration import settings as Settings
+        QdrantDBConfig = lr.vector_store.QdrantDBConfig
+    except ImportError:
+        # Last resort compatibility
+        import langroid.language_models as lm
+        LLMConfig = lm.OpenAIGPTConfig
+        from langroid.language_models.base import LLMMessage, Role
+        Settings = None
+        QdrantDBConfig = lr.vector_store.QdrantDBConfig
 
 from app.core.config import settings as app_settings
 from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
@@ -41,8 +59,8 @@ class LangroidAgentService:
         logger.info("Initializing Langroid Agent Service...")
         
         # Configure LLM (Ollama)
-        self.llm_config = OllamaChatConfig(
-            chat_model=app_settings.DEFAULT_LLM_MODEL,
+        self.llm_config = LLMConfig(
+            chat_model=f"ollama/{app_settings.DEFAULT_LLM_MODEL}",
             chat_context_length=16000,
             max_output_tokens=2000,
             temperature=0.1,
@@ -328,7 +346,7 @@ class LangroidAgentService:
     ) -> ChatAgent:
         """Create document analyzer agent"""
         
-        agent_config = lr.ChatAgentConfig(
+        agent_config = ChatAgentConfig(
             name="DocumentAnalyzer",
             llm=self.llm_config,
             vecdb=self._get_tenant_vector_store_config(tenant_id),
@@ -365,7 +383,7 @@ Always provide clear, structured analysis with specific examples from the docume
             embedding_model=app_settings.DEFAULT_EMBEDDING_MODEL
         )
         
-        agent_config = lr.ChatAgentConfig(
+        agent_config = ChatAgentConfig(
             name="RAGAssistant",
             llm=self.llm_config,
             vecdb=vector_config,
@@ -396,7 +414,7 @@ Always cite your sources and indicate confidence levels in your answers."""
             "You are a helpful AI assistant. Answer questions clearly and concisely."
         )
         
-        agent_config = lr.ChatAgentConfig(
+        agent_config = ChatAgentConfig(
             name="GenericAgent",
             llm=self.llm_config,
             system_message=system_message
