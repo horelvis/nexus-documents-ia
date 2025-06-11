@@ -84,6 +84,27 @@ export function ExpressOnboarding({ checkoutData, onComplete }: ExpressOnboardin
     }
   })
 
+  // Load saved onboarding data from localStorage when step 1 is reached
+  useEffect(() => {
+    if (currentStep === 1) {
+      try {
+        const savedData = localStorage.getItem('pendingOnboardingData')
+        if (savedData) {
+          const onboardingData = JSON.parse(savedData)
+          console.log('📋 Loading saved onboarding data:', onboardingData)
+          
+          // Update form with saved data
+          form.setValue('companyName', onboardingData.company_name || '')
+          
+          // Clear the saved data since we're using it now
+          localStorage.removeItem('pendingOnboardingData')
+        }
+      } catch (error) {
+        console.error('Error loading saved onboarding data:', error)
+      }
+    }
+  }, [currentStep, form])
+
   const steps = [
     {
       id: 'sync',

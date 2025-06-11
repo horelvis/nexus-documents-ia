@@ -148,22 +148,30 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
   const handleComplete = async () => {
     try {
-      // TODO: Save company data here when backend is ready
-      // const formData = form.getValues()
-      // const onboardingData = {
-      //   company_name: formData.companyName,
-      //   cif: formData.cif,
-      //   address: formData.address,
-      //   phone: formData.phone,
-      //   website: formData.website,
-      //   logo: logoData.file,
-      //   google_drive_connected: googleDriveConnected,
-      //   signature_provider: signatureProvider || null
-      // }
+      // En el último paso, redirigir a pricing en lugar de completar onboarding
+      // El onboarding solo se completará después de un pago exitoso
+      if (currentStep === steps.length - 1) {
+        // Guardar datos del formulario en localStorage para uso posterior
+        const formData = form.getValues()
+        const onboardingData = {
+          company_name: formData.companyName,
+          cif: formData.cif,
+          address: formData.address,
+          phone: formData.phone,
+          website: formData.website,
+          google_drive_connected: googleDriveConnected,
+          signature_provider: signatureProvider || null
+        }
+        
+        localStorage.setItem('pendingOnboardingData', JSON.stringify(onboardingData))
+        
+        // Redirigir a pricing para forzar el pago
+        window.location.href = '/pricing'
+        return
+      }
       
-      // Complete onboarding
+      // Para otros pasos, continuar normalmente
       await markOnboardingComplete()
-      
       onComplete()
       onOpenChange(false)
     } catch (error) {
@@ -665,14 +673,21 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 <Separator />
 
                 <div className="text-center">
-                  <div className="w-20 h-20 mx-auto mb-6 bg-green-100 rounded-full flex items-center justify-center">
-                    <Check className="h-10 w-10 text-green-600" />
+                  <div className="w-20 h-20 mx-auto mb-6 bg-blue-100 rounded-full flex items-center justify-center">
+                    <Shield className="h-10 w-10 text-blue-600" />
                   </div>
-                  <h3 className="text-2xl font-bold text-gray-900 mb-4">¡Todo listo para empezar!</h3>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-4">¡Último paso: Selecciona tu Plan!</h3>
                   <p className="text-gray-600 mb-6 text-lg">
-                    Tu cuenta está configurada y lista para usar. 
-                    Explora el dashboard para descubrir todas las funcionalidades.
+                    Para acceder a todas las funcionalidades de Nexus, necesitas seleccionar un plan de suscripción.
+                    Elige el que mejor se adapte a las necesidades de tu empresa.
                   </p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <p className="text-blue-800 text-sm">
+                      <strong>¿Por qué necesitas una suscripción?</strong><br/>
+                      Nexus es una plataforma empresarial con IA avanzada que requiere recursos significativos para procesar documentos, 
+                      ejecutar agentes inteligentes y mantener la seguridad de tus datos.
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -695,7 +710,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             disabled={!canProceed()}
           >
             {currentStep === steps.length - 1 ? (
-              'Finalizar'
+              'Continuar al Pago →'
             ) : (
               <>
                 Siguiente

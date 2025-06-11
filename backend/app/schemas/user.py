@@ -62,6 +62,7 @@ class OnboardingComplete(BaseModel):
     last_name: Optional[str] = Field(None, example="Doe")
     company_name: Optional[str] = Field(None, example="Mi Empresa SL")
     cif: Optional[str] = Field(None, example="B12345678")
+    industry: Optional[str] = Field(None, example="Technology")
     selected_plan: Optional[str] = Field(None, example="pro")
     payment_interval: Optional[str] = Field(None, example="month")
     onboarding_step: Optional[str] = Field(None, example="completed")
