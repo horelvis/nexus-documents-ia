@@ -92,7 +92,7 @@ export function AgentsMainSidebar({
   return (
     <Sidebar
       collapsible="none"
-      className="w-16 border-r"
+      className="!w-[calc(var(--sidebar-width-icon)_+_1px)] border-r"
       {...props}
     >
       <SidebarHeader>

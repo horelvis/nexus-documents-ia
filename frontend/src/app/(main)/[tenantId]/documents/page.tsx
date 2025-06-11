@@ -407,78 +407,87 @@ export default function DocumentsPage() {
 
         {/* Documents Grid */}
         {!isLoading && !error && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredDocuments.map((document: any) => (
               <Card key={document.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader className="pb-3">
+                <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {getFileIcon(document.file_type, document.mime_type, document.filename)}
-                      <div className="min-w-0 flex-1">
-                        <CardTitle className="text-base truncate" title={document.filename}>
+                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                      <div className="flex-shrink-0">
+                        {getFileIcon(document.file_type, document.mime_type, document.filename)}
+                      </div>
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <CardTitle className="text-sm truncate overflow-hidden text-ellipsis whitespace-nowrap" title={document.title || document.filename}>
                           {document.title || document.filename}
                         </CardTitle>
                       </div>
                     </div>
-                    <Badge className={getStatusColor(document.indexed)} variant="secondary">
+                    <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
                       {document.indexed}
                     </Badge>
                   </div>
                 </CardHeader>
                 
                 <CardContent>
-                  <div className="space-y-3">
-                    <div className="text-sm text-muted-foreground">
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">
                       <p>Size: {formatFileSize(document.file_size)}</p>
                       <p>Uploaded: {new Date(document.created_at).toLocaleDateString()}</p>
-                      {document.updated_at && (
-                        <p>Updated: {new Date(document.updated_at).toLocaleDateString()}</p>
-                      )}
                     </div>
                     
-                    <div className="flex flex-wrap gap-1">
-                      {(document.tags || []).map((tag: string) => (
-                        <Badge key={tag} variant="outline" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
+                    {(document.tags || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {(document.tags || []).slice(0, 2).map((tag: string) => (
+                          <Badge key={tag} variant="outline" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                        {(document.tags || []).length > 2 && (
+                          <Badge variant="outline" className="text-xs">
+                            +{(document.tags || []).length - 2}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     
-                    <div className="flex justify-between pt-2">
-                      <div className="flex gap-2">
+                    <div className="flex justify-between pt-1">
+                      <div className="flex gap-1">
                         <Button 
                           size="sm" 
                           variant="outline"
                           onClick={() => handleViewDocument(document)}
                           title="View document"
+                          className="h-7 w-7 p-0"
                         >
-                          <IconEye className="h-4 w-4" />
+                          <IconEye className="h-3 w-3" />
                         </Button>
                         <Button 
                           size="sm" 
                           variant="outline"
                           onClick={() => handleDownloadDocument(document)}
                           title="Download document"
+                          className="h-7 w-7 p-0"
                         >
-                          <IconDownload className="h-4 w-4" />
+                          <IconDownload className="h-3 w-3" />
                         </Button>
                         <Button 
                           size="sm" 
                           variant="outline"
                           onClick={() => handleEditDocument(document)}
                           title="Edit document"
+                          className="h-7 w-7 p-0"
                         >
-                          <IconEdit className="h-4 w-4" />
+                          <IconEdit className="h-3 w-3" />
                         </Button>
                       </div>
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="text-red-600 hover:text-red-700"
+                        className="text-red-600 hover:text-red-700 h-7 w-7 p-0"
                         onClick={() => handleDeleteDocument(document)}
                         title="Delete document"
                       >
-                        <IconTrash className="h-4 w-4" />
+                        <IconTrash className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>

@@ -35,49 +35,49 @@ export function getFileIcon(
   
   // PDF files
   if (type.includes('pdf') || extension === 'pdf') {
-    return <IconFileTypePdf className={`${className} text-red-500`} />
+    return <IconFileTypePdf className={`${className} text-muted-foreground`} />
   }
   
   // Word documents
   if (type.includes('word') || type.includes('officedocument') || 
       extension.includes('doc') || extension === 'docx') {
-    return <IconFileText className={`${className} text-blue-500`} />
+    return <IconFileText className={`${className} text-muted-foreground`} />
   }
   
   // Excel/Spreadsheets
   if (type.includes('spreadsheet') || type.includes('excel') ||
       extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
-    return <IconFileText className={`${className} text-green-500`} />
+    return <IconFileText className={`${className} text-muted-foreground`} />
   }
   
   // PowerPoint
   if (type.includes('presentation') || type.includes('powerpoint') ||
       extension === 'pptx' || extension === 'ppt') {
-    return <IconFileText className={`${className} text-orange-500`} />
+    return <IconFileText className={`${className} text-muted-foreground`} />
   }
   
   // Images
   if (type.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(extension)) {
-    return <IconPhoto className={`${className} text-purple-500`} />
+    return <IconPhoto className={`${className} text-muted-foreground`} />
   }
   
   // Videos
   if (type.includes('video') || ['mp4', 'avi', 'mov', 'wmv', 'flv'].includes(extension)) {
-    return <IconVideo className={`${className} text-indigo-500`} />
+    return <IconVideo className={`${className} text-muted-foreground`} />
   }
   
   // Audio
   if (type.includes('audio') || ['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(extension)) {
-    return <IconMusic className={`${className} text-pink-500`} />
+    return <IconMusic className={`${className} text-muted-foreground`} />
   }
   
   // Text files
   if (type.includes('text') || ['txt', 'md', 'rtf'].includes(extension)) {
-    return <IconFileText className={`${className} text-gray-600`} />
+    return <IconFileText className={`${className} text-muted-foreground`} />
   }
   
   // Default file icon
-  return <IconFile className={`${className} text-gray-500`} />
+  return <IconFile className={`${className} text-muted-foreground`} />
 }
 
 /**

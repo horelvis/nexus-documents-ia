@@ -1,34 +1,38 @@
 'use client'
 
+import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { useSearchParams, useRouter, useParams } from 'next/navigation'
 import { useAgentSelection } from '@/hooks/use-agent-selection'
 import { DigitalSignatureAssistant } from '@/components/agents/digital-signature-assistant'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { MessageCircle, Activity, FileSignature, FileText, Bot, Zap, Plus, CheckCircle } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { MessageCircle, Activity, FileSignature, FileText, Bot, Plus, Search } from 'lucide-react'
 import { Agent, useAgentsService } from '@/lib/services/agents.service'
 import { useNotifications } from '@/contexts/notifications-context'
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
   
-  const router = useRouter()
-  const params = useParams()
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
   const { selectedAgent, selectAgent, clearSelection } = useAgentSelection(agents)
+  
+  // Filter agents based on search term
+  const filteredAgents = agents.filter(agent => 
+    agent.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    getAgentDisplayName(agent.type).toLowerCase().includes(searchTerm.toLowerCase()) ||
+    agent.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
-  useEffect(() => {
-    loadAgents()
-  }, [])
-
+  // Simple data loading function following CLAUDE.md pattern
   const loadAgents = async () => {
+    setIsLoading(true)
+    
     try {
-      setIsLoading(true)
       console.log('🔄 Loading agents...')
       const response = await agentsService.getAgents()
       
@@ -65,6 +69,10 @@ export default function AgentsPage() {
     }
   }
 
+  useEffect(() => {
+    loadAgents()
+  }, [])
+
 
   const getAgentIcon = (type: string) => {
     switch (type) {
@@ -83,208 +91,202 @@ export default function AgentsPage() {
     }
   }
 
-  const getAgentBadgeColor = (type: string) => {
+  const handleCreateAgent = () => {
+    console.log('Create agent dialog would open here')
+  }
+
+  const getAgentDisplayName = (type: string) => {
     switch (type) {
       case 'digital_signature':
-        return 'bg-blue-100 text-blue-800'
+        return 'Asistente de Firmas Digitales'
       case 'document_analyzer':
-        return 'bg-green-100 text-green-800'
+        return 'Analizador de Documentos'
       case 'rag_assistant':
-        return 'bg-purple-100 text-purple-800'
+        return 'Asistente RAG'
       case 'legal_compliance':
-        return 'bg-red-100 text-red-800'
+        return 'Cumplimiento Legal'
       case 'financial_analysis':
-        return 'bg-orange-100 text-orange-800'
+        return 'Análisis Financiero'
       default:
-        return 'bg-gray-100 text-gray-800'
+        return 'Agente de IA'
     }
   }
 
-  const handleCreateAgent = () => {
-    setShowCreateDialog(true)
-  }
-
-  // Agent interaction content based on selection
-  const renderAgentContent = () => {
-    if (!selectedAgent) {
-      return (
-        <div className="flex flex-1 flex-col gap-4 p-4">
-          <div className="mx-auto max-w-2xl text-center">
-            <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Selecciona un Agente</h2>
-            <p className="text-muted-foreground mb-6">
-              Elige un agente de IA del panel lateral para interactuar con él o crear uno nuevo.
-            </p>
-            <Button onClick={handleCreateAgent} size="lg">
-              <Plus className="h-4 w-4 mr-2" />
-              Crear Nuevo Agente
-            </Button>
-          </div>
-        </div>
-      )
-    }
-
-    if (selectedAgent.type === 'digital_signature') {
-      return <DigitalSignatureAssistant agent={selectedAgent} onBack={clearSelection} />
-    }
-
-    // Generic agent interface for other types
-    return (
-      <div className="flex flex-1 flex-col gap-4 p-4">
-        <div className="space-y-6">
-          <div>
-            <h1 className="text-3xl font-bold">{selectedAgent.name}</h1>
-            <p className="text-muted-foreground">{selectedAgent.description}</p>
-          </div>
-          
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {getAgentIcon(selectedAgent.type)}
-                Interfaz del Agente
-              </CardTitle>
-              <CardDescription>
-                Configuración y interacción con {selectedAgent.name}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center space-y-4">
-                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
-                    {getAgentIcon(selectedAgent.type)}
-                  </div>
-                  <p className="text-muted-foreground">
-                    Interfaz para {selectedAgent.name} en desarrollo...
-                  </p>
-                  <Button variant="outline" onClick={clearSelection}>
-                    ← Volver a la lista
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    )
-  }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-      {/* Agents Sidebar */}
-      <div className="fixed inset-y-0 left-[--sidebar-width] z-10 hidden h-svh w-80 border-r bg-sidebar md:flex flex-col">
-        <div className="gap-3.5 border-b p-4">
-          <div className="flex w-full items-center justify-between">
-            <div className="text-foreground text-base font-medium flex items-center gap-2">
-              <Bot className="h-5 w-5" />
-              AI Agents
-              {agents.length > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {agents.length}
+    <div className="flex flex-1 flex-col gap-4 p-4">
+      {selectedAgent ? (
+        // Show selected agent interface
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={clearSelection}
+                className="flex items-center gap-2"
+              >
+                ← Volver
+              </Button>
+              <div className="flex items-center gap-2">
+                {getAgentIcon(selectedAgent.type)}
+                <h1 className="text-2xl font-bold">{selectedAgent.name || getAgentDisplayName(selectedAgent.type)}</h1>
+                <Badge 
+                  variant={selectedAgent.is_active ? "default" : "secondary"}
+                  className="text-xs"
+                >
+                  {selectedAgent.is_active ? 'Activo' : 'Inactivo'}
                 </Badge>
-              )}
+              </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleCreateAgent}
-              className="h-8 px-2"
-            >
-              <Plus className="h-3 w-3" />
+          </div>
+          
+          {selectedAgent.type === 'digital_signature' ? (
+            <DigitalSignatureAssistant agent={selectedAgent} onBack={clearSelection} />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {getAgentIcon(selectedAgent.type)}
+                  Interfaz del Agente
+                </CardTitle>
+                <CardDescription>
+                  {selectedAgent.description || `Configuración y interacción con ${selectedAgent.name || getAgentDisplayName(selectedAgent.type)}`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                      {getAgentIcon(selectedAgent.type)}
+                    </div>
+                    <p className="text-muted-foreground">
+                      Interfaz para {selectedAgent.name || getAgentDisplayName(selectedAgent.type)} en desarrollo...
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : (
+        // Show agents list
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Bot className="h-8 w-8" />
+              <div>
+                <h1 className="text-3xl font-bold">AI Agents</h1>
+                <p className="text-muted-foreground">
+                  Gestiona tus agentes de inteligencia artificial
+                </p>
+              </div>
+            </div>
+            <Button onClick={handleCreateAgent} className="flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Crear Agente
             </Button>
           </div>
-          <div className="mt-4">
-            <input 
-              placeholder="Buscar agentes..." 
-              className="bg-background h-8 w-full shadow-none border rounded-md px-3 text-sm"
-            />
+          
+          {/* Search and Filters */}
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar agentes..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            {agents.length > 0 && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Total:</span>
+                <Badge variant="outline">{filteredAgents.length} de {agents.length}</Badge>
+              </div>
+            )}
           </div>
-        </div>
-        
-        <div className="flex-1 overflow-auto">
-          <div className="w-full text-sm">
-            {isLoading ? (
-              <div className="p-4">
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center gap-3 animate-pulse">
-                      <div className="h-8 w-8 bg-gray-200 rounded" />
+          
+          {/* Agents Grid */}
+          {isLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Card key={i} className="animate-pulse">
+                  <CardHeader>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 bg-gray-200 rounded" />
                       <div className="flex-1">
                         <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
                         <div className="h-3 bg-gray-200 rounded w-1/2" />
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            ) : agents.length === 0 ? (
-              <div className="p-4 text-center">
-                <div className="space-y-4">
-                  <Bot className="h-12 w-12 mx-auto text-muted-foreground" />
-                  <h3 className="font-medium">No hay agentes</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Crea tu primer agente de IA
-                  </p>
-                  <Button onClick={handleCreateAgent} size="sm">
-                    <Plus className="h-3 w-3 mr-1" />
-                    Crear Agente
+                  </CardHeader>
+                </Card>
+              ))}
+            </div>
+          ) : filteredAgents.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">
+                  {agents.length === 0 ? 'No hay agentes' : 'No se encontraron agentes'}
+                </h3>
+                <p className="text-muted-foreground text-center mb-6">
+                  {agents.length === 0 
+                    ? 'Crea tu primer agente de IA para comenzar'
+                    : 'Intenta con otros términos de búsqueda'
+                  }
+                </p>
+                {agents.length === 0 && (
+                  <Button onClick={handleCreateAgent}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Crear Primer Agente
                   </Button>
-                </div>
-              </div>
-            ) : (
-              agents.map((agent) => {
-                const isSelected = selectedAgent?.id === agent.id
-                return (
-                  <button
-                    key={agent.id}
-                    onClick={() => selectAgent(agent)}
-                    className={`w-full flex flex-col items-start gap-2 border-b p-4 text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left ${
-                      isSelected ? 'bg-sidebar-accent border-l-2 border-l-blue-500' : ''
-                    }`}
-                  >
-                    <div className="flex w-full items-center gap-3">
-                      <div className="flex items-center gap-2">
-                        {isSelected ? (
-                          <CheckCircle className="h-4 w-4 text-blue-600" />
-                        ) : (
-                          getAgentIcon(agent.type)
-                        )}
-                        <span className={`font-medium ${isSelected ? 'text-blue-700' : ''}`}>
-                          {agent.name || getAgentDisplayName(agent.type)}
-                        </span>
-                      </div>
-                      <div className="ml-auto flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${
-                          agent.is_active ? 'bg-green-500' : 'bg-gray-400'
-                        }`} />
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredAgents.map((agent) => (
+                <Card 
+                  key={agent.id} 
+                  className="cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => selectAgent(agent)}
+                >
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-muted">
+                          {getAgentIcon(agent.type)}
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-base">
+                            {agent.name || getAgentDisplayName(agent.type)}
+                          </CardTitle>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {getAgentDisplayName(agent.type)}
+                            </Badge>
+                            <div className={`h-2 w-2 rounded-full ${
+                              agent.is_active ? 'bg-green-500' : 'bg-gray-400'
+                            }`} />
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    
                     {agent.description && (
-                      <span className="line-clamp-2 w-full text-xs text-muted-foreground text-left">
+                      <CardDescription className="mt-2">
                         {agent.description}
-                      </span>
+                      </CardDescription>
                     )}
-                  </button>
-                )
-              })
-            )}
-          </div>
-        </div>
-        
-        <div className="p-4 border-t">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Total:</span>
-              <Badge variant="outline" className="text-xs">{agents.length}</Badge>
+                  </CardHeader>
+                </Card>
+              ))}
             </div>
-          </div>
+          )}
         </div>
-      </div>
-
-      {/* Main Content with left margin for sidebar */}
-      <div className="ml-80 flex flex-1 flex-col">
-        {renderAgentContent()}
-      </div>
+      )}
     </div>
   )
 }
