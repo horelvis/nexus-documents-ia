@@ -113,7 +113,7 @@ class DocumentService:
         and handles tags. Adds to session but does not commit.
         """
         doc_id = str(uuid.uuid4())
-        file_path = f"documents/{doc_id}/{filename}"
+        file_path = filename
 
         db_document = Document(
             id=doc_id,
