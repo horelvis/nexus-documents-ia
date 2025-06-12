@@ -44,6 +44,7 @@ export function DocumentPreviewDialog({
   onOpenChange 
 }: DocumentPreviewDialogProps) {
   const [preview, setPreview] = useState<DocumentPreviewResponse | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
@@ -65,6 +66,12 @@ export function DocumentPreviewDialog({
         })
       } else if (response.data) {
         setPreview(response.data)
+        
+        // For PDF files, get signed URL for PDF viewer
+        if (response.data.pdf_available && document.file_type === 'pdf') {
+          await loadPdfUrl()
+        }
+        
         if (forceRegenerate) {
           toast.success('Preview regenerated successfully')
         }
@@ -80,6 +87,19 @@ export function DocumentPreviewDialog({
     }
   }
 
+  const loadPdfUrl = async () => {
+    if (!document) return
+    
+    try {
+      const urlResponse = await documentService.getDocumentDownloadUrl(document.id)
+      if (urlResponse.data?.download_url) {
+        setPdfUrl(urlResponse.data.download_url)
+      }
+    } catch (err) {
+      console.error('Failed to get PDF URL:', err)
+    }
+  }
+
   // Load preview when dialog opens
   useEffect(() => {
     if (open && document && !preview && !isLoading) {
@@ -91,6 +111,7 @@ export function DocumentPreviewDialog({
   useEffect(() => {
     if (!open || !document) {
       setPreview(null)
+      setPdfUrl(null)
       setError(null)
     }
   }, [open, document?.id])
@@ -266,16 +287,21 @@ export function DocumentPreviewDialog({
                       </Badge>
                     </div>
                     <div className="h-[600px] border rounded-lg overflow-hidden">
-                      <PDFViewer
-                        url={
-                          document.file_type === 'pdf' 
-                            ? `/api/v1/documents/${document.id}/pdf`
-                            : `/api/v1/documents/${document.id}/converted-pdf`
-                        }
-                        fileName={document.filename}
-                        showToolbar={true}
-                        initialScale={0.8}
-                      />
+                      {pdfUrl ? (
+                        <PDFViewer
+                          url={pdfUrl}
+                          fileName={document.filename}
+                          showToolbar={true}
+                          initialScale={0.8}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
+                          <div className="text-center">
+                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                            <p className="text-muted-foreground">Loading PDF...</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

@@ -123,7 +123,7 @@ class DocumentPreviewService:
             
             # Subir a storage para cache
             preview_storage_path = f"{self.preview_storage_prefix}/{document_id}/{pdf_name}"
-            upload_success = await self._upload_to_storage(str(pdf_path), preview_storage_path)
+            upload_success = self._upload_to_storage(str(pdf_path), preview_storage_path)
             
             # Generar thumbnails del PDF
             thumbnails = await self._generate_pdf_thumbnails(document_id, str(pdf_path))
@@ -196,7 +196,7 @@ class DocumentPreviewService:
             
             # Subir a storage
             preview_storage_path = f"{self.preview_storage_prefix}/{document_id}/{pdf_name}"
-            upload_success = await self._upload_to_storage(str(pdf_path), preview_storage_path)
+            upload_success = self._upload_to_storage(str(pdf_path), preview_storage_path)
             
             # Generar thumbnails
             thumbnails = await self._generate_pdf_thumbnails(document_id, str(pdf_path))
@@ -298,7 +298,7 @@ class DocumentPreviewService:
                     
                     # Subir thumbnail a storage
                     thumb_storage_path = f"{self.preview_storage_prefix}/{document_id}/{thumb_name}"
-                    upload_success = await self._upload_to_storage(str(thumb_path), thumb_storage_path)
+                    upload_success = self._upload_to_storage(str(thumb_path), thumb_storage_path)
                     
                     result = {
                         "type": "image_preview",
@@ -346,7 +346,7 @@ class DocumentPreviewService:
                 
                 # Subir a storage
                 thumb_storage_path = f"{self.preview_storage_prefix}/{document_id}/{thumb_name}"
-                upload_success = await self._upload_to_storage(str(thumb_path), thumb_storage_path)
+                upload_success = self._upload_to_storage(str(thumb_path), thumb_storage_path)
                 
                 if upload_success:
                     thumbnails.append(thumb_storage_path)
@@ -362,10 +362,17 @@ class DocumentPreviewService:
             logger.error(f"Thumbnail generation failed: {e}")
             return []
     
-    async def _upload_to_storage(self, local_path: str, storage_path: str) -> bool:
+    def _upload_to_storage(self, local_path: str, storage_path: str) -> bool:
         """Sube archivo al storage y retorna éxito/fallo"""
         try:
-            success = await self.storage_service.upload_file(local_path, storage_path)
+            # Leer archivo y subir como bytes
+            with open(local_path, 'rb') as f:
+                file_content = f.read()
+            
+            success = self.storage_service.upload_file(
+                file=file_content,
+                object_name=storage_path
+            )
             if success:
                 logger.debug(f"Uploaded {local_path} to {storage_path}")
             return success
@@ -385,7 +392,7 @@ class DocumentPreviewService:
                 json.dump(metadata, f, indent=2)
             
             metadata_storage_path = f"{self.preview_storage_prefix}/{document_id}/{metadata_name}"
-            await self._upload_to_storage(str(metadata_path), metadata_storage_path)
+            self._upload_to_storage(str(metadata_path), metadata_storage_path)
             
         except Exception as e:
             logger.error(f"Preview metadata caching failed: {e}")
@@ -397,15 +404,11 @@ class DocumentPreviewService:
             metadata_storage_path = f"{self.preview_storage_prefix}/{document_id}/{document_id}_metadata.json"
             
             # Intentar descargar metadata
-            metadata_local_path = self.temp_dir / f"{document_id}_metadata.json"
-            download_success = await self.storage_service.download_file(
-                metadata_storage_path, str(metadata_local_path)
-            )
+            metadata_content = self.storage_service.download_file(metadata_storage_path)
             
-            if download_success and metadata_local_path.exists():
+            if metadata_content:
                 import json
-                with open(metadata_local_path, 'r') as f:
-                    metadata = json.load(f)
+                metadata = json.loads(metadata_content.decode('utf-8'))
                 
                 # Verificar que el cache sigue válido (ej. menos de 24 horas)
                 cache_age = time.time() - metadata.get('generated_at', 0)
