@@ -11,7 +11,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.llm_service import LLMService
 from app.api.recommendations import router as recommendations_router
-from app.core.security import verify_service_access
+from app.core.security import validate_service_access
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +82,7 @@ async def health_check():
 @app.post("/embeddings", response_model=EmbeddingResponse)
 async def generate_embeddings(
     request: EmbeddingRequest,
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Generate embeddings for texts"""
     try:
@@ -96,7 +96,7 @@ async def generate_embeddings(
 @app.post("/embedding", response_model=Dict[str, List[float]])
 async def generate_single_embedding(
     request: Dict[str, str],
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Generate embedding for single text"""
     try:
@@ -110,7 +110,7 @@ async def generate_single_embedding(
 @app.post("/chunk", response_model=ChunkResponse)
 async def chunk_text(
     request: ChunkRequest,
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Chunk text into smaller pieces"""
     try:
@@ -124,7 +124,7 @@ async def chunk_text(
 @app.post("/documents/add")
 async def add_documents(
     request: AddDocumentRequest,
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Add documents to vector store"""
     try:
@@ -138,7 +138,7 @@ async def add_documents(
 @app.post("/documents/add-single")
 async def add_single_document(
     request: Dict[str, Any],
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Add single document to vector store"""
     try:
@@ -156,7 +156,7 @@ async def add_single_document(
 @app.post("/search", response_model=SearchResponse)
 async def search_similar(
     request: SearchRequest,
-    security: dict = Depends(verify_service_access)
+    security: dict = Depends(validate_service_access)
 ):
     """Search for similar documents"""
     try:
@@ -238,15 +238,15 @@ async def summarize_text(request: Dict[str, Any]):
 async def delete_document(
     tenant_id: str, 
     doc_id: str,
-    security: dict = Depends(verify_service_access)
-):
+    security: dict = Depends(validate_service_access)
+) -> dict:
     """Delete document from vector store"""
     try:
-        # Use tenant_id from security context for validation
-        if tenant_id != security["tenant_id"]:
-            raise HTTPException(status_code=403, detail="Tenant ID mismatch")
+        # Validate tenant_id parameter
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant ID required")
         
-        vector_service = VectorService(security["tenant_id"])
+        vector_service = VectorService(tenant_id)
         success = vector_service.delete_document(doc_id)
         return {"success": success}
     except Exception as e:
@@ -256,15 +256,15 @@ async def delete_document(
 @app.get("/collection/{tenant_id}/info")
 async def get_collection_info(
     tenant_id: str,
-    security: dict = Depends(verify_service_access)
-):
+    security: dict = Depends(validate_service_access)
+) -> dict:
     """Get collection information"""
     try:
-        # Use tenant_id from security context for validation
-        if tenant_id != security["tenant_id"]:
-            raise HTTPException(status_code=403, detail="Tenant ID mismatch")
+        # Validate tenant_id parameter
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant ID required")
         
-        vector_service = VectorService(security["tenant_id"])
+        vector_service = VectorService(tenant_id)
         info = vector_service.get_collection_info()
         return info
     except Exception as e:

@@ -5,8 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 ### Backend Development
-- **Start development environment**: `cd backend/docker && docker compose up -d`
-- **API server (local)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+- **Start development environment (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
+- **Start production environment**: `cd backend/docker && ./start-prod.sh`
+- **Start development environment (manual)**: `cd backend/docker && docker compose -f docker-compose.dev.yml up -d`
+- **Start production environment (manual)**: `cd backend/docker && docker compose up -d`
+- **API server (local without Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 - **Initialize database**: `cd backend && python -m scripts.init_db`
 - **Database migrations**: `cd backend && alembic upgrade head`
 - **Run tests**: `cd backend/tests && ./run_tests.sh`
@@ -20,9 +23,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Install dependencies**: `cd frontend && npm install`
 
 ### Full Stack Development
-- **Backend services**: `cd backend/docker && docker compose up -d` (PostgreSQL, Redis, Qdrant, microservices)
+- **Backend services**: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Qdrant, microservices with live reload)
 - **Frontend**: `cd frontend && npm run dev` (runs on port 3000)
 - **API Documentation**: Available at `http://localhost:8000/docs` when backend is running
+
+### Docker Development Modes
+
+#### Development Mode (Recommended for development)
+```bash
+cd backend/docker && ./start-dev.sh
+```
+**Features:**
+- **Live code reloading**: Python files are mounted as volumes, changes reflect immediately
+- **No rebuilds needed**: Only rebuilds when `requirements.txt` or `Dockerfile.dev` changes
+- **Auto-reload enabled**: uvicorn starts with `--reload` flag
+- **Faster iteration**: Ideal for active development
+
+**What's mounted:**
+- `microservices/langchain-service/app` → Container's `/app/app`
+- `microservices/langroid-service/app` → Container's `/app/app`
+- `microservices/storage-service/app` → Container's `/app/app`
+- `microservices/ollama-service/app` → Container's `/app/app`
+
+#### Production Mode
+```bash
+cd backend/docker && ./start-prod.sh
+```
+**Features:**
+- **Optimized images**: Multi-stage builds for smaller image sizes
+- **No volume mounting**: Code is copied into containers during build
+- **Production settings**: Optimized for performance and security
+- **Full rebuilds**: Rebuilds entire images when code changes
 
 ## Architecture Overview
 

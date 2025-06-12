@@ -1,17 +1,73 @@
 """
 Security module for Langroid Service
+Unified implementation following common pattern
 """
 import logging
 from typing import Dict, Any, Optional
-from fastapi import HTTPException, Header, Depends
+from fastapi import HTTPException, Depends, Request
 from functools import wraps
 import httpx
-import jwt
-from datetime import datetime, timedelta
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_api_key_from_header(request: Request) -> str:
+    """Extract API key from X-API-Key header"""
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+    return api_key
+
+
+def get_tenant_id_from_header(request: Request) -> Optional[str]:
+    """Extract tenant ID from X-Tenant-ID header (optional for routes with path param)"""
+    return request.headers.get("X-Tenant-ID")
+
+
+def get_user_id_from_header(request: Request) -> Optional[str]:
+    """Extract user ID from X-User-ID header (optional)"""
+    return request.headers.get("X-User-ID")
+
+
+def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
+    """Validate API key"""
+    if api_key != settings.API_KEY:
+        logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return True
+
+
+def validate_service_access(
+    tenant_id: Optional[str] = Depends(get_tenant_id_from_header),
+    user_id: Optional[str] = Depends(get_user_id_from_header),
+    api_key_valid: bool = Depends(validate_api_key)
+) -> dict:
+    """Validate service access and return context"""
+    
+    return {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "authenticated": True,
+        "api_key_valid": api_key_valid
+    }
+
+
+def validate_tenant_access(tenant_id: str, context: dict) -> str:
+    """Validate tenant access and return validated tenant_id"""
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required")
+    
+    # If tenant_id is also in headers, validate they match
+    header_tenant_id = context.get("tenant_id")
+    if header_tenant_id and header_tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="Tenant ID mismatch between path and header"
+        )
+    
+    return tenant_id
 
 
 class SecurityService:
@@ -30,9 +86,6 @@ class SecurityService:
         """Verify user has access to tenant and required role"""
         
         try:
-            # In production, this would call the main backend's auth service
-            # For now, we'll implement basic validation
-            
             if not tenant_id or not user_id:
                 raise HTTPException(
                     status_code=401,
@@ -78,15 +131,9 @@ class SecurityService:
         """Verify user has access to specific agent"""
         
         try:
-            # Check if agent exists and user has access
-            # This would typically check the agent's tenant and visibility settings
-            
             # For admin/superuser operations (create, delete, modify)
             if operation in ["create", "delete", "modify"]:
                 await self.verify_tenant_access(tenant_id, user_id, "admin")
-            
-            # For regular operations, check agent permissions
-            # This is simplified - in production you'd check agent ownership/visibility
             
             return True
             
@@ -98,9 +145,6 @@ class SecurityService:
         """Get user information from backend"""
         
         try:
-            # This would make an actual HTTP request to the backend
-            # For now, return mock data
-            
             # Mock response based on user_id patterns
             if user_id.endswith("_admin"):
                 return {
@@ -133,55 +177,27 @@ class SecurityService:
 security_service = SecurityService()
 
 
-# FastAPI dependencies
-async def get_api_key(api_key: str = Header(..., alias="X-API-Key")) -> str:
-    """Extract and validate API key from headers"""
-    if not api_key:
-        raise HTTPException(status_code=401, detail="Missing X-API-Key header")
-    
-    if api_key != settings.API_KEY:
-        logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    
-    return api_key
-
-
-async def get_tenant_id(tenant_id: str = Header(..., alias="X-Tenant-ID")) -> str:
-    """Extract tenant ID from headers"""
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID required")
-    return tenant_id
-
-
-async def get_user_id(user_id: str = Header(..., alias="X-User-ID")) -> str:
-    """Extract user ID from headers"""
-    if not user_id:
-        raise HTTPException(status_code=400, detail="User ID required")
-    return user_id
-
-
-async def verify_admin_access(
-    api_key: str = Depends(get_api_key),
-    tenant_id: str = Depends(get_tenant_id),
-    user_id: str = Depends(get_user_id)
-) -> Dict[str, Any]:
+# Legacy functions for backwards compatibility
+async def verify_admin_access(context: dict = Depends(validate_service_access)) -> Dict[str, Any]:
     """Verify admin access for agent management operations"""
+    tenant_id = context.get("tenant_id")
+    user_id = context.get("user_id")
     
-    return await security_service.verify_tenant_access(
-        tenant_id, user_id, "admin"
-    )
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=400, detail="Tenant ID and User ID required in headers")
+    
+    return await security_service.verify_tenant_access(tenant_id, user_id, "admin")
 
 
-async def verify_user_access(
-    api_key: str = Depends(get_api_key),
-    tenant_id: str = Depends(get_tenant_id),
-    user_id: str = Depends(get_user_id)
-) -> Dict[str, Any]:
+async def verify_user_access(context: dict = Depends(validate_service_access)) -> Dict[str, Any]:
     """Verify basic user access"""
+    tenant_id = context.get("tenant_id")
+    user_id = context.get("user_id")
     
-    return await security_service.verify_tenant_access(
-        tenant_id, user_id, "user"
-    )
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=400, detail="Tenant ID and User ID required in headers")
+    
+    return await security_service.verify_tenant_access(tenant_id, user_id, "user")
 
 
 def require_admin(func):

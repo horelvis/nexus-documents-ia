@@ -1,0 +1,75 @@
+# Development Dockerfile for Ollama Service
+# Optimized for development with volume mounting
+FROM ollama/ollama:latest as ollama-base
+
+# Install Python and dependencies for the API wrapper
+FROM python:3.11-slim
+
+# Install required system packages
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Ollama binary from the base image
+COPY --from=ollama-base /bin/ollama /bin/ollama
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+# This layer will only rebuild when requirements.txt changes
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create directory structure for volume mounting
+RUN mkdir -p ./app
+
+# Create ollama data directory
+RUN mkdir -p /root/.ollama
+
+# Set environment variables for development
+ENV OLLAMA_HOST=0.0.0.0
+ENV OLLAMA_PORT=11434
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Expose ports
+EXPOSE 11434 8000
+
+# Create development startup script
+RUN echo '#!/bin/bash\n\
+# Set environment for GPU detection\n\
+export NVIDIA_VISIBLE_DEVICES=all\n\
+export NVIDIA_DRIVER_CAPABILITIES=compute,utility\n\
+\n\
+# Start Ollama server in background\n\
+ollama serve &\n\
+\n\
+# Wait for Ollama to be ready\n\
+echo "Waiting for Ollama to start..."\n\
+sleep 10\n\
+\n\
+# Pull optimized models for your hardware (only if not exist)\n\
+if [ ! -d "/root/.ollama/models" ] || [ -z "$(ls -A /root/.ollama/models 2>/dev/null)" ]; then\n\
+    echo "Pulling optimized models for high-end hardware..."\n\
+    # Larger, more capable models for 64GB RAM + 42GB VRAM\n\
+    ollama pull llama3.1:8b\n\
+    ollama pull codellama:13b\n\
+    ollama pull mistral:7b\n\
+    ollama pull nomic-embed-text\n\
+    echo "Models downloaded successfully"\n\
+else\n\
+    echo "Models already exist, skipping download"\n\
+fi\n\
+\n\
+# Start the Python API wrapper with auto-reload\n\
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload\n\
+' > /app/start-dev.sh && chmod +x /app/start-dev.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:11434/api/tags || exit 1
+
+# Start services in development mode
+CMD ["/app/start-dev.sh"]

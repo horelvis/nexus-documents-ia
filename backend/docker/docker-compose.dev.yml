@@ -32,9 +32,9 @@ services:
       - DEBUG=${DEBUG:-true}
       - TESTING=${TESTING:-false}
     volumes:
-      - ../:/app  # Esto monta toda la carpeta backend en /app
+      - ../:/app  # Monta toda la carpeta backend en /app
     restart: unless-stopped
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -96,12 +96,11 @@ services:
       timeout: 10s
       retries: 3
 
-
-  # LangChain microservice
+  # LangChain microservice - DEVELOPMENT MODE
   langchain-service:
     build:
       context: ../microservices/langchain-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev  # Using development Dockerfile
     ports:
       - "8001:8001"
     depends_on:
@@ -115,6 +114,9 @@ services:
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - OLLAMA_MODEL=llama3.1:8b
       - EMBEDDING_MODEL=nomic-embed-text
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/langchain-service/app:/app/app:rw
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -123,11 +125,11 @@ services:
       retries: 3
       start_period: 30s
 
-  # Langroid microservice (Advanced AI agents)
+  # Langroid microservice - DEVELOPMENT MODE
   langroid-service:
     build:
       context: ../microservices/langroid-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev  # Using development Dockerfile
     ports:
       - "8002:8002"
     depends_on:
@@ -143,6 +145,9 @@ services:
       - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
       - SECRET_KEY=${SECRET_KEY:-langroid-secret-key}
       - LOG_LEVEL=INFO
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/langroid-service/app:/app/app:rw
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
@@ -151,16 +156,18 @@ services:
       retries: 3
       start_period: 60s
 
-  # Ollama Microservice
+  # Ollama Microservice - DEVELOPMENT MODE
   ollama-service:
     build:
       context: ../microservices/ollama-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev  # Using development Dockerfile
     ports:
       - "11434:11434"  # Ollama server port
       - "8004:8000"    # FastAPI wrapper port
     volumes:
       - ollama_data:/root/.ollama
+      # Mount the Python code for live reloading
+      - ../microservices/ollama-service/app:/app/app:rw
     networks:
       - backend-network
     restart: unless-stopped
@@ -185,17 +192,19 @@ services:
       retries: 3
       start_period: 120s
 
-  # Storage Microservice
+  # Storage Microservice - DEVELOPMENT MODE
   storage-service:
     build:
       context: ../microservices/storage-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev  # Using development Dockerfile
     ports:
       - "8003:8001"
     networks:
       - backend-network
     volumes:
       - ../credentials:/app/credentials:ro
+      # Mount the Python code for live reloading
+      - ../microservices/storage-service/app:/app/app:rw
     env_file:
       - ../.env
     environment:
