@@ -14,7 +14,7 @@ services:
       - langroid-service
       - ollama-service
       - storage-service
-      - gotenberg-service
+      - gotenberg
     networks:
       - backend-network
     env_file:
@@ -26,7 +26,7 @@ services:
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGROID_SERVICE_URL=http://langroid-service:8002
       - OLLAMA_BASE_URL=http://ollama-service:11434
-      - GOTENBERG_MICROSERVICE_URL=http://gotenberg-service:8005
+      - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
       - REDIS_HOST=redis
       - QDRANT_HOST=qdrant
@@ -218,30 +218,18 @@ services:
       retries: 3
       start_period: 30s
 
-  # Gotenberg Microservice (includes Gotenberg binary)
-  gotenberg-service:
-    build:
-      context: ../microservices/gotenberg-service
-      dockerfile: Dockerfile
+  # Gotenberg service for PDF conversion
+  gotenberg:
+    image: gotenberg/gotenberg:8
     ports:
-      - "8005:8005"
+      - "3000:3000"
     networks:
       - backend-network
-    environment:
-      - API_KEY=your-secret-api-key-here
-      - GOTENBERG_BASE_URL=http://localhost:3000
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '0.5'
+    command:
+      - "gotenberg"
+      - "--chromium-disable-web-security"
+      - "--chromium-allow-list=file:///*"
 
 networks:
   backend-network:

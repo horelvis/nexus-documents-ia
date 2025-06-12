@@ -101,8 +101,8 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "llama3.2"
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
-    # Gotenberg Microservice (includes Gotenberg binary)
-    GOTENBERG_MICROSERVICE_URL: str = "http://gotenberg-service:8005"
+    # Gotenberg Service (direct container)
+    GOTENBERG_BASE_URL: str = "http://gotenberg:3000"
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto

@@ -17,7 +17,7 @@ class GotenbergMicroserviceClient:
     
     def __init__(self, http_client: httpx.AsyncClient, tenant_id: str = None, user_id: str = None):
         self.http_client = http_client
-        self.base_url = settings.GOTENBERG_MICROSERVICE_URL
+        self.base_url = settings.GOTENBERG_BASE_URL
         self.tenant_id = tenant_id
         self.user_id = user_id
         
@@ -35,17 +35,17 @@ class GotenbergMicroserviceClient:
         return headers
 
     async def health_check(self) -> Dict[str, Any]:
-        """Check Gotenberg microservice health"""
+        """Check Gotenberg service health"""
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
         
         try:
             response = await self.http_client.get(f"{self.base_url}/health")
             response.raise_for_status()
-            return response.json()
+            return {"status": "healthy"}
             
         except Exception as e:
-            logger.error(f"Gotenberg microservice health check failed: {str(e)}")
+            logger.error(f"Gotenberg service health check failed: {str(e)}")
             return {
                 "status": "unhealthy",
                 "error": str(e)
@@ -53,45 +53,54 @@ class GotenbergMicroserviceClient:
 
     async def convert_office_to_pdf(
         self, 
-        file_content: bytes, 
-        filename: str,
+        file_content: bytes = None,
+        file_path: str = None, 
+        filename: str = None,
         tenant_id: str = None,
         **options
     ) -> bytes:
-        """Convert Office documents to PDF via microservice"""
+        """Convert Office documents to PDF using Gotenberg LibreOffice route"""
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
         
         try:
-            headers = self._get_auth_headers(tenant_id)
+            # Handle both file_path and file_content inputs
+            if file_path and not file_content:
+                with open(file_path, 'rb') as f:
+                    file_content = f.read()
+                if not filename:
+                    filename = Path(file_path).name
+            elif not file_content:
+                raise ValueError("Either file_content or file_path must be provided")
             
             files = {
-                'file': (filename, file_content, self._get_mime_type(filename))
+                'files': (filename, file_content, self._get_mime_type(filename))
             }
             
+            # Gotenberg uses different parameter names
             data = {
                 'landscape': str(options.get('landscape', False)).lower(),
-                'margin_top': str(options.get('margin_top', '0.5')),
-                'margin_bottom': str(options.get('margin_bottom', '0.5')),
-                'margin_left': str(options.get('margin_left', '0.5')),
-                'margin_right': str(options.get('margin_right', '0.5')),
+                'marginTop': str(options.get('margin_top', '0.5')),
+                'marginBottom': str(options.get('margin_bottom', '0.5')),
+                'marginLeft': str(options.get('margin_left', '0.5')),
+                'marginRight': str(options.get('margin_right', '0.5')),
             }
             
+            # Use official Gotenberg LibreOffice endpoint
             response = await self.http_client.post(
-                f"{self.base_url}/convert/office-to-pdf",
+                f"{self.base_url}/forms/libreoffice/convert",
                 files=files,
-                data=data,
-                headers=headers
+                data=data
             )
             
             response.raise_for_status()
             return response.content
             
         except httpx.HTTPError as e:
-            logger.error(f"Gotenberg microservice HTTP error: {e}")
+            logger.error(f"Gotenberg LibreOffice conversion HTTP error: {e}")
             raise
         except Exception as e:
-            logger.error(f"Gotenberg microservice conversion error: {e}")
+            logger.error(f"Gotenberg LibreOffice conversion error: {e}")
             raise
 
     async def convert_html_to_pdf(
@@ -101,30 +110,37 @@ class GotenbergMicroserviceClient:
         tenant_id: str = None,
         **options
     ) -> bytes:
-        """Convert HTML to PDF via microservice"""
+        """Convert HTML to PDF using Gotenberg Chromium route"""
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
         
         try:
-            headers = self._get_auth_headers(tenant_id)
+            # Create temporary HTML file
+            files = {
+                'files': ('index.html', html_content.encode('utf-8'), 'text/html')
+            }
+            
+            # Add CSS file if provided
+            if css_content:
+                files['files'] = [
+                    ('index.html', html_content.encode('utf-8'), 'text/html'),
+                    ('style.css', css_content.encode('utf-8'), 'text/css')
+                ]
             
             data = {
-                'html_content': html_content,
                 'landscape': str(options.get('landscape', False)).lower(),
-                'margin_top': str(options.get('margin_top', '1')),
-                'margin_bottom': str(options.get('margin_bottom', '1')),
-                'margin_left': str(options.get('margin_left', '1')),
-                'margin_right': str(options.get('margin_right', '1')),
+                'marginTop': str(options.get('margin_top', '1')),
+                'marginBottom': str(options.get('margin_bottom', '1')),
+                'marginLeft': str(options.get('margin_left', '1')),
+                'marginRight': str(options.get('margin_right', '1')),
                 'scale': str(options.get('scale', '1')),
             }
             
-            if css_content:
-                data['css_content'] = css_content
-            
+            # Use official Gotenberg Chromium HTML endpoint
             response = await self.http_client.post(
-                f"{self.base_url}/convert/html-to-pdf",
-                data=data,
-                headers=headers
+                f"{self.base_url}/forms/chromium/convert/html",
+                files=files,
+                data=data
             )
             
             response.raise_for_status()
@@ -141,29 +157,35 @@ class GotenbergMicroserviceClient:
         tenant_id: str = None,
         **options
     ) -> bytes:
-        """Convert Markdown to PDF via microservice"""
+        """Convert Markdown to PDF using Gotenberg Chromium markdown route"""
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
         
         try:
-            headers = self._get_auth_headers(tenant_id)
-            
-            data = {
-                'markdown_content': markdown_content,
-                'landscape': str(options.get('landscape', False)).lower(),
-                'margin_top': str(options.get('margin_top', '1')),
-                'margin_bottom': str(options.get('margin_bottom', '1')),
-                'margin_left': str(options.get('margin_left', '1')),
-                'margin_right': str(options.get('margin_right', '1')),
+            files = {
+                'files': ('index.md', markdown_content.encode('utf-8'), 'text/markdown')
             }
             
+            # Add CSS file if provided
             if css_content:
-                data['css_content'] = css_content
+                files['files'] = [
+                    ('index.md', markdown_content.encode('utf-8'), 'text/markdown'),
+                    ('style.css', css_content.encode('utf-8'), 'text/css')
+                ]
             
+            data = {
+                'landscape': str(options.get('landscape', False)).lower(),
+                'marginTop': str(options.get('margin_top', '1')),
+                'marginBottom': str(options.get('margin_bottom', '1')),
+                'marginLeft': str(options.get('margin_left', '1')),
+                'marginRight': str(options.get('margin_right', '1')),
+            }
+            
+            # Use official Gotenberg Chromium markdown endpoint
             response = await self.http_client.post(
-                f"{self.base_url}/convert/markdown-to-pdf",
-                data=data,
-                headers=headers
+                f"{self.base_url}/forms/chromium/convert/markdown",
+                files=files,
+                data=data
             )
             
             response.raise_for_status()
@@ -180,33 +202,35 @@ class GotenbergMicroserviceClient:
         tenant_id: str = None,
         **options
     ) -> bytes:
-        """Convert plain text to PDF via microservice"""
+        """Convert plain text to PDF by wrapping in HTML"""
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
         
         try:
-            headers = self._get_auth_headers(tenant_id)
+            # Wrap text content in basic HTML
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{title or 'Text Document'}</title>
+    <style>
+        body {{ 
+            font-family: monospace; 
+            white-space: pre-wrap; 
+            margin: 20px; 
+            line-height: 1.4; 
+        }}
+    </style>
+</head>
+<body>{text_content}</body>
+</html>"""
             
-            data = {
-                'text_content': text_content,
-                'landscape': str(options.get('landscape', False)).lower(),
-                'margin_top': str(options.get('margin_top', '1')),
-                'margin_bottom': str(options.get('margin_bottom', '1')),
-                'margin_left': str(options.get('margin_left', '1')),
-                'margin_right': str(options.get('margin_right', '1')),
-            }
-            
-            if title:
-                data['title'] = title
-            
-            response = await self.http_client.post(
-                f"{self.base_url}/convert/text-to-pdf",
-                data=data,
-                headers=headers
+            # Use HTML conversion
+            return await self.convert_html_to_pdf(
+                html_content=html_content,
+                tenant_id=tenant_id,
+                **options
             )
-            
-            response.raise_for_status()
-            return response.content
             
         except Exception as e:
             logger.error(f"Text to PDF conversion error: {e}")
@@ -219,35 +243,9 @@ class GotenbergMicroserviceClient:
         max_pages: int = 5,
         tenant_id: str = None
     ) -> list:
-        """Generate thumbnails from PDF via microservice"""
-        if not self.http_client:
-            raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
-        
-        try:
-            headers = self._get_auth_headers(tenant_id)
-            
-            files = {
-                'file': (filename, pdf_content, 'application/pdf')
-            }
-            
-            data = {
-                'max_pages': str(max_pages)
-            }
-            
-            response = await self.http_client.post(
-                f"{self.base_url}/thumbnails/generate-from-pdf",
-                files=files,
-                data=data,
-                headers=headers
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            return result.get('thumbnails', [])
-            
-        except Exception as e:
-            logger.error(f"PDF thumbnails generation error: {e}")
-            return []
+        """Generate thumbnails from PDF - Note: Gotenberg doesn't support this directly"""
+        logger.warning("PDF thumbnail generation not supported by Gotenberg directly. Use pdf2image library instead.")
+        return []
 
     async def generate_image_thumbnail(
         self, 
@@ -255,51 +253,18 @@ class GotenbergMicroserviceClient:
         filename: str,
         tenant_id: str = None
     ) -> Optional[str]:
-        """Generate thumbnail from image via microservice"""
-        if not self.http_client:
-            raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
-        
-        try:
-            headers = self._get_auth_headers(tenant_id)
-            
-            files = {
-                'file': (filename, image_content, self._get_image_mime_type(filename))
-            }
-            
-            response = await self.http_client.post(
-                f"{self.base_url}/thumbnails/generate-from-image",
-                files=files,
-                headers=headers
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            return result.get('thumbnail')
-            
-        except Exception as e:
-            logger.error(f"Image thumbnail generation error: {e}")
-            return None
+        """Generate thumbnail from image - Note: Gotenberg doesn't support this directly"""
+        logger.warning("Image thumbnail generation not supported by Gotenberg directly. Use PIL library instead.")
+        return None
 
     async def get_supported_formats(self, tenant_id: str = None) -> Dict[str, list]:
-        """Get supported formats via microservice"""
-        if not self.http_client:
-            raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
-        
-        try:
-            headers = self._get_auth_headers(tenant_id)
-            
-            response = await self.http_client.get(
-                f"{self.base_url}/formats/supported",
-                headers=headers
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            return result.get('formats', {})
-            
-        except Exception as e:
-            logger.error(f"Get supported formats error: {e}")
-            return {}
+        """Get supported formats for Gotenberg"""
+        return {
+            'office': ['.docx', '.doc', '.odt', '.xlsx', '.xls', '.ods', '.pptx', '.ppt', '.odp', '.rtf'],
+            'text': ['.html', '.htm', '.md', '.txt'],
+            'images': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'],
+            'pdf': ['.pdf']
+        }
 
     def _get_mime_type(self, filename: str) -> str:
         """Determine MIME type based on extension"""

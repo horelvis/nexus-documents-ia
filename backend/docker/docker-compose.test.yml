@@ -31,7 +31,7 @@ services:
       # Storage microservice configuration
       - STORAGE_SERVICE_URL=http://test-storage-service:8001
       - API_KEY=test-storage-api-key-12345
-      - GOTENBERG_MICROSERVICE_URL=http://test-gotenberg-service:8005
+      - GOTENBERG_BASE_URL=http://test-gotenberg:3000
     depends_on:
       test-db:
         condition: service_healthy
@@ -45,8 +45,8 @@ services:
         condition: service_healthy
       test-storage-service:
         condition: service_healthy
-      test-gotenberg-service:
-        condition: service_healthy
+      test-gotenberg:
+        condition: service_started
     networks:
       - test-network
     volumes:
@@ -190,17 +190,13 @@ services:
       retries: 5
       start_period: 30s
 
-  # Gotenberg Microservice for tests (includes Gotenberg binary)
-  test-gotenberg-service:
-    build:
-      context: ../microservices/gotenberg-service
-      dockerfile: Dockerfile
+  # Gotenberg service for tests
+  test-gotenberg:
+    image: gotenberg/gotenberg:8
+    ports:
+      - "3000:3000"
     networks:
       - test-network
-    environment:
-      - API_KEY=your-secret-api-key-here
-      - GOTENBERG_BASE_URL=http://localhost:3000
-      - TESTING=true
 
 networks:
   test-network:
