@@ -202,10 +202,10 @@ async def get_document_preview(
         
         import tempfile
         temp_dir = tempfile.mkdtemp()
-        temp_file_path = os.path.join(temp_dir, document.get('filename', 'document'))
+        temp_file_path = os.path.join(temp_dir, document.filename or 'document')
         
         download_success = await storage_service.download_file(
-            document.get('file_path', ''), 
+            document.file_path or '', 
             temp_file_path
         )
         
@@ -216,7 +216,7 @@ async def get_document_preview(
         preview_result = await preview_service.generate_preview(
             document_id=doc_id,
             file_path=temp_file_path,
-            filename=document.get('filename', 'unknown'),
+            filename=document.filename or 'unknown',
             force_regenerate=force_regenerate
         )
         
