@@ -24,7 +24,7 @@ class DocumentPreviewService:
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.gotenberg = GotenbergMicroserviceClient(http_client, tenant_id, user_id) if http_client else None
-        self.storage_service = StorageService(tenant_id)
+        self.storage_service = StorageService(tenant_id, user_id)
         self.temp_dir = Path(tempfile.gettempdir()) / "previews" / tenant_id
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         
@@ -32,7 +32,11 @@ class DocumentPreviewService:
         self.preview_storage_prefix = f"previews/{tenant_id}"
         
         # Formatos soportados por categoría
-        self.supported_formats = {}  # Will be loaded async
+        self.supported_formats = {
+            'office': {'.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.odt', '.ods', '.odp'},
+            'text': {'.txt', '.md', '.html', '.htm'},
+            'images': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+        }
         
         logger.info(f"DocumentPreviewService initialized for tenant: {tenant_id}")
     
@@ -65,14 +69,14 @@ class DocumentPreviewService:
                     logger.info(f"Using cached preview for document {document_id}")
                     return cached_preview
             
-            # Verificar si Gotenberg está disponible
-            if not await self.gotenberg.health_check():
-                logger.warning("Gotenberg not available, using fallback")
-                return await self._fallback_preview(file_path, filename)
-            
             # Procesar según el tipo de archivo
             if file_ext == '.pdf':
                 return await self._preview_existing_pdf(document_id, file_path, filename)
+            
+            # Verificar si Gotenberg está disponible para otros formatos
+            if not self.gotenberg or not await self.gotenberg.health_check():
+                logger.warning("Gotenberg not available, using fallback")
+                return await self._fallback_preview(file_path, filename)
             elif file_ext in self.supported_formats['office']:
                 return await self._preview_office_with_gotenberg(
                     document_id, file_path, filename
