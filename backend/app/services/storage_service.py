@@ -91,6 +91,15 @@ class StorageService:
             
             content = self.client.download_file(file_path)
             
+            # Fallback: si no se encuentra con el path completo, intentar solo con el filename
+            if not content and "/" in file_path:
+                filename_only = file_path.split("/")[-1]
+                logger.info(f"Trying fallback with filename only: {filename_only}")
+                content = self.client.download_file(filename_only)
+                if content:
+                    logger.info(f"File downloaded successfully with fallback: {object_name} -> {filename_only}")
+                    return content
+            
             if content:
                 logger.info(f"File downloaded successfully: {object_name} -> {file_path}")
             else:
@@ -239,13 +248,26 @@ class StorageService:
                 else:
                     file_path = path_without_tenant
             
-            url, expires_at = self.client.generate_download_signed_url(
-                file_path=file_path,
-                expiration=expiration
-            )
-            
-            logger.info(f"Generated download signed URL for: {object_name} -> {file_path}")
-            return url, expires_at
+            try:
+                url, expires_at = self.client.generate_download_signed_url(
+                    file_path=file_path,
+                    expiration=expiration
+                )
+                logger.info(f"Generated download signed URL for: {object_name} -> {file_path}")
+                return url, expires_at
+            except Exception as e:
+                # Fallback: si falla con el path completo, intentar solo con el filename
+                if "/" in file_path:
+                    filename_only = file_path.split("/")[-1]
+                    logger.info(f"Trying signed URL fallback with filename only: {filename_only}")
+                    url, expires_at = self.client.generate_download_signed_url(
+                        file_path=filename_only,
+                        expiration=expiration
+                    )
+                    logger.info(f"Generated download signed URL with fallback: {object_name} -> {filename_only}")
+                    return url, expires_at
+                else:
+                    raise
             
         except Exception as e:
             logger.error(f"Failed to generate download signed URL for {object_name}: {e}")

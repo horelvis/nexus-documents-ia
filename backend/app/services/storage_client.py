@@ -119,7 +119,7 @@ class StorageClient:
             kwargs["headers"] = request_headers
         
         try:
-            with httpx.Client(timeout=5.0) as client:  # Timeout más corto para fallar rápido
+            with httpx.Client(timeout=30.0) as client:  # Timeout suficiente para archivos grandes
                 response = client.request(method, url, **kwargs)
                 response.raise_for_status()
                 return response

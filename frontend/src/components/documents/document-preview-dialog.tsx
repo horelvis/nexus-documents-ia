@@ -25,7 +25,8 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
 import PDFViewer from './pdf-viewer'

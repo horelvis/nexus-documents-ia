@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
 import { useDocumentService } from '@/lib/services/document.service'
+import PDFViewer from '@/components/documents/pdf-viewer'
 
 export default function DocumentPreviewPage() {
   const params = useParams()
@@ -22,6 +23,7 @@ export default function DocumentPreviewPage() {
 
   const [document, setDocument] = useState<Document | null>(null)
   const [preview, setPreview] = useState<DocumentPreviewResponse | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +70,12 @@ export default function DocumentPreviewPage() {
         })
       } else if (response.data) {
         setPreview(response.data)
+        
+        // For PDF files, get signed URL for PDF viewer
+        if (response.data.pdf_available && document?.file_type === 'pdf') {
+          await loadPdfUrl()
+        }
+        
         if (forceRegenerate) {
           toast.success('Preview regenerated successfully')
         }
@@ -80,6 +88,19 @@ export default function DocumentPreviewPage() {
       })
     } finally {
       setIsLoadingPreview(false)
+    }
+  }
+
+  const loadPdfUrl = async () => {
+    if (!document) return
+    
+    try {
+      const urlResponse = await documentService.getDocumentDownloadUrl(document.id)
+      if (urlResponse.data?.download_url) {
+        setPdfUrl(urlResponse.data.download_url)
+      }
+    } catch (err) {
+      console.error('Failed to get PDF URL:', err)
     }
   }
 
@@ -256,10 +277,34 @@ export default function DocumentPreviewPage() {
 
                 {preview && !isLoadingPreview && (
                   <div className="space-y-6">
+                    {/* PDF Viewer */}
+                    {preview.pdf_available && document?.file_type === 'pdf' && (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold">PDF Document</h3>
+                        <div className="h-[800px] border rounded-lg overflow-hidden">
+                          {pdfUrl ? (
+                            <PDFViewer
+                              url={pdfUrl}
+                              fileName={document.filename}
+                              showToolbar={true}
+                              initialScale={0.9}
+                            />
+                          ) : (
+                            <div className="flex items-center justify-center h-full">
+                              <div className="text-center">
+                                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                                <p className="text-muted-foreground">Loading PDF...</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* PDF Thumbnails */}
                     {preview.pdf_available && preview.thumbnails.length > 0 && (
                       <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">PDF Preview</h3>
+                        <h3 className="text-lg font-semibold">PDF Page Thumbnails</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                           {preview.thumbnails.map((thumbnail, index) => (
                             <div key={index} className="space-y-2">
