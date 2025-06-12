@@ -57,7 +57,12 @@ def get_current_user(
         clerk_user_id = clerk_payload.get('sub')
         logger.info(f"🔍 [DEPENDENCIES] Looking for user with Clerk ID: {clerk_user_id}")
         
-        user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        from sqlalchemy.orm import selectinload
+        user = db.query(User).options(
+            selectinload(User.subscription),
+            selectinload(User.roles),
+            selectinload(User.image)
+        ).filter(User.clerk_user_id == clerk_user_id).first()
         if not user:
             logger.warning(f"⚠️ [DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
             logger.info("🔄 [DEPENDENCIES] Attempting auto-sync from Clerk...")

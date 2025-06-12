@@ -74,9 +74,19 @@ async def sync_user(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    """Get current authenticated user information."""
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get current authenticated user information with subscription details."""
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
+    
+    # Also log subscription status for debugging
+    if current_user.subscription:
+        logger.info(f"📋 [AUTH_ENDPOINT] User has subscription: {current_user.subscription.status}")
+    else:
+        logger.info(f"📋 [AUTH_ENDPOINT] User has no subscription (free plan)")
+    
     return current_user
 
 

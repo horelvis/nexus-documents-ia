@@ -81,31 +81,38 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       console.log('🔍 [PROFILE_GUARD] onboarding_completed:', user.onboarding_completed)
       console.log('🔍 [PROFILE_GUARD] subscription:', user.subscription)
       
-      // Check if user has completed onboarding AND has a selected plan
-      // For the new flow, we'll use onboarding_completed as the flag
-      // If onboarding_completed is true, we assume they went through the new flow
+      // Check if user has completed onboarding
       const hasCompletedOnboarding = user.onboarding_completed || false
       
       // Check subscription status to determine plan
       const subscription = user.subscription
       let planType = 'free'
       let hasValidPlan = true
+      let hasActiveSubscription = false
       
       if (subscription && subscription.status === 'active') {
         planType = subscription.plan?.name || 'premium'
+        hasActiveSubscription = true
       }
       
+      // Consider user as having completed onboarding if:
+      // 1. They explicitly completed onboarding, OR  
+      // 2. They have an active paid subscription (legacy users)
+      const isConsideredComplete = hasCompletedOnboarding || hasActiveSubscription
+      
       console.log('🔍 [PROFILE_GUARD] hasCompletedOnboarding:', hasCompletedOnboarding)
+      console.log('🔍 [PROFILE_GUARD] hasActiveSubscription:', hasActiveSubscription)
+      console.log('🔍 [PROFILE_GUARD] isConsideredComplete:', isConsideredComplete)
       console.log('🔍 [PROFILE_GUARD] planType:', planType)
       
       setProfileStatus(prev => ({
         ...prev,
-        hasCompletedNewOnboarding: hasCompletedOnboarding,
+        hasCompletedNewOnboarding: isConsideredComplete,
         selectedPlan: planType,
         hasValidPlan: hasValidPlan
       }))
       
-      return hasCompletedOnboarding
+      return isConsideredComplete
     } catch (error) {
       console.error('Error checking new onboarding status:', error)
       return false

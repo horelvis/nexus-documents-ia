@@ -178,6 +178,9 @@ export function UserProvider({ children }: UserProviderProps) {
       const userData: BackendUser = response.data
       setBackendUser(userData)
       
+      // Note: We only check onboarding_completed here for basic user flow
+      // The ProfileVerificationGuard does more detailed verification including 
+      // subscription status to handle legacy users with paid subscriptions
       const hasCompletedOnboarding = userData?.onboarding_completed || false
       setOnboarding({
         needsOnboarding: !hasCompletedOnboarding,
@@ -187,7 +190,7 @@ export function UserProvider({ children }: UserProviderProps) {
         error: null
       })
 
-      // Redirect to welcome page if needs onboarding and not already there
+      // Basic redirect - ProfileVerificationGuard will do final verification
       if (!hasCompletedOnboarding && !isWelcomeOrOnboardingPath()) {
         router.push(getWelcomePath(userData))
       }
