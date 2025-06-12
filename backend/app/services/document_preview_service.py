@@ -229,34 +229,44 @@ class DocumentPreviewService:
         filename: str
     ) -> Dict:
         """Procesa PDF existente para generar thumbnails"""
+        logger.info(f"Processing existing PDF {filename}")
+        
+        # Intentar generar thumbnails, pero no fallar si no se puede
+        thumbnails = []
         try:
-            logger.info(f"Processing existing PDF {filename}")
-            
-            # Generar thumbnails directamente del PDF
             thumbnails = await self._generate_pdf_thumbnails(document_id, file_path)
-            
-            # Obtener tamaño del archivo
-            file_size = os.path.getsize(file_path)
-            
-            result = {
-                "type": "pdf_preview",
-                "conversion_method": "none",
-                "pdf_available": True,
-                "pdf_storage_path": None,  # El PDF original ya está en storage
-                "pdf_local_path": file_path,
-                "thumbnails": thumbnails,
-                "original_format": ".pdf",
-                "cached": False,
-                "generated_at": int(time.time()),
-                "file_size": file_size
-            }
-            
-            await self._cache_preview_metadata(document_id, filename, result)
-            return result
-            
+            logger.info(f"Generated {len(thumbnails)} thumbnails for PDF {filename}")
         except Exception as e:
-            logger.error(f"PDF preview generation failed: {e}")
-            raise
+            logger.warning(f"Could not generate thumbnails for PDF {filename}: {e}")
+            # Continuar sin thumbnails
+        
+        # Obtener tamaño del archivo con fallback
+        file_size = 0
+        try:
+            file_size = os.path.getsize(file_path)
+        except Exception as e:
+            logger.warning(f"Could not get file size for {file_path}: {e}")
+        
+        result = {
+            "type": "pdf_preview",
+            "conversion_method": "none",
+            "pdf_available": True,
+            "pdf_storage_path": None,  # El PDF original ya está en storage
+            "pdf_local_path": file_path,
+            "thumbnails": thumbnails,
+            "original_format": ".pdf",
+            "cached": False,
+            "generated_at": int(time.time()),
+            "file_size": file_size
+        }
+        
+        # Intentar cache, pero no fallar si no se puede
+        try:
+            await self._cache_preview_metadata(document_id, filename, result)
+        except Exception as e:
+            logger.warning(f"Could not cache preview metadata for {filename}: {e}")
+        
+        return result
     
     async def _preview_image(
         self,

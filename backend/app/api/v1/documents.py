@@ -173,6 +173,76 @@ async def serve_pdf(
         raise HTTPException(status_code=500, detail="Error serving PDF")
 
 
+@router.get("/{doc_id}/converted-pdf")
+async def serve_converted_pdf(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Sirve el PDF convertido para documentos no-PDF que han sido convertidos a PDF.
+    """
+    from fastapi.responses import StreamingResponse
+    from fastapi import HTTPException
+    from app.services.document_preview_service import DocumentPreviewService
+    
+    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    # Obtener información del documento
+    document = document_service.get_document(db=db, doc_id=doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Verificar que NO sea un PDF original (para PDFs originales usar /pdf endpoint)
+    if document.file_type.lower() == 'pdf':
+        raise HTTPException(status_code=400, detail="Use /pdf endpoint for original PDF documents")
+    
+    try:
+        # Obtener información del preview existente
+        preview_info = await preview_service.get_preview_info(doc_id)
+        
+        if not preview_info or not preview_info.get('pdf_available'):
+            raise HTTPException(status_code=404, detail="No converted PDF available for this document")
+        
+        # Verificar si tenemos el PDF en storage
+        pdf_storage_path = preview_info.get('pdf_storage_path')
+        if not pdf_storage_path:
+            raise HTTPException(status_code=404, detail="Converted PDF not found in storage")
+        
+        # Obtener el archivo PDF desde storage
+        from app.services.storage_service import StorageService
+        storage_service = StorageService(tenant_id, str(current_user.id))
+        
+        # Descargar archivo PDF convertido
+        file_content = storage_service.download_file(pdf_storage_path)
+        
+        if not file_content:
+            raise HTTPException(status_code=500, detail="Could not retrieve converted PDF")
+        
+        # Crear streaming response
+        def iterfile():
+            yield file_content
+        
+        response = StreamingResponse(
+            iterfile(),
+            media_type='application/pdf',
+            headers={
+                'Content-Disposition': f'inline; filename="{document.filename}_converted.pdf"',
+                'Content-Type': 'application/pdf'
+            }
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving converted PDF {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error serving converted PDF")
+
+
 @router.delete("/{doc_id}", response_model=dict)
 async def delete_document(
     doc_id: str,

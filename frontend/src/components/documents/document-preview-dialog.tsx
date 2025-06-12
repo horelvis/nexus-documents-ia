@@ -255,17 +255,23 @@ export function DocumentPreviewDialog({
             <ScrollArea className="flex-1 rounded-lg border">
               <div className="p-4 space-y-4">
                 {/* PDF Viewer */}
-                {preview.pdf_available && document.file_type === 'pdf' && (
+                {preview.pdf_available && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium">PDF Preview</h4>
+                      <h4 className="text-sm font-medium">
+                        {document.file_type === 'pdf' ? 'PDF Preview' : 'Converted PDF Preview'}
+                      </h4>
                       <Badge variant="secondary" className="text-xs">
                         Interactive PDF Viewer
                       </Badge>
                     </div>
                     <div className="h-[600px] border rounded-lg overflow-hidden">
                       <PDFViewer
-                        url={`/api/v1/documents/${document.id}/pdf`}
+                        url={
+                          document.file_type === 'pdf' 
+                            ? `/api/v1/documents/${document.id}/pdf`
+                            : `/api/v1/documents/${document.id}/converted-pdf`
+                        }
                         fileName={document.filename}
                         showToolbar={true}
                         initialScale={0.8}
@@ -274,11 +280,11 @@ export function DocumentPreviewDialog({
                   </div>
                 )}
 
-                {/* PDF Thumbnails (fallback for non-PDF files converted to PDF) */}
-                {preview.pdf_available && document.file_type !== 'pdf' && preview.thumbnails.length > 0 && (
+                {/* PDF Thumbnails (only show as additional content below PDF viewer) */}
+                {preview.pdf_available && preview.thumbnails.length > 0 && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium">Converted PDF Preview</h4>
+                      <h4 className="text-sm font-medium">PDF Page Thumbnails</h4>
                       <Badge variant="outline" className="text-xs">
                         {preview.conversion_method}
                       </Badge>
