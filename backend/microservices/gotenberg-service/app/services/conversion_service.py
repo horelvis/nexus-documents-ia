@@ -1,30 +1,33 @@
 """
-Gotenberg Client for Document Conversion
-Open source document conversion service
+Document Conversion Service using Gotenberg
 """
 import httpx
 import asyncio
 import logging
-from typing import Optional, Dict, Any, BinaryIO
-from pathlib import Path
 import tempfile
 import os
+from typing import Optional, Dict, Any, BinaryIO
+from pathlib import Path
+from PIL import Image
+import io
+import base64
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-class GotenbergClient:
-    """Cliente para Gotenberg - Servicio de conversión de documentos"""
+class ConversionService:
+    """Service for document conversion using Gotenberg"""
     
-    def __init__(self, base_url: Optional[str] = None):
-        self.base_url = base_url or settings.GOTENBERG_SERVICE_URL
-        self.timeout = 120.0  # 2 minutos timeout
+    def __init__(self):
+        self.gotenberg_url = settings.GOTENBERG_BASE_URL
+        self.timeout = settings.PDF_CONVERSION_TIMEOUT
         
     async def health_check(self) -> bool:
-        """Verificar si Gotenberg está disponible"""
+        """Check if Gotenberg is available"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self.base_url}/health")
+                response = await client.get(f"{self.gotenberg_url}/health")
                 return response.status_code == 200
         except Exception as e:
             logger.error(f"Gotenberg health check failed: {e}")
@@ -32,43 +35,35 @@ class GotenbergClient:
     
     async def convert_office_to_pdf(
         self, 
-        file_path: str, 
+        file_content: bytes, 
         filename: str,
         **options
     ) -> bytes:
-        """
-        Convierte documentos Office a PDF
-        
-        Args:
-            file_path: Ruta al archivo
-            filename: Nombre original del archivo
-            options: Opciones adicionales (landscape, margins, etc.)
-        """
+        """Convert Office documents to PDF"""
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                with open(file_path, 'rb') as file:
-                    files = {
-                        'files': (filename, file, self._get_mime_type(filename))
-                    }
-                    
-                    # Opciones de conversión
-                    data = {
-                        'landscape': str(options.get('landscape', False)).lower(),
-                        'marginTop': str(options.get('margin_top', '0.5')),
-                        'marginBottom': str(options.get('margin_bottom', '0.5')),
-                        'marginLeft': str(options.get('margin_left', '0.5')),
-                        'marginRight': str(options.get('margin_right', '0.5')),
-                    }
-                    
-                    response = await client.post(
-                        f"{self.base_url}/forms/libreoffice/convert",
-                        files=files,
-                        data=data
-                    )
-                    
-                    response.raise_for_status()
-                    return response.content
-                    
+                files = {
+                    'files': (filename, file_content, self._get_mime_type(filename))
+                }
+                
+                # Conversion options
+                data = {
+                    'landscape': str(options.get('landscape', False)).lower(),
+                    'marginTop': str(options.get('margin_top', '0.5')),
+                    'marginBottom': str(options.get('margin_bottom', '0.5')),
+                    'marginLeft': str(options.get('margin_left', '0.5')),
+                    'marginRight': str(options.get('margin_right', '0.5')),
+                }
+                
+                response = await client.post(
+                    f"{self.gotenberg_url}/forms/libreoffice/convert",
+                    files=files,
+                    data=data
+                )
+                
+                response.raise_for_status()
+                return response.content
+                
         except httpx.HTTPError as e:
             logger.error(f"Gotenberg HTTP error: {e}")
             raise
@@ -82,17 +77,16 @@ class GotenbergClient:
         css_content: Optional[str] = None,
         **options
     ) -> bytes:
-        """Convierte HTML a PDF"""
+        """Convert HTML to PDF"""
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 files = {}
                 
-                # Archivo HTML principal
+                # Main HTML file
                 files['files'] = ('index.html', html_content.encode(), 'text/html')
                 
-                # Si hay CSS, agregarlo como archivo adicional
+                # Add CSS if provided
                 if css_content:
-                    # Para múltiples archivos, usar lista de tuplas
                     files = {
                         'files': [
                             ('index.html', html_content.encode(), 'text/html'),
@@ -110,7 +104,7 @@ class GotenbergClient:
                 }
                 
                 response = await client.post(
-                    f"{self.base_url}/forms/chromium/convert/html",
+                    f"{self.gotenberg_url}/forms/chromium/convert/html",
                     files=files,
                     data=data
                 )
@@ -122,48 +116,21 @@ class GotenbergClient:
             logger.error(f"HTML to PDF conversion error: {e}")
             raise
     
-    async def convert_url_to_pdf(self, url: str, **options) -> bytes:
-        """Convierte una URL a PDF"""
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                data = {
-                    'url': url,
-                    'landscape': str(options.get('landscape', False)).lower(),
-                    'marginTop': str(options.get('margin_top', '1')),
-                    'marginBottom': str(options.get('margin_bottom', '1')),
-                    'marginLeft': str(options.get('margin_left', '1')),
-                    'marginRight': str(options.get('margin_right', '1')),
-                    'scale': str(options.get('scale', '1')),
-                    'waitDelay': options.get('wait_delay', '1s'),
-                }
-                
-                response = await client.post(
-                    f"{self.base_url}/forms/chromium/convert/url",
-                    data=data
-                )
-                
-                response.raise_for_status()
-                return response.content
-                
-        except Exception as e:
-            logger.error(f"URL to PDF conversion error: {e}")
-            raise
-    
     async def convert_markdown_to_pdf(
         self, 
         markdown_content: str, 
         css_content: Optional[str] = None,
         **options
     ) -> bytes:
-        """Convierte Markdown a PDF"""
+        """Convert Markdown to PDF"""
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 files = {}
                 
-                # Archivo Markdown principal
+                # Main Markdown file
                 files['files'] = ('index.md', markdown_content.encode(), 'text/markdown')
                 
-                # Si hay CSS, agregarlo
+                # Add CSS if provided
                 if css_content:
                     files = {
                         'files': [
@@ -181,7 +148,7 @@ class GotenbergClient:
                 }
                 
                 response = await client.post(
-                    f"{self.base_url}/forms/chromium/convert/markdown",
+                    f"{self.gotenberg_url}/forms/chromium/convert/markdown",
                     files=files,
                     data=data
                 )
@@ -199,9 +166,9 @@ class GotenbergClient:
         title: Optional[str] = None,
         **options
     ) -> bytes:
-        """Convierte texto plano a PDF usando HTML"""
+        """Convert plain text to PDF using HTML"""
         try:
-            # Crear HTML básico para el texto
+            # Create basic HTML for text
             html_content = f"""
             <!DOCTYPE html>
             <html>
@@ -245,8 +212,109 @@ class GotenbergClient:
             logger.error(f"Text to PDF conversion error: {e}")
             raise
     
+    def generate_thumbnail_from_pdf(
+        self, 
+        pdf_content: bytes, 
+        page_number: int = 0
+    ) -> Optional[str]:
+        """Generate thumbnail from PDF page"""
+        try:
+            import pdf2image
+            
+            # Convert PDF to images
+            images = pdf2image.convert_from_bytes(
+                pdf_content,
+                first_page=page_number + 1,
+                last_page=page_number + 1,
+                dpi=150
+            )
+            
+            if not images:
+                return None
+            
+            # Resize image to thumbnail size
+            image = images[0]
+            image.thumbnail((settings.THUMBNAIL_WIDTH, settings.THUMBNAIL_HEIGHT), Image.Resampling.LANCZOS)
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            image.save(buffer, format='JPEG', quality=settings.THUMBNAIL_QUALITY)
+            image_data = base64.b64encode(buffer.getvalue()).decode()
+            
+            return f"data:image/jpeg;base64,{image_data}"
+            
+        except Exception as e:
+            logger.error(f"Thumbnail generation error: {e}")
+            return None
+    
+    def generate_thumbnails_from_pdf(
+        self, 
+        pdf_content: bytes, 
+        max_pages: int = 5
+    ) -> list:
+        """Generate thumbnails from multiple PDF pages"""
+        try:
+            import pdf2image
+            
+            # Convert PDF to images
+            images = pdf2image.convert_from_bytes(
+                pdf_content,
+                last_page=max_pages,
+                dpi=150
+            )
+            
+            thumbnails = []
+            for i, image in enumerate(images):
+                # Resize image to thumbnail size
+                image.thumbnail((settings.THUMBNAIL_WIDTH, settings.THUMBNAIL_HEIGHT), Image.Resampling.LANCZOS)
+                
+                # Convert to base64
+                buffer = io.BytesIO()
+                image.save(buffer, format='JPEG', quality=settings.THUMBNAIL_QUALITY)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                
+                thumbnails.append(f"data:image/jpeg;base64,{image_data}")
+            
+            return thumbnails
+            
+        except Exception as e:
+            logger.error(f"Multiple thumbnails generation error: {e}")
+            return []
+    
+    def generate_image_thumbnail(
+        self, 
+        image_content: bytes, 
+        mime_type: str
+    ) -> Optional[str]:
+        """Generate thumbnail from image"""
+        try:
+            # Open image
+            image = Image.open(io.BytesIO(image_content))
+            
+            # Convert to RGB if necessary
+            if image.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                if image.mode == 'P':
+                    image = image.convert('RGBA')
+                background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                image = background
+            
+            # Resize to thumbnail size
+            image.thumbnail((settings.THUMBNAIL_WIDTH, settings.THUMBNAIL_HEIGHT), Image.Resampling.LANCZOS)
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            image.save(buffer, format='JPEG', quality=settings.THUMBNAIL_QUALITY)
+            image_data = base64.b64encode(buffer.getvalue()).decode()
+            
+            return f"data:image/jpeg;base64,{image_data}"
+            
+        except Exception as e:
+            logger.error(f"Image thumbnail generation error: {e}")
+            return None
+    
     def _get_mime_type(self, filename: str) -> str:
-        """Determina el MIME type basado en la extensión"""
+        """Determine MIME type based on extension"""
         ext = Path(filename).suffix.lower()
         mime_types = {
             '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -264,7 +332,7 @@ class GotenbergClient:
         return mime_types.get(ext, 'application/octet-stream')
     
     def get_supported_formats(self) -> Dict[str, list]:
-        """Retorna los formatos soportados por categoría"""
+        """Return supported formats by category"""
         return {
             "office": ['.docx', '.doc', '.odt', '.rtf', '.xlsx', '.xls', '.ods', '.pptx', '.ppt', '.odp'],
             "text": ['.txt', '.md', '.html', '.htm'],
@@ -273,7 +341,7 @@ class GotenbergClient:
         }
     
     def is_supported_format(self, filename: str) -> bool:
-        """Verifica si el formato es soportado para conversión"""
+        """Check if format is supported for conversion"""
         ext = Path(filename).suffix.lower()
         all_formats = []
         for format_list in self.get_supported_formats().values():

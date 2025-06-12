@@ -11,7 +11,7 @@ import logging
 import hashlib
 import time
 
-from app.services.gotenberg_client import GotenbergClient
+from app.services.gotenberg_microservice_client import GotenbergMicroserviceClient
 from app.services.storage_service import StorageService
 from app.core.config import settings
 
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 class DocumentPreviewService:
     """Servicio de preview usando Gotenberg como motor principal"""
     
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None):
+    def __init__(self, tenant_id: str, user_id: Optional[str] = None, http_client = None):
         self.tenant_id = tenant_id
         self.user_id = user_id
-        self.gotenberg = GotenbergClient()
+        self.gotenberg = GotenbergMicroserviceClient(http_client, tenant_id, user_id) if http_client else None
         self.storage_service = StorageService(tenant_id)
         self.temp_dir = Path(tempfile.gettempdir()) / "previews" / tenant_id
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -32,7 +32,7 @@ class DocumentPreviewService:
         self.preview_storage_prefix = f"previews/{tenant_id}"
         
         # Formatos soportados por categoría
-        self.supported_formats = self.gotenberg.get_supported_formats()
+        self.supported_formats = {}  # Will be loaded async
         
         logger.info(f"DocumentPreviewService initialized for tenant: {tenant_id}")
     

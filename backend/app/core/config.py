@@ -101,8 +101,11 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "llama3.2"
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
-    # Gotenberg Document Conversion Service
+    # Gotenberg Document Conversion Service (direct)
     GOTENBERG_SERVICE_URL: str = "http://gotenberg:3000"
+    
+    # Gotenberg Microservice 
+    GOTENBERG_MICROSERVICE_URL: str = "http://gotenberg-service:8005"
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
@@ -115,7 +118,7 @@ class Settings(BaseSettings):
     DEFAULT_TENANT: str = "default"
 
     # Temporary API Key for basic auth during development
-    API_KEY: str = "your_secret_api_key_here" # Default value, should be overridden by env var
+    API_KEY: str = "your-secret-api-key-here" # Default value, should be overridden by env var
     
     # Clerk Configuration
     CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")

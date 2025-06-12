@@ -14,6 +14,7 @@ services:
       - langroid-service
       - ollama-service
       - storage-service
+      - gotenberg-service
       - gotenberg
     networks:
       - backend-network
@@ -27,6 +28,7 @@ services:
       - LANGROID_SERVICE_URL=http://langroid-service:8002
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - GOTENBERG_SERVICE_URL=http://gotenberg:3000
+      - GOTENBERG_MICROSERVICE_URL=http://gotenberg-service:8005
       # Infrastructure
       - REDIS_HOST=redis
       - QDRANT_HOST=qdrant
@@ -251,6 +253,33 @@ services:
         reservations:
           memory: 512M
           cpus: '0.25'
+
+  # Gotenberg Microservice
+  gotenberg-service:
+    build:
+      context: ../microservices/gotenberg-service
+      dockerfile: Dockerfile
+    ports:
+      - "8005:8005"
+    depends_on:
+      - gotenberg
+    networks:
+      - backend-network
+    environment:
+      - API_KEY=your-secret-api-key-here
+      - GOTENBERG_BASE_URL=http://gotenberg:3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
 networks:
   backend-network:
