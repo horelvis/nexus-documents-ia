@@ -397,8 +397,7 @@ class DocumentService:
             # Eliminar del vector store
             await self.vector_service.delete_document(doc_id=doc_id) # Ensure single call to vector_service
             
-            # Eliminar chunks de la base de datos
-            db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
+            # Note: Document chunks are managed by the vector service, not in the main database
             # Eliminar documento de la base de datos
             db.delete(document)
             db.commit()
@@ -882,49 +881,6 @@ class DocumentService:
         except Exception as e:
             logger.exception(f"Error getting document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving the document.")
-    
-    async def delete_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
-        """
-        Elimina un documento y todos sus datos asociados.
-        
-        Args:
-            db: SQLAlchemy Session
-            doc_id: ID del documento
-            
-        Returns:
-            Mensaje de confirmación
-        """
-        # db = next(get_db()) # Removed this line
-        
-        try:
-            document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
-            ).first()
-            
-            if not document:
-                raise HTTPException(status_code=404, detail="Document not found")
-            
-            # Eliminar archivo del almacenamiento
-            await asyncio.to_thread(self.storage_service.delete_file, document.file_path)
-            
-            # Eliminar del vector store
-            await self.vector_service.delete_document(doc_id=doc_id) # Use VectorService
-            
-            # Eliminar chunks de la base de datos
-            db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
-            # Eliminar documento de la base de datos
-            db.delete(document)
-            db.commit()
-            
-            return {"message": f"Document {doc_id} deleted successfully"}
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            db.rollback()
-            logger.exception(f"Error deleting document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the document.")
     
     def generate_summary(self, db: "Session", doc_id: str) -> Dict[str, str]: # Added db: Session
         """

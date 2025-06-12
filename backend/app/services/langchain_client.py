@@ -320,16 +320,13 @@ class LangChainClient:
             raise RuntimeError("HTTP client not provided to LangChainClient.")
 
         try:
-            payload = {
-                "doc_id": doc_id,
-                "tenant_id": tenant_id or settings.DEFAULT_TENANT
-            }
-            response = await self.http_client.post(
-                f"{self.base_url}/documents/delete_by_id", # Changed endpoint
-                json=payload
+            headers = self._get_auth_headers(tenant_id)
+            response = await self.http_client.delete(
+                f"{self.base_url}/documents/{tenant_id}/{doc_id}",
+                headers=headers
             )
             response.raise_for_status()
-            return response.json().get("success", False) # Consistent False on failure
+            return response.json().get("success", False)
         except httpx.HTTPError as e:
             logger.error(f"HTTP error deleting document {doc_id}: {str(e)}")
             raise
