@@ -28,6 +28,7 @@ import {
   Zap
 } from 'lucide-react'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
+import PDFViewer from './pdf-viewer'
 import { useDocumentService } from '@/lib/services/document.service'
 import { toast } from 'sonner'
 
@@ -253,14 +254,40 @@ export function DocumentPreviewDialog({
           {preview && !isLoading && (
             <ScrollArea className="flex-1 rounded-lg border">
               <div className="p-4 space-y-4">
-                {/* PDF Thumbnails */}
-                {preview.pdf_available && preview.thumbnails.length > 0 && (
+                {/* PDF Viewer */}
+                {preview.pdf_available && document.file_type === 'pdf' && (
                   <div className="space-y-3">
-                    <h4 className="text-sm font-medium">PDF Preview</h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-medium">PDF Preview</h4>
+                      <Badge variant="secondary" className="text-xs">
+                        Interactive PDF Viewer
+                      </Badge>
+                    </div>
+                    <div className="h-[600px] border rounded-lg overflow-hidden">
+                      <PDFViewer
+                        url={`/api/v1/documents/${document.id}/pdf`}
+                        fileName={document.filename}
+                        showToolbar={true}
+                        initialScale={0.8}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* PDF Thumbnails (fallback for non-PDF files converted to PDF) */}
+                {preview.pdf_available && document.file_type !== 'pdf' && preview.thumbnails.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-medium">Converted PDF Preview</h4>
+                      <Badge variant="outline" className="text-xs">
+                        {preview.conversion_method}
+                      </Badge>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {preview.thumbnails.map((thumbnail, index) => (
                         <div key={index} className="space-y-2">
-                          <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border">
+                          <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border cursor-pointer hover:bg-muted/80 transition-colors"
+                               onClick={() => window.open(thumbnail, '_blank')}>
                             <img
                               src={thumbnail}
                               alt={`Page ${index + 1}`}

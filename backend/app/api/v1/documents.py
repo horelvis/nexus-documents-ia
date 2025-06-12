@@ -115,6 +115,64 @@ async def get_download_url(
     return document_service.get_signed_download_url(db=db, doc_id=doc_id) # Pass db
 
 
+@router.get("/{doc_id}/pdf")
+async def serve_pdf(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Sirve el PDF directamente para visualización en el navegador.
+    Solo funciona para documentos que ya son PDF.
+    """
+    from fastapi.responses import StreamingResponse
+    from fastapi import HTTPException
+    
+    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    # Obtener información del documento
+    document = document_service.get_document(db=db, doc_id=doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Verificar que sea un PDF
+    if document.file_type.lower() != 'pdf':
+        raise HTTPException(status_code=400, detail="Document is not a PDF")
+    
+    # Obtener el archivo desde storage
+    from app.services.storage_service import StorageService
+    storage_service = StorageService(tenant_id)
+    
+    try:
+        # Descargar archivo como bytes
+        file_content = storage_service.download_file(document.file_path)
+        
+        if not file_content:
+            raise HTTPException(status_code=500, detail="Could not retrieve PDF")
+        
+        # Crear streaming response directamente desde bytes
+        from io import BytesIO
+        
+        def iterfile():
+            yield file_content
+        
+        response = StreamingResponse(
+            iterfile(),
+            media_type='application/pdf',
+            headers={
+                'Content-Disposition': f'inline; filename="{document.filename}"',
+                'Content-Type': 'application/pdf'
+            }
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error serving PDF {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error serving PDF")
+
+
 @router.delete("/{doc_id}", response_model=dict)
 async def delete_document(
     doc_id: str,
@@ -201,16 +259,23 @@ async def get_document_preview(
         storage_service = StorageService(tenant_id)
         
         import tempfile
+        import os
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, document.filename or 'document')
         
-        download_success = await storage_service.download_file(
-            document.file_path or '', 
-            temp_file_path
-        )
+        # Descargar archivo como bytes
+        file_content = storage_service.download_file(document.file_path or '')
         
-        if not download_success:
+        if not file_content:
             raise HTTPException(status_code=500, detail="Could not download document for preview")
+        
+        # Escribir bytes a archivo temporal
+        try:
+            with open(temp_file_path, 'wb') as f:
+                f.write(file_content)
+        except Exception as e:
+            logger.error(f"Error writing temp file: {e}")
+            raise HTTPException(status_code=500, detail="Could not create temporary file")
         
         # Generar preview
         preview_result = await preview_service.generate_preview(
