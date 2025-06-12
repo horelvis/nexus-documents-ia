@@ -359,10 +359,12 @@ class DocumentService:
                 "file_path": document.file_path,
                 "file_type": document.file_type,
                 "file_size": document.file_size,
+                "tenant_id": str(document.tenant_id),
+                "created_by": str(document.created_by),
                 "indexed": document.indexed,
                 "created_at": document.created_at.isoformat(),
                 "updated_at": document.updated_at.isoformat(),
-                "tags": [tag.name for tag in document.tags],
+                "tags": [{"id": tag.id, "name": tag.name, "tenant_id": str(tag.tenant_id), "created_at": tag.created_at.isoformat()} for tag in document.tags],
                 "preview_chunks": chunks_dict
             }
             
@@ -824,7 +826,7 @@ class DocumentService:
             logger.exception(f"Error getting documents: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving documents.")
     
-    def get_document(self, db: "Session", doc_id: str) -> Dict[str, Any]: # Added db: Session
+    def get_document(self, db: "Session", doc_id: str) -> Document: # Changed return type
         """
         Obtiene información detallada de un documento.
         
@@ -833,9 +835,8 @@ class DocumentService:
             doc_id: ID del documento
             
         Returns:
-            Diccionario con información del documento
+            Modelo Document de SQLAlchemy
         """
-        # db = next(get_db()) # Removed this line
         
         try:
             document = db.query(Document).filter(
@@ -846,38 +847,9 @@ class DocumentService:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
-            # TODO: Implementar chunks cuando el modelo DocumentChunk esté disponible
-            # chunks = db.query(DocumentChunk).filter(
-            #     DocumentChunk.document_id == doc_id
-            # ).order_by(
-            #     DocumentChunk.chunk_index
-            # ).limit(3).all()
-            
-            chunks_dict = []
-            # for chunk in chunks:
-            #     chunks_dict.append({
-            #         "id": chunk.id,
-            #         "document_id": str(chunk.document_id),
-            #         "chunk_index": chunk.chunk_index,
-            #         "content": chunk.content
-            #     })
-            
-            result = {
-                "id": str(document.id),
-                "title": document.title,
-                "description": document.description,
-                "filename": document.filename,
-                "file_path": document.file_path,
-                "file_type": document.file_type,
-                "file_size": document.file_size,
-                "indexed": document.indexed,
-                "created_at": document.created_at.isoformat(),
-                "updated_at": document.updated_at.isoformat(),
-                "tags": [tag.name for tag in document.tags],
-                "preview_chunks": chunks_dict
-            }
-            
-            return result
+            # Devolver directamente el objeto documento
+            # Pydantic se encargará de la serialización usando from_attributes=True
+            return document
             
         except HTTPException:
             raise
