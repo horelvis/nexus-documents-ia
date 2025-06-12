@@ -1,15 +1,18 @@
-FROM python:3.11-slim
+FROM gotenberg/gotenberg:8
 
-# Install system dependencies for PDF processing and Gotenberg
+# Install Python and dependencies
+USER root
 RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
     poppler-utils \
-    wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gotenberg
-RUN wget -O /usr/local/bin/gotenberg https://github.com/gotenberg/gotenberg/releases/download/v8.0.3/gotenberg_8.0.3_linux_amd64 \
-    && chmod +x /usr/local/bin/gotenberg
+# Create a virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
@@ -20,11 +23,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (will be mounted as volume in dev)
 COPY app/ ./app/
 
-# Expose port
-EXPOSE 8005
-
-# Start script that runs both Gotenberg and the FastAPI app
+# Copy start script
 COPY start-dev.sh /start-dev.sh
 RUN chmod +x /start-dev.sh
+
+# Expose ports (Gotenberg on 3000, FastAPI on 8005)
+EXPOSE 3000 8005
 
 CMD ["/start-dev.sh"]

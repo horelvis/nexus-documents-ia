@@ -10,9 +10,9 @@ Frontend/API Principal → Gotenberg Microservice (incluye Gotenberg binary)
 
 ### Arquitectura Integrada
 
-El microservicio **`gotenberg-service`** (puerto 8005) incluye:
-- **Gotenberg binary** ejecutándose internamente en puerto 3000
-- **FastAPI application** que provee:
+El microservicio **`gotenberg-service`** (puerto 8005) está basado en la imagen oficial `gotenberg/gotenberg:8` e incluye:
+- **Gotenberg oficial** ejecutándose internamente en puerto 3000
+- **Python 3 + FastAPI** que provee:
   - Autenticación y autorización multi-tenant
   - Lógica de negocio (tenant isolation, caching, etc.)
   - Gestión de thumbnails e imágenes
@@ -79,11 +79,12 @@ docker compose -f docker-compose.test.yml up
 
 ## Dependencias
 
-- FastAPI + Uvicorn
-- httpx (cliente HTTP)
-- Pillow (procesamiento de imágenes)
-- pdf2image (conversión PDF a imagen)
-- pydantic (validación)
+- **Base**: gotenberg/gotenberg:8 (imagen oficial)
+- **Python**: FastAPI + Uvicorn
+- **HTTP**: httpx (cliente HTTP)
+- **Imágenes**: Pillow (procesamiento de imágenes)
+- **PDF**: pdf2image (conversión PDF a imagen)
+- **Validación**: pydantic
 
 ## Logs
 
