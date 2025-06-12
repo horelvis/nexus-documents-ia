@@ -308,3 +308,36 @@ export interface ServiceStatus {
   details?: Record<string, unknown>
   error?: string
 }
+
+// Document Preview Types
+export interface DocumentPreviewResponse {
+  type: 'office_preview' | 'text_preview' | 'pdf_preview' | 'image_preview' | 'text_fallback' | 'unsupported_fallback'
+  conversion_method: 'gotenberg' | 'pil' | 'fallback' | 'none'
+  pdf_available: boolean
+  pdf_storage_path?: string
+  pdf_local_path?: string
+  thumbnail_path?: string
+  thumbnails: string[]
+  original_format: string
+  original_dimensions?: [number, number]
+  original_image_format?: string
+  cached: boolean
+  generated_at: number
+  file_size: number
+  text_preview?: string
+  message?: string
+  filename?: string
+  supported_formats?: {
+    office: string[]
+    text: string[]
+    already_pdf: string[]
+    images: string[]
+  }
+}
+
+export interface DocumentPreviewInfo {
+  has_preview: boolean
+  preview_info?: DocumentPreviewResponse
+  message?: string
+  error?: string
+}

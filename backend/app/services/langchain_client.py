@@ -175,14 +175,15 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                f"{self.base_url}/search/similar",
-                json=payload
+                f"{self.base_url}/search",
+                json=payload,
+                headers=self._get_auth_headers(tenant_id)
             )
             
             response.raise_for_status()
             result = response.json()
             
-            return result.get("documents", [])
+            return result.get("results", [])
             
         except httpx.HTTPError as e:
             logger.error(f"HTTP error in semantic search: {str(e)}")

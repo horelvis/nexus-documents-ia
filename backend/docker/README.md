@@ -65,6 +65,7 @@ microservices/ollama-service/app     → /app/app  (live reload)
 | Storage | 8003 | 8003 | Google Cloud Storage service |
 | Ollama API | 8004 | 8004 | LLM API wrapper |
 | Ollama Server | 11434 | 11434 | Ollama LLM server |
+| **Gotenberg** | **3001** | **3001** | **Document conversion to PDF** |
 | PostgreSQL | 5432 | 5432 | Main database |
 | Redis | 6379 | 6379 | Cache & sessions |
 | Qdrant | 6333 | 6333 | Vector database |
@@ -209,9 +210,61 @@ docker compose -f docker-compose.dev.yml logs -f langchain-service
 docker compose -f docker-compose.dev.yml logs -f -t
 ```
 
+## Gotenberg Document Conversion
+
+### Overview
+Gotenberg is an open-source document conversion service that provides universal PDF generation from various document formats.
+
+### Supported Formats
+- **Office Documents**: `.docx`, `.doc`, `.xlsx`, `.xls`, `.pptx`, `.ppt`, `.odt`, `.ods`, `.odp`
+- **Text Formats**: `.txt`, `.md`, `.html`, `.htm`
+- **Already PDF**: `.pdf` (thumbnail generation)
+- **Images**: `.jpg`, `.png`, `.gif`, `.bmp`, `.tiff`
+
+### API Endpoints
+```bash
+# Generate document preview
+GET /api/v1/documents/{doc_id}/preview
+
+# Check existing preview
+GET /api/v1/documents/{doc_id}/preview/info
+
+# Force regenerate preview
+GET /api/v1/documents/{doc_id}/preview?force_regenerate=true
+```
+
+### Preview Response Format
+```json
+{
+  "type": "office_preview",
+  "conversion_method": "gotenberg",
+  "pdf_available": true,
+  "pdf_storage_path": "previews/tenant-id/doc-id/preview.pdf",
+  "thumbnails": ["path/to/thumb1.jpg", "path/to/thumb2.jpg"],
+  "original_format": ".docx",
+  "cached": true,
+  "generated_at": 1703123456,
+  "file_size": 2048576
+}
+```
+
+### Features
+- ✅ **High-quality PDF conversion** using LibreOffice and Chromium
+- ✅ **Thumbnail generation** from PDF pages
+- ✅ **Caching system** for faster subsequent requests
+- ✅ **Storage integration** for preview persistence
+- ✅ **Fallback support** when Gotenberg is unavailable
+- ✅ **Custom CSS** for HTML/Markdown conversion
+
+### Health Check
+```bash
+curl http://localhost:3001/health
+```
+
 ## Performance Notes
 
 - **Development mode**: Slight performance overhead due to volume mounting
 - **Production mode**: Optimized performance, smaller images
-- **Memory usage**: ~4-6GB RAM for full stack
+- **Memory usage**: ~4-6GB RAM for full stack (including Gotenberg)
 - **GPU support**: Ollama service includes NVIDIA GPU support
+- **Gotenberg resources**: ~512MB-1GB RAM, varies by document complexity

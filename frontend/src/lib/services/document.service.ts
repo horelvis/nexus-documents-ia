@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useApiClient } from '../api-client'
 import { API_CONFIG } from '../config'
-import { Document, DocumentUploadResponse, SearchResponse } from '../types'
+import { Document, DocumentUploadResponse, SearchResponse, DocumentPreviewResponse, DocumentPreviewInfo } from '../types'
 
 export interface DocumentListParams {
   page?: number
@@ -171,6 +171,21 @@ export class DocumentService {
       answer: string
       sources: Document[]
     }>(API_CONFIG.ENDPOINTS.SEARCH_ASK, payload)
+  }
+
+  async getDocumentPreview(id: string, forceRegenerate: boolean = false) {
+    const searchParams = new URLSearchParams()
+    if (forceRegenerate) {
+      searchParams.append('force_regenerate', 'true')
+    }
+    
+    const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}/${id}/preview${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    return this.apiClient.get<DocumentPreviewResponse>(endpoint)
+  }
+
+  async getDocumentPreviewInfo(id: string) {
+    const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}/${id}/preview/info`
+    return this.apiClient.get<DocumentPreviewInfo>(endpoint)
   }
 }
 

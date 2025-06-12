@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
 import { 
   IconPlus, 
   IconSearch, 
@@ -13,7 +14,8 @@ import {
   IconDownload,
   IconTrash,
   IconEdit,
-  IconLoader2
+  IconLoader2,
+  IconPhoto
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -29,10 +31,19 @@ import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useDocumentService } from "@/lib/services/document.service"
 import { Document as ApiDocument } from "@/lib/types"
-import { EditDocumentDialog, DocumentViewerDialog, DeleteDocumentDialog } from "@/components/documents"
+import { 
+  EditDocumentDialog, 
+  DocumentViewerDialog, 
+  DeleteDocumentDialog,
+  DocumentPreviewDialog 
+} from "@/components/documents"
 import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
+  const params = useParams()
+  const router = useRouter()
+  const tenantId = params.tenantId as string
+
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFilter, setSelectedFilter] = useState('all')
@@ -43,6 +54,7 @@ export default function DocumentsPage() {
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
   const { openUploadDialog, setOnUploadComplete } = useUpload()
@@ -134,6 +146,15 @@ export default function DocumentsPage() {
   const handleDeleteDocument = (document: ApiDocument) => {
     setSelectedDocument(document)
     setDeleteDialogOpen(true)
+  }
+
+  const handlePreviewDocument = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setPreviewDialogOpen(true)
+  }
+
+  const handleFullPagePreview = (document: ApiDocument) => {
+    router.push(`/${tenantId}/documents/${document.id}/preview`)
   }
 
   const handleDownloadDocument = async (document: ApiDocument) => {
@@ -452,11 +473,33 @@ export default function DocumentsPage() {
                     
                     <div className="flex justify-between pt-1">
                       <div className="flex gap-1">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              title="Preview options"
+                              className="h-7 w-7 p-0"
+                            >
+                              <IconPhoto className="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuItem onClick={() => handlePreviewDocument(document)}>
+                              <IconPhoto className="mr-2 h-4 w-4" />
+                              Quick Preview
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
+                              <IconEye className="mr-2 h-4 w-4" />
+                              Full Page Preview
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button 
                           size="sm" 
                           variant="outline"
                           onClick={() => handleViewDocument(document)}
-                          title="View document"
+                          title="View document details"
                           className="h-7 w-7 p-0"
                         >
                           <IconEye className="h-3 w-3" />
@@ -540,6 +583,12 @@ export default function DocumentsPage() {
           open={deleteDialogOpen}
           onOpenChange={setDeleteDialogOpen}
           onConfirm={handleConfirmDelete}
+        />
+
+        <DocumentPreviewDialog
+          document={selectedDocument}
+          open={previewDialogOpen}
+          onOpenChange={setPreviewDialogOpen}
         />
 
       </div>

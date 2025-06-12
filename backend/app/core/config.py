@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "llama3.2"
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
+    # Gotenberg Document Conversion Service
+    GOTENBERG_SERVICE_URL: str = "http://gotenberg:3000"
+    
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
     ALLOWED_EXTENSIONS: List[str] = ["pdf", "docx", "txt", "md", "csv", "xlsx"]

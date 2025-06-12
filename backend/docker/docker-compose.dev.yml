@@ -14,6 +14,7 @@ services:
       - langroid-service
       - ollama-service
       - storage-service
+      - gotenberg
     networks:
       - backend-network
     env_file:
@@ -25,6 +26,7 @@ services:
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGROID_SERVICE_URL=http://langroid-service:8002
       - OLLAMA_BASE_URL=http://ollama-service:11434
+      - GOTENBERG_SERVICE_URL=http://gotenberg:3000
       # Infrastructure
       - REDIS_HOST=redis
       - QDRANT_HOST=qdrant
@@ -224,6 +226,37 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # Gotenberg for document conversion
+  gotenberg:
+    image: gotenberg/gotenberg:8.0.3
+    container_name: nexus-gotenberg-dev
+    ports:
+      - "3001:3000"  # External port 3001 to avoid conflicts
+    networks:
+      - backend-network
+    environment:
+      - GOTENBERG_LOG_LEVEL=DEBUG
+      - GOTENBERG_GRACEFUL_SHUTDOWN_DURATION=30s
+    command:
+      - "gotenberg"
+      - "--chromium-disable-javascript=false"
+      - "--chromium-allow-list=file:///*"
+      - "--libreoffice-disable-routes=false"
+      - "--api-timeout=120s"
+      - "--api-root-path=/"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
 
 networks:
   backend-network:

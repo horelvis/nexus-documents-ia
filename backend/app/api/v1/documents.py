@@ -1,4 +1,5 @@
 from typing import List, Optional
+import os
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from app.api.dependencies import get_current_user, get_current_tenant_id, require_document_upload_permission
@@ -170,3 +171,97 @@ async def remove_document_tag(
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db
+
+
+@router.get("/{doc_id}/preview", response_model=dict)
+async def get_document_preview(
+    doc_id: str,
+    force_regenerate: bool = Query(False, description="Force regeneration of preview"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Genera preview del documento usando Gotenberg.
+    Soporta conversión de documentos Office, texto, markdown y más a PDF.
+    """
+    from app.services.document_preview_service import DocumentPreviewService
+    
+    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    try:
+        # Obtener información del documento
+        document = document_service.get_document(db=db, doc_id=doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Descargar archivo para procesamiento
+        from app.services.storage_service import StorageService
+        storage_service = StorageService(tenant_id)
+        
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        temp_file_path = os.path.join(temp_dir, document.get('filename', 'document'))
+        
+        download_success = await storage_service.download_file(
+            document.get('file_path', ''), 
+            temp_file_path
+        )
+        
+        if not download_success:
+            raise HTTPException(status_code=500, detail="Could not download document for preview")
+        
+        # Generar preview
+        preview_result = await preview_service.generate_preview(
+            document_id=doc_id,
+            file_path=temp_file_path,
+            filename=document.get('filename', 'unknown'),
+            force_regenerate=force_regenerate
+        )
+        
+        return preview_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Preview generation failed for document {doc_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Preview generation failed. Please try again later."
+        )
+
+
+@router.get("/{doc_id}/preview/info", response_model=dict)
+async def get_preview_info(
+    doc_id: str,
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Obtiene información de preview existente sin regenerar.
+    """
+    from app.services.document_preview_service import DocumentPreviewService
+    
+    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    try:
+        preview_info = await preview_service.get_preview_info(doc_id)
+        
+        if preview_info:
+            return {
+                "has_preview": True,
+                "preview_info": preview_info
+            }
+        else:
+            return {
+                "has_preview": False,
+                "message": "No preview available. Generate one with /preview endpoint."
+            }
+            
+    except Exception as e:
+        logger.error(f"Preview info retrieval failed for document {doc_id}: {str(e)}")
+        return {
+            "has_preview": False,
+            "error": "Could not retrieve preview information"
+        }
