@@ -10,4 +10,4 @@ sleep 5
 
 # Start the FastAPI application
 echo "Starting FastAPI application..."
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8005
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8005
