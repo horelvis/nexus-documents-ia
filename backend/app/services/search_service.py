@@ -166,7 +166,7 @@ class SearchService:
         """
         return await self.chat_with_documents(query=question, doc_ids=doc_ids)
     
-    def semantic_search(
+    async def semantic_search(
         self, 
         query: str, 
         limit: int = 10,
@@ -193,18 +193,18 @@ class SearchService:
                 # Aplicar filtros si están presentes
                 doc_ids = filters.get('doc_ids')
                 if doc_ids:
-                    results = self.vector_service.search_by_document_ids(
+                    results = await self.vector_service.search_by_document_ids(
                         doc_ids=doc_ids,
                         query=query,
                         limit=limit
                     )
                 else:
-                    results = self.vector_service.search_similar(
+                    results = await self.vector_service.search_similar(
                         query=query,
                         limit=limit
                     )
             else:
-                results = self.vector_service.search_similar(
+                results = await self.vector_service.search_similar(
                     query=query,
                     limit=limit
                 )
@@ -225,7 +225,7 @@ class SearchService:
             logger.error(f"Error in semantic search: {str(e)}")
             return []
 
-    def get_vector_store_info(self) -> Dict[str, Any]:
+    async def get_vector_store_info(self) -> Dict[str, Any]:
         """
         Obtiene información del vector store.
         
@@ -233,7 +233,7 @@ class SearchService:
             Información del vector store
         """
         try:
-            return self.vector_service.get_collection_info()
+            return await self.vector_service.get_collection_info()
         except Exception as e:
             logger.error(f"Error getting vector store info: {str(e)}")
             return {}
