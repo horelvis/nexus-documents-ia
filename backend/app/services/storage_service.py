@@ -66,21 +66,35 @@ class StorageService:
         Descarga un archivo del almacenamiento.
         
         Args:
-            object_name: Nombre del objeto a descargar
+            object_name: Nombre del objeto a descargar (puede incluir path completo o relativo)
             
         Returns:
             Contenido del archivo como bytes o None si no existe
         """
         try:
-            # Extraer path del object_name
-            file_path = object_name.split("/")[-1]
+            # Si el object_name incluye el prefijo del tenant, removerlo
+            # Formato esperado: tenant-{id}/user-{id}/filename o tenant-{id}/system/filename
+            file_path = object_name
+            
+            # Remover prefijo tenant si está presente
+            if object_name.startswith(f"tenant-{self.tenant_id}/"):
+                # Remover "tenant-{id}/" del inicio
+                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
+                
+                # Si incluye user prefix, removerlo también
+                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
+                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
+                elif path_without_tenant.startswith("system/"):
+                    file_path = path_without_tenant[len("system/"):]
+                else:
+                    file_path = path_without_tenant
             
             content = self.client.download_file(file_path)
             
             if content:
-                logger.info(f"File downloaded successfully: {object_name}")
+                logger.info(f"File downloaded successfully: {object_name} -> {file_path}")
             else:
-                logger.warning(f"File not found: {object_name}")
+                logger.warning(f"File not found: {object_name} -> {file_path}")
             
             return content
             
@@ -93,21 +107,34 @@ class StorageService:
         Elimina un archivo del almacenamiento.
         
         Args:
-            object_name: Nombre del objeto a eliminar
+            object_name: Nombre del objeto a eliminar (puede incluir path completo o relativo)
             
         Returns:
             True si se eliminó correctamente, False en caso contrario
         """
         try:
-            # Extraer path del object_name
-            file_path = object_name.split("/")[-1]
+            # Si el object_name incluye el prefijo del tenant, removerlo
+            file_path = object_name
+            
+            # Remover prefijo tenant si está presente
+            if object_name.startswith(f"tenant-{self.tenant_id}/"):
+                # Remover "tenant-{id}/" del inicio
+                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
+                
+                # Si incluye user prefix, removerlo también
+                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
+                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
+                elif path_without_tenant.startswith("system/"):
+                    file_path = path_without_tenant[len("system/"):]
+                else:
+                    file_path = path_without_tenant
             
             success = self.client.delete_file(file_path)
             
             if success:
-                logger.info(f"File deleted successfully: {object_name}")
+                logger.info(f"File deleted successfully: {object_name} -> {file_path}")
             else:
-                logger.warning(f"File not found for deletion: {object_name}")
+                logger.warning(f"File not found for deletion: {object_name} -> {file_path}")
             
             return success
             
@@ -189,22 +216,35 @@ class StorageService:
         Genera una URL firmada para descargar un objeto.
         
         Args:
-            object_name: Nombre del objeto a descargar
+            object_name: Nombre del objeto a descargar (puede incluir path completo o relativo)
             expiration: Tiempo de expiración en segundos
             
         Returns:
             Tuple con la URL firmada y la fecha de expiración
         """
         try:
-            # Extraer path del object_name
-            file_path = object_name.split("/")[-1]
+            # Si el object_name incluye el prefijo del tenant, removerlo
+            file_path = object_name
+            
+            # Remover prefijo tenant si está presente
+            if object_name.startswith(f"tenant-{self.tenant_id}/"):
+                # Remover "tenant-{id}/" del inicio
+                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
+                
+                # Si incluye user prefix, removerlo también
+                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
+                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
+                elif path_without_tenant.startswith("system/"):
+                    file_path = path_without_tenant[len("system/"):]
+                else:
+                    file_path = path_without_tenant
             
             url, expires_at = self.client.generate_download_signed_url(
                 file_path=file_path,
                 expiration=expiration
             )
             
-            logger.info(f"Generated download signed URL for: {object_name}")
+            logger.info(f"Generated download signed URL for: {object_name} -> {file_path}")
             return url, expires_at
             
         except Exception as e:

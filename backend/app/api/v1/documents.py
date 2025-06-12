@@ -142,7 +142,7 @@ async def serve_pdf(
     
     # Obtener el archivo desde storage
     from app.services.storage_service import StorageService
-    storage_service = StorageService(tenant_id)
+    storage_service = StorageService(tenant_id, str(current_user.id))
     
     try:
         # Descargar archivo como bytes
@@ -256,7 +256,7 @@ async def get_document_preview(
         
         # Descargar archivo para procesamiento
         from app.services.storage_service import StorageService
-        storage_service = StorageService(tenant_id)
+        storage_service = StorageService(tenant_id, str(current_user.id))
         
         import tempfile
         import os
