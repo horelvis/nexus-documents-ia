@@ -40,4 +40,4 @@ CMD if [ "${DEBUG:-false}" = "true" ]; then \
         python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload; \
     else \
         python -m uvicorn app.main:app --host 0.0.0.0 --port 8001; \
-    fi
+    figotenberg/gotenberg:edge 

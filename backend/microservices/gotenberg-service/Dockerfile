@@ -2,10 +2,8 @@ FROM gotenberg/gotenberg:edge
 
 USER root
 
-# Install Python and dependencies
+# Install system dependencies (Python should already be in gotenberg image)
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
     poppler-utils \
     curl \
     && rm -rf /var/lib/apt/lists/*
