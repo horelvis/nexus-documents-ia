@@ -98,11 +98,11 @@ services:
       timeout: 10s
       retries: 3
 
-  # LangChain microservice - DEVELOPMENT MODE
+  # LangChain microservice
   langchain-service:
     build:
       context: ../microservices/langchain-service
-      dockerfile: Dockerfile.dev  # Using development Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "8001:8001"
     depends_on:
@@ -116,22 +116,18 @@ services:
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - OLLAMA_MODEL=llama3.1:8b
       - EMBEDDING_MODEL=nomic-embed-text
+      - API_KEY=your-secret-api-key-here
+      - DEBUG=true  # Enable reload in dev
     volumes:
       # Mount the Python code for live reloading
       - ../microservices/langchain-service/app:/app/app:rw
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
   # Langroid microservice - DEVELOPMENT MODE
   langroid-service:
     build:
       context: ../microservices/langroid-service
-      dockerfile: Dockerfile.dev  # Using development Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "8002:8002"
     depends_on:
@@ -147,6 +143,7 @@ services:
       - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
       - SECRET_KEY=${SECRET_KEY:-langroid-secret-key}
       - LOG_LEVEL=INFO
+      - DEBUG=true  # Enable reload in dev
     volumes:
       # Mount the Python code for live reloading
       - ../microservices/langroid-service/app:/app/app:rw
@@ -162,7 +159,7 @@ services:
   ollama-service:
     build:
       context: ../microservices/ollama-service
-      dockerfile: Dockerfile.dev  # Using development Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "11434:11434"  # Ollama server port
       - "8004:8000"    # FastAPI wrapper port
@@ -180,6 +177,7 @@ services:
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_MAX_LOADED_MODELS=3
       - PYTHONPATH=/app
+      - DEBUG=true  # Enable reload in dev
     deploy:
       resources:
         reservations:
@@ -198,7 +196,7 @@ services:
   storage-service:
     build:
       context: ../microservices/storage-service
-      dockerfile: Dockerfile.dev  # Using development Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "8003:8001"
     networks:
@@ -231,7 +229,7 @@ services:
   gotenberg-service:
     build:
       context: ../microservices/gotenberg-service
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
       - "8005:8005"
     networks:
@@ -239,15 +237,10 @@ services:
     environment:
       - API_KEY=your-secret-api-key-here
       - GOTENBERG_BASE_URL=http://localhost:3000
+      - DEBUG=true  # Enable reload in dev
     volumes:
       - ../microservices/gotenberg-service/app:/app/app  # Live reload
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
 networks:
   backend-network:
