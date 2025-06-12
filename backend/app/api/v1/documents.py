@@ -125,7 +125,7 @@ async def delete_document(
     Elimina un documento y sus datos asociados.
     """
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.delete_document(db=db, doc_id=doc_id)
+    return await document_service.delete_document(db=db, doc_id=doc_id)
 
 
 @router.get("/{doc_id}/summary", response_model=dict)
