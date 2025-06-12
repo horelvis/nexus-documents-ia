@@ -44,6 +44,7 @@ cd backend/docker && ./start-dev.sh
 - `microservices/langroid-service/app` → Container's `/app/app`
 - `microservices/storage-service/app` → Container's `/app/app`
 - `microservices/ollama-service/app` → Container's `/app/app`
+- `microservices/gotenberg-service/app` → Container's `/app/app`
 
 #### Production Mode
 ```bash
@@ -80,6 +81,7 @@ This is a **multi-tenant intelligent document management system** with a microse
 - **Langroid Service** (port 8002): Advanced AI agents and multi-agent conversations
 - **Storage Service** (port 8003): Google Cloud Storage operations with signed URLs
 - **Ollama Service** (port 8004): Local LLM hosting and inference
+- **Gotenberg Service** (port 8005): Document conversion, PDF generation, thumbnail creation
 
 #### Database Schema Highlights
 - **Multi-tenant models**: All core entities have tenant_id foreign keys

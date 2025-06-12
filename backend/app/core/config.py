@@ -101,10 +101,7 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "llama3.2"
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
-    # Gotenberg Document Conversion Service (direct)
-    GOTENBERG_SERVICE_URL: str = "http://gotenberg:3000"
-    
-    # Gotenberg Microservice 
+    # Gotenberg Microservice (includes Gotenberg binary)
     GOTENBERG_MICROSERVICE_URL: str = "http://gotenberg-service:8005"
     
     # Procesamiento de Documentos
