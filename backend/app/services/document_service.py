@@ -335,21 +335,21 @@ class DocumentService:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
-            # Obtener primeros chunks para vista previa
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == doc_id
-            ).order_by(
-                DocumentChunk.chunk_index
-            ).limit(3).all()
+            # TODO: Implementar chunks cuando el modelo DocumentChunk esté disponible
+            # chunks = db.query(DocumentChunk).filter(
+            #     DocumentChunk.document_id == doc_id
+            # ).order_by(
+            #     DocumentChunk.chunk_index
+            # ).limit(3).all()
             
             chunks_dict = []
-            for chunk in chunks:
-                chunks_dict.append({
-                    "id": chunk.id,
-                    "document_id": str(chunk.document_id),
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content
-                })
+            # for chunk in chunks:
+            #     chunks_dict.append({
+            #         "id": chunk.id,
+            #         "document_id": str(chunk.document_id),
+            #         "chunk_index": chunk.chunk_index,
+            #         "content": chunk.content
+            #     })
             
             result = {
                 "id": str(document.id),
@@ -429,18 +429,21 @@ class DocumentService:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
-            # Obtener texto de los chunks
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == doc_id
-            ).order_by(
-                DocumentChunk.chunk_index
-            ).all()
+            # TODO: Implementar chunks cuando el modelo DocumentChunk esté disponible
+            # chunks = db.query(DocumentChunk).filter(
+            #     DocumentChunk.document_id == doc_id
+            # ).order_by(
+            #     DocumentChunk.chunk_index
+            # ).all()
             
-            if not chunks:
-                raise HTTPException(status_code=404, detail="Document content not found")
+            chunks = []  # Temporal: lista vacía
             
-            # Unir texto de los chunks
-            text = "\n\n".join([chunk.content for chunk in chunks])
+            # TODO: Implementar con chunks cuando esté disponible
+            # Por ahora, usar descripción del documento como contenido
+            text = document.description or "Document content not available yet. Chunks feature is being implemented."
+            
+            if len(text) < 10:  # Si es muy corto, usar un texto más descriptivo
+                text = f"Document '{document.title}' content will be available when the chunks feature is implemented."
             
             # Limitar longitud si es demasiado grande
             max_chars = 100000
@@ -843,21 +846,21 @@ class DocumentService:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
-            # Obtener primeros chunks para vista previa
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == doc_id
-            ).order_by(
-                DocumentChunk.chunk_index
-            ).limit(3).all()
+            # TODO: Implementar chunks cuando el modelo DocumentChunk esté disponible
+            # chunks = db.query(DocumentChunk).filter(
+            #     DocumentChunk.document_id == doc_id
+            # ).order_by(
+            #     DocumentChunk.chunk_index
+            # ).limit(3).all()
             
             chunks_dict = []
-            for chunk in chunks:
-                chunks_dict.append({
-                    "id": chunk.id,
-                    "document_id": str(chunk.document_id),
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content
-                })
+            # for chunk in chunks:
+            #     chunks_dict.append({
+            #         "id": chunk.id,
+            #         "document_id": str(chunk.document_id),
+            #         "chunk_index": chunk.chunk_index,
+            #         "content": chunk.content
+            #     })
             
             result = {
                 "id": str(document.id),
@@ -905,18 +908,21 @@ class DocumentService:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
-            # Obtener texto de los chunks
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == doc_id
-            ).order_by(
-                DocumentChunk.chunk_index
-            ).all()
+            # TODO: Implementar chunks cuando el modelo DocumentChunk esté disponible
+            # chunks = db.query(DocumentChunk).filter(
+            #     DocumentChunk.document_id == doc_id
+            # ).order_by(
+            #     DocumentChunk.chunk_index
+            # ).all()
             
-            if not chunks:
-                raise HTTPException(status_code=404, detail="Document content not found")
+            chunks = []  # Temporal: lista vacía
             
-            # Unir texto de los chunks
-            text = "\n\n".join([chunk.content for chunk in chunks])
+            # TODO: Implementar con chunks cuando esté disponible
+            # Por ahora, usar descripción del documento como contenido
+            text = document.description or "Document content not available yet. Chunks feature is being implemented."
+            
+            if len(text) < 10:  # Si es muy corto, usar un texto más descriptivo
+                text = f"Document '{document.title}' content will be available when the chunks feature is implemented."
             
             # Limitar longitud si es demasiado grande
             max_chars = 100000  # Ajustar según limitaciones del LLM
