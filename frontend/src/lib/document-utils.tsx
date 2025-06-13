@@ -83,8 +83,8 @@ export function getFileIcon(
 /**
  * Formats file size in human readable format
  */
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes'
+export function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes === 0) return '0 Bytes'
   
   const k = 1024
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
@@ -96,11 +96,12 @@ export function formatFileSize(bytes: number): string {
 /**
  * Returns status color classes based on indexing status
  */
-export function getStatusColor(indexed: string): string {
+export function getStatusColor(indexed: string | null | undefined): string {
   switch (indexed) {
     case 'INDEXED':
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
     case 'PROCESSING':
+    case 'INDEXING':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
     case 'INDEXING_ERROR':
       return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
@@ -114,8 +115,12 @@ export function getStatusColor(indexed: string): string {
 /**
  * Returns relative time string from date
  */
-export function getRelativeTime(dateString: string): string {
+export function getRelativeTime(dateString: string | null | undefined): string {
+  if (!dateString) return 'Unknown date'
+  
   const date = new Date(dateString)
+  if (isNaN(date.getTime())) return 'Invalid date'
+  
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMinutes = Math.floor(diffMs / (1000 * 60))

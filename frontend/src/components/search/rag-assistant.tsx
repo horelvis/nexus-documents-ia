@@ -212,9 +212,9 @@ export default function RAGAssistant({
             {searchResults.length > 0 ? (
               <div className="flex items-center justify-between">
                 <div className="flex flex-wrap gap-1">
-                  {[...new Set(searchResults.map(r => r.document.file_type))].map(type => (
+                  {[...new Set(searchResults.map(r => r.document.file_type).filter(type => type))].map(type => (
                     <Badge key={type} variant="outline" className="text-xs border-blue-200 text-blue-600 dark:border-blue-700 dark:text-blue-400">
-                      {type.toUpperCase()}
+                      {type?.toUpperCase() || 'UNKNOWN'}
                     </Badge>
                   ))}
                 </div>

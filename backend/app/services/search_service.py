@@ -3,10 +3,13 @@ LangChain-based Search Service with simplified RAG
 """
 import logging
 from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService
+from app.db.database import SessionLocal
+from app.db.models import Document
 
 logger = logging.getLogger(__name__)
 
@@ -72,31 +75,168 @@ class SearchService:
             doc_ids: Lista opcional de IDs de documentos para filtrar
             
         Returns:
-            Lista de documentos similares
+            Lista de documentos similares con datos completos
         """
         try:
             logger.debug(f"Searching documents for query: {query[:100]}...")
             
             if doc_ids:
                 # Búsqueda filtrada por documentos específicos
-                results = self.vector_service.search_by_document_ids(
+                vector_results = await self.vector_service.search_by_document_ids(
                     doc_ids=doc_ids,
                     query=query,
                     limit=limit
                 )
             else:
                 # Búsqueda general
-                results = self.vector_service.search_similar(
+                vector_results = await self.vector_service.search_similar(
                     query=query,
                     limit=limit
                 )
             
-            logger.debug(f"Found {len(results)} similar documents")
-            return results
+            logger.debug(f"Found {len(vector_results)} vector results")
+            
+            # Enrich with complete document data from database
+            enriched_results = await self._enrich_search_results(vector_results)
+            
+            logger.debug(f"Returning {len(enriched_results)} enriched search results")
+            return enriched_results
             
         except Exception as e:
             logger.error(f"Error searching documents: {str(e)}")
             return []
+    
+    async def _enrich_search_results(self, vector_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Enrich vector search results with complete document data from database.
+        
+        Args:
+            vector_results: Results from vector search with basic metadata
+            
+        Returns:
+            Enriched results with full document data
+        """
+        if not vector_results:
+            return []
+        
+        try:
+            # Extract document IDs from vector results
+            doc_ids = []
+            results_by_doc_id = {}
+            
+            for result in vector_results:
+                doc_id = result.get('metadata', {}).get('doc_id')
+                if doc_id:
+                    doc_ids.append(doc_id)
+                    results_by_doc_id[doc_id] = result
+            
+            if not doc_ids:
+                logger.warning("No document IDs found in vector search results")
+                return vector_results
+            
+            # Get complete document data from database with tags
+            with SessionLocal() as db:
+                documents = db.query(Document).options(
+                    joinedload(Document.tags)
+                ).filter(
+                    Document.id.in_(doc_ids),
+                    Document.tenant_id == self.tenant_id
+                ).all()
+            
+            # Create enriched results
+            enriched_results = []
+            for doc in documents:
+                doc_id = str(doc.id)
+                vector_result = results_by_doc_id.get(doc_id)
+                
+                if vector_result:
+                    # Create enriched result structure
+                    enriched_result = {
+                        "document": {
+                            "id": str(doc.id),
+                            "title": doc.title,
+                            "description": doc.description,
+                            "filename": doc.filename,
+                            "file_type": doc.file_type,
+                            "file_size": doc.file_size,
+                            "mime_type": doc.mime_type,
+                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            "indexed": doc.indexed.value if doc.indexed else None,
+                            "tenant_id": str(doc.tenant_id),
+                            "tags": [tag.name for tag in doc.tags] if doc.tags else []
+                        },
+                        "score": vector_result.get('score', 0.0),
+                        "matches": self._extract_matches_from_content(vector_result)
+                    }
+                    enriched_results.append(enriched_result)
+            
+            logger.debug(f"Enriched {len(enriched_results)} search results with database data")
+            return enriched_results
+            
+        except Exception as e:
+            logger.error(f"Error enriching search results: {str(e)}")
+            # Return original results if enrichment fails
+            return vector_results
+    
+    def _extract_matches_from_content(self, vector_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract text matches from vector search content.
+        
+        Args:
+            vector_result: Single vector search result
+            
+        Returns:
+            List of text matches with scores
+        """
+        matches = []
+        content = vector_result.get('content', '')
+        score = vector_result.get('score', 0.0)
+        
+        if content and len(content.strip()) > 0:
+            # Create a match from the content
+            # For now, we'll create one match per result
+            # In the future, this could be more sophisticated
+            matches.append({
+                "text": content[:200] + "..." if len(content) > 200 else content,
+                "score": score
+            })
+        
+        return matches
+    
+    async def ask_documents(
+        self, 
+        question: str, 
+        doc_ids: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Ask a question about documents using RAG.
+        
+        Args:
+            question: Question to ask
+            doc_ids: Optional list of document IDs to limit the search to
+            
+        Returns:
+            Answer with sources
+        """
+        try:
+            logger.debug(f"Asking question: {question[:100]}...")
+            
+            # Use the chat_with_documents method for RAG
+            response = await self.chat_with_documents(
+                query=question,
+                doc_ids=doc_ids
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in ask_documents: {str(e)}")
+            return {
+                "answer": "Lo siento, ocurrió un error al procesar tu pregunta.",
+                "sources": [],
+                "error": str(e)
+            }
     
     async def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
         """

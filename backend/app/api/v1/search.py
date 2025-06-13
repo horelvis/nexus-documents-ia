@@ -35,10 +35,9 @@ async def search_documents(
     if date_to:
         filters["date_to"] = date_to
     
-    results = await search_service.semantic_search(
+    results = await search_service.search_documents(
         query=query,
-        limit=limit,
-        filters=filters
+        limit=limit
     )
     
     return results

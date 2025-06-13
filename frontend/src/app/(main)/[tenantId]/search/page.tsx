@@ -334,18 +334,18 @@ export default function SearchPage() {
                               </div>
                               <div className="flex items-center gap-2 ml-4">
                                 <Badge variant="secondary" className="text-xs">
-                                  {(result.score * 100).toFixed(1)}% match
+                                  {result.score ? (result.score * 100).toFixed(1) : '0.0'}% match
                                 </Badge>
                                 <Badge className={getStatusColor(result.document.indexed)} variant="secondary">
-                                  {result.document.indexed}
+                                  {result.document.indexed || 'unknown'}
                                 </Badge>
                               </div>
                             </div>
 
                             <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
-                              <span>Size: {formatFileSize(result.document.file_size)}</span>
+                              <span>Size: {result.document.file_size ? formatFileSize(result.document.file_size) : 'Unknown'}</span>
                               <span>•</span>
-                              <span>Uploaded: {new Date(result.document.created_at).toLocaleDateString()}</span>
+                              <span>Uploaded: {result.document.created_at ? new Date(result.document.created_at).toLocaleDateString() : 'Unknown date'}</span>
                             </div>
 
                             {result.document.tags && result.document.tags.length > 0 && (
@@ -368,7 +368,7 @@ export default function SearchPage() {
                                       &quot;...{match.text}...&quot;
                                     </span>
                                     <Badge variant="outline" className="ml-2 text-xs">
-                                      {(match.score * 100).toFixed(1)}% relevance
+                                      {match.score ? (match.score * 100).toFixed(1) : '0.0'}% relevance
                                     </Badge>
                                   </div>
                                 ))}
