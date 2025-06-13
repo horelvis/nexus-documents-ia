@@ -2,6 +2,7 @@
 Vector Service using LangChain microservice HTTP client
 """
 import logging
+import asyncio
 import httpx # Added httpx import
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
@@ -120,6 +121,10 @@ class VectorService:
             if "model" in error_msg.lower() and ("not found" in error_msg.lower() or "404" in error_msg):
                 logger.warning("Detected missing embedding model. Attempting to auto-fix...")
                 await self._ensure_embedding_model()
+            # Check for dimension mismatch and trigger reindexing
+            elif "dimension error" in error_msg.lower() or "expected dim" in error_msg.lower():
+                logger.warning("Detected vector dimension mismatch. Triggering auto-fix with reindexing...")
+                await self._auto_fix_dimension_mismatch()
                 
             return []
     
@@ -332,3 +337,47 @@ class VectorService:
                 "vector_service": "error",
                 "error": str(e)
             }
+    
+    async def _auto_fix_dimension_mismatch(self) -> bool:
+        """
+        Automatically fix dimension mismatch by recreating collection and reindexing.
+        
+        Returns:
+            True if fix was successful, False otherwise
+        """
+        try:
+            logger.info("Starting automatic dimension mismatch fix...")
+            
+            # First, check the LangChain service to recreate collection
+            langchain_url = settings.LANGCHAIN_SERVICE_URL.replace("langchain-service:8001", "localhost:8001")
+            
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # Trigger collection recreation
+                headers = {"X-API-Key": "dev-langchain-api-key-12345"}
+                recreate_response = await client.post(
+                    f"{langchain_url}/collection/{self.tenant_id}/recreate",
+                    headers=headers
+                )
+                
+                if recreate_response.status_code == 200:
+                    logger.info("Collection recreated successfully")
+                    
+                    # Import reindex service here to avoid circular imports
+                    from app.services.reindex_service import ReindexService
+                    
+                    # Start reindexing in background
+                    reindex_service = ReindexService(tenant_id=self.tenant_id, user_id=self.user_id)
+                    logger.info("Starting automatic reindexing of documents...")
+                    
+                    # Start reindexing asynchronously
+                    asyncio.create_task(reindex_service.reindex_all_missing(max_concurrent=2))
+                    
+                    logger.info("Dimension mismatch auto-fix initiated successfully")
+                    return True
+                else:
+                    logger.error(f"Failed to recreate collection: {recreate_response.status_code}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error in auto-fix dimension mismatch: {str(e)}")
+            return False

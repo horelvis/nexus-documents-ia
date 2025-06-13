@@ -5,6 +5,7 @@ from app.api.dependencies import get_current_user, get_current_tenant_id
 from app.db.models import User
 from app.services.search_service import SearchService
 from app.services.vector_service import VectorService
+from app.services.reindex_service import ReindexService
 from app.schemas.document import ChatMessage
 
 router = APIRouter()
@@ -99,4 +100,73 @@ async def fix_embedding_model(
         raise HTTPException(
             status_code=500,
             detail="Failed to ensure embedding model availability"
+        )
+
+
+@router.get("/reindex/status", response_model=dict)
+async def get_reindex_status(
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Obtiene el estado del reindexado para el tenant actual.
+    """
+    reindex_service = ReindexService(tenant_id=tenant_id)
+    status = await reindex_service.check_reindex_status()
+    return status
+
+
+@router.post("/reindex/all", response_model=dict)
+async def reindex_all_documents(
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Reindexa todos los documentos que faltan en el vector store.
+    """
+    reindex_service = ReindexService(tenant_id=tenant_id)
+    result = await reindex_service.reindex_all_missing()
+    return result
+
+
+@router.post("/reindex/documents", response_model=dict)
+async def reindex_specific_documents(
+    document_ids: List[str],
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Reindexa documentos específicos por sus IDs.
+    """
+    if not document_ids:
+        raise HTTPException(status_code=400, detail="Document IDs list cannot be empty")
+    
+    reindex_service = ReindexService(tenant_id=tenant_id)
+    result = await reindex_service.reindex_specific_documents(document_ids)
+    return result
+
+
+@router.post("/fix-and-reindex", response_model=dict)
+async def fix_collection_and_reindex(
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Arregla problemas de dimensiones y reindexa automáticamente.
+    """
+    vector_service = VectorService(tenant_id=tenant_id)
+    
+    # Trigger dimension fix
+    fix_success = await vector_service._auto_fix_dimension_mismatch()
+    
+    if fix_success:
+        return {
+            "message": "Collection fix and reindexing initiated successfully",
+            "status": "in_progress",
+            "success": True
+        }
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to initiate collection fix and reindexing"
         )
