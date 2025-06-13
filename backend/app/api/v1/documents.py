@@ -117,7 +117,7 @@ async def stream_document(
     
     # Llamar al storage service proxy endpoint
     from app.core.config import settings
-    storage_url = f"{settings.STORAGE_SERVICE_URL}/storage/proxy/{document.file_path}"
+    storage_url = f"{settings.STORAGE_SERVICE_URL}/api/v1/storage/proxy/{document.file_path}"
     
     headers = {
         "X-API-Key": settings.STORAGE_API_KEY,
@@ -130,9 +130,11 @@ async def stream_document(
             response = await client.get(storage_url, headers=headers)
             
             if response.status_code == 404:
-                raise HTTPException(status_code=404, detail="Document file not found")
+                logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
+                raise HTTPException(status_code=404, detail="Document file not found in storage")
             elif response.status_code != 200:
-                raise HTTPException(status_code=500, detail="Error retrieving document")
+                logger.error(f"Storage error {response.status_code}: {response.text}")
+                raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
             
             # Preparar headers para el cliente
             content_headers = {

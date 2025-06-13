@@ -45,24 +45,29 @@ async def log_requests(request: Request, call_next):
     """Middleware para loggear requests"""
     start_time = time.time()
     
-    # Log request
-    logger.info(f"Request: {request.method} {request.url}")
+    # Skip logging for health checks (Docker health check spam)
+    is_health_check = request.url.path in ["/health", "/healthz"]
     
-    # Headers importantes para debugging (sin exponer secrets)
-    tenant_id = request.headers.get("X-Tenant-ID", "unknown")
-    user_id = request.headers.get("X-User-ID", "system")
-    
-    logger.debug(f"Tenant: {tenant_id}, User: {user_id}")
+    # Log request (skip health checks)
+    if not is_health_check:
+        logger.info(f"Request: {request.method} {request.url}")
+        
+        # Headers importantes para debugging (sin exponer secrets)
+        tenant_id = request.headers.get("X-Tenant-ID", "unknown")
+        user_id = request.headers.get("X-User-ID", "system")
+        
+        logger.debug(f"Tenant: {tenant_id}, User: {user_id}")
     
     response = await call_next(request)
     
-    # Log response
-    process_time = time.time() - start_time
-    logger.info(
-        f"Response: {response.status_code} "
-        f"({process_time:.3f}s) "
-        f"for {request.method} {request.url.path}"
-    )
+    # Log response (skip health checks)
+    if not is_health_check:
+        process_time = time.time() - start_time
+        logger.info(
+            f"Response: {response.status_code} "
+            f"({process_time:.3f}s) "
+            f"for {request.method} {request.url.path}"
+        )
     
     return response
 

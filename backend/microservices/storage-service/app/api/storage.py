@@ -112,9 +112,12 @@ async def upload_file(
     
     # Validaciones
     if not file.filename:
+        logger.error("Upload failed: No filename provided")
         raise HTTPException(status_code=400, detail="Filename is required")
     
     if not validate_file_extension(file.filename):
+        logger.error(f"Upload failed: Invalid extension for file: {file.filename}")
+        logger.error(f"Allowed extensions: {', '.join(settings.ALLOWED_EXTENSIONS)}")
         raise HTTPException(
             status_code=400,
             detail=f"File extension not allowed. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}"

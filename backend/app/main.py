@@ -178,8 +178,12 @@ async def log_requests(request: Request, call_next):
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
     
-    # Log inicial de la request
-    logger.info(f"📨 {request.method} {request.url.path} from {client_ip}")
+    # Skip logging for health checks (Docker health check spam)
+    is_health_check = request.url.path in ["/health", "/healthz"]
+    
+    # Log inicial de la request (skip health checks)
+    if not is_health_check:
+        logger.info(f"📨 {request.method} {request.url.path} from {client_ip}")
     
     # Log headers adicionales para debugging de auth
     if request.url.path.startswith("/api/v1/auth"):
@@ -204,8 +208,9 @@ async def log_requests(request: Request, call_next):
         # Añadir cabecera de tiempo de procesamiento
         response.headers["X-Process-Time"] = str(process_time)
         
-        # Log de respuesta exitosa
-        logger.info(f"✅ {response.status_code} {request.method} {request.url.path} ({process_time:.3f}s)")
+        # Log de respuesta exitosa (skip health checks)
+        if not is_health_check:
+            logger.info(f"✅ {response.status_code} {request.method} {request.url.path} ({process_time:.3f}s)")
         
         # Log adicional para endpoints de auth con errores
         if request.url.path.startswith("/api/v1/auth") and response.status_code >= 400:
@@ -220,7 +225,9 @@ async def log_requests(request: Request, call_next):
         
     except Exception as e:
         process_time = time.time() - start_time
-        logger.error(f"❌ {request.method} {request.url.path} failed: {str(e)} ({process_time:.3f}s)")
+        # Log errors (skip health checks)
+        if not is_health_check:
+            logger.error(f"❌ {request.method} {request.url.path} failed: {str(e)} ({process_time:.3f}s)")
         
         # Log adicional para excepciones en auth endpoints
         if request.url.path.startswith("/api/v1/auth"):
