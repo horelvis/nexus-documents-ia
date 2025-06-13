@@ -106,16 +106,16 @@ export class DocumentService {
     return this.apiClient.get<{ content: string }>(endpoint)
   }
 
+  /**
+   * Download document using the new streaming proxy with Redis cache.
+   * This replaces the old signed URL approach with better performance and security.
+   */
   async downloadDocument(id: string): Promise<{ blob: Blob; filename: string } | { error: string }> {
     try {
-      // First get the download URL
-      const urlResponse = await this.getDocumentDownloadUrl(id)
-      if (urlResponse.error || !urlResponse.data?.download_url) {
-        return { error: urlResponse.error || 'Failed to get download URL' }
-      }
-
-      // Download the file using the signed URL
-      const response = await fetch(urlResponse.data.download_url)
+      // Use new streaming endpoint with Redis cache and proxy
+      const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_STREAM(id)
+      const response = await this.apiClient.fetchRaw(endpoint)
+      
       if (!response.ok) {
         return { error: `Download failed: ${response.statusText}` }
       }
@@ -146,10 +146,8 @@ export class DocumentService {
     return this.apiClient.get<{ summary: string }>(endpoint)
   }
 
-  async getDocumentDownloadUrl(id: string) {
-    const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_DOWNLOAD(id)
-    return this.apiClient.get<{ download_url: string }>(endpoint)
-  }
+  // getDocumentDownloadUrl method removed for security reasons
+  // Use downloadDocument() instead for all document access
 
   async searchDocuments(query: string, limit: number = 10) {
     const searchParams = new URLSearchParams({

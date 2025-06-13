@@ -95,9 +95,13 @@ export default function DocumentPreviewPage() {
     if (!document) return
     
     try {
-      const urlResponse = await documentService.getDocumentDownloadUrl(document.id)
-      if (urlResponse.data?.download_url) {
-        setPdfUrl(urlResponse.data.download_url)
+      // Use new streaming endpoint
+      const downloadResult = await documentService.downloadDocument(document.id)
+      if (downloadResult.blob) {
+        const localUrl = URL.createObjectURL(downloadResult.blob)
+        setPdfUrl(localUrl)
+      } else {
+        console.error('Failed to fetch PDF:', downloadResult.error)
       }
     } catch (err) {
       console.error('Failed to get PDF URL:', err)
@@ -175,6 +179,23 @@ export default function DocumentPreviewPage() {
       generatePreview()
     }
   }, [document])
+
+  // Cleanup PDF URL on unmount or document change
+  useEffect(() => {
+    return () => {
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl)
+      }
+    }
+  }, [pdfUrl])
+
+  useEffect(() => {
+    // Cleanup when document changes
+    if (pdfUrl && pdfUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(pdfUrl)
+      setPdfUrl(null)
+    }
+  }, [documentId])
 
   return (
     <div className="container mx-auto py-6 space-y-6">

@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Backend Development
 - **Start development environment (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
 - **Start production environment**: `cd backend/docker && ./start-prod.sh`
-- **Start development environment (manual)**: `cd backend/docker && docker compose -f docker-compose.dev.yml up -d`
-- **Start production environment (manual)**: `cd backend/docker && docker compose up -d`
+- **Start development environment (manual)**: `cd backend/docker && docker compose up -d`
+- **Start production environment (manual)**: `cd backend/docker && docker compose -f docker-compose.prod.yml up -d`
 - **API server (local without Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 - **Initialize database**: `cd backend && python -m scripts.init_db`
 - **Database migrations**: `cd backend && alembic upgrade head`
@@ -29,32 +29,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Docker Development Modes
 
-#### Development Mode (Recommended for development)
+#### Development Mode (Default - Recommended for development)
 ```bash
 cd backend/docker && ./start-dev.sh
+# OR manually:
+cd backend/docker && docker compose up -d
 ```
 **Features:**
 - **Live code reloading**: Python files are mounted as volumes, changes reflect immediately
-- **No rebuilds needed**: Only rebuilds when `requirements.txt` or `Dockerfile.dev` changes
+- **No rebuilds needed**: Only rebuilds when `requirements.txt` or `Dockerfile` changes
 - **Auto-reload enabled**: uvicorn starts with `--reload` flag
 - **Faster iteration**: Ideal for active development
 
 **What's mounted:**
+- `backend/` → Container's `/app` (main API)
 - `microservices/langchain-service/app` → Container's `/app/app`
 - `microservices/langroid-service/app` → Container's `/app/app`
 - `microservices/storage-service/app` → Container's `/app/app`
 - `microservices/ollama-service/app` → Container's `/app/app`
-- `microservices/gotenberg-service/app` → Container's `/app/app`
 
 #### Production Mode
 ```bash
 cd backend/docker && ./start-prod.sh
+# OR manually:
+cd backend/docker && docker compose -f docker-compose.prod.yml up -d
 ```
 **Features:**
 - **Optimized images**: Multi-stage builds for smaller image sizes
 - **No volume mounting**: Code is copied into containers during build
 - **Production settings**: Optimized for performance and security
 - **Full rebuilds**: Rebuilds entire images when code changes
+
+#### Test Mode
+```bash
+cd backend/docker && docker compose -f docker-compose.test.yml up
+```
+**Features:**
+- **Isolated testing**: Separate database and services for tests
+- **Real GCS integration**: Uses actual Google Cloud Storage for realistic testing
+- **Coverage reports**: Generates test coverage in `backend/tests/coverage_report/`
+- **Automatic cleanup**: Services stop after tests complete
 
 ## Architecture Overview
 

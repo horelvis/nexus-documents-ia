@@ -92,9 +92,13 @@ export function DocumentPreviewDialog({
     if (!document) return
     
     try {
-      const urlResponse = await documentService.getDocumentDownloadUrl(document.id)
-      if (urlResponse.data?.download_url) {
-        setPdfUrl(urlResponse.data.download_url)
+      // Use new streaming endpoint
+      const downloadResult = await documentService.downloadDocument(document.id)
+      if (downloadResult.blob) {
+        const localUrl = URL.createObjectURL(downloadResult.blob)
+        setPdfUrl(localUrl)
+      } else {
+        console.error('Failed to fetch PDF:', downloadResult.error)
       }
     } catch (err) {
       console.error('Failed to get PDF URL:', err)
@@ -112,10 +116,15 @@ export function DocumentPreviewDialog({
   useEffect(() => {
     if (!open || !document) {
       setPreview(null)
+      
+      // Limpiar URL del blob para evitar memory leaks
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl)
+      }
       setPdfUrl(null)
       setError(null)
     }
-  }, [open, document?.id])
+  }, [open, document?.id, pdfUrl])
 
   const handleDownload = async () => {
     if (!document) return

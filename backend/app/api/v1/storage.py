@@ -3,59 +3,14 @@ from typing import List
 from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import get_current_user, get_current_tenant_id, get_current_active_superuser
 from app.db.models import User
-from app.schemas.document import SignedUrlResponse, UploadRequest
+from app.schemas.document import UploadRequest
 from app.services.storage_service import StorageService
 
 router = APIRouter()
 
 
-@router.post("/upload-url", response_model=SignedUrlResponse)
-async def generate_upload_url(
-    request: UploadRequest,
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
-):
-    """
-    Genera una URL firmada para subir un archivo directamente al almacenamiento.
-    """
-    storage_service = StorageService(tenant_id=tenant_id)
-    
-    url, expires_at = storage_service.generate_upload_signed_url(
-        object_name=f"uploads/{current_user.id}/{request.filename}",
-        content_type=request.content_type
-    )
-    
-    return {
-        "url": url,
-        "expires_at": expires_at.isoformat()
-    }
-
-
-@router.post("/download-url", response_model=SignedUrlResponse)
-async def generate_download_url(
-    object_name: str,
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
-):
-    """
-    Genera una URL firmada para descargar un archivo del almacenamiento.
-    """
-    storage_service = StorageService(tenant_id=tenant_id)
-    
-    # Validar que el usuario tenga acceso al objeto
-    # Aquí podría implementarse una verificación de acceso más detallada
-    
-    try:
-        url, expires_at = storage_service.generate_download_signed_url(
-            object_name=object_name
-        )
-        
-        return {
-            "url": url,
-            "expires_at": expires_at.isoformat()
-        }
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="El archivo no existe")
+# Signed URL endpoints removed for security reasons
+# Use storage microservice proxy endpoints instead
 
 
 @router.get("/list", response_model=List[dict])

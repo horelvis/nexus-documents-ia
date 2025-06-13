@@ -6,7 +6,7 @@ from app.api.dependencies import get_current_user, get_current_tenant_id, requir
 from app.db.models import User
 from app.schemas.document import (
     Document, DocumentDetail,
-    SignedUrlResponse, UploadRequest
+    UploadRequest
 )
 from app.services.document_service import DocumentService
 import logging
@@ -71,20 +71,8 @@ async def create_document(
     )
 
 
-@router.get("/upload-url", response_model=SignedUrlResponse)
-async def get_upload_url(
-    request: UploadRequest,
-    current_user: User = Depends(require_document_upload_permission),
-    tenant_id: str = Depends(get_current_tenant_id)
-):
-    """
-    Genera una URL firmada para subir un documento directamente a GCS.
-    """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_signed_upload_url(
-        filename=request.filename,
-        content_type=request.content_type
-    )
+# Upload signed URL endpoint removed for security reasons
+# Use direct upload via /upload endpoint instead
 
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
@@ -101,19 +89,80 @@ async def get_document(
     return document_service.get_document(db=db, doc_id=doc_id)
 
 
-@router.get("/{doc_id}/download-url", response_model=SignedUrlResponse)
-async def get_download_url(
+# Signed URL endpoint removed for security reasons
+# Use /stream endpoint instead for all document access
+
+
+@router.get("/{doc_id}/stream")
+async def stream_document(
     doc_id: str,
-    db: Session = Depends(get_db), # Added db session
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """
-    Genera una URL firmada para descargar un documento específico.
+    Sirve documentos a través del proxy con cache Redis.
+    Reemplaza tanto /pdf como /download-url con una sola ruta optimizada.
     """
+    from fastapi.responses import StreamingResponse
+    from fastapi import HTTPException
+    import httpx
+    
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_signed_download_url(db=db, doc_id=doc_id) # Pass db
-
+    
+    # Obtener información del documento
+    document = document_service.get_document(db=db, doc_id=doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Llamar al storage service proxy endpoint
+    from app.core.config import settings
+    storage_url = f"{settings.STORAGE_SERVICE_URL}/storage/proxy/{document.file_path}"
+    
+    headers = {
+        "X-API-Key": settings.STORAGE_API_KEY,
+        "X-Tenant-ID": tenant_id,
+        "X-User-ID": str(current_user.id)
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(storage_url, headers=headers)
+            
+            if response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Document file not found")
+            elif response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Error retrieving document")
+            
+            # Preparar headers para el cliente
+            content_headers = {
+                "Content-Type": response.headers.get("content-type", "application/octet-stream"),
+                "Content-Disposition": f'inline; filename="{document.filename}"'
+            }
+            
+            # Añadir headers de cache info si están disponibles
+            if "x-cache" in response.headers:
+                content_headers["X-Cache"] = response.headers["x-cache"]
+            
+            if "content-length" in response.headers:
+                content_headers["Content-Length"] = response.headers["content-length"]
+            
+            # Stream la respuesta
+            async def stream_response():
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    yield chunk
+            
+            return StreamingResponse(
+                stream_response(),
+                headers=content_headers,
+                media_type=response.headers.get("content-type", "application/octet-stream")
+            )
+            
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="Request timeout")
+    except Exception as e:
+        logger.error(f"Error streaming document {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error streaming document")
 
 @router.get("/{doc_id}/pdf")
 async def serve_pdf(

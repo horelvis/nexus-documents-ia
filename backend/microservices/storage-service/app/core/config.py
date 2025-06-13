@@ -34,6 +34,11 @@ class Settings:
     
     # Testing
     TESTING: bool = os.getenv("TESTING", "false").lower() == "true"
+    
+    # Redis Configuration
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
 
 # Crear instancia y log de configuración
 settings = Settings()
@@ -46,11 +51,13 @@ logger.info(f"GCS_CREDENTIALS: {settings.GCS_CREDENTIALS}")
 logger.info(f"GCS_BUCKET_NAME: {settings.GCS_BUCKET_NAME}")
 logger.info(f"DEBUG: {settings.DEBUG}")
 logger.info(f"TESTING: {settings.TESTING}")
+logger.info(f"REDIS_HOST: {settings.REDIS_HOST}")
+logger.info(f"REDIS_PORT: {settings.REDIS_PORT}")
 logger.info("=== END CONFIGURATION ===")
 
 # Log de variables de entorno raw
 logger.info("=== RAW ENVIRONMENT VARIABLES ===")
-for key in ["API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING"]:
+for key in ["API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING", "REDIS_HOST", "REDIS_PORT"]:
     value = os.getenv(key, "NOT_SET")
     if key == "API_KEY" and value != "NOT_SET":
         value = f"{value[:10]}... (masked)"

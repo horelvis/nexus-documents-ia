@@ -140,6 +140,15 @@ class StorageService:
             
             success = self.client.delete_file(file_path)
             
+            # Fallback: si no se encuentra con el path completo, intentar solo con el filename
+            if not success and "/" in file_path:
+                filename_only = file_path.split("/")[-1]
+                logger.info(f"Trying delete fallback with filename only: {filename_only}")
+                success = self.client.delete_file(filename_only)
+                if success:
+                    logger.info(f"File deleted successfully with fallback: {object_name} -> {filename_only}")
+                    return success
+            
             if success:
                 logger.info(f"File deleted successfully: {object_name} -> {file_path}")
             else:

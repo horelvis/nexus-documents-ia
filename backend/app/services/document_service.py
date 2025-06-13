@@ -394,7 +394,9 @@ class DocumentService:
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Eliminar archivo del almacenamiento
-            await asyncio.to_thread(self.storage_service.delete_file, document.file_path)
+            storage_deleted = await asyncio.to_thread(self.storage_service.delete_file, document.file_path)
+            if not storage_deleted:
+                logger.warning(f"Failed to delete file from storage: {document.file_path}")
             
             # Eliminar del vector store
             await self.vector_service.delete_document(doc_id=doc_id) # Ensure single call to vector_service
@@ -404,7 +406,10 @@ class DocumentService:
             db.delete(document)
             db.commit()
             
-            return {"message": f"Document {doc_id} deleted successfully"}
+            message = f"Document {doc_id} deleted successfully"
+            if not storage_deleted:
+                message += " (warning: file may still exist in storage)"
+            return {"message": message}
             
         except HTTPException:
             raise
@@ -555,77 +560,11 @@ class DocumentService:
         # finally: # Removed
             # db.close() # Removed
     
-    def get_signed_download_url(self, db: Session, doc_id: str) -> Dict[str, Any]: # Added db: Session
-        """
-        Genera una URL firmada para descargar un documento.
-        """
-        # db = SessionLocal() # Removed
-        
-        try:
-            document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
-            ).first()
-            
-            if not document:
-                raise HTTPException(status_code=404, detail="Document not found")
-            
-            # Generar URL firmada
-            url, expires_at = self.storage_service.generate_download_signed_url(
-                object_name=document.file_path
-            )
-            
-            return {
-                "url": url,
-                "expires_at": expires_at.isoformat(),
-                "filename": document.filename
-            }
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception(f"Error generating signed URL for document {doc_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the download URL.")
-        # finally: # Removed
-            # db.close() # Removed
+    # get_signed_download_url method removed for security reasons
+    # Use stream_document endpoint instead for all document access
     
-    def get_signed_upload_url(self, filename: str, content_type: str) -> Dict[str, Any]:
-        """
-        Genera una URL firmada para subir un documento.
-        """
-        try:
-            # Verificar extensión
-            file_ext = os.path.splitext(filename)[1][1:].lower() if "." in filename else ""
-            if not file_ext or file_ext not in settings.ALLOWED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Tipo de archivo no permitido. Permitidos: {', '.join(settings.ALLOWED_EXTENSIONS)}"
-                )
-            
-            # Generar ID único para el futuro documento
-            doc_id = str(uuid.uuid4())
-            
-            # Definir ruta en el almacenamiento
-            file_path = f"documents/{doc_id}/{filename}"
-            
-            # Generar URL firmada
-            url, expires_at = self.storage_service.generate_upload_signed_url(
-                object_name=file_path,
-                content_type=content_type
-            )
-            
-            return {
-                "upload_url": url,
-                "expires_at": expires_at.isoformat(),
-                "file_path": file_path,
-                "doc_id": doc_id
-            }
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception(f"Error generating signed upload URL: {str(e)}")
-            raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the upload URL.")
+    # get_signed_upload_url method removed for security reasons
+    # Use direct upload via /upload endpoint instead
 
     def _extract_text(self, file: BinaryIO, file_type: str) -> str:
         """

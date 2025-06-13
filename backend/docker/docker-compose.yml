@@ -1,5 +1,5 @@
 services:
-  # Servicio principal de la API
+  # Servicio principal de la API - DEVELOPMENT MODE
   api:
     build:
       context: ..
@@ -34,9 +34,9 @@ services:
       - DEBUG=${DEBUG:-true}
       - TESTING=${TESTING:-false}
     volumes:
-      - ../:/app  # Esto monta toda la carpeta backend en /app
+      - ../:/app  # Live code reloading for development
     restart: unless-stopped
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -99,7 +99,7 @@ services:
       retries: 3
 
 
-  # LangChain microservice
+  # LangChain microservice - DEVELOPMENT MODE
   langchain-service:
     build:
       context: ../microservices/langchain-service
@@ -117,15 +117,14 @@ services:
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - OLLAMA_MODEL=llama3.1:8b
       - EMBEDDING_MODEL=nomic-embed-text
+      - API_KEY=your-secret-api-key-here
+      - DEBUG=true  # Enable reload in dev
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/langchain-service/app:/app/app:rw
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
-  # Langroid microservice (Advanced AI agents)
+  # Langroid microservice - DEVELOPMENT MODE
   langroid-service:
     build:
       context: ../microservices/langroid-service
@@ -145,6 +144,10 @@ services:
       - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
       - SECRET_KEY=${SECRET_KEY:-langroid-secret-key}
       - LOG_LEVEL=INFO
+      - DEBUG=true  # Enable reload in dev
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/langroid-service/app:/app/app:rw
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
@@ -153,7 +156,7 @@ services:
       retries: 3
       start_period: 60s
 
-  # Ollama Microservice
+  # Ollama Microservice - DEVELOPMENT MODE
   ollama-service:
     build:
       context: ../microservices/ollama-service
@@ -163,6 +166,8 @@ services:
       - "8004:8000"    # FastAPI wrapper port
     volumes:
       - ollama_data:/root/.ollama
+      # Mount the Python code for live reloading
+      - ../microservices/ollama-service/app:/app/app:rw
     networks:
       - backend-network
     restart: unless-stopped
@@ -173,6 +178,7 @@ services:
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_MAX_LOADED_MODELS=3
       - PYTHONPATH=/app
+      - DEBUG=true  # Enable reload in dev
     deploy:
       resources:
         reservations:
@@ -187,17 +193,21 @@ services:
       retries: 3
       start_period: 120s
 
-  # Storage Microservice
+  # Storage Microservice - DEVELOPMENT MODE
   storage-service:
     build:
       context: ../microservices/storage-service
       dockerfile: Dockerfile
     ports:
       - "8003:8001"
+    depends_on:
+      - redis
     networks:
       - backend-network
     volumes:
       - ../credentials:/app/credentials:ro
+      # Mount the Python code for live reloading
+      - ../microservices/storage-service/app:/app/app:rw
     env_file:
       - ../.env
     environment:
@@ -210,6 +220,8 @@ services:
       - RATE_LIMIT_PER_MINUTE=10
       - DEBUG=true
       - TESTING=false
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -218,7 +230,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # Gotenberg service for PDF conversion
+  # Gotenberg service for document conversion
   gotenberg:
     image: gotenberg/gotenberg:8
     ports:
@@ -226,10 +238,12 @@ services:
     networks:
       - backend-network
     restart: unless-stopped
-    command:
-      - "gotenberg"
-      - "--chromium-disable-web-security"
-      - "--chromium-allow-list=file:///*"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   backend-network:

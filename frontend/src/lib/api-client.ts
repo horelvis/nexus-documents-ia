@@ -101,6 +101,25 @@ class ApiClient {
     return this.request<T>(endpoint, { method: 'DELETE' })
   }
 
+  async fetchRaw(endpoint: string, options: RequestInit = {}): Promise<Response> {
+    const token = await this.getAuthToken()
+    
+    const defaultHeaders: HeadersInit = {}
+    if (token) {
+      defaultHeaders.Authorization = `Bearer ${token}`
+    }
+
+    const config: RequestInit = {
+      ...options,
+      headers: {
+        ...defaultHeaders,
+        ...options.headers,
+      },
+    }
+
+    return fetch(`${this.baseURL}${endpoint}`, config)
+  }
+
   async upload<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
     try {
       const token = await this.getAuthToken()

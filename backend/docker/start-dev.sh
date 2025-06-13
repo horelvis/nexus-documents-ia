@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Development startup script for Nexus Document Backend
-# This script uses the development docker-compose configuration with volume mounting
+# This script uses the default docker-compose configuration with volume mounting
 
 set -e
 
@@ -19,15 +19,15 @@ fi
 
 # Stop any existing containers
 echo "🛑 Stopping any existing containers..."
-docker compose -f docker-compose.dev.yml down
+docker compose down
 
 # Build images (only rebuilds if Dockerfile or requirements.txt changed)
 echo "🔨 Building development images..."
-docker compose -f docker-compose.dev.yml build
+docker compose build
 
 # Start services
 echo "🎯 Starting services in development mode..."
-docker compose -f docker-compose.dev.yml up -d
+docker compose up -d
 
 # Show status
 echo ""
@@ -48,9 +48,9 @@ echo "   • Redis:             localhost:6379"
 echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
-echo "   docker compose -f docker-compose.dev.yml logs -f [service-name]"
+echo "   docker compose logs -f [service-name]"
 echo ""
 echo "🛑 Stop services with:"
-echo "   docker compose -f docker-compose.dev.yml down"
+echo "   docker compose down"
 echo ""
 echo "💡 Code changes will automatically reload services!"

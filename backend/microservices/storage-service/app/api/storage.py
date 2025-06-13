@@ -1,11 +1,12 @@
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, AsyncGenerator
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import io
 
 from app.core.security import (
     validate_tenant_access, 
@@ -16,11 +17,15 @@ from app.core.security import (
 )
 from app.core.config import settings
 from app.services.gcs_service import GCSService
+from app.services.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
+
+# Cache global para instancias de GCSService (bucket_name -> GCSService)
+_gcs_service_cache: Dict[str, GCSService] = {}
 
 router = APIRouter(prefix="/storage", tags=["storage"])
 
@@ -65,12 +70,29 @@ class CleanupResponse(BaseModel):
     bucket: str
 
 def get_gcs_service(auth_context: dict = Depends(validate_tenant_access)) -> GCSService:
-    """Dependency que retorna el servicio GCS configurado para el tenant"""
+    """Dependency que retorna el servicio GCS configurado para el tenant (con cache)"""
     bucket_name = get_bucket_name(
         auth_context["tenant_id"], 
         auth_context.get("bucket_name")
     )
-    return GCSService(bucket_name)
+    
+    # Verificar si ya existe en cache
+    if bucket_name in _gcs_service_cache:
+        logger.debug(f"Using cached GCS service for bucket: {bucket_name}")
+        return _gcs_service_cache[bucket_name]
+    
+    # Crear nueva instancia y guardar en cache
+    logger.info(f"Creating new GCS service instance for bucket: {bucket_name}")
+    gcs_service = GCSService(bucket_name)
+    _gcs_service_cache[bucket_name] = gcs_service
+    
+    return gcs_service
+
+def clear_gcs_cache():
+    """Limpia el cache de servicios GCS (útil para testing)"""
+    global _gcs_service_cache
+    _gcs_service_cache.clear()
+    logger.info("GCS service cache cleared")
 
 @router.post("/upload", response_model=UploadResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
@@ -180,6 +202,111 @@ async def download_file(
         }
     )
 
+@router.get("/proxy/{path:path}")
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def proxy_download_file(
+    request: Request,
+    path: str,
+    auth_context: dict = Depends(validate_tenant_access),
+    gcs_service: GCSService = Depends(get_gcs_service)
+):
+    """
+    Proxy download with Redis cache and streaming support.
+    
+    - **path**: Path del archivo (sin prefijo de tenant/user)
+    
+    Features:
+    - Redis cache for files < 50MB
+    - Streaming for large files
+    - Automatic TTL based on file size
+    - Complete audit logging
+    """
+    
+    # Construir path completo
+    object_name = get_object_path(
+        auth_context["tenant_id"],
+        auth_context["user_id"],
+        path
+    )
+    
+    # Obtener info del archivo primero
+    file_info = gcs_service.get_file_info(object_name)
+    if not file_info:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_size = file_info.get("size", 0)
+    content_type = file_info.get("content_type", "application/octet-stream")
+    filename = path.split('/')[-1]
+    
+    # Log access for audit
+    logger.info(f"Proxy access: {object_name} by tenant {auth_context['tenant_id']} (size: {file_size})")
+    
+    # Check cache first for cacheable files
+    if redis_cache.should_cache(file_size):
+        cached_data = redis_cache.get(auth_context["tenant_id"], object_name)
+        if cached_data:
+            content, metadata = cached_data
+            logger.info(f"Cache hit for {object_name}")
+            
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f"inline; filename={filename}",
+                    "Content-Length": str(len(content)),
+                    "X-Cache": "HIT"
+                }
+            )
+    
+    # Cache miss or uncacheable file - download from GCS
+    content = gcs_service.download_file(object_name)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File not found in storage")
+    
+    # Cache small/medium files
+    if redis_cache.should_cache(file_size):
+        redis_cache.set(
+            auth_context["tenant_id"], 
+            object_name, 
+            content, 
+            file_info, 
+            file_size
+        )
+        cache_status = "MISS-CACHED"
+    else:
+        cache_status = "UNCACHEABLE"
+    
+    # For large files, stream to avoid memory issues
+    if file_size > redis_cache.MEDIUM_FILE_LIMIT:
+        def stream_content():
+            chunk_size = 1024 * 1024  # 1MB chunks
+            content_io = io.BytesIO(content)
+            while True:
+                chunk = content_io.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+        
+        return StreamingResponse(
+            stream_content(),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"inline; filename={filename}",
+                "Content-Length": str(file_size),
+                "X-Cache": cache_status
+            }
+        )
+    else:
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"inline; filename={filename}",
+                "Content-Length": str(len(content)),
+                "X-Cache": cache_status
+            }
+        )
+
 @router.delete("/delete/{path:path}", response_model=DeleteResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def delete_file(
@@ -202,6 +329,9 @@ async def delete_file(
     )
     
     success = gcs_service.delete_file(object_name)
+    
+    # Clear from cache if exists
+    redis_cache.delete(auth_context["tenant_id"], object_name)
     
     logger.info(f"File deleted: {object_name} by tenant {auth_context['tenant_id']}")
     
@@ -278,91 +408,11 @@ async def list_files(
         prefix=prefix
     )
 
-@router.post("/signed-url/upload", response_model=SignedUrlResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
-async def generate_upload_signed_url(
-    request: Request,
-    data: SignedUrlRequest,
-    auth_context: dict = Depends(validate_tenant_access),
-    gcs_service: GCSService = Depends(get_gcs_service)
-):
-    """
-    Genera una URL firmada para subir un archivo.
-    
-    - **filename**: Nombre del archivo a subir
-    - **content_type**: Tipo de contenido MIME
-    - **expiration**: Tiempo de expiración en segundos (opcional)
-    """
-    
-    # Validaciones
-    if not validate_file_extension(data.filename):
-        raise HTTPException(
-            status_code=400,
-            detail=f"File extension not allowed. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}"
-        )
-    
-    # Generar path del objeto
-    object_name = get_object_path(
-        auth_context["tenant_id"],
-        auth_context["user_id"],
-        data.filename
-    )
-    
-    url, expires_at = gcs_service.generate_signed_url(
-        object_name=object_name,
-        method="PUT",
-        expiration=data.expiration,
-        content_type=data.content_type
-    )
-    
-    logger.info(f"Generated upload signed URL for: {object_name}")
-    
-    return SignedUrlResponse(
-        url=url,
-        expires_at=expires_at.isoformat(),
-        object_name=object_name
-    )
+# Signed URL upload endpoint removed for security reasons
+# Use direct upload via /upload endpoint instead
 
-@router.post("/signed-url/download/{path:path}", response_model=SignedUrlResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
-async def generate_download_signed_url(
-    request: Request,
-    path: str,
-    expiration: Optional[int] = Query(None, description="Tiempo de expiración en segundos"),
-    auth_context: dict = Depends(validate_tenant_access),
-    gcs_service: GCSService = Depends(get_gcs_service)
-):
-    """
-    Genera una URL firmada para descargar un archivo.
-    
-    - **path**: Path del archivo (sin prefijo de tenant/user)
-    - **expiration**: Tiempo de expiración en segundos (opcional)
-    """
-    
-    # Construir path completo
-    object_name = get_object_path(
-        auth_context["tenant_id"],
-        auth_context["user_id"],
-        path
-    )
-    
-    # Verificar que el archivo existe
-    if not gcs_service.file_exists(object_name):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    url, expires_at = gcs_service.generate_signed_url(
-        object_name=object_name,
-        method="GET",
-        expiration=expiration
-    )
-    
-    logger.info(f"Generated download signed URL for: {object_name}")
-    
-    return SignedUrlResponse(
-        url=url,
-        expires_at=expires_at.isoformat(),
-        object_name=object_name
-    )
+# Signed URL download endpoint removed for security reasons
+# Use /proxy/{path} endpoint instead for all document access
 
 # Endpoint solo para testing
 @router.post("/cleanup", response_model=CleanupResponse)
@@ -386,12 +436,39 @@ async def cleanup_test_bucket(
     
     return CleanupResponse(**result)
 
+# Cache management endpoints
+@router.get("/cache/stats")
+async def get_cache_stats(
+    auth_context: dict = Depends(validate_tenant_access)
+):
+    """Get Redis cache statistics."""
+    return redis_cache.get_cache_stats()
+
+@router.delete("/cache/clear")
+async def clear_tenant_cache(
+    auth_context: dict = Depends(validate_tenant_access)
+):
+    """Clear cache for current tenant."""
+    deleted = redis_cache.clear_tenant_cache(auth_context["tenant_id"])
+    return {
+        "message": f"Cleared {deleted} cached documents for tenant",
+        "tenant_id": auth_context["tenant_id"],
+        "deleted_count": deleted
+    }
+
 # Health check
 @router.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Enhanced health check endpoint with Redis status"""
+    redis_healthy = redis_cache.health_check()
+    cache_stats = redis_cache.get_cache_stats() if redis_healthy else {"connected": False}
+    
     return {
-        "status": "healthy",
+        "status": "healthy" if redis_healthy else "degraded",
         "service": settings.SERVICE_NAME,
-        "version": settings.SERVICE_VERSION
+        "version": settings.SERVICE_VERSION,
+        "redis_connected": redis_healthy,
+        "cache_stats": cache_stats,
+        "cached_buckets": list(_gcs_service_cache.keys()),
+        "gcs_cache_size": len(_gcs_service_cache)
     }

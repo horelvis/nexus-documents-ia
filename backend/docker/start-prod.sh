@@ -19,15 +19,15 @@ fi
 
 # Stop any existing containers
 echo "🛑 Stopping any existing containers..."
-docker compose down
+docker compose -f docker-compose.prod.yml down
 
 # Build images
 echo "🔨 Building production images..."
-docker compose build --no-cache
+docker compose -f docker-compose.prod.yml build --no-cache
 
 # Start services
 echo "🎯 Starting services in production mode..."
-docker compose up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Show status
 echo ""
@@ -48,7 +48,7 @@ echo "   • Redis:             localhost:6379"
 echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
-echo "   docker compose logs -f [service-name]"
+echo "   docker compose -f docker-compose.prod.yml logs -f [service-name]"
 echo ""
 echo "🛑 Stop services with:"
-echo "   docker compose down"
+echo "   docker compose -f docker-compose.prod.yml down"
