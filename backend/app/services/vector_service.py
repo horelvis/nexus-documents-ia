@@ -111,6 +111,12 @@ class VectorService:
                 results = await lc_client.search_similar(tenant_id=self.tenant_id, query=query, limit=limit)
             
             logger.debug(f"Found {len(results)} similar documents")
+            
+            # Check if we have few/no results and trigger reindexing if needed
+            if len(results) == 0:
+                logger.info("No search results found. Checking if reindexing is needed...")
+                await self._check_and_trigger_reindex()
+            
             return results
             
         except Exception as e:
@@ -380,4 +386,56 @@ class VectorService:
                     
         except Exception as e:
             logger.error(f"Error in auto-fix dimension mismatch: {str(e)}")
+            return False
+    
+    async def _check_and_trigger_reindex(self) -> bool:
+        """
+        Check if there are documents that need reindexing and trigger it automatically.
+        
+        Returns:
+            True if reindexing was triggered, False otherwise
+        """
+        try:
+            # Import here to avoid circular imports
+            from app.services.reindex_service import ReindexService
+            from app.db.database import SessionLocal
+            from app.db.models import Document
+            from app.schemas.enums import IndexingStatus
+            from sqlalchemy import and_
+            
+            # Quick check: are there any indexed documents?
+            with SessionLocal() as db:
+                indexed_count = db.query(Document).filter(
+                    and_(
+                        Document.tenant_id == self.tenant_id,
+                        Document.indexed == IndexingStatus.INDEXED
+                    )
+                ).count()
+                
+                if indexed_count == 0:
+                    logger.debug("No indexed documents found - no reindexing needed")
+                    return False
+                
+                logger.info(f"Found {indexed_count} indexed documents, but search returned 0 results")
+                logger.info("Triggering automatic reindexing...")
+                
+                # Create reindex service and trigger reindexing
+                reindex_service = ReindexService(tenant_id=self.tenant_id, user_id=self.user_id)
+                
+                # Check how many need reindexing
+                documents_needing_reindex = await reindex_service.get_documents_needing_reindex(db)
+                
+                if len(documents_needing_reindex) > 0:
+                    logger.info(f"Found {len(documents_needing_reindex)} documents needing reindexing")
+                    
+                    # Start reindexing in background
+                    asyncio.create_task(reindex_service.reindex_all_missing(max_concurrent=3))
+                    logger.info("✅ Automatic reindexing started in background")
+                    return True
+                else:
+                    logger.debug("All documents are properly indexed in vector store")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error checking and triggering reindex: {str(e)}")
             return False

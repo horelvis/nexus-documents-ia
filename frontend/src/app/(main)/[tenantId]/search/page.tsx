@@ -22,6 +22,7 @@ import { useNotifications } from "@/contexts/notifications-context"
 import { useSearchService, SearchResult, AskDocumentsResponse } from "@/lib/services/search.service"
 import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
 import RAGAssistant from "@/components/search/rag-assistant"
+import FinancialAgent from "@/components/search/financial-agent"
 
 export default function SearchPage() {
   // Search state
@@ -40,6 +41,7 @@ export default function SearchPage() {
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [financialFilters, setFinancialFilters] = useState<any>({})
   
   const { addNotification } = useNotifications()
   const searchService = useSearchService()
@@ -147,6 +149,20 @@ export default function SearchPage() {
     setSelectedTags([])
     setDateFrom('')
     setDateTo('')
+    setFinancialFilters({})
+  }
+
+  const handleFinancialFiltersChange = (filters: any) => {
+    setFinancialFilters(filters)
+    // Optionally trigger a new search with financial filters
+    // You could extend the search API to support these filters
+  }
+
+  const handleFinancialInsight = (insight: string) => {
+    // When user clicks on a financial insight, set it as a question for the Q&A
+    setQuestion(insight)
+    // Optionally switch to the Ask tab
+    // You could add tab switching logic here
   }
 
   const handleAssistantSuggestion = (suggestion: string) => {
@@ -240,17 +256,31 @@ export default function SearchPage() {
                   </div>
                   <Button variant="outline" onClick={clearFilters}>
                     Clear Filters
+                    {(Object.keys(financialFilters).length > 0) && (
+                      <Badge variant="secondary" className="ml-2 h-4 w-4 p-0 text-xs">
+                        {Object.keys(financialFilters).length}
+                      </Badge>
+                    )}
                   </Button>
                 </div>
               </CardContent>
             </Card>
 
             {!isSearching && !searchError && searchQuery && (
-              <RAGAssistant
-                searchResults={searchResults}
-                searchQuery={searchQuery}
-                onSuggestionClick={handleAssistantSuggestion}
-              />
+              <div className="space-y-4">
+                <RAGAssistant
+                  searchResults={searchResults}
+                  searchQuery={searchQuery}
+                  onSuggestionClick={handleAssistantSuggestion}
+                />
+                
+                <FinancialAgent
+                  searchResults={searchResults}
+                  searchQuery={searchQuery}
+                  onFiltersChange={handleFinancialFiltersChange}
+                  onInsightClick={handleFinancialInsight}
+                />
+              </div>
             )}
 
             {isSearching && (
