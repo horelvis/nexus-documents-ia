@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.api.llm import router as llm_router
 from app.core.config import settings
+from app.services.ollama_service import OllamaService
 
 # Create FastAPI application
 app = FastAPI(
@@ -29,6 +30,33 @@ app.add_middleware(
 
 # Include routers
 app.include_router(llm_router, prefix="/api/v1", tags=["llm"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to ensure required models are available"""
+    logger.info("🚀 Starting Ollama Microservice startup...")
+    
+    # Initialize Ollama service
+    ollama_service = OllamaService()
+    
+    # Required models for the system
+    required_models = [
+        settings.EMBEDDING_MODEL,  # nomic-embed-text
+        settings.DEFAULT_MODEL     # llama3.2 or other default LLM
+    ]
+    
+    for model in required_models:
+        try:
+            logger.info(f"🔍 Checking if model '{model}' is available...")
+            success = await ollama_service.ensure_model_loaded(model)
+            if success:
+                logger.info(f"✅ Model '{model}' is ready")
+            else:
+                logger.warning(f"⚠️ Failed to ensure model '{model}' is ready")
+        except Exception as e:
+            logger.error(f"❌ Error ensuring model '{model}': {e}")
+    
+    logger.info("🎉 Ollama Microservice startup complete!")
 
 @app.get("/health")
 async def health_check():

@@ -34,23 +34,32 @@ class VectorService:
         logger.info(f"VectorService initialized for tenant: {self.tenant_id}")
     
     def _ensure_collection_exists(self):
-        """Asegura que la colección existe en Qdrant"""
+        """Asegura que la colección existe en Qdrant con las dimensiones correctas"""
         try:
+            # Verificar y recrear colección si hay conflicto de dimensiones
+            collection_ok = self._recreate_collection_if_needed()
+            
+            if not collection_ok:
+                raise Exception("Failed to ensure collection has correct dimensions")
+            
+            # Verificar si necesitamos crear la colección
             collections = self.client.get_collections()
             collection_names = [col.name for col in collections.collections]
             
             if self.collection_name not in collection_names:
-                # Crear nueva colección
+                # Crear nueva colección con dimensiones dinámicas
+                embedding_dimensions = self._get_embedding_dimensions()
+                
                 self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
-                        size=1536,  # Dimensión estándar para embeddings
+                        size=embedding_dimensions,
                         distance=models.Distance.COSINE,
                     ),
                 )
-                logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente")
+                logger.info(f"Colección Qdrant '{self.collection_name}' creada exitosamente con {embedding_dimensions} dimensiones")
             else:
-                logger.debug(f"Colección Qdrant '{self.collection_name}' ya existe")
+                logger.debug(f"Colección Qdrant '{self.collection_name}' ya existe con dimensiones correctas")
                 
         except Exception as e:
             logger.error(f"Error al verificar/crear colección {self.collection_name}: {str(e)}")
@@ -177,7 +186,21 @@ class VectorService:
             return results
             
         except Exception as e:
-            logger.error(f"Error searching similar documents: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error searching similar documents: {error_msg}")
+            
+            # Check for dimension mismatch and try to fix it
+            if "dimension error" in error_msg.lower() or "expected dim" in error_msg.lower():
+                logger.warning("Detected vector dimension mismatch. Attempting to recreate collection...")
+                try:
+                    collection_recreated = self._recreate_collection_if_needed()
+                    if collection_recreated:
+                        logger.info("Collection recreated successfully. Please try your search again.")
+                    else:
+                        logger.error("Failed to recreate collection with correct dimensions")
+                except Exception as recreate_error:
+                    logger.error(f"Error recreating collection: {str(recreate_error)}")
+            
             return []
     
     def search_by_document_ids(self, doc_ids: List[str], query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -289,4 +312,69 @@ class VectorService:
             
         except Exception as e:
             logger.error(f"Error clearing collection: {str(e)}")
+            return False
+    
+    def _get_embedding_dimensions(self) -> int:
+        """
+        Determina las dimensiones del modelo de embeddings actual.
+        
+        Returns:
+            Número de dimensiones del vector de embeddings
+        """
+        try:
+            # Generar un embedding de prueba para determinar dimensiones
+            test_embedding = self.embeddings.embed_query("test")
+            dimensions = len(test_embedding)
+            logger.info(f"Detected embedding dimensions: {dimensions}")
+            return dimensions
+        except Exception as e:
+            logger.error(f"Error detecting embedding dimensions: {str(e)}")
+            # Fallback para nomic-embed-text
+            return 768
+    
+    def _recreate_collection_if_needed(self) -> bool:
+        """
+        Recrea la colección si hay conflicto de dimensiones.
+        
+        Returns:
+            True si la colección fue recreada o está OK, False en caso de error
+        """
+        try:
+            # Verificar si la colección existe
+            collections = self.client.get_collections()
+            collection_names = [col.name for col in collections.collections]
+            
+            if self.collection_name not in collection_names:
+                logger.info(f"Collection {self.collection_name} does not exist, will be created")
+                return True
+            
+            # Obtener info de la colección existente
+            collection_info = self.client.get_collection(self.collection_name)
+            existing_dimensions = collection_info.config.params.vectors.size
+            required_dimensions = self._get_embedding_dimensions()
+            
+            if existing_dimensions != required_dimensions:
+                logger.warning(f"Dimension mismatch: existing={existing_dimensions}, required={required_dimensions}")
+                logger.warning(f"Recreating collection {self.collection_name}")
+                
+                # Eliminar colección existente
+                self.client.delete_collection(self.collection_name)
+                logger.info(f"Deleted collection {self.collection_name}")
+                
+                # Crear nueva colección con dimensiones correctas
+                self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=required_dimensions,
+                        distance=models.Distance.COSINE,
+                    ),
+                )
+                logger.info(f"Recreated collection {self.collection_name} with {required_dimensions} dimensions")
+                return True
+            else:
+                logger.debug(f"Collection {self.collection_name} has correct dimensions: {existing_dimensions}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error recreating collection: {str(e)}")
             return False

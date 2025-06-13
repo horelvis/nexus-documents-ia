@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.dependencies import get_current_user, get_current_tenant_id
 from app.db.models import User
 from app.services.search_service import SearchService
+from app.services.vector_service import VectorService
 from app.schemas.document import ChatMessage
 
 router = APIRouter()
@@ -62,3 +63,40 @@ async def ask_documents(
     )
     
     return result
+
+
+@router.get("/health", response_model=dict)
+async def check_search_system_health(
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Verifica la salud del sistema de búsqueda semántica.
+    """
+    vector_service = VectorService(tenant_id=tenant_id)
+    health_info = await vector_service.check_system_health()
+    
+    return health_info
+
+
+@router.post("/fix-embedding-model", response_model=dict)
+async def fix_embedding_model(
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Intenta descargar automáticamente el modelo de embeddings si falta.
+    """
+    vector_service = VectorService(tenant_id=tenant_id)
+    success = await vector_service._ensure_embedding_model()
+    
+    if success:
+        return {
+            "message": "Embedding model is now available",
+            "success": True
+        }
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to ensure embedding model availability"
+        )

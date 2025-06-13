@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Default models to load (optimized for high-end hardware)
     DEFAULT_MODELS: List[str] = ["llama3.1:8b", "codellama:13b", "mistral:7b", "nomic-embed-text"]
     
+    # Primary models
+    DEFAULT_MODEL: str = "llama3.2"  # Default chat model
+    EMBEDDING_MODEL: str = "nomic-embed-text"  # Model for embeddings
+    
     # API configuration
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000

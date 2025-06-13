@@ -135,3 +135,40 @@ async def get_status():
     except Exception as e:
         logger.error(f"Error getting status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/models/ensure-required")
+async def ensure_required_models():
+    """Ensure all required models are available"""
+    try:
+        required_models = [settings.EMBEDDING_MODEL, settings.DEFAULT_MODEL]
+        results = {}
+        
+        for model in required_models:
+            logger.info(f"Ensuring model {model} is available...")
+            success = await ollama_service.ensure_model_loaded(model)
+            results[model] = "available" if success else "failed"
+            
+        return {
+            "message": "Required models check completed",
+            "results": results,
+            "required_models": required_models
+        }
+    except Exception as e:
+        logger.error(f"Error ensuring required models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/models/check-embedding")
+async def check_embedding_model():
+    """Check if embedding model is available"""
+    try:
+        model_name = settings.EMBEDDING_MODEL
+        info = await ollama_service.get_model_info(model_name)
+        
+        return {
+            "model": model_name,
+            "available": info is not None,
+            "info": info
+        }
+    except Exception as e:
+        logger.error(f"Error checking embedding model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

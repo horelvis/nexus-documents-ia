@@ -46,6 +46,7 @@ export default function RAGAssistant({
 
   // Generate contextual suggestions based on search results
   useEffect(() => {
+    console.log('RAG Assistant - Search results:', searchResults.length, 'Query:', searchQuery)
     if (searchResults.length > 0) {
       generateSuggestions()
     }
@@ -232,26 +233,34 @@ export default function RAGAssistant({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleSuggestionClick("facturas")}
+                  onClick={() => handleSuggestionClick("pdf")}
                   className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
                 >
-                  facturas
+                  pdf
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleSuggestionClick("contratos")}
+                  onClick={() => handleSuggestionClick("docx")}
                   className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
                 >
-                  contratos
+                  docx
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleSuggestionClick("documentos")}
+                  onClick={() => handleSuggestionClick("imagen")}
                   className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
                 >
-                  documentos
+                  imagen
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleSuggestionClick("texto")}
+                  className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
+                >
+                  texto
                 </Button>
               </div>
             )}

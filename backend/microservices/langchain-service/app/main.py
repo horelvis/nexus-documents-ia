@@ -271,6 +271,77 @@ async def get_collection_info(
         logger.error(f"Error getting collection info: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/collection/{tenant_id}/recreate")
+async def recreate_collection(
+    tenant_id: str,
+    security: dict = Depends(validate_service_access)
+) -> dict:
+    """Recreate collection with correct dimensions"""
+    try:
+        # Validate tenant_id parameter
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant ID required")
+        
+        vector_service = VectorService(tenant_id)
+        success = vector_service._recreate_collection_if_needed()
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Collection recreated successfully with correct dimensions"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to recreate collection")
+            
+    except Exception as e:
+        logger.error(f"Error recreating collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/collection/{tenant_id}/health")
+async def check_collection_health(
+    tenant_id: str,
+    security: dict = Depends(validate_service_access)
+) -> dict:
+    """Check collection health and dimensions"""
+    try:
+        # Validate tenant_id parameter
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant ID required")
+        
+        vector_service = VectorService(tenant_id)
+        
+        # Get collection info
+        collection_info = vector_service.get_collection_info()
+        
+        # Check if dimensions match
+        required_dimensions = vector_service._get_embedding_dimensions()
+        
+        # Get current dimensions from Qdrant
+        try:
+            qdrant_info = vector_service.client.get_collection(vector_service.collection_name)
+            current_dimensions = qdrant_info.config.params.vectors.size
+            dimensions_match = current_dimensions == required_dimensions
+        except Exception:
+            current_dimensions = None
+            dimensions_match = False
+        
+        return {
+            "collection_name": vector_service.collection_name,
+            "collection_exists": bool(collection_info),
+            "current_dimensions": current_dimensions,
+            "required_dimensions": required_dimensions,
+            "dimensions_match": dimensions_match,
+            "vectors_count": collection_info.get("vectors_count", 0),
+            "status": "healthy" if dimensions_match else "dimension_mismatch"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking collection health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
