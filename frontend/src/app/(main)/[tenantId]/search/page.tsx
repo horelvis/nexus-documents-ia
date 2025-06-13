@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useSearchService, SearchResult, AskDocumentsResponse } from "@/lib/services/search.service"
 import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
+import RAGAssistant from "@/components/search/rag-assistant"
 
 export default function SearchPage() {
   // Search state
@@ -148,6 +149,18 @@ export default function SearchPage() {
     setDateTo('')
   }
 
+  const handleAssistantSuggestion = (suggestion: string) => {
+    // If it's a search term (like "facturas"), update search query
+    if (suggestion === "facturas" || suggestion === "contratos" || suggestion === "documentos") {
+      setSearchQuery(suggestion)
+      // Trigger search automatically
+      setTimeout(() => performSearch(), 100)
+    } else {
+      // If it's a question, set it for the Q&A tab
+      setQuestion(suggestion)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
@@ -158,7 +171,7 @@ export default function SearchPage() {
             Semantic Search
           </h1>
           <p className="text-muted-foreground">
-            Search through your documents using AI-powered semantic understanding and ask questions about your content
+            Search through your documents using AI-powered semantic understanding and ask questions about your content. The AI Assistant will help you analyze your results.
           </p>
         </div>
 
@@ -232,7 +245,14 @@ export default function SearchPage() {
               </CardContent>
             </Card>
 
-            {/* Search Results */}
+            {!isSearching && !searchError && searchQuery && (
+              <RAGAssistant
+                searchResults={searchResults}
+                searchQuery={searchQuery}
+                onSuggestionClick={handleAssistantSuggestion}
+              />
+            )}
+
             {isSearching && (
               <div className="flex justify-center items-center py-12">
                 <IconLoader2 className="h-8 w-8 animate-spin" />
@@ -315,7 +335,7 @@ export default function SearchPage() {
                                 {result.matches.slice(0, 2).map((match, index) => (
                                   <div key={index} className="text-sm mb-2 last:mb-0">
                                     <span className="text-muted-foreground">
-                                      "...{match.text}..."
+                                      &quot;...{match.text}...&quot;
                                     </span>
                                     <Badge variant="outline" className="ml-2 text-xs">
                                       {(match.score * 100).toFixed(1)}% relevance
@@ -439,7 +459,7 @@ export default function SearchPage() {
                                 </Badge>
                               </div>
                               <p className="text-sm text-muted-foreground">
-                                "{source.excerpt}..."
+                                &quot;{source.excerpt}...&quot;
                               </p>
                             </div>
                           </div>
