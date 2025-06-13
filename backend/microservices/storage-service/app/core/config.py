@@ -26,7 +26,8 @@ class Settings:
     # File limits
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "104857600"))  # 100MB
     ALLOWED_EXTENSIONS: set = {
-        "pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"
+        "pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls",
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp"
     }
     
     # Rate limiting
