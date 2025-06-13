@@ -34,22 +34,21 @@ class GotenbergMicroserviceClient:
             
         return headers
 
-    async def health_check(self) -> Dict[str, Any]:
-        """Check Gotenberg service health"""
+    async def health_check(self) -> bool:
+        """Check Gotenberg service health - returns boolean for easier usage"""
         if not self.http_client:
-            raise RuntimeError("HTTP client not provided to GotenbergMicroserviceClient.")
+            logger.error("HTTP client not provided to GotenbergMicroserviceClient.")
+            return False
         
         try:
-            response = await self.http_client.get(f"{self.base_url}/health")
+            response = await self.http_client.get(f"{self.base_url}/health", timeout=5.0)
             response.raise_for_status()
-            return {"status": "healthy"}
+            logger.debug("Gotenberg health check successful")
+            return True
             
         except Exception as e:
-            logger.error(f"Gotenberg service health check failed: {str(e)}")
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
+            logger.warning(f"Gotenberg service health check failed: {str(e)}")
+            return False
 
     async def convert_office_to_pdf(
         self, 

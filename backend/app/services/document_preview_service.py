@@ -23,7 +23,17 @@ class DocumentPreviewService:
     def __init__(self, tenant_id: str, user_id: Optional[str] = None, http_client = None):
         self.tenant_id = tenant_id
         self.user_id = user_id
-        self.gotenberg = GotenbergMicroserviceClient(http_client, tenant_id, user_id) if http_client else None
+        
+        # Track if we own the HTTP client for cleanup
+        self._owns_http_client = http_client is None
+        
+        # Always create Gotenberg client with a default HTTP client if none provided
+        if http_client is None:
+            import httpx
+            http_client = httpx.AsyncClient(timeout=30.0)
+        
+        self._http_client = http_client
+        self.gotenberg = GotenbergMicroserviceClient(http_client, tenant_id, user_id)
         self.storage_service = StorageService(tenant_id, user_id)
         self.temp_dir = Path(tempfile.gettempdir()) / "previews" / tenant_id
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -74,7 +84,7 @@ class DocumentPreviewService:
                 return await self._preview_existing_pdf(document_id, file_path, filename)
             
             # Verificar si Gotenberg está disponible para otros formatos
-            if not self.gotenberg or not await self.gotenberg.health_check():
+            if not await self.gotenberg.health_check():
                 logger.warning("Gotenberg not available, using fallback")
                 return await self._fallback_preview(file_path, filename)
             elif file_ext in self.supported_formats['office']:
@@ -529,6 +539,15 @@ class DocumentPreviewService:
                 logger.debug(f"Cleaned up temp file: {file_path}")
         except Exception as e:
             logger.error(f"Temp file cleanup failed: {e}")
+    
+    async def cleanup(self):
+        """Cleanup resources including HTTP client if we own it"""
+        try:
+            if self._owns_http_client and hasattr(self, '_http_client'):
+                await self._http_client.aclose()
+                logger.debug("Closed HTTP client")
+        except Exception as e:
+            logger.error(f"HTTP client cleanup failed: {e}")
     
     async def get_preview_info(self, document_id: str) -> Optional[Dict]:
         """Obtiene información de preview existente sin regenerar"""

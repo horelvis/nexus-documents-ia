@@ -2,6 +2,11 @@
 
 import React, { useState, useCallback } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
+
+// Import PDF.js CSS for text layer and annotations support
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +20,6 @@ import {
   RotateCw,
   Download,
   Maximize2,
-  Search,
   Loader2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -42,7 +46,6 @@ export default function PDFViewer({
   const [pageNumber, setPageNumber] = useState<number>(1)
   const [scale, setScale] = useState<number>(initialScale)
   const [rotation, setRotation] = useState<number>(0)
-  const [searchText, setSearchText] = useState<string>('')
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 

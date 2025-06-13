@@ -416,6 +416,20 @@ async def get_document_preview(
             status_code=500, 
             detail="Preview generation failed. Please try again later."
         )
+    finally:
+        # Cleanup preview service resources
+        try:
+            await preview_service.cleanup()
+        except Exception as e:
+            logger.warning(f"Preview service cleanup failed: {e}")
+        
+        # Cleanup temp directory
+        try:
+            import shutil
+            if 'temp_dir' in locals():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Temp directory cleanup failed: {e}")
 
 
 @router.get("/{doc_id}/preview/info", response_model=dict)
@@ -451,3 +465,9 @@ async def get_preview_info(
             "has_preview": False,
             "error": "Could not retrieve preview information"
         }
+    finally:
+        # Cleanup preview service resources
+        try:
+            await preview_service.cleanup()
+        except Exception as e:
+            logger.warning(f"Preview service cleanup failed: {e}")

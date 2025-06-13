@@ -115,7 +115,7 @@ class RedisCache:
             metadata_key = self._get_metadata_key(cache_key)
             ttl = self._get_ttl_for_size(file_size)
             
-            # Add cache metadata
+            # Add cache metadata - ensure all values are strings
             cache_metadata = metadata.copy() if metadata else {}
             cache_metadata.update({
                 'cached_at': datetime.utcnow().isoformat(),
@@ -123,10 +123,21 @@ class RedisCache:
                 'cache_key': cache_key
             })
             
+            # Convert all values to strings for Redis storage
+            serialized_metadata = {}
+            for key, value in cache_metadata.items():
+                if isinstance(value, (str, int, float)):
+                    serialized_metadata[str(key)] = str(value)
+                elif isinstance(value, bytes):
+                    serialized_metadata[str(key)] = value.decode('utf-8', errors='ignore')
+                else:
+                    # For complex objects, convert to string representation
+                    serialized_metadata[str(key)] = str(value)
+            
             # Store content and metadata in pipeline
             pipe = self.redis_client.pipeline()
             pipe.setex(cache_key, ttl, content)
-            pipe.hset(metadata_key, mapping=cache_metadata)
+            pipe.hset(metadata_key, mapping=serialized_metadata)
             pipe.expire(metadata_key, ttl)
             pipe.execute()
             

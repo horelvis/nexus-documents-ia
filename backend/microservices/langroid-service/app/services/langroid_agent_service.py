@@ -153,7 +153,8 @@ class LangroidAgentService:
                 "user_id": user_id,
                 "configuration": config,
                 "created_at": datetime.now(),
-                "last_used": datetime.now()
+                "last_used": datetime.now(),
+                "persistent": config.get("persistent", True)  # Por defecto son persistentes
             }
             
             logger.info(f"Created {agent_type} agent {agent_id} for tenant {tenant_id}")
@@ -187,9 +188,12 @@ class LangroidAgentService:
                 agents.append({
                     "agent_id": agent_id,
                     "type": agent_info["type"],
+                    "name": agent_info["configuration"].get("name", f"{agent_info['type'].replace('_', ' ').title()} Agent"),
+                    "persistent": agent_info.get("persistent", True),
                     "created_at": agent_info["created_at"].isoformat(),
                     "last_used": agent_info["last_used"].isoformat(),
-                    "configuration": agent_info["configuration"]
+                    "configuration": agent_info["configuration"],
+                    "user_id": agent_info["user_id"]
                 })
         
         return agents

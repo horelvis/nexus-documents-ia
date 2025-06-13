@@ -147,6 +147,52 @@ async def service_status():
 # AGENT MANAGEMENT
 # =====================================
 
+@app.get("/agents/types")
+async def list_agent_types():
+    """List all available agent types with descriptions"""
+    global agent_service
+    
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    
+    agent_types = {
+        "digital_signature": {
+            "name": "Digital Signature Agent",
+            "description": "Handles digital signature workflows and document signing processes",
+            "capabilities": ["signature_requests", "status_tracking", "signer_management"]
+        },
+        "document_analyzer": {
+            "name": "Document Analyzer Agent", 
+            "description": "Analyzes documents for various purposes (legal, financial, etc.)",
+            "capabilities": ["content_analysis", "extraction", "summarization"]
+        },
+        "rag_assistant": {
+            "name": "RAG Assistant Agent",
+            "description": "Retrieval-Augmented Generation assistant for document Q&A",
+            "capabilities": ["document_search", "context_qa", "knowledge_retrieval"]
+        },
+        "legal_compliance": {
+            "name": "Legal Compliance Agent",
+            "description": "Analyzes documents for legal compliance and regulatory requirements",
+            "capabilities": ["compliance_check", "risk_assessment", "regulatory_analysis"]
+        },
+        "financial_analysis": {
+            "name": "Financial Analysis Agent",
+            "description": "Analyzes financial documents and provides insights",
+            "capabilities": ["financial_metrics", "trend_analysis", "report_generation"]
+        },
+        "generic": {
+            "name": "Generic Agent",
+            "description": "General-purpose AI assistant for various tasks",
+            "capabilities": ["general_qa", "text_processing", "basic_analysis"]
+        }
+    }
+    
+    return {
+        "available_types": agent_types,
+        "total": len(agent_types)
+    }
+
 @app.post("/agents/create")
 async def create_agent(config: AgentConfig):
     """Create a new agent instance"""
@@ -172,6 +218,59 @@ async def create_agent(config: AgentConfig):
         
     except Exception as e:
         logger.error(f"Error creating agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/agents/create/{agent_type}")
+async def create_agent_by_type(
+    agent_type: str, 
+    tenant_id: str, 
+    user_id: str,
+    name: Optional[str] = None,
+    system_message: Optional[str] = None
+):
+    """Create an agent of specific type with simple parameters"""
+    global agent_service
+    
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    
+    # Validate agent type
+    valid_types = ["digital_signature", "document_analyzer", "rag_assistant", 
+                   "legal_compliance", "financial_analysis", "generic"]
+    
+    if agent_type not in valid_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid agent type. Valid types: {', '.join(valid_types)}"
+        )
+    
+    # Prepare configuration
+    config = {}
+    if name:
+        config["name"] = name
+    if system_message:
+        config["system_message"] = system_message
+    
+    try:
+        agent_id = await agent_service.create_agent(
+            agent_type=agent_type,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            configuration=config
+        )
+        
+        return {
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+            "name": name or f"{agent_type.replace('_', ' ').title()} Agent",
+            "status": "created",
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "configuration": config
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating {agent_type} agent: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
