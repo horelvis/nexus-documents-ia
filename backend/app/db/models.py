@@ -238,7 +238,6 @@ class Tenant(Base):
     documents = relationship("Document", back_populates="tenant")
     tags = relationship("Tag", back_populates="tenant")
     roles = relationship("Role", back_populates="tenant")
-    agent_deployments = relationship("AgentDeployment", back_populates="tenant")
     
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),
