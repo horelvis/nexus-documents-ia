@@ -10,16 +10,6 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 
-# Import agent registry models
-from app.db.models.agent_registry import (
-    AgentDefinition,
-    AgentDeployment,
-    AgentTemplate,
-    AgentPlugin,
-    AgentStatus,
-    AgentType
-)
-
 # =====================================
 # TABLAS DE ASOCIACIÓN (Many-to-Many)
 # =====================================

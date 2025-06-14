@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 
-from app.api.dependencies import get_current_active_user, require_subscription_permission
+from app.api.dependencies import get_current_active_user, require_subscription_permission, require_admin
 from app.db.models import User
 from app.services.langroid_client import langroid_client
 
@@ -306,6 +306,51 @@ async def analyze_document(
 # =====================================
 # TEST ENDPOINTS
 # =====================================
+
+@router.post("/import/langflow")
+async def import_langflow_agent(
+    langflow_data: Dict[str, Any],
+    current_user: User = Depends(require_admin)
+):
+    """Import agent from Langflow JSON and save to agents directory"""
+    import json
+    from pathlib import Path
+    
+    try:
+        # Validate it's a Langflow export
+        if "data" not in langflow_data or "nodes" not in langflow_data.get("data", {}):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Langflow export format"
+            )
+        
+        # Get agent name
+        agent_name = langflow_data.get("name", "unnamed_agent").replace(" ", "_").lower()
+        
+        # Save to agents directory (this would be mounted in production)
+        agents_dir = Path("/app/agents")
+        agents_dir.mkdir(exist_ok=True)
+        
+        # Save the JSON file
+        agent_file = agents_dir / f"{agent_name}.json"
+        with open(agent_file, 'w') as f:
+            json.dump(langflow_data, f, indent=2)
+        
+        logger.info(f"Imported Langflow agent: {agent_name}")
+        
+        return {
+            "status": "success",
+            "message": f"Agent '{agent_name}' imported successfully",
+            "agent_name": agent_name,
+            "file_path": str(agent_file)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error importing Langflow agent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to import agent: {str(e)}"
+        )
 
 @router.post("/test")
 async def test_langroid_integration(

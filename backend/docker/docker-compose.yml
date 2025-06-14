@@ -148,6 +148,8 @@ services:
     volumes:
       # Mount the Python code for live reloading
       - ../microservices/langroid-service/app:/app/app:rw
+      # Mount agents directory for dynamic agent loading
+      - ./langflow/flows:/app/agents:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]

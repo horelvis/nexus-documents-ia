@@ -599,80 +599,77 @@ Provide a detailed response for this task."""
             logger.info(f"Cleaned up agent {agent_id}")
     
     async def _load_dynamic_agents(self):
-        """Load dynamic agent definitions from database via main API"""
+        """Load dynamic agent definitions from JSON files"""
         try:
-            logger.info("Loading dynamic agent definitions from main API...")
+            logger.info("Loading dynamic agent definitions from JSON files...")
             
-            # Import httpx here to avoid circular imports
-            import httpx
+            import json
+            import os
+            from pathlib import Path
             
-            # Get agent definitions from main API
-            # Note: In production, this would need proper authentication
-            main_api_url = app_settings.MAIN_API_URL or "http://backend:8000"
+            # Directory where Langflow exports are stored
+            agents_dir = Path("/app/agents")
+            if not agents_dir.exists():
+                agents_dir = Path("./agents")  # Fallback for local development
             
-            try:
-                async with httpx.AsyncClient() as client:
-                    # Fetch all active agent definitions
-                    response = await client.get(
-                        f"{main_api_url}/api/v1/agent-registry/definitions",
-                        params={"include_private": True},
-                        timeout=10.0
-                    )
-                    
-                    if response.status_code == 200:
-                        agent_definitions = response.json()
+            if agents_dir.exists():
+                # Load all JSON files from agents directory
+                for json_file in agents_dir.glob("*.json"):
+                    try:
+                        with open(json_file, 'r') as f:
+                            agent_def = json.load(f)
                         
-                        # Register each agent definition
-                        for agent_def in agent_definitions:
-                            agent_name = agent_def.get("name")
-                            if agent_name and agent_name not in self.agent_classes:
-                                self.dynamic_agent_definitions[agent_name] = agent_def
-                                
-                                # Create factory function with proper closure
-                                def make_factory(definition):
-                                    return lambda aid, tid, uid, cfg: self._create_dynamic_agent(
-                                        aid, tid, uid, cfg, definition
-                                    )
-                                
-                                self.agent_classes[agent_name] = make_factory(agent_def)
-                                logger.info(f"Loaded dynamic agent: {agent_name} ({agent_def.get('display_name')})")
+                        # Convert Langflow export to agent definition
+                        if "data" in agent_def and "nodes" in agent_def.get("data", {}):
+                            # This is a Langflow export, convert it
+                            from app.services.langflow_import_service import LangflowImportService
+                            agent_def = LangflowImportService.parse_langflow_export(agent_def)
                         
-                        logger.info(f"Loaded {len(agent_definitions)} dynamic agent definitions")
-                    else:
-                        logger.warning(f"Could not fetch agent definitions: HTTP {response.status_code}")
-                        
-            except httpx.RequestError as e:
-                logger.warning(f"Could not connect to main API: {e}")
-                logger.info("Continuing with built-in agents only")
+                        agent_name = agent_def.get("name")
+                        if agent_name and agent_name not in self.agent_classes:
+                            self.dynamic_agent_definitions[agent_name] = agent_def
+                            
+                            # Create factory function with proper closure
+                            def make_factory(definition):
+                                return lambda aid, tid, uid, cfg: self._create_dynamic_agent(
+                                    aid, tid, uid, cfg, definition
+                                )
+                            
+                            self.agent_classes[agent_name] = make_factory(agent_def)
+                            logger.info(f"Loaded agent from {json_file.name}: {agent_name}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error loading agent from {json_file}: {e}")
+                
+                logger.info(f"Loaded {len(self.dynamic_agent_definitions)} dynamic agents from files")
+            else:
+                logger.info(f"Agents directory not found at {agents_dir}")
             
-            # Fallback: Load from local config if API not available
+            # Load example agent if no dynamic agents loaded
             if not self.dynamic_agent_definitions:
-                logger.info("Loading example agent from local config...")
-                dynamic_agents = {
-                    "example_langflow_agent": {
-                        "name": "example_langflow_agent",
-                        "display_name": "Example Langflow Agent",
-                        "description": "Example agent that can be created in Langflow",
-                        "system_prompt": "You are a helpful assistant created with Langflow.",
-                        "capabilities": ["chat", "rag", "tool_use"],
-                        "ui_config": {
-                            "icon": "IconRobot",
-                            "color": "purple",
-                            "quick_actions": [
-                                "Chat with Langflow agent",
-                                "Analyze documents",
-                                "Execute tools"
-                            ]
-                        }
+                logger.info("Loading example agent...")
+                example_agent = {
+                    "name": "example_langflow_agent",
+                    "display_name": "Example Langflow Agent",
+                    "description": "Example agent that can be created in Langflow",
+                    "system_prompt": "You are a helpful assistant created with Langflow.",
+                    "capabilities": ["chat", "rag", "tool_use"],
+                    "ui_config": {
+                        "icon": "IconRobot",
+                        "color": "purple",
+                        "quick_actions": [
+                            "Chat with Langflow agent",
+                            "Analyze documents",
+                            "Execute tools"
+                        ]
                     }
                 }
                 
-                for agent_name, agent_def in dynamic_agents.items():
-                    self.dynamic_agent_definitions[agent_name] = agent_def
-                    self.agent_classes[agent_name] = lambda aid, tid, uid, cfg, definition=agent_def: self._create_dynamic_agent(
-                        aid, tid, uid, cfg, definition
-                    )
-                    logger.info(f"Loaded example agent: {agent_name}")
+                self.dynamic_agent_definitions["example_langflow_agent"] = example_agent
+                self.agent_classes["example_langflow_agent"] = lambda aid, tid, uid, cfg: self._create_dynamic_agent(
+                    aid, tid, uid, cfg, example_agent
+                )
+                logger.info("Loaded example agent")
                 
         except Exception as e:
             logger.error(f"Error loading dynamic agents: {e}")

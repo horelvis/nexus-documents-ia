@@ -451,8 +451,9 @@ cd backend/docker
    - Click Export → JSON
    - Save to `langflow/flows/` or copy JSON
 5. **Import to System**:
-   - Use Admin UI import feature
-   - Or use API endpoint: `/api/v1/agent-registry/import/langflow`
+   - Save JSON to `langflow/flows/` directory
+   - Or use API endpoint: `/api/v1/agents/import/langflow` (Admin only)
+   - Restart Langroid service to load new agents
 
 #### Example Flows
 - **RAG Document Assistant**: `langflow/flows/example-rag-agent.json`
