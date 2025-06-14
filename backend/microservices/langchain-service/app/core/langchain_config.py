@@ -4,7 +4,7 @@ LangChain configuration and initialization
 import logging
 from typing import Optional
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
-from langchain_community.vectorstores import Qdrant
+from langchain_qdrant import Qdrant
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate

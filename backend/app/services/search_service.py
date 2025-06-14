@@ -125,10 +125,16 @@ class SearchService:
             results_by_doc_id = {}
             
             for result in vector_results:
-                doc_id = result.get('metadata', {}).get('doc_id')
+                # Try different ways to extract doc_id
+                doc_id = None
+                if 'metadata' in result and result['metadata']:
+                    doc_id = result['metadata'].get('doc_id') or result['metadata'].get('_id')
+                
                 if doc_id:
                     doc_ids.append(doc_id)
                     results_by_doc_id[doc_id] = result
+                else:
+                    logger.warning(f"No doc_id found in result: {result.keys()}")
             
             if not doc_ids:
                 logger.warning("No document IDs found in vector search results")
@@ -150,33 +156,39 @@ class SearchService:
                 vector_result = results_by_doc_id.get(doc_id)
                 
                 if vector_result:
-                    # Create enriched result structure
-                    enriched_result = {
-                        "document": {
-                            "id": str(doc.id),
-                            "title": doc.title,
-                            "description": doc.description,
-                            "filename": doc.filename,
-                            "file_type": doc.file_type,
-                            "file_size": doc.file_size,
-                            "mime_type": doc.mime_type,
-                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                            "indexed": doc.indexed.value if doc.indexed else None,
-                            "tenant_id": str(doc.tenant_id),
-                            "tags": [tag.name for tag in doc.tags] if doc.tags else []
-                        },
-                        "score": vector_result.get('score', 0.0),
-                        "matches": self._extract_matches_from_content(vector_result)
-                    }
-                    enriched_results.append(enriched_result)
+                    try:
+                        # Create enriched result structure that matches frontend expectations
+                        enriched_result = {
+                            "document": {
+                                "id": str(doc.id),
+                                "title": doc.title or vector_result.get('metadata', {}).get('title', doc.filename),
+                                "description": doc.description,
+                                "filename": doc.filename or vector_result.get('metadata', {}).get('filename'),
+                                "file_type": doc.file_type or vector_result.get('metadata', {}).get('file_type'),
+                                "file_size": doc.file_size,
+                                "mime_type": doc.mime_type,
+                                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                                "indexed": str(doc.indexed) if doc.indexed is not None else "unknown",
+                                "tenant_id": str(doc.tenant_id),
+                                "tags": [tag.name for tag in doc.tags] if doc.tags else []
+                            },
+                            "score": vector_result.get('score', 0.0),
+                            "matches": self._extract_matches_from_content(vector_result)
+                        }
+                        enriched_results.append(enriched_result)
+                    except Exception as doc_error:
+                        logger.error(f"Error processing document {doc.id}: {str(doc_error)}")
+                        # Add original vector result as fallback
+                        enriched_results.append(vector_result)
             
             logger.debug(f"Enriched {len(enriched_results)} search results with database data")
             return enriched_results
             
         except Exception as e:
             logger.error(f"Error enriching search results: {str(e)}")
-            # Return original results if enrichment fails
+            # Return original results if enrichment fails - frontend can handle both structures
+            logger.info("Falling back to vector search results without database enrichment")
             return vector_results
     
     def _extract_matches_from_content(self, vector_result: Dict[str, Any]) -> List[Dict[str, Any]]:

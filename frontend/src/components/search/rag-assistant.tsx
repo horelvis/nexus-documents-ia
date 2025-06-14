@@ -8,7 +8,8 @@ import {
   IconLoader2,
   IconBulb,
   IconChevronUp,
-  IconChevronDown
+  IconChevronDown,
+  IconBrain
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,6 +18,9 @@ import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { useSearchService, SearchResult } from "@/lib/services/search.service"
 import { useNotifications } from "@/contexts/notifications-context"
+import { ThinkingDisplay } from "@/components/agents/thinking-display"
+import { useAgentChat } from "@/hooks/use-agent-chat"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface RAGAssistantProps {
   searchResults: SearchResult[]
@@ -36,13 +40,31 @@ export default function RAGAssistant({
   onSuggestionClick 
 }: RAGAssistantProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [currentInput, setCurrentInput] = useState('')
-  const [isProcessing, setIsProcessing] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [showThinking, setShowThinking] = useState(true)
+  const [agentId] = useState('document_analyzer') // Using document analyzer agent
 
   const { addNotification } = useNotifications()
   const searchService = useSearchService()
+  
+  const { 
+    messages, 
+    thinkingEvents,
+    isLoading,
+    isStreaming,
+    sendMessage,
+    clearChat
+  } = useAgentChat({
+    agentId,
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: error
+      })
+    }
+  })
 
   // Generate contextual suggestions based on search results
   useEffect(() => {
@@ -53,7 +75,11 @@ export default function RAGAssistant({
   }, [searchResults, searchQuery])
 
   const generateSuggestions = () => {
-    const fileTypes = [...new Set(searchResults.map(r => r.document.file_type))]
+    // Handle both new structure (with document object) and current structure (with metadata)
+    const fileTypes = [...new Set(searchResults.map(r => {
+      const document = r.document || r.metadata || {}
+      return document.file_type
+    }))].filter(type => type)
     const docCount = searchResults.length
     const query = searchQuery.toLowerCase()
     
@@ -114,49 +140,18 @@ export default function RAGAssistant({
     setSuggestions(contextualSuggestions.slice(0, 4))
   }
 
-  const sendMessage = async (message: string) => {
+  const handleSendMessage = async (message: string) => {
     if (!message.trim()) return
-
-    setIsProcessing(true)
     
-    // Add user message
-    const userMessage: ChatMessage = {
-      type: 'user',
-      content: message,
-      timestamp: new Date()
-    }
-    setMessages(prev => [...prev, userMessage])
     setCurrentInput('')
-
-    try {
-      const response = await searchService.askDocuments({
-        question: message,
-        doc_ids: searchResults.map(r => r.document.id)
-      })
-
-      if (response.error) {
-        addNotification({
-          type: 'error',
-          title: 'Error',
-          message: response.error
-        })
-      } else if (response.data) {
-        const assistantMessage: ChatMessage = {
-          type: 'assistant',
-          content: response.data.answer,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, assistantMessage])
-      }
-    } catch (err) {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Failed to get response from assistant'
-      })
-    } finally {
-      setIsProcessing(false)
-    }
+    
+    // Send message with document context
+    await sendMessage(message, {
+      documents: searchResults.map(r => ({
+        id: r.document.id,
+        title: r.document.title,
+        type: r.document.file_type
+      }))
   }
 
   const handleSuggestionClick = async (suggestion: string) => {
@@ -171,7 +166,7 @@ export default function RAGAssistant({
     onSuggestionClick(suggestion)
     // Small delay to ensure expansion animation completes
     setTimeout(() => {
-      sendMessage(suggestion)
+      handleSendMessage(suggestion)
     }, 100)
   }
 
@@ -212,7 +207,10 @@ export default function RAGAssistant({
             {searchResults.length > 0 ? (
               <div className="flex items-center justify-between">
                 <div className="flex flex-wrap gap-1">
-                  {[...new Set(searchResults.map(r => r.document.file_type).filter(type => type))].map(type => (
+                  {[...new Set(searchResults.map(r => {
+                    const document = r.document || r.metadata || {}
+                    return document.file_type
+                  }).filter(type => type))].map(type => (
                     <Badge key={type} variant="outline" className="text-xs border-blue-200 text-blue-600 dark:border-blue-700 dark:text-blue-400">
                       {type?.toUpperCase() || 'UNKNOWN'}
                     </Badge>
@@ -270,6 +268,22 @@ export default function RAGAssistant({
 
       {isExpanded && (
         <CardContent className="space-y-4">
+          {/* Toggle for showing thinking */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+              <IconBrain className="h-4 w-4" />
+              Show Agent Thinking
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowThinking(!showThinking)}
+              className={showThinking ? 'text-blue-600' : 'text-gray-400'}
+            >
+              {showThinking ? 'ON' : 'OFF'}
+            </Button>
+          </div>
+
           {/* Quick Suggestions */}
           {suggestions.length > 0 && messages.length === 0 && (
             <div className="space-y-2">
@@ -293,36 +307,57 @@ export default function RAGAssistant({
             </div>
           )}
 
-          {/* Chat Messages */}
+          {/* Chat Interface with Thinking Display */}
           {messages.length > 0 && (
-            <div className="space-y-3 max-h-64 overflow-y-auto">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
+            <Tabs defaultValue="chat" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="chat">Chat</TabsTrigger>
+                <TabsTrigger value="thinking" disabled={!showThinking || thinkingEvents.length === 0}>
+                  Thinking ({thinkingEvents.length})
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="chat" className="space-y-3 max-h-64 overflow-y-auto">
+                {messages.map((message, index) => (
                   <div
-                    className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                      message.type === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                    }`}
+                    key={index}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
-                    <span className="text-xs opacity-70 mt-1 block">
-                      {message.timestamp.toLocaleTimeString()}
-                    </span>
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 text-sm ${
+                        message.role === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <span className="text-xs opacity-70 mt-1 block">
+                        {new Date(message.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </TabsContent>
+              
+              <TabsContent value="thinking" className="max-h-64 overflow-y-auto">
+                {showThinking && thinkingEvents.length > 0 && (
+                  <ThinkingDisplay 
+                    events={thinkingEvents} 
+                    isStreaming={isStreaming}
+                    className="text-sm"
+                  />
+                )}
+              </TabsContent>
+            </Tabs>
           )}
 
           {/* Processing Indicator */}
-          {isProcessing && (
+          {isLoading && (
             <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
               <IconLoader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Analyzing documents...</span>
+              <span className="text-sm">
+                {isStreaming ? 'Agent is thinking...' : 'Processing...'}
+              </span>
             </div>
           )}
 
@@ -335,16 +370,16 @@ export default function RAGAssistant({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  sendMessage(currentInput)
+                  handleSendMessage(currentInput)
                 }
               }}
               rows={2}
               className="resize-none"
-              disabled={isProcessing}
+              disabled={isLoading}
             />
             <Button
-              onClick={() => sendMessage(currentInput)}
-              disabled={isProcessing || !currentInput.trim()}
+              onClick={() => handleSendMessage(currentInput)}
+              disabled={isLoading || !currentInput.trim()}
               size="sm"
               className="self-end"
             >

@@ -3,15 +3,23 @@
 import { useState, useCallback, useRef } from 'react'
 import { ChatMessage, ChatRequest, StreamingEvent, useAgentsService } from '@/lib/services/agents.service'
 
+export interface ThinkingEvent {
+  type: 'thinking' | 'reasoning' | 'planning' | 'observation' | 'conclusion'
+  content: string
+  metadata?: Record<string, any>
+}
+
 export interface UseAgentChatOptions {
   agentId: string
   onMessage?: (message: ChatMessage) => void
   onError?: (error: string) => void
   onStreamEnd?: () => void
+  onThinkingEvent?: (event: ThinkingEvent) => void
 }
 
-export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAgentChatOptions) {
+export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThinkingEvent }: UseAgentChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -23,8 +31,16 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAg
     onMessage?.(message)
   }, [onMessage])
 
+  const addThinkingEvent = useCallback((event: ThinkingEvent) => {
+    setThinkingEvents(prev => [...prev, event])
+    onThinkingEvent?.(event)
+  }, [onThinkingEvent])
+
   const sendMessage = useCallback(async (content: string, context?: Record<string, any>) => {
     if (!content.trim()) return
+
+    // Clear thinking events for new message
+    setThinkingEvents([])
 
     // Add user message immediately
     const userMessage: ChatMessage = {
@@ -112,6 +128,19 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAg
               setConversationId(data.content)
               break
               
+            case 'thinking':
+            case 'reasoning':
+            case 'planning':
+            case 'observation':
+            case 'conclusion':
+              // Handle thinking events
+              addThinkingEvent({
+                type: data.type as ThinkingEvent['type'],
+                content: data.content,
+                metadata: data.metadata
+              })
+              break
+              
             case 'message':
               assistantMessage += data.content
               // Update the last assistant message in real-time
@@ -191,6 +220,7 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd }: UseAg
 
   return {
     messages,
+    thinkingEvents,
     isLoading,
     isStreaming,
     conversationId,

@@ -40,6 +40,7 @@ except ImportError:
 
 from app.core.config import settings as app_settings
 # from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
+from app.services.enhanced_langroid_agent import DocumentAnalysisAgent, ContractAnalysisAgent
 
 logger = logging.getLogger(__name__)
 
@@ -389,28 +390,16 @@ Always provide clear guidance on signature processes and help users manage their
         tenant_id: str,
         user_id: str,
         config: Dict[str, Any]
-    ) -> ChatAgent:
-        """Create document analyzer agent"""
+    ) -> DocumentAnalysisAgent:
+        """Create enhanced document analyzer agent with chain of thought"""
         
-        vector_config = self._get_tenant_vector_store_config(tenant_id)
-        
-        agent_config = ChatAgentConfig(
-            name="DocumentAnalyzer",
-            llm=self.llm_config,
-            vecdb=vector_config,  # May be None if vector store unavailable
-            system_message="""You are an expert document analyzer.
-            
-Your capabilities include:
-- Summarizing documents
-- Extracting key information
-- Analyzing sentiment and tone
-- Identifying important entities
-- Suggesting tags and categories
-
-Always provide clear, structured analysis with specific examples from the document."""
+        # Return enhanced agent with visible reasoning
+        return DocumentAnalysisAgent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            config=config
         )
-        
-        return ChatAgent(agent_config)
     
     async def _create_rag_assistant(
         self,
@@ -486,47 +475,16 @@ Always cite your sources and indicate confidence levels in your answers."""
         tenant_id: str,
         user_id: str,
         config: Dict[str, Any]
-    ) -> ChatAgent:
-        """Create legal compliance agent"""
+    ) -> ContractAnalysisAgent:
+        """Create enhanced legal compliance agent with chain of thought"""
         
-        try:
-            vector_config = self._get_tenant_vector_store_config(tenant_id)
-            
-            agent_config = ChatAgentConfig(
-                name="LegalComplianceAgent",
-                llm=self.llm_config,
-                vecdb=vector_config,
-                system_message="""You are a Legal Compliance Expert specialized in contract analysis and regulatory compliance.
-
-Your expertise includes:
-- Contract review and risk assessment
-- Regulatory compliance verification
-- Legal clause analysis and recommendations
-- Due diligence document review
-- Terms and conditions evaluation
-- Legal precedent research
-- Compliance audit support
-- Risk identification and mitigation
-
-Analysis Framework:
-1. COMPLIANCE CHECK: Verify adherence to applicable laws and regulations
-2. RISK ASSESSMENT: Identify potential legal risks and liabilities
-3. CLAUSE ANALYSIS: Review critical terms, conditions, and obligations
-4. RECOMMENDATIONS: Provide actionable legal guidance
-5. PRECEDENT REVIEW: Reference relevant legal cases when applicable
-
-Always provide structured analysis with clear risk levels (LOW/MEDIUM/HIGH) and specific recommendations."""
-            )
-            
-            return ChatAgent(agent_config)
-            
-        except Exception as e:
-            logger.error(f"Failed to create legal compliance agent: {e}")
-            agent_config = ChatAgentConfig(
-                name="LegalComplianceAgent",
-                system_message="You are a legal compliance expert. Analyze documents for legal risks and compliance issues."
-            )
-            return ChatAgent(agent_config)
+        # Use enhanced contract analysis agent with visible reasoning
+        return ContractAnalysisAgent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            config=config
+        )
     
     async def _create_financial_analysis_agent(
         self,

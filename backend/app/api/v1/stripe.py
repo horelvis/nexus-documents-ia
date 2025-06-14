@@ -16,7 +16,7 @@ from app.db.models import Subscription
 
 # Importaciones necesarias en la parte superior del archivo
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Schemas para los requests
 class CheckoutSessionRequest(BaseModel):
@@ -452,3 +452,272 @@ async def configure_customer_portal(
             status_code=500,
             detail=f"Error configurando portal: {str(e)}"
         )
+
+
+@router.post("/webhook")
+async def stripe_webhook(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    """
+    Handle Stripe webhooks for subscription events.
+    
+    Webhook URL: https://your-domain.com/api/v1/stripe/webhook
+    
+    Events handled:
+    - checkout.session.completed: When a checkout session is successfully completed
+    - customer.subscription.created: When a new subscription is created
+    - customer.subscription.updated: When a subscription is updated
+    - customer.subscription.deleted: When a subscription is canceled
+    - invoice.payment_succeeded: When a payment succeeds
+    - invoice.payment_failed: When a payment fails
+    """
+    # Get the webhook payload and signature
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    
+    if not sig_header:
+        logger.error("Missing stripe-signature header")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing stripe-signature header"
+        )
+    
+    try:
+        # Verify webhook signature
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        logger.error(f"Invalid payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError as e:
+        logger.error(f"Invalid signature: {e}")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    # Log the event
+    logger.info(f"🎯 Stripe webhook received: {event['type']} - ID: {event['id']}")
+    
+    # Handle the event
+    try:
+        if event["type"] == "checkout.session.completed":
+            await handle_checkout_session_completed(db, event["data"]["object"])
+            
+        elif event["type"] == "customer.subscription.created":
+            await handle_subscription_created(db, event["data"]["object"])
+            
+        elif event["type"] == "customer.subscription.updated":
+            await handle_subscription_updated(db, event["data"]["object"])
+            
+        elif event["type"] == "customer.subscription.deleted":
+            await handle_subscription_deleted(db, event["data"]["object"])
+            
+        elif event["type"] == "invoice.payment_succeeded":
+            await handle_invoice_payment_succeeded(db, event["data"]["object"])
+            
+        elif event["type"] == "invoice.payment_failed":
+            await handle_invoice_payment_failed(db, event["data"]["object"])
+            
+        else:
+            logger.info(f"Unhandled event type: {event['type']}")
+    
+    except Exception as e:
+        logger.error(f"Error handling webhook event {event['type']}: {e}")
+        # Return success anyway to avoid Stripe retrying
+        # Log the error for manual investigation
+    
+    return {"status": "success", "event_id": event["id"]}
+
+
+# Webhook handler functions
+async def handle_checkout_session_completed(db: Session, session: Dict[str, Any]):
+    """
+    Handle successful checkout session completion.
+    This is called when a user completes payment for the first time.
+    """
+    customer_id = session.get("customer")
+    customer_email = session.get("customer_details", {}).get("email")
+    
+    logger.info(f"Processing checkout.session.completed for customer {customer_id}")
+    
+    # Find user by email or stripe_customer_id
+    user = db.query(User).filter(
+        (User.email == customer_email) | (User.stripe_customer_id == customer_id)
+    ).first()
+    
+    if not user:
+        logger.error(f"User not found for customer {customer_id} / email {customer_email}")
+        return
+    
+    # Update user's stripe_customer_id if not set
+    if not user.stripe_customer_id:
+        user.stripe_customer_id = customer_id
+        db.commit()
+        logger.info(f"Updated stripe_customer_id for user {user.id}")
+    
+    # If there's a subscription, it will be handled by subscription.created event
+    logger.info(f"Checkout completed for user {user.id}, subscription will be handled by subscription webhook")
+
+
+async def handle_subscription_created(db: Session, subscription: Dict[str, Any]):
+    """
+    Handle new subscription creation.
+    """
+    subscription_id = subscription.get("id")
+    customer_id = subscription.get("customer")
+    status = subscription.get("status")
+    
+    logger.info(f"Processing subscription.created: {subscription_id}")
+    
+    # Find user by stripe_customer_id
+    user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+    
+    if not user:
+        logger.error(f"User not found for customer {customer_id}")
+        return
+    
+    # Extract price and plan info
+    items = subscription.get("items", {}).get("data", [])
+    if not items:
+        logger.error(f"No items found in subscription {subscription_id}")
+        return
+    
+    price = items[0].get("price", {})
+    plan_id = subscription.get("metadata", {}).get("plan_id") or price.get("lookup_key", "pro")
+    interval = price.get("recurring", {}).get("interval", "month")
+    
+    # Check if subscription already exists
+    existing_sub = db.query(Subscription).filter(
+        Subscription.stripe_subscription_id == subscription_id
+    ).first()
+    
+    if existing_sub:
+        logger.info(f"Subscription {subscription_id} already exists, updating...")
+        existing_sub.status = status
+        existing_sub.current_period_start = datetime.fromtimestamp(subscription.get("current_period_start"))
+        existing_sub.current_period_end = datetime.fromtimestamp(subscription.get("current_period_end"))
+    else:
+        # Create new subscription record
+        new_subscription = Subscription(
+            user_id=user.id,
+            stripe_subscription_id=subscription_id,
+            stripe_customer_id=customer_id,
+            stripe_plan_id=plan_id,
+            status=status,
+            interval=interval,
+            current_period_start=datetime.fromtimestamp(subscription.get("current_period_start")),
+            current_period_end=datetime.fromtimestamp(subscription.get("current_period_end")),
+            cancel_at_period_end=subscription.get("cancel_at_period_end", False)
+        )
+        db.add(new_subscription)
+        logger.info(f"Created new subscription {subscription_id} for user {user.id}")
+    
+    db.commit()
+
+
+async def handle_subscription_updated(db: Session, subscription: Dict[str, Any]):
+    """
+    Handle subscription updates (plan changes, renewals, etc).
+    """
+    subscription_id = subscription.get("id")
+    status = subscription.get("status")
+    
+    logger.info(f"Processing subscription.updated: {subscription_id}")
+    
+    # Find existing subscription
+    existing_sub = db.query(Subscription).filter(
+        Subscription.stripe_subscription_id == subscription_id
+    ).first()
+    
+    if not existing_sub:
+        logger.warning(f"Subscription {subscription_id} not found, creating new one")
+        await handle_subscription_created(db, subscription)
+        return
+    
+    # Update subscription details
+    existing_sub.status = status
+    existing_sub.current_period_start = datetime.fromtimestamp(subscription.get("current_period_start"))
+    existing_sub.current_period_end = datetime.fromtimestamp(subscription.get("current_period_end"))
+    existing_sub.cancel_at_period_end = subscription.get("cancel_at_period_end", False)
+    
+    # Update plan if changed
+    items = subscription.get("items", {}).get("data", [])
+    if items:
+        price = items[0].get("price", {})
+        plan_id = subscription.get("metadata", {}).get("plan_id") or price.get("lookup_key", existing_sub.stripe_plan_id)
+        interval = price.get("recurring", {}).get("interval", existing_sub.interval)
+        
+        existing_sub.stripe_plan_id = plan_id
+        existing_sub.interval = interval
+    
+    db.commit()
+    logger.info(f"Updated subscription {subscription_id}")
+
+
+async def handle_subscription_deleted(db: Session, subscription: Dict[str, Any]):
+    """
+    Handle subscription cancellation/deletion.
+    """
+    subscription_id = subscription.get("id")
+    
+    logger.info(f"Processing subscription.deleted: {subscription_id}")
+    
+    # Find existing subscription
+    existing_sub = db.query(Subscription).filter(
+        Subscription.stripe_subscription_id == subscription_id
+    ).first()
+    
+    if not existing_sub:
+        logger.warning(f"Subscription {subscription_id} not found for deletion")
+        return
+    
+    # Update status to canceled
+    existing_sub.status = "canceled"
+    existing_sub.canceled_at = datetime.now(timezone.utc)
+    
+    db.commit()
+    logger.info(f"Marked subscription {subscription_id} as canceled")
+
+
+async def handle_invoice_payment_succeeded(db: Session, invoice: Dict[str, Any]):
+    """
+    Handle successful invoice payment.
+    """
+    subscription_id = invoice.get("subscription")
+    
+    if not subscription_id:
+        return  # One-time payment, not a subscription
+    
+    logger.info(f"Processing invoice.payment_succeeded for subscription {subscription_id}")
+    
+    # Update subscription status if needed
+    existing_sub = db.query(Subscription).filter(
+        Subscription.stripe_subscription_id == subscription_id
+    ).first()
+    
+    if existing_sub and existing_sub.status != "active":
+        existing_sub.status = "active"
+        db.commit()
+        logger.info(f"Reactivated subscription {subscription_id} after successful payment")
+
+
+async def handle_invoice_payment_failed(db: Session, invoice: Dict[str, Any]):
+    """
+    Handle failed invoice payment.
+    """
+    subscription_id = invoice.get("subscription")
+    customer_id = invoice.get("customer")
+    
+    if not subscription_id:
+        return  # One-time payment, not a subscription
+    
+    logger.info(f"Processing invoice.payment_failed for subscription {subscription_id}")
+    
+    # Find user to notify
+    user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+    
+    if user:
+        # TODO: Send email notification about failed payment
+        logger.warning(f"Payment failed for user {user.id}, subscription {subscription_id}")
+    
+    # Subscription status will be updated by subscription.updated event

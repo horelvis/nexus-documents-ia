@@ -322,3 +322,64 @@ export function MyComponent() {
 3. **Simple dependencies**: Minimal useEffect dependencies
 4. **Clear error handling**: Always handle errors explicitly
 5. **Predictable behavior**: No background processes or automatic updates
+
+## Langflow Integration for Admin Agent Management
+
+### Overview
+Langflow can be integrated as an admin-only tool for visual agent creation and deployment, complementing the existing Langroid-based agent system.
+
+### Current Agent Architecture
+- **Agent Service**: REST API at `/backend/app/api/v1/agents.py`
+- **Langroid Microservice**: Dedicated service for agent execution (port 8002)
+- **Agent Types**: Digital Signature, Document Analyzer, RAG Assistant, Contract/Financial/Legal Analysis
+- **Database Models**: agents, agent_tools, agent_conversations, agent_messages, agent_executions
+
+### Proposed Langflow Integration
+
+#### 1. New Microservice
+- **Langflow Service** (port 8006): Visual workflow builder and manager
+- Docker configuration in `backend/microservices/langflow-service/`
+- Communicates with Langroid service for agent deployment
+
+#### 2. Admin-Only API Endpoints
+```python
+# backend/app/api/v1/langflow_admin.py
+- POST /langflow/flows - Create workflow (admin only)
+- GET /langflow/flows - List workflows (admin only)
+- POST /langflow/deploy/{flow_id} - Deploy as agent (admin only)
+- PUT /langflow/flows/{flow_id} - Update workflow (admin only)
+- POST /langflow/test/{flow_id} - Test workflow (admin only)
+```
+
+#### 3. Database Extensions
+```sql
+-- Langflow-specific tables
+langflow_workflows:
+  - id, name, description, flow_definition (JSONB)
+  - created_by, is_active, deployment_status
+  
+langflow_deployments:
+  - workflow_id, agent_id, deployed_by
+  - deployment_config, status, deployed_at
+```
+
+#### 4. Security Considerations
+- All Langflow endpoints require `get_current_active_superuser` dependency
+- Flow definitions validated before deployment
+- Sandboxed testing environment
+- Audit logging for all admin actions
+
+#### 5. Integration Benefits
+- Visual workflow builder for non-technical admins
+- Rapid prototyping of new agent capabilities
+- Version control for agent workflows
+- Hot-reload capability for updates
+- A/B testing of agent behaviors
+
+#### 6. Deployment Flow
+1. Admin creates visual workflow in Langflow UI
+2. Workflow saved to `langflow_workflows` table
+3. Admin deploys workflow to specific tenant
+4. Langflow definition converted to Langroid agent
+5. Agent registered in existing agent system
+6. Monitoring and rollback capabilities available

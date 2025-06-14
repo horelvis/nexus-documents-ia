@@ -70,8 +70,11 @@ export default function FinancialAgent({
   // Detect if there are financial documents in search results
   const financialKeywords = ['factura', 'invoice', 'presupuesto', 'budget', 'cotización', 'quote', 'recibo', 'receipt', 'pago', 'payment']
   const hasFinancialDocs = searchResults.some(result => {
-    const content = `${result.document.title} ${result.document.description} ${result.document.filename}`.toLowerCase()
-    return financialKeywords.some(keyword => content.includes(keyword))
+    // Handle both new structure (with document object) and current structure (with metadata)
+    const document = result.document || result.metadata || {}
+    const content = result.content || ''
+    const documentText = `${document.title || ''} ${document.description || ''} ${document.filename || ''} ${content}`.toLowerCase()
+    return financialKeywords.some(keyword => documentText.includes(keyword))
   }) || financialKeywords.some(keyword => searchQuery.toLowerCase().includes(keyword))
 
   // Generate financial insights based on search results
@@ -85,13 +88,16 @@ export default function FinancialAgent({
   const detectDocumentTypes = () => {
     const types = new Set<string>()
     searchResults.forEach(result => {
-      const content = `${result.document.title} ${result.document.description} ${result.document.filename}`.toLowerCase()
+      // Handle both new structure (with document object) and current structure (with metadata)
+      const document = result.document || result.metadata || {}
+      const content = result.content || ''
+      const documentText = `${document.title || ''} ${document.description || ''} ${document.filename || ''} ${content}`.toLowerCase()
       
-      if (content.includes('factura') || content.includes('invoice')) types.add('invoice')
-      if (content.includes('presupuesto') || content.includes('budget')) types.add('budget')
-      if (content.includes('cotización') || content.includes('quote')) types.add('quote')
-      if (content.includes('recibo') || content.includes('receipt')) types.add('receipt')
-      if (content.includes('informe') && (content.includes('financiero') || content.includes('financial'))) types.add('report')
+      if (documentText.includes('factura') || documentText.includes('invoice')) types.add('invoice')
+      if (documentText.includes('presupuesto') || documentText.includes('budget')) types.add('budget')
+      if (documentText.includes('cotización') || documentText.includes('quote')) types.add('quote')
+      if (documentText.includes('recibo') || documentText.includes('receipt')) types.add('receipt')
+      if (documentText.includes('informe') && (documentText.includes('financiero') || documentText.includes('financial'))) types.add('report')
     })
     
     setDetectedDocTypes(Array.from(types))

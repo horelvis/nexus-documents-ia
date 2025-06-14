@@ -266,23 +266,6 @@ export default function SearchPage() {
               </CardContent>
             </Card>
 
-            {!isSearching && !searchError && searchQuery && (
-              <div className="space-y-4">
-                <RAGAssistant
-                  searchResults={searchResults}
-                  searchQuery={searchQuery}
-                  onSuggestionClick={handleAssistantSuggestion}
-                />
-                
-                <FinancialAgent
-                  searchResults={searchResults}
-                  searchQuery={searchQuery}
-                  onFiltersChange={handleFinancialFiltersChange}
-                  onInsightClick={handleFinancialInsight}
-                />
-              </div>
-            )}
-
             {isSearching && (
               <div className="flex justify-center items-center py-12">
                 <IconLoader2 className="h-8 w-8 animate-spin" />
@@ -305,6 +288,24 @@ export default function SearchPage() {
 
             {!isSearching && !searchError && searchResults.length > 0 && (
               <div className="space-y-4">
+                {/* AI Agents - Always show when there are results */}
+                {searchQuery && (
+                  <div className="space-y-4">
+                    <RAGAssistant
+                      searchResults={searchResults}
+                      searchQuery={searchQuery}
+                      onSuggestionClick={handleAssistantSuggestion}
+                    />
+                    
+                    <FinancialAgent
+                      searchResults={searchResults}
+                      searchQuery={searchQuery}
+                      onFiltersChange={handleFinancialFiltersChange}
+                      onInsightClick={handleFinancialInsight}
+                    />
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold">
                     Search Results ({searchResults.length})
@@ -312,73 +313,106 @@ export default function SearchPage() {
                 </div>
 
                 <div className="grid gap-4">
-                  {searchResults.map((result) => (
-                    <Card key={result.document.id} className="hover:shadow-md transition-shadow">
-                      <CardContent className="pt-6">
-                        <div className="flex items-start gap-4">
-                          <div className="flex-shrink-0">
-                            {getFileIcon(result.document.file_type, result.document.mime_type, result.document.filename)}
-                          </div>
-                          
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between mb-2">
-                              <div>
-                                <h4 className="font-semibold text-base truncate">
-                                  {result.document.title || result.document.filename}
-                                </h4>
-                                {result.document.description && (
-                                  <p className="text-muted-foreground text-sm mt-1">
-                                    {result.document.description}
-                                  </p>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 ml-4">
-                                <Badge variant="secondary" className="text-xs">
-                                  {result.score ? (result.score * 100).toFixed(1) : '0.0'}% match
-                                </Badge>
-                                <Badge className={getStatusColor(result.document.indexed)} variant="secondary">
-                                  {result.document.indexed || 'unknown'}
-                                </Badge>
-                              </div>
+                  {searchResults.map((result, index) => {
+                    // Handle both new structure (with document object) and current structure (with metadata)
+                    const document = result.document || result.metadata || {}
+                    const content = result.content || ''
+                    const score = result.score || 0
+                    const matches = result.matches || []
+                    
+                    // Create a normalized document object
+                    const normalizedDoc = {
+                      id: document.doc_id || document._id || document.id || index,
+                      title: document.title || document.filename || 'Untitled',
+                      description: document.description || '',
+                      filename: document.filename || 'Unknown file',
+                      file_type: document.file_type || 'unknown',
+                      file_size: document.file_size || null,
+                      mime_type: document.mime_type || '',
+                      created_at: document.created_at || null,
+                      indexed: document.indexed || 'unknown',
+                      tags: document.tags || []
+                    }
+                    
+                    return (
+                      <Card key={normalizedDoc.id} className="hover:shadow-md transition-shadow">
+                        <CardContent className="pt-6">
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                              {getFileIcon(normalizedDoc.file_type, normalizedDoc.mime_type, normalizedDoc.filename)}
                             </div>
-
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
-                              <span>Size: {result.document.file_size ? formatFileSize(result.document.file_size) : 'Unknown'}</span>
-                              <span>•</span>
-                              <span>Uploaded: {result.document.created_at ? new Date(result.document.created_at).toLocaleDateString() : 'Unknown date'}</span>
-                            </div>
-
-                            {result.document.tags && result.document.tags.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mb-3">
-                                {result.document.tags.map((tag) => (
-                                  <Badge key={tag} variant="outline" className="text-xs">
-                                    <IconTag className="h-3 w-3 mr-1" />
-                                    {tag}
+                            
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between mb-2">
+                                <div>
+                                  <h4 className="font-semibold text-base truncate">
+                                    {normalizedDoc.title}
+                                  </h4>
+                                  {normalizedDoc.description && (
+                                    <p className="text-muted-foreground text-sm mt-1">
+                                      {normalizedDoc.description}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 ml-4">
+                                  <Badge variant="secondary" className="text-xs">
+                                    {score ? (score * 100).toFixed(1) : '0.0'}% match
                                   </Badge>
-                                ))}
+                                  <Badge className={getStatusColor(normalizedDoc.indexed)} variant="secondary">
+                                    {normalizedDoc.indexed}
+                                  </Badge>
+                                </div>
                               </div>
-                            )}
 
-                            {result.matches && result.matches.length > 0 && (
-                              <div className="bg-muted/50 rounded-lg p-3">
-                                <h5 className="font-medium text-sm mb-2">Relevant Excerpts:</h5>
-                                {result.matches.slice(0, 2).map((match, index) => (
-                                  <div key={index} className="text-sm mb-2 last:mb-0">
-                                    <span className="text-muted-foreground">
-                                      &quot;...{match.text}...&quot;
-                                    </span>
-                                    <Badge variant="outline" className="ml-2 text-xs">
-                                      {match.score ? (match.score * 100).toFixed(1) : '0.0'}% relevance
-                                    </Badge>
-                                  </div>
-                                ))}
+                              <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
+                                <span>Size: {normalizedDoc.file_size ? formatFileSize(normalizedDoc.file_size) : 'Unknown'}</span>
+                                <span>•</span>
+                                <span>Uploaded: {normalizedDoc.created_at ? new Date(normalizedDoc.created_at).toLocaleDateString() : 'Unknown date'}</span>
                               </div>
-                            )}
+
+                              {normalizedDoc.tags && normalizedDoc.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-3">
+                                  {normalizedDoc.tags.map((tag, tagIndex) => (
+                                    <Badge key={tagIndex} variant="outline" className="text-xs">
+                                      <IconTag className="h-3 w-3 mr-1" />
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+
+                              {(matches.length > 0 || content) && (
+                                <div className="bg-muted/50 rounded-lg p-3">
+                                  <h5 className="font-medium text-sm mb-2">Relevant Excerpts:</h5>
+                                  {matches.length > 0 ? (
+                                    matches.slice(0, 2).map((match, matchIndex) => (
+                                      <div key={matchIndex} className="text-sm mb-2 last:mb-0">
+                                        <span className="text-muted-foreground">
+                                          &quot;...{match.text}...&quot;
+                                        </span>
+                                        <Badge variant="outline" className="ml-2 text-xs">
+                                          {match.score ? (match.score * 100).toFixed(1) : '0.0'}% relevance
+                                        </Badge>
+                                      </div>
+                                    ))
+                                  ) : content && (
+                                    <div className="text-sm mb-2">
+                                      <span className="text-muted-foreground">
+                                        &quot;...{content.slice(0, 200)}...&quot;
+                                      </span>
+                                      <Badge variant="outline" className="ml-2 text-xs">
+                                        {score ? (score * 100).toFixed(1) : '0.0'}% relevance
+                                      </Badge>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
                 </div>
               </div>
             )}
