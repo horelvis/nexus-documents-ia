@@ -132,6 +132,27 @@ export default function SearchPage() {
   const autoSelectAgent = (query: string, results: any[]) => {
     const lowerQuery = query.toLowerCase()
     
+    // First check dynamic agents with custom keywords
+    for (const agent of availableAgents) {
+      if (agent.ui_config?.keywords) {
+        // Check if query matches any custom keywords
+        const keywords = agent.ui_config.keywords as string[]
+        if (keywords.some(keyword => lowerQuery.includes(keyword.toLowerCase()))) {
+          setSelectedAgentId(agent.id)
+          return
+        }
+      }
+    }
+    
+    // Check for customer support agent
+    if (availableAgents.some(a => a.id === 'customer_support_agent')) {
+      if (lowerQuery.includes('support') || lowerQuery.includes('help') ||
+          lowerQuery.includes('ticket') || lowerQuery.includes('issue')) {
+        setSelectedAgentId('customer_support_agent')
+        return
+      }
+    }
+    
     // Check for financial agent
     if (availableAgents.some(a => a.id === 'financial_analysis_agent')) {
       if (lowerQuery.includes('invoice') || lowerQuery.includes('payment') ||
@@ -172,8 +193,20 @@ export default function SearchPage() {
     }
   }
 
-  // Get agent icon
+  // Get agent icon - now supports dynamic icons
   const getAgentIcon = (agent: any) => {
+    // Check for custom UI config icon first
+    const customIcon = agent.ui_config?.icon
+    if (customIcon) {
+      // Map custom icon names to Tabler icons
+      switch (customIcon) {
+        case 'IconHeadset':
+          return <IconMessageCircle className="h-5 w-5" />
+        // Add more custom icon mappings as needed
+      }
+    }
+
+    // Fallback to default icon mapping
     switch (agent.icon || agent.type) {
       case 'financial':
       case 'financial_analysis_agent':
@@ -192,6 +225,9 @@ export default function SearchPage() {
         return <IconSignature className="h-5 w-5" />
       case 'search':
         return <IconSearch className="h-5 w-5" />
+      case 'support':
+      case 'customer_support_agent':
+        return <IconMessageCircle className="h-5 w-5" />
       default:
         return <IconBrain className="h-5 w-5" />
     }
@@ -301,6 +337,7 @@ export default function SearchPage() {
                     agentId={selectedAgentId}
                     searchQuery={searchQuery}
                     searchResults={searchResults}
+                    availableAgents={availableAgents}
                   />
                 )}
               </div>
@@ -331,21 +368,43 @@ export default function SearchPage() {
                       {availableAgents.map((agent) => (
                         <Card 
                           key={agent.id} 
-                          className="cursor-pointer hover:border-primary transition-colors"
+                          className={`cursor-pointer hover:border-primary transition-colors ${
+                            selectedAgentId === agent.id ? 'border-primary' : ''
+                          }`}
                           onClick={() => setSelectedAgentId(agent.id)}
                         >
                           <CardHeader className="pb-3">
-                            <div className="flex items-center gap-2">
-                              <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                                {getAgentIcon(agent)}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className={`p-2 rounded-lg ${
+                                  agent.ui_config?.color 
+                                    ? `bg-${agent.ui_config.color}-50 text-${agent.ui_config.color}-600`
+                                    : 'bg-primary/10 text-primary'
+                                }`}>
+                                  {getAgentIcon(agent)}
+                                </div>
+                                <h3 className="font-semibold">{agent.name}</h3>
                               </div>
-                              <h3 className="font-semibold">{agent.name}</h3>
+                              {agent.source === 'dynamic' && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Custom
+                                </Badge>
+                              )}
                             </div>
                           </CardHeader>
                           <CardContent>
                             <p className="text-sm text-muted-foreground">
                               {agent.description}
                             </p>
+                            {agent.capabilities && agent.capabilities.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {agent.capabilities.slice(0, 3).map((cap, idx) => (
+                                  <Badge key={idx} variant="outline" className="text-xs">
+                                    {cap.replace(/_/g, ' ')}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                           </CardContent>
                         </Card>
                       ))}
@@ -397,7 +456,7 @@ export default function SearchPage() {
 }
 
 // Agent Interface Component
-function AgentInterface({ agentId, searchQuery, searchResults }: any) {
+function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }: any) {
   const [input, setInput] = useState('')
   const [showThinking, setShowThinking] = useState(false)
   
@@ -448,13 +507,33 @@ function AgentInterface({ agentId, searchQuery, searchResults }: any) {
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <IconRobot className="h-5 w-5 text-blue-600" />
-            AI Agent Analysis
+            {(() => {
+              const agent = availableAgents.find(a => a.id === agentId)
+              return agent?.name || 'AI Agent Analysis'
+            })()}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
             Analyzing {searchResults.length} documents related to "{searchQuery}"
           </p>
+          {(() => {
+            const agent = availableAgents.find(a => a.id === agentId)
+            return agent?.ui_config?.quick_actions && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {agent.ui_config.quick_actions.map((action, idx) => (
+                  <Button
+                    key={idx}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSendMessage(action)}
+                  >
+                    {action}
+                  </Button>
+                ))}
+              </div>
+            )
+          })()}
         </CardContent>
       </Card>
 

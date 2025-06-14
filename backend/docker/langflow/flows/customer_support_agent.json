@@ -19,7 +19,8 @@
       "Escalate to supervisor",
       "Generate support report",
       "Search knowledge base"
-    ]
+    ],
+    "keywords": ["support", "help", "ticket", "issue", "problem", "assistance"]
   },
   "tools": [
     "search_knowledge_base",

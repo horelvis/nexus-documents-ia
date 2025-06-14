@@ -7,13 +7,21 @@ export interface Agent {
   name: string
   description: string
   type: string
-  configuration: Record<string, any>
-  tools: string[]
-  is_active: boolean
-  is_public: boolean
-  created_at: string
-  updated_at: string
-  created_by: string
+  icon?: string
+  configuration?: Record<string, any>
+  tools?: string[]
+  is_active?: boolean
+  is_public?: boolean
+  created_at?: string
+  updated_at?: string
+  created_by?: string
+  source?: 'built-in' | 'dynamic'
+  capabilities?: string[]
+  ui_config?: {
+    icon?: string
+    color?: string
+    quick_actions?: string[]
+  }
 }
 
 export interface ChatMessage {
@@ -49,6 +57,11 @@ export class AgentsService {
 
   async getAgents() {
     const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/list`)
+    return response
+  }
+
+  async getAgentTypes() {
+    const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/types`)
     return response
   }
 
