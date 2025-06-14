@@ -1,0 +1,253 @@
+{
+  "name": "Document Analyzer Agent",
+  "description": "Intelligent agent for document analysis, summarization, keyword extraction, and sentiment analysis",
+  "data": {
+    "nodes": [
+      {
+        "id": "user_query",
+        "type": "input",
+        "position": { "x": 100, "y": 200 },
+        "data": {
+          "label": "Analysis Query",
+          "type": "text",
+          "description": "User request for document analysis"
+        }
+      },
+      {
+        "id": "documents_input",
+        "type": "document_loader",
+        "position": { "x": 100, "y": 350 },
+        "data": {
+          "label": "Documents to Analyze",
+          "type": "documents",
+          "supported_types": ["pdf", "docx", "txt", "xlsx", "csv"]
+        }
+      },
+      {
+        "id": "analysis_type_selector",
+        "type": "conditional_router",
+        "position": { "x": 300, "y": 275 },
+        "data": {
+          "label": "Analysis Type Router",
+          "routes": [
+            "summary",
+            "keywords",
+            "sentiment",
+            "general",
+            "comparison"
+          ]
+        }
+      },
+      {
+        "id": "document_preprocessor",
+        "type": "text_processor",
+        "position": { "x": 500, "y": 150 },
+        "data": {
+          "label": "Document Preprocessor",
+          "operations": [
+            "extract_text",
+            "clean_formatting",
+            "segment_sections",
+            "detect_language"
+          ]
+        }
+      },
+      {
+        "id": "summarization_llm",
+        "type": "llm",
+        "position": { "x": 700, "y": 50 },
+        "data": {
+          "label": "Summarization LLM",
+          "model": "gpt-4",
+          "temperature": 0.3,
+          "system_prompt": "You are an expert document summarizer. Create concise, accurate summaries that capture key points and main ideas."
+        }
+      },
+      {
+        "id": "keyword_extractor",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 200 },
+        "data": {
+          "label": "Keyword & Entity Extractor",
+          "function": "extract_keywords_entities",
+          "algorithms": ["TF-IDF", "RAKE", "NER"],
+          "outputs": ["keywords", "entities", "topics"]
+        }
+      },
+      {
+        "id": "sentiment_analyzer",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 350 },
+        "data": {
+          "label": "Sentiment & Tone Analyzer",
+          "function": "analyze_sentiment",
+          "aspects": ["overall", "section-wise", "entity-based"],
+          "outputs": ["sentiment_score", "tone", "emotions"]
+        }
+      },
+      {
+        "id": "semantic_search",
+        "type": "vector_search",
+        "position": { "x": 500, "y": 450 },
+        "data": {
+          "label": "Semantic Document Search",
+          "embedding_model": "text-embedding-ada-002",
+          "similarity_threshold": 0.7
+        }
+      },
+      {
+        "id": "comparison_engine",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 500 },
+        "data": {
+          "label": "Document Comparison Engine",
+          "function": "compare_documents",
+          "metrics": ["similarity", "differences", "common_themes"]
+        }
+      },
+      {
+        "id": "insight_aggregator",
+        "type": "aggregator",
+        "position": { "x": 900, "y": 275 },
+        "data": {
+          "label": "Insight Aggregator",
+          "combine_method": "weighted_merge",
+          "output_format": "structured_json"
+        }
+      },
+      {
+        "id": "response_generator",
+        "type": "template",
+        "position": { "x": 1100, "y": 275 },
+        "data": {
+          "label": "Analysis Response Generator",
+          "template": "## Document Analysis Results\n\n### Analysis Type: {analysis_type}\n\n### Summary:\n{summary}\n\n### Key Findings:\n{findings}\n\n### Extracted Information:\n- Keywords: {keywords}\n- Entities: {entities}\n- Sentiment: {sentiment}\n\n### Recommendations:\n{recommendations}"
+        }
+      },
+      {
+        "id": "output_formatter",
+        "type": "output",
+        "position": { "x": 1300, "y": 275 },
+        "data": {
+          "label": "Formatted Analysis Output",
+          "format": "markdown",
+          "include_metadata": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "user_query",
+        "target": "analysis_type_selector",
+        "type": "default"
+      },
+      {
+        "id": "e2",
+        "source": "documents_input",
+        "target": "document_preprocessor",
+        "type": "default"
+      },
+      {
+        "id": "e3",
+        "source": "analysis_type_selector",
+        "target": "document_preprocessor",
+        "type": "default"
+      },
+      {
+        "id": "e4",
+        "source": "document_preprocessor",
+        "target": "summarization_llm",
+        "type": "conditional",
+        "condition": "analysis_type in ['summary', 'general']"
+      },
+      {
+        "id": "e5",
+        "source": "document_preprocessor",
+        "target": "keyword_extractor",
+        "type": "conditional",
+        "condition": "analysis_type in ['keywords', 'general']"
+      },
+      {
+        "id": "e6",
+        "source": "document_preprocessor",
+        "target": "sentiment_analyzer",
+        "type": "conditional",
+        "condition": "analysis_type in ['sentiment', 'general']"
+      },
+      {
+        "id": "e7",
+        "source": "document_preprocessor",
+        "target": "semantic_search",
+        "type": "default"
+      },
+      {
+        "id": "e8",
+        "source": "document_preprocessor",
+        "target": "comparison_engine",
+        "type": "conditional",
+        "condition": "analysis_type == 'comparison'"
+      },
+      {
+        "id": "e9",
+        "source": "summarization_llm",
+        "target": "insight_aggregator",
+        "type": "default"
+      },
+      {
+        "id": "e10",
+        "source": "keyword_extractor",
+        "target": "insight_aggregator",
+        "type": "default"
+      },
+      {
+        "id": "e11",
+        "source": "sentiment_analyzer",
+        "target": "insight_aggregator",
+        "type": "default"
+      },
+      {
+        "id": "e12",
+        "source": "comparison_engine",
+        "target": "insight_aggregator",
+        "type": "default"
+      },
+      {
+        "id": "e13",
+        "source": "insight_aggregator",
+        "target": "response_generator",
+        "type": "default"
+      },
+      {
+        "id": "e14",
+        "source": "response_generator",
+        "target": "output_formatter",
+        "type": "default"
+      }
+    ]
+  },
+  "config": {
+    "features": [
+      "Multi-format document support",
+      "Advanced NLP processing",
+      "Semantic understanding",
+      "Multi-language support",
+      "Real-time analysis",
+      "Batch processing capability"
+    ],
+    "tools": [
+      "analyze_document",
+      "search_documents",
+      "calculate"
+    ],
+    "analysis_capabilities": [
+      "Executive summaries",
+      "Key point extraction",
+      "Theme identification",
+      "Sentiment analysis",
+      "Entity recognition",
+      "Document comparison",
+      "Trend detection"
+    ]
+  }
+}

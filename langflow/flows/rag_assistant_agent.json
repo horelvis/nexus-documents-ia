@@ -1,0 +1,249 @@
+{
+  "name": "RAG Assistant Agent",
+  "description": "Retrieval-Augmented Generation assistant for intelligent document search and contextual Q&A",
+  "data": {
+    "nodes": [
+      {
+        "id": "user_question",
+        "type": "input",
+        "position": { "x": 100, "y": 200 },
+        "data": {
+          "label": "User Question",
+          "type": "text",
+          "description": "Natural language question about documents"
+        }
+      },
+      {
+        "id": "search_context",
+        "type": "input",
+        "position": { "x": 100, "y": 350 },
+        "data": {
+          "label": "Search Context",
+          "type": "search_results",
+          "description": "Previous search results to use as context"
+        }
+      },
+      {
+        "id": "query_embedder",
+        "type": "embeddings",
+        "position": { "x": 300, "y": 200 },
+        "data": {
+          "label": "Query Embedder",
+          "model": "text-embedding-ada-002",
+          "dimension": 1536
+        }
+      },
+      {
+        "id": "vector_search",
+        "type": "qdrant_search",
+        "position": { "x": 500, "y": 200 },
+        "data": {
+          "label": "Vector Document Search",
+          "collection": "documents",
+          "top_k": 10,
+          "score_threshold": 0.7
+        }
+      },
+      {
+        "id": "context_builder",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 250 },
+        "data": {
+          "label": "Context Builder",
+          "function": "build_rag_context",
+          "max_tokens": 3000,
+          "chunk_overlap": 100
+        }
+      },
+      {
+        "id": "suggestion_generator",
+        "type": "llm",
+        "position": { "x": 500, "y": 400 },
+        "data": {
+          "label": "Suggestion Generator",
+          "model": "gpt-3.5-turbo",
+          "temperature": 0.7,
+          "system_prompt": "Generate relevant follow-up questions based on the context and user's current question."
+        }
+      },
+      {
+        "id": "rag_llm",
+        "type": "llm",
+        "position": { "x": 900, "y": 250 },
+        "data": {
+          "label": "RAG Response LLM",
+          "model": "gpt-4",
+          "temperature": 0.5,
+          "system_prompt": "You are a helpful AI assistant analyzing documents. Use the provided context to answer questions accurately. If information is not in the context, say so clearly. Always cite which documents you're referencing."
+        }
+      },
+      {
+        "id": "thinking_display",
+        "type": "streaming_component",
+        "position": { "x": 900, "y": 100 },
+        "data": {
+          "label": "Thinking Process Display",
+          "show_reasoning": true,
+          "show_document_refs": true
+        }
+      },
+      {
+        "id": "response_validator",
+        "type": "custom_component",
+        "position": { "x": 1100, "y": 250 },
+        "data": {
+          "label": "Response Validator",
+          "function": "validate_rag_response",
+          "checks": [
+            "citation_accuracy",
+            "relevance_score",
+            "hallucination_detection"
+          ]
+        }
+      },
+      {
+        "id": "chat_memory",
+        "type": "memory",
+        "position": { "x": 700, "y": 100 },
+        "data": {
+          "label": "Conversation Memory",
+          "type": "sliding_window",
+          "window_size": 10,
+          "store_embeddings": true
+        }
+      },
+      {
+        "id": "response_formatter",
+        "type": "template",
+        "position": { "x": 1300, "y": 250 },
+        "data": {
+          "label": "Response Formatter",
+          "template": "### Answer:\n{answer}\n\n### Sources:\n{sources}\n\n### Confidence: {confidence}\n\n### Suggested Questions:\n{suggestions}"
+        }
+      },
+      {
+        "id": "output_stream",
+        "type": "output",
+        "position": { "x": 1500, "y": 250 },
+        "data": {
+          "label": "Streaming Response Output",
+          "format": "markdown",
+          "streaming": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "user_question",
+        "target": "query_embedder",
+        "type": "default"
+      },
+      {
+        "id": "e2",
+        "source": "query_embedder",
+        "target": "vector_search",
+        "type": "default"
+      },
+      {
+        "id": "e3",
+        "source": "vector_search",
+        "target": "context_builder",
+        "type": "default"
+      },
+      {
+        "id": "e4",
+        "source": "search_context",
+        "target": "context_builder",
+        "type": "default"
+      },
+      {
+        "id": "e5",
+        "source": "chat_memory",
+        "target": "context_builder",
+        "type": "default"
+      },
+      {
+        "id": "e6",
+        "source": "context_builder",
+        "target": "rag_llm",
+        "type": "default"
+      },
+      {
+        "id": "e7",
+        "source": "user_question",
+        "target": "rag_llm",
+        "type": "default"
+      },
+      {
+        "id": "e8",
+        "source": "context_builder",
+        "target": "suggestion_generator",
+        "type": "default"
+      },
+      {
+        "id": "e9",
+        "source": "rag_llm",
+        "target": "thinking_display",
+        "type": "streaming"
+      },
+      {
+        "id": "e10",
+        "source": "rag_llm",
+        "target": "response_validator",
+        "type": "default"
+      },
+      {
+        "id": "e11",
+        "source": "response_validator",
+        "target": "response_formatter",
+        "type": "default"
+      },
+      {
+        "id": "e12",
+        "source": "suggestion_generator",
+        "target": "response_formatter",
+        "type": "default"
+      },
+      {
+        "id": "e13",
+        "source": "response_formatter",
+        "target": "output_stream",
+        "type": "streaming"
+      },
+      {
+        "id": "e14",
+        "source": "rag_llm",
+        "target": "chat_memory",
+        "type": "default"
+      }
+    ]
+  },
+  "config": {
+    "features": [
+      "Retrieval-Augmented Generation",
+      "Semantic document search",
+      "Contextual Q&A",
+      "Multi-turn conversations",
+      "Source attribution",
+      "Hallucination prevention",
+      "Thinking process display",
+      "Smart follow-up suggestions"
+    ],
+    "rag_settings": {
+      "chunk_size": 500,
+      "chunk_overlap": 50,
+      "retrieval_method": "hybrid",
+      "rerank_enabled": true,
+      "max_context_length": 3000
+    },
+    "capabilities": [
+      "Document Q&A",
+      "Summarization with sources",
+      "Fact extraction",
+      "Cross-document analysis",
+      "Contextual explanations",
+      "Interactive exploration"
+    ]
+  }
+}

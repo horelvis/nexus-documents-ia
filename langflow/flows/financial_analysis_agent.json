@@ -1,0 +1,193 @@
+{
+  "name": "Financial Analysis Agent",
+  "description": "Agent specialized in financial document analysis, due dates tracking, expense analysis, and cash flow management",
+  "data": {
+    "nodes": [
+      {
+        "id": "agent_input",
+        "type": "input",
+        "position": { "x": 100, "y": 200 },
+        "data": {
+          "label": "Financial Query Input",
+          "type": "text",
+          "description": "User query about financial documents"
+        }
+      },
+      {
+        "id": "document_context",
+        "type": "document_loader",
+        "position": { "x": 100, "y": 350 },
+        "data": {
+          "label": "Document Context",
+          "type": "documents",
+          "description": "Financial documents to analyze"
+        }
+      },
+      {
+        "id": "query_analyzer",
+        "type": "text_classifier",
+        "position": { "x": 300, "y": 200 },
+        "data": {
+          "label": "Query Type Analyzer",
+          "categories": [
+            "due_dates_payments",
+            "expense_analysis",
+            "financial_summary",
+            "cash_flow",
+            "general"
+          ]
+        }
+      },
+      {
+        "id": "financial_llm",
+        "type": "llm",
+        "position": { "x": 500, "y": 300 },
+        "data": {
+          "label": "Financial Analysis LLM",
+          "model": "gpt-4",
+          "temperature": 0.3,
+          "system_prompt": "You are a financial analysis expert specializing in invoice processing, expense tracking, and cash flow management. Analyze financial documents and provide detailed insights."
+        }
+      },
+      {
+        "id": "due_dates_analyzer",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 100 },
+        "data": {
+          "label": "Due Dates & Payments Analyzer",
+          "function": "analyze_due_dates_and_payments",
+          "inputs": ["documents"],
+          "outputs": ["overdue_items", "due_soon", "upcoming_payments"]
+        }
+      },
+      {
+        "id": "expense_analyzer",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 250 },
+        "data": {
+          "label": "Expense Pattern Analyzer",
+          "function": "analyze_expenses",
+          "inputs": ["documents"],
+          "outputs": ["expense_categories", "trends", "anomalies"]
+        }
+      },
+      {
+        "id": "cash_flow_analyzer",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 400 },
+        "data": {
+          "label": "Cash Flow Analyzer",
+          "function": "analyze_cash_flow",
+          "inputs": ["documents"],
+          "outputs": ["inflows", "outflows", "liquidity_status"]
+        }
+      },
+      {
+        "id": "insight_generator",
+        "type": "template",
+        "position": { "x": 900, "y": 250 },
+        "data": {
+          "label": "Financial Insights Generator",
+          "template": "## Financial Analysis Results\n\n{analysis_type}\n\n### Key Findings:\n{findings}\n\n### Recommendations:\n{recommendations}\n\n### Action Items:\n{action_items}"
+        }
+      },
+      {
+        "id": "response_formatter",
+        "type": "output",
+        "position": { "x": 1100, "y": 250 },
+        "data": {
+          "label": "Formatted Financial Response",
+          "format": "markdown"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "agent_input",
+        "target": "query_analyzer",
+        "type": "default"
+      },
+      {
+        "id": "e2",
+        "source": "document_context",
+        "target": "financial_llm",
+        "type": "default"
+      },
+      {
+        "id": "e3",
+        "source": "query_analyzer",
+        "target": "financial_llm",
+        "type": "default"
+      },
+      {
+        "id": "e4",
+        "source": "financial_llm",
+        "target": "due_dates_analyzer",
+        "type": "conditional",
+        "condition": "analysis_type == 'due_dates_payments'"
+      },
+      {
+        "id": "e5",
+        "source": "financial_llm",
+        "target": "expense_analyzer",
+        "type": "conditional",
+        "condition": "analysis_type == 'expense_analysis'"
+      },
+      {
+        "id": "e6",
+        "source": "financial_llm",
+        "target": "cash_flow_analyzer",
+        "type": "conditional",
+        "condition": "analysis_type == 'cash_flow'"
+      },
+      {
+        "id": "e7",
+        "source": "due_dates_analyzer",
+        "target": "insight_generator",
+        "type": "default"
+      },
+      {
+        "id": "e8",
+        "source": "expense_analyzer",
+        "target": "insight_generator",
+        "type": "default"
+      },
+      {
+        "id": "e9",
+        "source": "cash_flow_analyzer",
+        "target": "insight_generator",
+        "type": "default"
+      },
+      {
+        "id": "e10",
+        "source": "insight_generator",
+        "target": "response_formatter",
+        "type": "default"
+      }
+    ]
+  },
+  "config": {
+    "features": [
+      "Chain of Thought reasoning",
+      "Multi-step financial analysis",
+      "Real-time document processing",
+      "Pattern recognition for expenses",
+      "Due date tracking and alerts",
+      "Cash flow forecasting"
+    ],
+    "tools": [
+      "calculate",
+      "search_documents",
+      "analyze_document"
+    ],
+    "specialized_functions": [
+      "extract_amounts",
+      "calculate_totals",
+      "identify_payment_terms",
+      "categorize_expenses",
+      "detect_anomalies",
+      "generate_financial_summary"
+    ]
+  }
+}

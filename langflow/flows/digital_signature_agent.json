@@ -1,0 +1,319 @@
+{
+  "name": "Digital Signature Agent",
+  "description": "Specialized agent for managing digital signature workflows, tracking signature status, and automating document signing processes",
+  "data": {
+    "nodes": [
+      {
+        "id": "signature_request",
+        "type": "input",
+        "position": { "x": 100, "y": 200 },
+        "data": {
+          "label": "Signature Request",
+          "type": "text",
+          "description": "User request for signature workflow"
+        }
+      },
+      {
+        "id": "document_input",
+        "type": "document_loader",
+        "position": { "x": 100, "y": 350 },
+        "data": {
+          "label": "Document for Signature",
+          "type": "document",
+          "supported_formats": ["pdf", "docx", "txt"]
+        }
+      },
+      {
+        "id": "request_analyzer",
+        "type": "text_classifier",
+        "position": { "x": 300, "y": 275 },
+        "data": {
+          "label": "Request Type Analyzer",
+          "categories": [
+            "create_signature_request",
+            "check_status",
+            "send_reminders",
+            "list_requests",
+            "download_signed"
+          ]
+        }
+      },
+      {
+        "id": "signature_llm",
+        "type": "llm",
+        "position": { "x": 500, "y": 275 },
+        "data": {
+          "label": "Signature Assistant LLM",
+          "model": "gpt-4",
+          "temperature": 0.3,
+          "system_prompt": "You are a digital signature workflow assistant. Help users create, manage, and track signature requests professionally and efficiently."
+        }
+      },
+      {
+        "id": "create_request_tool",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 100 },
+        "data": {
+          "label": "Create Signature Request",
+          "function": "create_signature_request",
+          "inputs": [
+            "title",
+            "document",
+            "signers",
+            "message",
+            "signature_type"
+          ],
+          "signature_types": ["sequential", "parallel", "hybrid"]
+        }
+      },
+      {
+        "id": "status_tracker",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 250 },
+        "data": {
+          "label": "Signature Status Tracker",
+          "function": "track_signature_status",
+          "track": [
+            "pending",
+            "sent",
+            "viewed",
+            "signed",
+            "completed",
+            "expired"
+          ]
+        }
+      },
+      {
+        "id": "signer_manager",
+        "type": "custom_component",
+        "position": { "x": 700, "y": 400 },
+        "data": {
+          "label": "Signer Management",
+          "function": "manage_signers",
+          "operations": [
+            "add_signer",
+            "remove_signer",
+            "update_signer",
+            "set_signing_order",
+            "assign_fields"
+          ]
+        }
+      },
+      {
+        "id": "notification_engine",
+        "type": "custom_component",
+        "position": { "x": 900, "y": 175 },
+        "data": {
+          "label": "Notification Engine",
+          "function": "send_notifications",
+          "types": [
+            "signature_request",
+            "reminder",
+            "signed_notification",
+            "completion_alert"
+          ],
+          "channels": ["email", "sms", "in_app"]
+        }
+      },
+      {
+        "id": "document_search",
+        "type": "vector_search",
+        "position": { "x": 500, "y": 450 },
+        "data": {
+          "label": "Document Search",
+          "collection": "documents",
+          "filters": ["unsigned", "pending", "completed"]
+        }
+      },
+      {
+        "id": "workflow_orchestrator",
+        "type": "workflow",
+        "position": { "x": 900, "y": 325 },
+        "data": {
+          "label": "Signature Workflow Orchestrator",
+          "workflows": [
+            "simple_signature",
+            "multi_party_sequential",
+            "approval_workflow",
+            "witness_signature"
+          ]
+        }
+      },
+      {
+        "id": "audit_logger",
+        "type": "custom_component",
+        "position": { "x": 900, "y": 475 },
+        "data": {
+          "label": "Audit Trail Logger",
+          "function": "log_signature_events",
+          "events": [
+            "request_created",
+            "document_viewed",
+            "signature_added",
+            "request_completed",
+            "request_cancelled"
+          ]
+        }
+      },
+      {
+        "id": "response_generator",
+        "type": "template",
+        "position": { "x": 1100, "y": 275 },
+        "data": {
+          "label": "Response Generator",
+          "template": "## Signature Workflow Update\n\n### Action: {action}\n\n### Status: {status}\n\n### Details:\n{details}\n\n### Signers Status:\n{signers_status}\n\n### Next Steps:\n{next_steps}\n\n### Audit Trail:\n{audit_trail}"
+        }
+      },
+      {
+        "id": "output_handler",
+        "type": "output",
+        "position": { "x": 1300, "y": 275 },
+        "data": {
+          "label": "Signature Response Output",
+          "format": "json",
+          "include_metadata": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "signature_request",
+        "target": "request_analyzer",
+        "type": "default"
+      },
+      {
+        "id": "e2",
+        "source": "document_input",
+        "target": "signature_llm",
+        "type": "default"
+      },
+      {
+        "id": "e3",
+        "source": "request_analyzer",
+        "target": "signature_llm",
+        "type": "default"
+      },
+      {
+        "id": "e4",
+        "source": "signature_llm",
+        "target": "create_request_tool",
+        "type": "conditional",
+        "condition": "action == 'create'"
+      },
+      {
+        "id": "e5",
+        "source": "signature_llm",
+        "target": "status_tracker",
+        "type": "conditional",
+        "condition": "action == 'check_status'"
+      },
+      {
+        "id": "e6",
+        "source": "signature_llm",
+        "target": "signer_manager",
+        "type": "conditional",
+        "condition": "action == 'manage_signers'"
+      },
+      {
+        "id": "e7",
+        "source": "create_request_tool",
+        "target": "workflow_orchestrator",
+        "type": "default"
+      },
+      {
+        "id": "e8",
+        "source": "status_tracker",
+        "target": "notification_engine",
+        "type": "conditional",
+        "condition": "needs_reminder == true"
+      },
+      {
+        "id": "e9",
+        "source": "signer_manager",
+        "target": "workflow_orchestrator",
+        "type": "default"
+      },
+      {
+        "id": "e10",
+        "source": "signature_llm",
+        "target": "document_search",
+        "type": "conditional",
+        "condition": "action == 'search'"
+      },
+      {
+        "id": "e11",
+        "source": "workflow_orchestrator",
+        "target": "audit_logger",
+        "type": "default"
+      },
+      {
+        "id": "e12",
+        "source": "workflow_orchestrator",
+        "target": "response_generator",
+        "type": "default"
+      },
+      {
+        "id": "e13",
+        "source": "notification_engine",
+        "target": "response_generator",
+        "type": "default"
+      },
+      {
+        "id": "e14",
+        "source": "audit_logger",
+        "target": "response_generator",
+        "type": "default"
+      },
+      {
+        "id": "e15",
+        "source": "response_generator",
+        "target": "output_handler",
+        "type": "default"
+      }
+    ]
+  },
+  "config": {
+    "features": [
+      "End-to-end signature workflow management",
+      "Multi-party signature orchestration",
+      "Real-time status tracking",
+      "Automated reminder system",
+      "Comprehensive audit trail",
+      "Document search and retrieval",
+      "Signature field assignment"
+    ],
+    "tools": [
+      "create_signature_request",
+      "get_signature_status",
+      "list_signature_requests",
+      "send_signature_request",
+      "download_signed_document",
+      "search_documents",
+      "calculate"
+    ],
+    "workflow_types": [
+      "Simple signature",
+      "Sequential signing",
+      "Parallel signing",
+      "Approval workflow",
+      "Witness signature",
+      "Notarized signature"
+    ],
+    "security_features": [
+      "Identity verification",
+      "Access control",
+      "Encryption at rest",
+      "Tamper-evident seal",
+      "Time stamping",
+      "Compliance tracking"
+    ],
+    "integrations": [
+      "DocuSign",
+      "Adobe Sign",
+      "HelloSign",
+      "PandaDoc",
+      "SignNow"
+    ]
+  }
+}
