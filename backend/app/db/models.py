@@ -147,7 +147,6 @@ class User(Base):
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
     document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
     agent_conversations = relationship("AgentConversation", back_populates="user")
-    created_agents = relationship("AgentDefinition", back_populates="creator")
     
     __table_args__ = (
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
