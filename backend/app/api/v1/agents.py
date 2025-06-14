@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 
-from app.api.dependencies import get_current_active_user, require_subscription_permission, require_admin
+from app.api.dependencies import get_current_active_user, require_subscription_permission, get_current_active_superuser
 from app.db.models import User
 from app.services.langroid_client import langroid_client
 
@@ -310,7 +310,7 @@ async def analyze_document(
 @router.post("/import/langflow")
 async def import_langflow_agent(
     langflow_data: Dict[str, Any],
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(get_current_active_superuser)
 ):
     """Import agent from Langflow JSON and save to agents directory"""
     import json

@@ -4,13 +4,8 @@ Langflow Import Service - Convert Langflow flows to Agent Definitions
 import json
 import logging
 from typing import Dict, Any, Optional, List
-from uuid import UUID
-import uuid
 from datetime import datetime
 
-from sqlalchemy.orm import Session
-
-from app.db.models import AgentDefinition, AgentType, AgentStatus
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -86,19 +81,19 @@ class LangflowImportService:
         return sanitized[:100]  # Limit length
     
     @staticmethod
-    def _determine_agent_type(nodes: List[Dict]) -> AgentType:
+    def _determine_agent_type(nodes: List[Dict]) -> str:
         """Determine agent type based on nodes"""
         node_types = [node.get("data", {}).get("type", "") for node in nodes]
         
         # Check for specific patterns
         if any("conversation" in t.lower() for t in node_types):
-            return AgentType.CONVERSATIONAL
+            return "conversational"
         elif any("analysis" in t.lower() or "analyze" in t.lower() for t in node_types):
-            return AgentType.ANALYTICAL
+            return "analytical"
         elif any("workflow" in t.lower() or "sequence" in t.lower() for t in node_types):
-            return AgentType.WORKFLOW
+            return "workflow"
         else:
-            return AgentType.CUSTOM
+            return "custom"
     
     @staticmethod
     def _extract_capabilities(nodes: List[Dict]) -> List[str]:
@@ -243,76 +238,6 @@ class LangflowImportService:
             "expandable": True
         }
     
-    @staticmethod
-    async def import_from_langflow(
-        db: Session,
-        langflow_json: Dict[str, Any],
-        tenant_id: UUID,
-        user_id: UUID,
-        is_public: bool = False
-    ) -> AgentDefinition:
-        """Import a Langflow flow and create an agent definition"""
-        
-        # Parse the Langflow export
-        agent_data = LangflowImportService.parse_langflow_export(langflow_json)
-        
-        # Check if agent with same name exists
-        existing = db.query(AgentDefinition).filter(
-            AgentDefinition.name == agent_data["name"],
-            AgentDefinition.tenant_id == (None if is_public else tenant_id)
-        ).first()
-        
-        if existing:
-            # Update existing agent
-            for key, value in agent_data.items():
-                if key != "name":  # Don't change the name
-                    setattr(existing, key, value)
-            existing.updated_at = datetime.utcnow()
-            agent = existing
-            logger.info(f"Updated existing agent: {agent.name}")
-        else:
-            # Create new agent definition
-            agent = AgentDefinition(
-                **agent_data,
-                tenant_id=None if is_public else tenant_id,
-                created_by=user_id,
-                is_public=is_public,
-                status=AgentStatus.ACTIVE
-            )
-            db.add(agent)
-            logger.info(f"Created new agent from Langflow: {agent.name}")
-        
-        db.commit()
-        db.refresh(agent)
-        
-        return agent
-    
-    @staticmethod
-    async def import_from_langflow_url(
-        db: Session,
-        flow_url: str,
-        tenant_id: UUID,
-        user_id: UUID,
-        is_public: bool = False
-    ) -> AgentDefinition:
-        """Import a Langflow flow from URL (e.g., Langflow API)"""
-        import httpx
-        
-        try:
-            # Fetch flow from Langflow API
-            async with httpx.AsyncClient() as client:
-                response = await client.get(flow_url)
-                response.raise_for_status()
-                langflow_json = response.json()
-            
-            # Import the flow
-            return await LangflowImportService.import_from_langflow(
-                db, langflow_json, tenant_id, user_id, is_public
-            )
-            
-        except httpx.HTTPError as e:
-            logger.error(f"Error fetching Langflow flow from URL: {str(e)}")
-            raise ValueError(f"Could not fetch flow from URL: {str(e)}")
     
     @staticmethod
     def validate_langflow_export(langflow_json: Dict[str, Any]) -> bool:
