@@ -41,6 +41,7 @@ except ImportError:
 from app.core.config import settings as app_settings
 # from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
 from app.services.enhanced_langroid_agent import DocumentAnalysisAgent, ContractAnalysisAgent
+from app.services.financial_analysis_agent import FinancialAnalysisAgent
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class LangroidAgentService:
     
     def __init__(self):
         self.active_agents: Dict[str, Dict[str, Any]] = {}
+        # Start with built-in agents
         self.agent_classes = {
             "digital_signature": self._create_signature_agent,
             "document_analyzer": self._create_document_analyzer,
@@ -58,6 +60,7 @@ class LangroidAgentService:
             "financial_analysis": self._create_financial_analysis_agent,
             "generic": self._create_generic_agent
         }
+        self.dynamic_agent_definitions: Dict[str, Dict[str, Any]] = {}
         self.llm_config = None
     
     async def initialize(self):
@@ -95,6 +98,9 @@ class LangroidAgentService:
             self.base_vector_store_config = {"cloud": False}
         
         logger.info("Langroid Agent Service initialized successfully")
+        
+        # Load dynamic agent definitions
+        await self._load_dynamic_agents()
     
     def _get_tenant_vector_store_config(self, tenant_id: str):
         """Get vector store config isolated by tenant"""
@@ -492,48 +498,16 @@ Always cite your sources and indicate confidence levels in your answers."""
         tenant_id: str,
         user_id: str,
         config: Dict[str, Any]
-    ) -> ChatAgent:
-        """Create financial analysis agent"""
+    ) -> FinancialAnalysisAgent:
+        """Create enhanced financial analysis agent with chain of thought"""
         
-        try:
-            vector_config = self._get_tenant_vector_store_config(tenant_id)
-            
-            agent_config = ChatAgentConfig(
-                name="FinancialAnalysisAgent",
-                llm=self.llm_config,
-                vecdb=vector_config,
-                system_message="""You are a Financial Analysis Expert specialized in financial document processing and analysis.
-
-Your capabilities include:
-- Financial statement analysis (P&L, Balance Sheet, Cash Flow)
-- Invoice validation and processing
-- Budget analysis and variance reporting
-- Expense categorization and audit
-- Financial ratio calculations
-- Cost-benefit analysis
-- Revenue recognition review
-- Tax compliance verification
-
-Analysis Framework:
-1. DATA EXTRACTION: Extract key financial figures and metrics
-2. VALIDATION: Verify calculations and identify discrepancies
-3. TREND ANALYSIS: Analyze historical patterns and trends
-4. RATIO ANALYSIS: Calculate and interpret financial ratios
-5. RISK ASSESSMENT: Identify financial risks and red flags
-6. RECOMMENDATIONS: Provide actionable financial insights
-
-Always present findings with clear metrics, percentages, and structured financial summaries."""
-            )
-            
-            return ChatAgent(agent_config)
-            
-        except Exception as e:
-            logger.error(f"Failed to create financial analysis agent: {e}")
-            agent_config = ChatAgentConfig(
-                name="FinancialAnalysisAgent",
-                system_message="You are a financial analysis expert. Analyze financial documents and provide insights."
-            )
-            return ChatAgent(agent_config)
+        # Return enhanced financial agent with visible reasoning
+        return FinancialAnalysisAgent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            config=config
+        )
     
     # =====================================
     # HELPER METHODS
@@ -623,3 +597,123 @@ Provide a detailed response for this task."""
             del self.active_agents[agent_id]
             
             logger.info(f"Cleaned up agent {agent_id}")
+    
+    async def _load_dynamic_agents(self):
+        """Load dynamic agent definitions from database via main API"""
+        try:
+            logger.info("Loading dynamic agent definitions from main API...")
+            
+            # Import httpx here to avoid circular imports
+            import httpx
+            
+            # Get agent definitions from main API
+            # Note: In production, this would need proper authentication
+            main_api_url = app_settings.MAIN_API_URL or "http://backend:8000"
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    # Fetch all active agent definitions
+                    response = await client.get(
+                        f"{main_api_url}/api/v1/agent-registry/definitions",
+                        params={"include_private": True},
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code == 200:
+                        agent_definitions = response.json()
+                        
+                        # Register each agent definition
+                        for agent_def in agent_definitions:
+                            agent_name = agent_def.get("name")
+                            if agent_name and agent_name not in self.agent_classes:
+                                self.dynamic_agent_definitions[agent_name] = agent_def
+                                
+                                # Create factory function with proper closure
+                                def make_factory(definition):
+                                    return lambda aid, tid, uid, cfg: self._create_dynamic_agent(
+                                        aid, tid, uid, cfg, definition
+                                    )
+                                
+                                self.agent_classes[agent_name] = make_factory(agent_def)
+                                logger.info(f"Loaded dynamic agent: {agent_name} ({agent_def.get('display_name')})")
+                        
+                        logger.info(f"Loaded {len(agent_definitions)} dynamic agent definitions")
+                    else:
+                        logger.warning(f"Could not fetch agent definitions: HTTP {response.status_code}")
+                        
+            except httpx.RequestError as e:
+                logger.warning(f"Could not connect to main API: {e}")
+                logger.info("Continuing with built-in agents only")
+            
+            # Fallback: Load from local config if API not available
+            if not self.dynamic_agent_definitions:
+                logger.info("Loading example agent from local config...")
+                dynamic_agents = {
+                    "example_langflow_agent": {
+                        "name": "example_langflow_agent",
+                        "display_name": "Example Langflow Agent",
+                        "description": "Example agent that can be created in Langflow",
+                        "system_prompt": "You are a helpful assistant created with Langflow.",
+                        "capabilities": ["chat", "rag", "tool_use"],
+                        "ui_config": {
+                            "icon": "IconRobot",
+                            "color": "purple",
+                            "quick_actions": [
+                                "Chat with Langflow agent",
+                                "Analyze documents",
+                                "Execute tools"
+                            ]
+                        }
+                    }
+                }
+                
+                for agent_name, agent_def in dynamic_agents.items():
+                    self.dynamic_agent_definitions[agent_name] = agent_def
+                    self.agent_classes[agent_name] = lambda aid, tid, uid, cfg, definition=agent_def: self._create_dynamic_agent(
+                        aid, tid, uid, cfg, definition
+                    )
+                    logger.info(f"Loaded example agent: {agent_name}")
+                
+        except Exception as e:
+            logger.error(f"Error loading dynamic agents: {e}")
+    
+    async def _create_dynamic_agent(
+        self,
+        agent_id: str,
+        tenant_id: str, 
+        user_id: str,
+        config: Dict[str, Any],
+        definition: Dict[str, Any]
+    ) -> ChatAgent:
+        """Create a dynamic agent based on definition"""
+        
+        # Use the definition to configure the agent
+        system_prompt = definition.get("system_prompt", "You are a helpful AI assistant.")
+        
+        # Check if we should use a specialized base class
+        base_class_name = definition.get("base_class", "generic")
+        
+        if base_class_name == "financial" or "financial" in definition.get("capabilities", []):
+            # Use FinancialAnalysisAgent for financial agents
+            return FinancialAnalysisAgent(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                config={
+                    **config,
+                    "system_prompt": system_prompt,
+                    "definition": definition
+                }
+            )
+        else:
+            # Use generic ChatAgent
+            vector_config = self._get_tenant_vector_store_config(tenant_id)
+            
+            agent_config = ChatAgentConfig(
+                name=definition.get("display_name", "Dynamic Agent"),
+                llm=self.llm_config,
+                vecdb=vector_config,
+                system_message=system_prompt
+            )
+            
+            return ChatAgent(agent_config)

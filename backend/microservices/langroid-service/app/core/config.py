@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list = ["*"]  # Configure for production
     REQUIRE_TENANT_AUTH: bool = True
     
+    # Main API URL for fetching agent definitions
+    MAIN_API_URL: str = os.getenv("MAIN_API_URL", "http://backend:8000")
+    
     class Config:
         env_file = ".env"
 

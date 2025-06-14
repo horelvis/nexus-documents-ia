@@ -10,6 +10,16 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 
+# Import agent registry models
+from app.db.models.agent_registry import (
+    AgentDefinition,
+    AgentDeployment,
+    AgentTemplate,
+    AgentPlugin,
+    AgentStatus,
+    AgentType
+)
+
 # =====================================
 # TABLAS DE ASOCIACIÓN (Many-to-Many)
 # =====================================
@@ -147,6 +157,7 @@ class User(Base):
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
     document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
     agent_conversations = relationship("AgentConversation", back_populates="user")
+    created_agents = relationship("AgentDefinition", back_populates="creator")
     
     __table_args__ = (
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
@@ -238,6 +249,7 @@ class Tenant(Base):
     documents = relationship("Document", back_populates="tenant")
     tags = relationship("Tag", back_populates="tenant")
     roles = relationship("Role", back_populates="tenant")
+    agent_deployments = relationship("AgentDeployment", back_populates="tenant")
     
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),

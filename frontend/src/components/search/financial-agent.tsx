@@ -30,7 +30,7 @@ interface FinancialAgentProps {
   searchResults: SearchResult[]
   searchQuery: string
   onFiltersChange: (filters: FinancialFilters) => void
-  onInsightClick: (insight: string) => void
+  onInsightClick: (insight: string) => void | Promise<void>
 }
 
 interface FinancialFilters {
@@ -193,13 +193,13 @@ export default function FinancialAgent({
   const handleInsightAction = async (insight: FinancialInsight) => {
     if (insight.action) {
       setIsAnalyzing(true)
-      onInsightClick(insight.action)
+      setIsExpanded(true)
       
-      // Simulate analysis delay
-      setTimeout(() => {
-        setIsAnalyzing(false)
-        setIsExpanded(true)
-      }, 1000)
+      // Call the parent handler which now executes the query automatically
+      await onInsightClick(insight.action)
+      
+      // The analysis is now handled by the parent component
+      setIsAnalyzing(false)
     }
   }
 

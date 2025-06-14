@@ -158,11 +158,38 @@ export default function SearchPage() {
     // You could extend the search API to support these filters
   }
 
-  const handleFinancialInsight = (insight: string) => {
+  const handleFinancialInsight = async (insight: string) => {
     // When user clicks on a financial insight, set it as a question for the Q&A
     setQuestion(insight)
-    // Optionally switch to the Ask tab
-    // You could add tab switching logic here
+    setIsAskingQuestion(true)
+    
+    try {
+      // Automatically execute the question
+      const response = await searchService.askDocuments({
+        question: insight,
+        // If there are search results, use them as context
+        doc_ids: searchResults.length > 0 ? searchResults.map(r => r.document.id) : undefined
+      })
+
+      if (response.error) {
+        addNotification({
+          type: 'error',
+          title: 'Error',
+          message: response.error
+        })
+      } else if (response.data) {
+        setAskResponse(response.data)
+      }
+    } catch (err) {
+      console.error("Failed to ask question:", err)
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to process your question'
+      })
+    } finally {
+      setIsAskingQuestion(false)
+    }
   }
 
   const handleAssistantSuggestion = (suggestion: string) => {

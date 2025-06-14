@@ -17,6 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Clean rebuild**: `./clean_and_rebuild.sh` (from project root)
 
 ### Frontend Development
+- **Node version**: Use Node.js 18+ (required for Next.js 15)
+  - `nvm use 18` or `nvm use 20` (if using nvm)
 - **Start development**: `cd frontend && npm run dev` (uses Turbopack)
 - **Build**: `cd frontend && npm run build`
 - **Lint**: `cd frontend && npm run lint`
@@ -138,6 +140,20 @@ This is a **multi-tenant intelligent document management system** with a microse
 - **Zod**: Schema validation
 - **React Hook Form**: Form management
 
+## Environment Setup
+
+### Node Version Management (NVM)
+This project uses NVM (Node Version Manager) for managing Node.js versions:
+- **Frontend requires**: Node.js 18.18.0+ or 20.0.0+ (for Next.js 15)
+- **Switch Node version**: `nvm use 18` or `nvm use 20`
+- **Install if needed**: `nvm install 18` or `nvm install 20`
+- **Set default**: `nvm alias default 18`
+
+Common NVM commands:
+- `nvm list` - Show installed versions
+- `nvm current` - Show current version
+- `nvm use <version>` - Switch to specific version
+
 ## Development Guidelines
 
 ### Database Operations
@@ -190,6 +206,26 @@ This is a **multi-tenant intelligent document management system** with a microse
 - Follow TypeScript strict mode in frontend
 - Implement comprehensive error handling
 - Use structured logging with request correlation IDs
+
+## Troubleshooting
+
+### Next.js Build/Module Errors
+If you encounter module resolution errors like "Export default doesn't exist":
+1. **Clear Next.js cache**: `rm -rf frontend/.next`
+2. **Check Node version**: `cd frontend && nvm current` (should be 18+)
+3. **Switch if needed**: `nvm use 18` or `nvm use 20`
+4. **Reinstall dependencies**: `rm -rf node_modules && npm install`
+5. **Restart dev server**: `npm run dev`
+
+### Docker Issues
+- **Permission denied**: Add user to docker group: `sudo usermod -aG docker $USER`
+- **Port already in use**: Check with `docker ps` and stop conflicting containers
+- **Out of space**: Clean up with `docker system prune -a`
+
+### Common Frontend Errors
+- **Module not found**: Usually a cache issue, follow Next.js troubleshooting steps above
+- **Type errors**: Run `npm run lint` to check for TypeScript issues
+- **Tailwind not working**: Ensure `npm run dev` is running (it compiles Tailwind)
 
 ## Common Development Workflows
 

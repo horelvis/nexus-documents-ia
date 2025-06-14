@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search
+    agents, signatures, webhooks, search, agent_registry
 )
 from fastapi import APIRouter
 
@@ -31,3 +31,6 @@ api_router.include_router(signatures.router, prefix="/signatures", tags=["signat
 
 # Webhooks for external integrations
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+
+# Agent Registry for dynamic agent management
+api_router.include_router(agent_registry.router, prefix="/agent-registry", tags=["agent-registry"])

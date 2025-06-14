@@ -28,11 +28,8 @@ interface RAGAssistantProps {
   onSuggestionClick: (suggestion: string) => void
 }
 
-interface ChatMessage {
-  type: 'user' | 'assistant'
-  content: string
-  timestamp: Date
-}
+// Removed ChatMessage interface as it's not being used anymore
+// Using messages from useAgentChat hook instead
 
 export default function RAGAssistant({ 
   searchResults, 
@@ -152,6 +149,7 @@ export default function RAGAssistant({
         title: r.document.title,
         type: r.document.file_type
       }))
+    })
   }
 
   const handleSuggestionClick = async (suggestion: string) => {
