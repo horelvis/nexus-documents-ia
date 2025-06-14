@@ -1,0 +1,126 @@
+{
+  "name": "RAG Document Assistant",
+  "description": "Advanced RAG agent for document analysis with Qdrant integration",
+  "data": {
+    "nodes": [
+      {
+        "id": "1",
+        "type": "promptTemplate",
+        "data": {
+          "type": "PromptTemplate",
+          "node": {
+            "template": "You are an expert document analyst with access to a knowledge base. Use the provided context to answer questions accurately and thoroughly.\n\nContext: {context}\n\nQuestion: {question}\n\nProvide a detailed answer based on the context. If the context doesn't contain relevant information, say so clearly.",
+            "input_variables": ["context", "question"]
+          }
+        },
+        "position": { "x": 100, "y": 100 }
+      },
+      {
+        "id": "2",
+        "type": "vectorStore",
+        "data": {
+          "type": "QdrantVectorStore",
+          "node": {
+            "collection_name": "documents",
+            "host": "qdrant",
+            "port": 6333,
+            "embedding_model": "nomic-embed-text"
+          }
+        },
+        "position": { "x": 100, "y": 300 }
+      },
+      {
+        "id": "3",
+        "type": "retriever",
+        "data": {
+          "type": "VectorStoreRetriever",
+          "node": {
+            "k": 5,
+            "search_type": "similarity"
+          }
+        },
+        "position": { "x": 300, "y": 300 }
+      },
+      {
+        "id": "4",
+        "type": "llm",
+        "data": {
+          "type": "OllamaLLM",
+          "node": {
+            "model": "llama3.2",
+            "temperature": 0.7,
+            "base_url": "http://ollama-service:11434"
+          }
+        },
+        "position": { "x": 500, "y": 200 }
+      },
+      {
+        "id": "5",
+        "type": "chain",
+        "data": {
+          "type": "RetrievalQA",
+          "node": {
+            "chain_type": "stuff",
+            "return_source_documents": true
+          }
+        },
+        "position": { "x": 700, "y": 200 }
+      },
+      {
+        "id": "6",
+        "type": "memory",
+        "data": {
+          "type": "ConversationBufferMemory",
+          "node": {
+            "memory_key": "chat_history",
+            "return_messages": true
+          }
+        },
+        "position": { "x": 500, "y": 400 }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "1",
+        "target": "5",
+        "sourceHandle": "output",
+        "targetHandle": "prompt"
+      },
+      {
+        "id": "e2",
+        "source": "2",
+        "target": "3",
+        "sourceHandle": "output",
+        "targetHandle": "vectorstore"
+      },
+      {
+        "id": "e3",
+        "source": "3",
+        "target": "5",
+        "sourceHandle": "output",
+        "targetHandle": "retriever"
+      },
+      {
+        "id": "e4",
+        "source": "4",
+        "target": "5",
+        "sourceHandle": "output",
+        "targetHandle": "llm"
+      },
+      {
+        "id": "e5",
+        "source": "6",
+        "target": "5",
+        "sourceHandle": "output",
+        "targetHandle": "memory"
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    }
+  },
+  "version": "1.0.0"
+}

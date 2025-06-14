@@ -26,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Full Stack Development
 - **Backend services**: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Qdrant, microservices with live reload)
+- **Backend with Langflow**: `cd backend/docker && ./start-dev-with-langflow.sh` (includes visual agent builder)
 - **Frontend**: `cd frontend && npm run dev` (runs on port 3000)
 - **API Documentation**: Available at `http://localhost:8000/docs` when backend is running
 
@@ -419,3 +420,47 @@ langflow_deployments:
 4. Langflow definition converted to Langroid agent
 5. Agent registered in existing agent system
 6. Monitoring and rollback capabilities available
+
+### Langflow Development Environment
+
+#### Overview
+Langflow is included as a Docker container in the development environment for visual agent design.
+
+#### Starting Langflow
+```bash
+cd backend/docker
+./start-dev-with-langflow.sh
+```
+
+#### Access Points
+- **Langflow UI**: http://localhost:7860
+- **Flows Directory**: `backend/docker/langflow/flows/`
+- **Custom Components**: `backend/docker/langflow/components/`
+
+#### Creating Agents with Langflow
+1. **Open Langflow**: Navigate to http://localhost:7860
+2. **Create Flow**: 
+   - Use drag-and-drop interface
+   - Connect nodes: LLMs, Prompts, Tools, Memory
+   - Test flow in Langflow playground
+3. **Configure for Nexus**:
+   - Use Ollama nodes with model: `llama3.2`
+   - Use QdrantVectorStore for RAG
+   - Set collection names to match tenant pattern
+4. **Export Flow**: 
+   - Click Export → JSON
+   - Save to `langflow/flows/` or copy JSON
+5. **Import to System**:
+   - Use Admin UI import feature
+   - Or use API endpoint: `/api/v1/agent-registry/import/langflow`
+
+#### Example Flows
+- **RAG Document Assistant**: `langflow/flows/example-rag-agent.json`
+- Custom components in `langflow/components/`
+
+#### Best Practices
+- Test flows in Langflow before importing
+- Use meaningful node names and descriptions
+- Include error handling nodes
+- Document expected inputs/outputs
+- Version control flow JSON files

@@ -156,6 +156,39 @@ services:
       retries: 3
       start_period: 60s
 
+  # Langflow - Visual agent builder for development
+  langflow:
+    image: langflowai/langflow:latest
+    container_name: nexus_langflow
+    ports:
+      - "7860:7860"
+    environment:
+      - LANGFLOW_DATABASE_URL=sqlite:////app/langflow.db
+      - LANGFLOW_CONFIG_DIR=/app/config
+      - LANGFLOW_COMPONENTS_PATH=/app/components
+      - LANGFLOW_LOG_LEVEL=info
+      - LANGFLOW_OPEN_BROWSER=false
+      - LANGFLOW_REMOVE_API_KEYS=false
+      # Connect to local Ollama
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+      # Optional: Set default models
+      - DEFAULT_LLM_MODEL=llama3.2
+      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
+    volumes:
+      - langflow_data:/app
+      - ./langflow/flows:/app/flows
+      - ./langflow/components:/app/components
+    depends_on:
+      - ollama-service
+    networks:
+      - backend-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Ollama Microservice - DEVELOPMENT MODE
   ollama-service:
     build:
@@ -254,3 +287,4 @@ volumes:
   redis_data:
   qdrant_data:
   ollama_data:
+  langflow_data:
