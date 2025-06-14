@@ -1,397 +1,186 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { 
-  IconRobot, 
-  IconMessageCircle, 
-  IconSend, 
+  IconMessageCircle,
+  IconSend,
   IconLoader2,
-  IconBulb,
-  IconChevronUp,
-  IconChevronDown,
-  IconBrain
+  IconFile,
+  IconSparkles,
+  IconInfoCircle
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
-import { useSearchService, SearchResult } from "@/lib/services/search.service"
-import { useNotifications } from "@/contexts/notifications-context"
-import { ThinkingDisplay } from "@/components/agents/thinking-display"
-import { useAgentChat } from "@/hooks/use-agent-chat"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
 
-interface RAGAssistantProps {
-  searchResults: SearchResult[]
+interface RagAssistantProps {
+  searchResults: any[]
   searchQuery: string
-  onSuggestionClick: (suggestion: string) => void
+  onAskQuestion: (question: string) => Promise<void>
+  agentResponse?: any
+  isProcessing?: boolean
 }
 
-// Removed ChatMessage interface as it's not being used anymore
-// Using messages from useAgentChat hook instead
-
-export default function RAGAssistant({ 
+export function RagAssistant({ 
   searchResults, 
   searchQuery, 
-  onSuggestionClick 
-}: RAGAssistantProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [currentInput, setCurrentInput] = useState('')
-  const [suggestions, setSuggestions] = useState<string[]>([])
-  const [showThinking, setShowThinking] = useState(true)
-  const [agentId] = useState('document_analyzer') // Using document analyzer agent
-
-  const { addNotification } = useNotifications()
-  const searchService = useSearchService()
+  onAskQuestion,
+  agentResponse,
+  isProcessing = false
+}: RagAssistantProps) {
+  const [question, setQuestion] = useState("")
   
-  const { 
-    messages, 
-    thinkingEvents,
-    isLoading,
-    isStreaming,
-    sendMessage,
-    clearChat
-  } = useAgentChat({
-    agentId,
-    onError: (error) => {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: error
-      })
+  const handleAskQuestion = () => {
+    if (question.trim()) {
+      onAskQuestion(question)
+      setQuestion("")
     }
-  })
-
-  // Generate contextual suggestions based on search results
-  useEffect(() => {
-    console.log('RAG Assistant - Search results:', searchResults.length, 'Query:', searchQuery)
-    if (searchResults.length > 0) {
-      generateSuggestions()
-    }
-  }, [searchResults, searchQuery])
-
-  const generateSuggestions = () => {
-    // Handle both new structure (with document object) and current structure (with metadata)
-    const fileTypes = [...new Set(searchResults.map(r => {
-      const document = r.document || r.metadata || {}
-      return document.file_type
-    }))].filter(type => type)
-    const docCount = searchResults.length
-    const query = searchQuery.toLowerCase()
-    
-    let contextualSuggestions: string[] = []
-
-    // Context-aware suggestions based on search query
-    if (query.includes('factura') || query.includes('invoice') || query.includes('bill')) {
-      contextualSuggestions = [
-        `¿Cuál es el total de las facturas encontradas?`,
-        `¿Hay facturas pendientes de pago?`,
-        `Analiza los proveedores de estas facturas`,
-        `¿Cuándo vencen estas facturas?`
-      ]
-    } else if (query.includes('contrato') || query.includes('contract') || query.includes('agreement')) {
-      contextualSuggestions = [
-        `¿Cuándo expiran estos contratos?`,
-        `Resume las condiciones principales`,
-        `¿Hay cláusulas de renovación automática?`,
-        `Identifica riesgos legales en estos contratos`
-      ]
-    } else if (query.includes('financi') || query.includes('budget') || query.includes('presupuesto')) {
-      contextualSuggestions = [
-        `Analiza el rendimiento financiero`,
-        `¿Cuáles son las tendencias principales?`,
-        `Compara ingresos vs gastos`,
-        `Identifica oportunidades de ahorro`
-      ]
-    } else if (query.includes('legal') || query.includes('compliance') || query.includes('regulation')) {
-      contextualSuggestions = [
-        `¿Hay riesgos de cumplimiento?`,
-        `Analiza el estado de conformidad`,
-        `¿Qué acciones correctivas se necesitan?`,
-        `Resume los requisitos legales`
-      ]
-    } else {
-      // Generic suggestions
-      contextualSuggestions = [
-        `Resume los ${docCount} documentos encontrados`,
-        `¿Cuáles son los puntos clave?`,
-        `Compara estos documentos entre sí`,
-        `¿Qué patrones encuentras?`
-      ]
-    }
-
-    // Add file-type specific suggestions if generic
-    if (!query.includes('factura') && !query.includes('contrato')) {
-      if (fileTypes.includes('pdf')) {
-        contextualSuggestions.push('Analiza los documentos PDF encontrados')
-      }
-      if (fileTypes.includes('xlsx') || fileTypes.includes('csv')) {
-        contextualSuggestions.push('Extrae datos de las hojas de cálculo')
-      }
-      if (fileTypes.includes('docx')) {
-        contextualSuggestions.push('Resume los documentos de texto')
-      }
-    }
-
-    setSuggestions(contextualSuggestions.slice(0, 4))
   }
 
-  const handleSendMessage = async (message: string) => {
-    if (!message.trim()) return
-    
-    setCurrentInput('')
-    
-    // Send message with document context
-    await sendMessage(message, {
-      documents: searchResults.map(r => ({
-        id: r.document.id,
-        title: r.document.title,
-        type: r.document.file_type
-      }))
-    })
-  }
-
-  const handleSuggestionClick = async (suggestion: string) => {
-    // If it's a search term, don't expand - let parent handle search
-    if (suggestion === "facturas" || suggestion === "contratos" || suggestion === "documentos") {
-      onSuggestionClick(suggestion)
-      return
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !isProcessing) {
+      handleAskQuestion()
     }
-    
-    // For questions/analysis, expand and send message
-    setIsExpanded(true)
-    onSuggestionClick(suggestion)
-    // Small delay to ensure expansion animation completes
-    setTimeout(() => {
-      handleSendMessage(suggestion)
-    }, 100)
   }
 
-  // Show assistant even with 0 results to help guide users
+  // Suggested questions based on search results
+  const suggestedQuestions = [
+    "What are the key points from these documents?",
+    "Can you summarize the main findings?",
+    "What patterns do you see in these documents?",
+    `Tell me more about "${searchQuery}"`,
+    "What are the most important details?"
+  ]
 
   return (
-    <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-            <IconRobot className="h-5 w-5" />
-            AI Assistant
+    <div className="space-y-4">
+      {/* Context Info */}
+      <Card className="bg-purple-50 border-purple-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <IconMessageCircle className="h-5 w-5 text-purple-600" />
+            Q&A Assistant
           </CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
-          >
-            {isExpanded ? (
-              <IconChevronUp className="h-4 w-4" />
-            ) : (
-              <IconChevronDown className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        
-        {!isExpanded && (
-          <div className="space-y-2">
-            <p className="text-sm text-blue-600 dark:text-blue-400">
-              {searchResults.length === 0 ? (
-                `No encontré documentos para "${searchQuery}". ¿Te ayudo a buscar algo más específico?`
-              ) : (
-                `Encontré ${searchResults.length} documento${searchResults.length !== 1 ? 's' : ''}. ¿Te ayudo a analizarlos?`
-              )}
-            </p>
-            
-            {searchResults.length > 0 ? (
-              <div className="flex items-center justify-between">
-                <div className="flex flex-wrap gap-1">
-                  {[...new Set(searchResults.map(r => {
-                    const document = r.document || r.metadata || {}
-                    return document.file_type
-                  }).filter(type => type))].map(type => (
-                    <Badge key={type} variant="outline" className="text-xs border-blue-200 text-blue-600 dark:border-blue-700 dark:text-blue-400">
-                      {type?.toUpperCase() || 'UNKNOWN'}
-                    </Badge>
-                  ))}
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleSuggestionClick(`Resume los ${searchResults.length} documentos encontrados`)}
-                  className="ml-2 h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                >
-                  <IconBulb className="h-3 w-3 mr-1" />
-                  Analizar
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleSuggestionClick("pdf")}
-                  className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                >
-                  pdf
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleSuggestionClick("docx")}
-                  className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                >
-                  docx
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleSuggestionClick("imagen")}
-                  className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                >
-                  imagen
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleSuggestionClick("texto")}
-                  className="h-6 text-xs border-blue-200 text-blue-600 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                >
-                  texto
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </CardHeader>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            I can help you understand these {searchResults.length} documents. 
+            Ask me anything about their content, and I'll provide detailed answers with sources.
+          </p>
+        </CardContent>
+      </Card>
 
-      {isExpanded && (
+      {/* Question Input */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Ask a Question</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
-          {/* Toggle for showing thinking */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-              <IconBrain className="h-4 w-4" />
-              Show Agent Thinking
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowThinking(!showThinking)}
-              className={showThinking ? 'text-blue-600' : 'text-gray-400'}
-            >
-              {showThinking ? 'ON' : 'OFF'}
-            </Button>
-          </div>
-
-          {/* Quick Suggestions */}
-          {suggestions.length > 0 && messages.length === 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-                <IconBulb className="h-4 w-4" />
-                Suggested Questions:
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {suggestions.map((suggestion, index) => (
-                  <Button
-                    key={index}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="text-xs h-auto py-1 px-2 border-blue-200 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                  >
-                    {suggestion}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Chat Interface with Thinking Display */}
-          {messages.length > 0 && (
-            <Tabs defaultValue="chat" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="chat">Chat</TabsTrigger>
-                <TabsTrigger value="thinking" disabled={!showThinking || thinkingEvents.length === 0}>
-                  Thinking ({thinkingEvents.length})
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="chat" className="space-y-3 max-h-64 overflow-y-auto">
-                {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                        message.role === 'user'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                      <span className="text-xs opacity-70 mt-1 block">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </TabsContent>
-              
-              <TabsContent value="thinking" className="max-h-64 overflow-y-auto">
-                {showThinking && thinkingEvents.length > 0 && (
-                  <ThinkingDisplay 
-                    events={thinkingEvents} 
-                    isStreaming={isStreaming}
-                    className="text-sm"
-                  />
-                )}
-              </TabsContent>
-            </Tabs>
-          )}
-
-          {/* Processing Indicator */}
-          {isLoading && (
-            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">
-                {isStreaming ? 'Agent is thinking...' : 'Processing...'}
-              </span>
-            </div>
-          )}
-
-          {/* Input */}
           <div className="flex gap-2">
-            <Textarea
-              placeholder="Ask me anything about these documents..."
-              value={currentInput}
-              onChange={(e) => setCurrentInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSendMessage(currentInput)
-                }
-              }}
-              rows={2}
-              className="resize-none"
-              disabled={isLoading}
+            <Input
+              placeholder="What would you like to know about these documents?"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyPress={handleKeyPress}
+              disabled={isProcessing}
             />
-            <Button
-              onClick={() => handleSendMessage(currentInput)}
-              disabled={isLoading || !currentInput.trim()}
-              size="sm"
-              className="self-end"
+            <Button 
+              onClick={handleAskQuestion} 
+              disabled={isProcessing || !question.trim()}
             >
-              <IconSend className="h-4 w-4" />
+              {isProcessing ? (
+                <IconLoader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <IconSend className="h-4 w-4" />
+              )}
             </Button>
           </div>
 
-          {/* Context Info */}
-          <div className="text-xs text-blue-600/70 dark:text-blue-400/70 flex items-center gap-1">
-            <IconMessageCircle className="h-3 w-3" />
-            Analyzing {searchResults.length} documents from your search results
+          {/* Suggested Questions */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">Suggested questions:</p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedQuestions.map((q, index) => (
+                <Badge
+                  key={index}
+                  variant="outline"
+                  className="cursor-pointer hover:bg-secondary"
+                  onClick={() => {
+                    setQuestion(q)
+                    onAskQuestion(q)
+                  }}
+                >
+                  {q}
+                </Badge>
+              ))}
+            </div>
           </div>
         </CardContent>
+      </Card>
+
+      {/* Processing State */}
+      {isProcessing && (
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="py-8">
+            <div className="flex flex-col items-center justify-center space-y-2">
+              <IconSparkles className="h-8 w-8 text-blue-500 animate-pulse" />
+              <p className="text-sm text-muted-foreground">Analyzing documents and generating answer...</p>
+            </div>
+          </CardContent>
+        </Card>
       )}
-    </Card>
+
+      {/* Document Context */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <IconFile className="h-4 w-4" />
+            Document Context
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {searchResults.slice(0, 5).map((result, index) => (
+              <div key={index} className="flex items-start gap-2 text-sm">
+                <Badge variant="outline" className="mt-0.5">
+                  {Math.round(result.score * 100)}%
+                </Badge>
+                <div className="flex-1">
+                  <p className="font-medium">{result.document.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {result.document.description || result.highlights?.[0] || "No preview available"}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {searchResults.length > 5 && (
+              <p className="text-xs text-muted-foreground text-center pt-2">
+                And {searchResults.length - 5} more documents...
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tips */}
+      <Card className="bg-muted/50">
+        <CardContent className="py-4">
+          <div className="flex gap-2">
+            <IconInfoCircle className="h-4 w-4 text-muted-foreground mt-0.5" />
+            <div className="text-sm text-muted-foreground">
+              <p className="font-medium">Tips for better answers:</p>
+              <ul className="list-disc list-inside mt-1 space-y-0.5">
+                <li>Be specific about what you want to know</li>
+                <li>Ask about relationships between documents</li>
+                <li>Request summaries or comparisons</li>
+                <li>Ask for specific data points or facts</li>
+              </ul>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

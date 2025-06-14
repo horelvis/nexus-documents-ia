@@ -122,18 +122,17 @@ async def service_status():
     """Service status with detailed information"""
     global agent_service
     
+    # Get dynamic agent types
+    supported_types = list(agent_service.agent_classes.keys()) if agent_service else []
+    dynamic_agents = list(agent_service.dynamic_agent_definitions.keys()) if agent_service else []
+    
     status = {
         "service": "langroid-service",
         "status": "ready" if agent_service else "initializing",
         "active_agents": len(agent_service.active_agents) if agent_service else 0,
-        "supported_agent_types": [
-            "digital_signature",
-            "document_analyzer", 
-            "rag_assistant",
-            "legal_compliance",
-            "financial_analysis",
-            "generic"
-        ],
+        "supported_agent_types": supported_types,
+        "dynamic_agents_loaded": dynamic_agents,
+        "total_agent_types": len(supported_types),
         "models": {
             "llm": settings.DEFAULT_LLM_MODEL,
             "embedding": settings.DEFAULT_EMBEDDING_MODEL
@@ -155,42 +154,60 @@ async def list_agent_types():
     if not agent_service:
         raise HTTPException(status_code=503, detail="Service not ready")
     
-    agent_types = {
-        "digital_signature": {
-            "name": "Digital Signature Agent",
-            "description": "Handles digital signature workflows and document signing processes",
-            "capabilities": ["signature_requests", "status_tracking", "signer_management"]
-        },
-        "document_analyzer": {
-            "name": "Document Analyzer Agent", 
-            "description": "Analyzes documents for various purposes (legal, financial, etc.)",
-            "capabilities": ["content_analysis", "extraction", "summarization"]
-        },
-        "rag_assistant": {
-            "name": "RAG Assistant Agent",
-            "description": "Retrieval-Augmented Generation assistant for document Q&A",
-            "capabilities": ["document_search", "context_qa", "knowledge_retrieval"]
-        },
-        "legal_compliance": {
-            "name": "Legal Compliance Agent",
-            "description": "Analyzes documents for legal compliance and regulatory requirements",
-            "capabilities": ["compliance_check", "risk_assessment", "regulatory_analysis"]
-        },
-        "financial_analysis": {
-            "name": "Financial Analysis Agent",
-            "description": "Analyzes financial documents and provides insights",
-            "capabilities": ["financial_metrics", "trend_analysis", "report_generation"]
-        },
-        "generic": {
-            "name": "Generic Agent",
-            "description": "General-purpose AI assistant for various tasks",
-            "capabilities": ["general_qa", "text_processing", "basic_analysis"]
-        }
-    }
+    # Get all available agent types from the service (both built-in and dynamic)
+    agent_types = {}
+    
+    # Add all registered agent classes
+    for agent_key in agent_service.agent_classes.keys():
+        # Skip duplicate entries (e.g., "financial_analysis" and "financial_analysis_agent")
+        # But include all dynamic agents regardless of naming
+        if agent_key in agent_service.dynamic_agent_definitions:
+            # Always include dynamic agents
+            pass
+        elif not agent_key.endswith("_agent") and not agent_key == "generic":
+            # Skip built-in agents without _agent suffix (except generic)
+            continue
+            
+        # Check if it's a dynamic agent
+        if agent_key in agent_service.dynamic_agent_definitions:
+            agent_def = agent_service.dynamic_agent_definitions[agent_key]
+            agent_types[agent_key] = {
+                "name": agent_def.get("display_name", agent_def.get("name", agent_key.replace("_", " ").title())),
+                "description": agent_def.get("description", "Custom agent loaded from JSON"),
+                "capabilities": agent_def.get("capabilities", []),
+                "source": "dynamic",
+                "ui_config": agent_def.get("ui_config", {})
+            }
+        else:
+            # Built-in agent - get metadata
+            agent_name = agent_key.replace("_agent", "").replace("_", " ").title() + " Agent"
+            descriptions = {
+                "digital_signature_agent": "Handles digital signature workflows and document signing processes",
+                "document_analyzer_agent": "Analyzes documents for various purposes (legal, financial, etc.)",
+                "rag_assistant_agent": "Retrieval-Augmented Generation assistant for document Q&A",
+                "legal_compliance_agent": "Analyzes documents for legal compliance and regulatory requirements",
+                "financial_analysis_agent": "Analyzes financial documents and provides insights"
+            }
+            capabilities = {
+                "digital_signature_agent": ["signature_requests", "status_tracking", "signer_management"],
+                "document_analyzer_agent": ["content_analysis", "extraction", "summarization"],
+                "rag_assistant_agent": ["document_search", "context_qa", "knowledge_retrieval"],
+                "legal_compliance_agent": ["compliance_check", "risk_assessment", "regulatory_analysis"],
+                "financial_analysis_agent": ["financial_metrics", "trend_analysis", "report_generation"]
+            }
+            
+            agent_types[agent_key] = {
+                "name": agent_name,
+                "description": descriptions.get(agent_key, "AI assistant for specialized tasks"),
+                "capabilities": capabilities.get(agent_key, ["general_assistance"]),
+                "source": "built-in"
+            }
     
     return {
         "available_types": agent_types,
-        "total": len(agent_types)
+        "total": len(agent_types),
+        "built_in_count": sum(1 for a in agent_types.values() if a.get("source") == "built-in"),
+        "dynamic_count": sum(1 for a in agent_types.values() if a.get("source") == "dynamic")
     }
 
 @app.post("/agents/create")
@@ -234,14 +251,12 @@ async def create_agent_by_type(
     if not agent_service:
         raise HTTPException(status_code=503, detail="Service not ready")
     
-    # Validate agent type
-    valid_types = ["digital_signature", "document_analyzer", "rag_assistant", 
-                   "legal_compliance", "financial_analysis", "generic"]
-    
-    if agent_type not in valid_types:
+    # Validate agent type against dynamically loaded agents
+    if agent_type not in agent_service.agent_classes:
+        valid_types = list(agent_service.agent_classes.keys())
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid agent type. Valid types: {', '.join(valid_types)}"
+            detail=f"Invalid agent type '{agent_type}'. Valid types: {', '.join(valid_types)}"
         )
     
     # Prepare configuration

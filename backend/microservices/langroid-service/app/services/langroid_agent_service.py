@@ -51,13 +51,18 @@ class LangroidAgentService:
     
     def __init__(self):
         self.active_agents: Dict[str, Dict[str, Any]] = {}
-        # Start with built-in agents
+        # Start with built-in agents - use full agent IDs as expected by frontend
         self.agent_classes = {
             "digital_signature": self._create_signature_agent,
+            "digital_signature_agent": self._create_signature_agent,
             "document_analyzer": self._create_document_analyzer,
+            "document_analyzer_agent": self._create_document_analyzer,
             "rag_assistant": self._create_rag_assistant,
+            "rag_assistant_agent": self._create_rag_assistant,
             "legal_compliance": self._create_legal_compliance_agent,
+            "legal_compliance_agent": self._create_legal_compliance_agent,
             "financial_analysis": self._create_financial_analysis_agent,
+            "financial_analysis_agent": self._create_financial_analysis_agent,
             "generic": self._create_generic_agent
         }
         self.dynamic_agent_definitions: Dict[str, Dict[str, Any]] = {}
@@ -189,11 +194,69 @@ class LangroidAgentService:
     async def list_agents(self, tenant_id: str) -> List[Dict[str, Any]]:
         """List all agents for a tenant"""
         
-        agents = []
+        # First, return all available agent types (both built-in and dynamic)
+        available_agents = []
+        
+        # Built-in agents with their metadata
+        built_in_agents = {
+            "digital_signature_agent": {
+                "id": "digital_signature_agent",
+                "name": "Digital Signature Agent",
+                "description": "Handles digital signature workflows and document signing",
+                "type": "signature",
+                "icon": "signature"
+            },
+            "document_analyzer_agent": {
+                "id": "document_analyzer_agent", 
+                "name": "Document Analyzer Agent",
+                "description": "Analyzes documents for various purposes",
+                "type": "document",
+                "icon": "document"
+            },
+            "rag_assistant_agent": {
+                "id": "rag_assistant_agent",
+                "name": "RAG Assistant Agent",
+                "description": "Retrieval-Augmented Generation for document Q&A",
+                "type": "rag",
+                "icon": "rag"
+            },
+            "legal_compliance_agent": {
+                "id": "legal_compliance_agent",
+                "name": "Legal Compliance Agent",
+                "description": "Analyzes documents for legal compliance",
+                "type": "legal",
+                "icon": "legal"
+            },
+            "financial_analysis_agent": {
+                "id": "financial_analysis_agent",
+                "name": "Financial Analysis Agent",
+                "description": "Analyzes financial documents and provides insights",
+                "type": "financial",
+                "icon": "financial"
+            }
+        }
+        
+        # Add built-in agents
+        for agent_key, agent_meta in built_in_agents.items():
+            available_agents.append(agent_meta)
+        
+        # Add dynamic agents
+        for agent_name, agent_def in self.dynamic_agent_definitions.items():
+            available_agents.append({
+                "id": agent_name,
+                "name": agent_def.get("display_name", agent_name.replace("_", " ").title()),
+                "description": agent_def.get("description", "Custom agent from Langflow"),
+                "type": agent_def.get("type", "custom"),
+                "icon": agent_def.get("ui_config", {}).get("icon", "robot")
+            })
+        
+        # Then add any active agent instances for this tenant
+        active_instances = []
         for agent_id, agent_info in self.active_agents.items():
             if agent_info["tenant_id"] == tenant_id:
-                agents.append({
-                    "agent_id": agent_id,
+                active_instances.append({
+                    "instance_id": agent_id,
+                    "agent_id": agent_info["type"],
                     "type": agent_info["type"],
                     "name": agent_info["configuration"].get("name", f"{agent_info['type'].replace('_', ' ').title()} Agent"),
                     "persistent": agent_info.get("persistent", True),
@@ -203,7 +266,7 @@ class LangroidAgentService:
                     "user_id": agent_info["user_id"]
                 })
         
-        return agents
+        return available_agents
     
     async def chat_with_agent(
         self,
@@ -214,6 +277,25 @@ class LangroidAgentService:
         context: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Chat with an agent and stream responses"""
+        
+        # Check if this is an agent type rather than an instance
+        if agent_id in self.agent_classes and agent_id not in self.active_agents:
+            # Create a temporary agent instance for this chat
+            try:
+                temp_agent_id = await self.create_agent(
+                    agent_type=agent_id,
+                    tenant_id=tenant_id,
+                    user_id="system",  # System-created for chat
+                    configuration={"persistent": False}
+                )
+                agent_id = temp_agent_id
+            except Exception as e:
+                yield {
+                    "type": "error",
+                    "content": f"Failed to create agent instance: {str(e)}",
+                    "metadata": {"agent_id": agent_id}
+                }
+                return
         
         if agent_id not in self.active_agents:
             yield {
@@ -611,6 +693,12 @@ Provide a detailed response for this task."""
             agents_dir = Path("/app/agents")
             if not agents_dir.exists():
                 agents_dir = Path("./agents")  # Fallback for local development
+            if not agents_dir.exists():
+                # Also check the langflow flows directory
+                agents_dir = Path("/app/docker/langflow/flows")
+            if not agents_dir.exists():
+                # Try relative path from service location
+                agents_dir = Path("../../docker/langflow/flows")
             
             if agents_dir.exists():
                 # Load all JSON files from agents directory
