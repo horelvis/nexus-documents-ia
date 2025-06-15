@@ -73,9 +73,9 @@ class Settings(BaseSettings):
         return url
     
     # Redis
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: Optional[str] = None
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
     # Vector DB (Qdrant)
     QDRANT_HOST: str = "localhost"

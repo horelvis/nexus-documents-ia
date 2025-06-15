@@ -11,7 +11,7 @@ from app.api.dependencies import get_current_active_superuser, get_current_activ
 from app.db.models import User
 from app.db.database import get_db
 from app.core.config import settings
-from app.db.models import Subscription
+# Subscription model removed - using Stripe as source of truth
 
 
 # Importaciones necesarias en la parte superior del archivo
@@ -303,46 +303,26 @@ async def get_current_subscription(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Obtiene la suscripción actual del usuario con estado detallado y permisos.
+    Obtiene la suscripción actual del usuario consultando Stripe directamente.
     """
     try:
-        from app.services.subscription_service import SubscriptionService
+        from app.services.subscription_service_v2 import SubscriptionServiceV2
         
-        # Obtener estado completo de la suscripción
-        subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+        # Obtener estado de suscripción desde Stripe
+        status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         
-        # Buscar datos de suscripción en la base de datos
-        subscription = db.query(Subscription).filter(
-            Subscription.user_id == current_user.id
-        ).first()
-
-        if not subscription:
-            # Usuario sin suscripción = plan gratuito
-            return {
-                "id": "free",
-                "plan_id": "free",
-                "status": "active",
-                "interval": "month",
-                "current_period_start": int(time.time()),
-                "current_period_end": int(time.time() + (30 * 24 * 60 * 60)),
-                "cancel_at_period_end": False,
-                "customer_id": current_user.stripe_customer_id,
-                # Información adicional del servicio de suscripciones
-                "subscription_status": subscription_status
-            }
-
-        # Retornar datos completos de la suscripción
+        # Formatear respuesta para compatibilidad con frontend
         return {
-            "id": subscription.stripe_subscription_id,
-            "plan_id": subscription.stripe_plan_id,
-            "status": subscription.status,
-            "interval": subscription.interval,
-            "current_period_start": int(subscription.current_period_start.timestamp()),
-            "current_period_end": int(subscription.current_period_end.timestamp()),
-            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "id": status.get("subscription_id", status["plan"]),
+            "plan_id": status["plan"],
+            "status": status["status"],
+            "interval": "month",  # Default, se actualiza si hay suscripción
+            "current_period_start": int(time.time()),
+            "current_period_end": status.get("current_period_end", int(time.time() + (30 * 24 * 60 * 60))),
+            "cancel_at_period_end": status.get("cancel_at_period_end", False),
             "customer_id": current_user.stripe_customer_id,
-            # Información adicional del servicio de suscripciones
-            "subscription_status": subscription_status
+            # Información adicional del servicio
+            "subscription_status": status
         }
 
     except Exception as e:
@@ -359,205 +339,49 @@ async def sync_subscription_from_stripe(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Sincroniza la suscripción desde Stripe (útil después del checkout).
+    Sincroniza la suscripción desde Stripe.
+    Versión simplificada que consulta Stripe directamente.
     """
     try:
-        logger.info(f"[SYNC] Starting sync for user {current_user.id} ({current_user.email})")
-        logger.info(f"[SYNC] Current stripe_customer_id: {current_user.stripe_customer_id}")
+        from app.services.subscription_service_v2 import SubscriptionServiceV2
         
-        if not current_user.stripe_customer_id:
-            logger.warning(f"[SYNC] User {current_user.id} has no stripe_customer_id")
-            
-            # Intentar buscar el customer por email en Stripe
-            logger.info(f"[SYNC] Searching for customer by email: {current_user.email}")
-            customers = stripe.Customer.list(email=current_user.email, limit=1)
-            
-            if customers.data:
-                customer = customers.data[0]
-                logger.info(f"[SYNC] Found customer in Stripe: {customer.id}")
-                
-                # Actualizar el customer_id en la base de datos
-                current_user.stripe_customer_id = customer.id
-                db.commit()
-                logger.info(f"[SYNC] Updated user with stripe_customer_id: {customer.id}")
-            else:
-                logger.error(f"[SYNC] No customer found in Stripe for email: {current_user.email}")
-                return {
-                    "error": "No se encontró cliente en Stripe",
-                    "plan_id": "free",
-                    "status": "no_customer",
-                    "synced": False
-                }
-
-        # Obtener TODAS las suscripciones del customer (incluyendo trials)
-        logger.info(f"[SYNC] Fetching ALL subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
-        try:
-            # Primero buscar suscripciones activas o en trial
-            all_statuses = ["active", "trialing", "past_due"]
-            subscriptions = stripe.Subscription.list(
-                customer=current_user.stripe_customer_id,
-                limit=10
-            )
-            logger.info(f"[SYNC] Stripe API call successful")
-            logger.info(f"[SYNC] Found {len(subscriptions.data)} total subscriptions")
-            
-            # Filtrar solo las que nos interesan
-            valid_subscriptions = [
-                sub for sub in subscriptions.data 
-                if sub.status in all_statuses
-            ]
-            
-            if valid_subscriptions:
-                logger.info(f"[SYNC] Found {len(valid_subscriptions)} valid subscriptions:")
-                for sub in valid_subscriptions:
-                    logger.info(f"[SYNC]   - ID: {sub.id}, Status: {sub.status}, Created: {sub.created}")
-                
-                # Usar la primera suscripción válida
-                subscriptions.data = [valid_subscriptions[0]]
-            else:
-                subscriptions.data = []
-                
-        except stripe.error.StripeError as e:
-            logger.error(f"[SYNC] Stripe API error: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error al consultar Stripe: {str(e)}"
-            )
-
-        if not subscriptions.data:
-            # Realmente no hay suscripciones
-            logger.info("[SYNC] No valid subscriptions found for customer")
-            existing_sub = db.query(Subscription).filter(
-                Subscription.user_id == current_user.id
-            ).first()
-            
-            if existing_sub:
-                existing_sub.status = "canceled"
-                db.commit()
-
-            return {
-                "id": "free",
-                "plan_id": "free", 
-                "status": "active",
-                "synced": True
-            }
-
-        # Hay suscripción activa, sincronizar datos
-        stripe_sub = subscriptions.data[0]
+        logger.info(f"[SYNC] Starting sync for user {current_user.id}")
         
-        # La respuesta ya es un diccionario, no necesitamos convertir
-        if isinstance(stripe_sub, dict):
-            stripe_sub_dict = stripe_sub
-        else:
-            # Por si acaso es un objeto Stripe
-            if hasattr(stripe_sub, 'to_dict_recursive'):
-                stripe_sub_dict = stripe_sub.to_dict_recursive()
-            else:
-                stripe_sub_dict = dict(stripe_sub)
+        # Limpiar cache para forzar consulta fresca
+        SubscriptionServiceV2.clear_cache(str(current_user.id))
         
-        sub_id = stripe_sub_dict.get('id')
-        logger.info(f"[SYNC] Processing subscription: {sub_id}")
-        logger.info(f"[SYNC] Subscription status: {stripe_sub_dict.get('status')}")
-        logger.info(f"[SYNC] Subscription metadata: {stripe_sub_dict.get('metadata', {})}")
+        # Verificar suscripción (actualiza stripe_customer_id si es necesario)
+        status = SubscriptionServiceV2.verify_on_login(db, current_user)
         
-        # Buscar o crear suscripción local
-        local_sub = db.query(Subscription).filter(
-            Subscription.stripe_subscription_id == sub_id
-        ).first()
-
-        if not local_sub:
-            # Determinar el plan_id basado en el price_id o metadata
-            plan_id = "pro"  # Default
-            interval = "month"  # Default
-            
-            try:
-                # Acceder a los items de la suscripción
-                items = stripe_sub_dict.get("items", {})
-                if isinstance(items, dict) and "data" in items and items["data"]:
-                    price_data = items["data"][0].get("price", {})
-                    price_id = price_data.get("id", "")
-                    
-                    # Mapear price_id a plan_id
-                    if price_id == settings.STRIPE_PRO_PRICE_ID:
-                        plan_id = "pro"
-                    elif price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
-                        plan_id = "enterprise"
-                    
-                    # Obtener interval
-                    recurring = price_data.get("recurring", {})
-                    interval = recurring.get("interval", "month")
-                    
-                    logger.info(f"Creating subscription: price_id={price_id}, plan_id={plan_id}, interval={interval}")
-                else:
-                    logger.warning(f"No items found in subscription {sub_id}, using defaults")
-                
-                # Revisar metadata como alternativa
-                if stripe_sub_dict.get("metadata", {}).get("plan_id"):
-                    plan_id = stripe_sub_dict["metadata"]["plan_id"]
-                    logger.info(f"Using plan_id from metadata: {plan_id}")
-                
-            except Exception as e:
-                logger.error(f"Error parsing subscription items: {e}")
-                # Usar valores por defecto
-            
-            # Obtener timestamps con valores por defecto seguros
-            period_start = stripe_sub_dict.get('current_period_start', int(time.time()))
-            period_end = stripe_sub_dict.get('current_period_end', int(time.time() + 30*24*60*60))
-            
-            # Crear nueva suscripción local
-            local_sub = Subscription(
-                user_id=current_user.id,
-                stripe_subscription_id=sub_id,
-                stripe_customer_id=current_user.stripe_customer_id,
-                stripe_plan_id=plan_id,
-                status=stripe_sub_dict.get('status', 'active'),
-                interval=interval,
-                current_period_start=datetime.fromtimestamp(period_start),
-                current_period_end=datetime.fromtimestamp(period_end),
-                cancel_at_period_end=stripe_sub_dict.get('cancel_at_period_end', False)
-            )
-            db.add(local_sub)
-            logger.info(f"[SYNC] Created new subscription record for {sub_id}")
-        else:
-            # Actualizar suscripción existente
-            period_start = stripe_sub_dict.get('current_period_start', int(local_sub.current_period_start.timestamp()))
-            period_end = stripe_sub_dict.get('current_period_end', int(local_sub.current_period_end.timestamp()))
-            
-            local_sub.status = stripe_sub_dict.get('status', local_sub.status)
-            local_sub.current_period_start = datetime.fromtimestamp(period_start)
-            local_sub.current_period_end = datetime.fromtimestamp(period_end)
-            local_sub.cancel_at_period_end = stripe_sub_dict.get('cancel_at_period_end', False)
-            logger.info(f"[SYNC] Updated existing subscription {sub_id}")
-
-        db.commit()
-        db.refresh(local_sub)
-
-        logger.info(f"Subscription synced for user {current_user.id}: {sub_id}")
-
+        logger.info(f"[SYNC] User {current_user.id} subscription status: {status}")
+        
+        # Formatear respuesta para compatibilidad con frontend
         return {
-            "id": local_sub.stripe_subscription_id,
-            "plan_id": local_sub.stripe_plan_id,
-            "status": local_sub.status,
-            "interval": local_sub.interval,
-            "current_period_start": int(local_sub.current_period_start.timestamp()),
-            "current_period_end": int(local_sub.current_period_end.timestamp()),
-            "cancel_at_period_end": local_sub.cancel_at_period_end,
-            "synced": True
+            "id": status.get("subscription_id", status["plan"]),
+            "plan_id": status["plan"],
+            "status": status["status"],
+            "synced": True,
+            "message": status.get("message", ""),
+            "limits": status.get("limits", {}),
+            "trial_days_remaining": status.get("trial_days_remaining"),
+            "current_period_end": status.get("current_period_end"),
+            "cancel_at_period_end": status.get("cancel_at_period_end", False)
         }
-
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error syncing subscription for user {current_user.id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error sincronizando con Stripe: {str(e)}"
-        )
-    
+        
     except Exception as e:
-        logger.error(f"Error syncing subscription for user {current_user.id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error interno sincronizando suscripción"
-        )
+        logger.error(f"[SYNC] Error syncing subscription: {e}")
+        return {
+            "id": "free",
+            "plan_id": "free",
+            "status": "error",
+            "synced": False,
+            "message": f"Error sincronizando: {str(e)}",
+            "limits": {
+                "documents": 10,
+                "storage_mb": 100,
+                "agents_per_month": 0
+            }
+        }
 
 
 # Configuración del Customer Portal (ejecutar una vez)

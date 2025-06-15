@@ -228,7 +228,7 @@ def manual_add_onboarding_column():
         return False
 
 def fix_subscription_table():
-    """Corrige el problema de la columna plan_id en la tabla subscriptions"""
+    """Corrige el problema de las columnas plan_id y price_id en la tabla subscriptions"""
     try:
         logger.info("🔧 Verificando tabla subscriptions...")
         
@@ -245,25 +245,29 @@ def fix_subscription_table():
                 logger.info("📋 Tabla subscriptions no existe - saltando")
                 return True
             
-            # Verificar columnas existentes
+            # Verificar TODAS las columnas problemáticas
             result = conn.execute(text("""
-                SELECT column_name, is_nullable
+                SELECT column_name, is_nullable, data_type
                 FROM information_schema.columns 
                 WHERE table_name='subscriptions' 
-                AND column_name IN ('plan_id', 'stripe_plan_id')
+                AND column_name IN ('plan_id', 'price_id', 'stripe_plan_id', 'stripe_price_id')
             """))
             
-            columns = {row[0]: row[1] for row in result.fetchall()}
+            columns = {row[0]: {'nullable': row[1], 'type': row[2]} for row in result.fetchall()}
             logger.info(f"🔍 Columnas encontradas en subscriptions: {columns}")
             
-            # Si existe plan_id y es NOT NULL, hacerla nullable
-            if 'plan_id' in columns and columns['plan_id'] == 'NO':
-                logger.info("🔧 Haciendo plan_id nullable...")
-                conn.execute(text("""
-                    ALTER TABLE subscriptions 
-                    ALTER COLUMN plan_id DROP NOT NULL
-                """))
-                logger.info("✅ plan_id ahora es nullable")
+            # Hacer nullable todas las columnas problemáticas
+            for col_name in ['plan_id', 'price_id']:
+                if col_name in columns and columns[col_name]['nullable'] == 'NO':
+                    logger.info(f"🔧 Haciendo {col_name} nullable...")
+                    try:
+                        conn.execute(text(f"""
+                            ALTER TABLE subscriptions 
+                            ALTER COLUMN {col_name} DROP NOT NULL
+                        """))
+                        logger.info(f"✅ {col_name} ahora es nullable")
+                    except Exception as e:
+                        logger.warning(f"⚠️ No se pudo modificar {col_name}: {e}")
             
             # Asegurar que stripe_plan_id existe
             if 'stripe_plan_id' not in columns:
@@ -273,6 +277,15 @@ def fix_subscription_table():
                     ADD COLUMN stripe_plan_id VARCHAR(50)
                 """))
                 logger.info("✅ stripe_plan_id agregada")
+            
+            # Asegurar que stripe_price_id existe (por si acaso)
+            if 'stripe_price_id' not in columns:
+                logger.info("➕ Agregando columna stripe_price_id...")
+                conn.execute(text("""
+                    ALTER TABLE subscriptions 
+                    ADD COLUMN stripe_price_id VARCHAR(255)
+                """))
+                logger.info("✅ stripe_price_id agregada")
             
             # Migrar datos si es necesario
             if 'plan_id' in columns and 'stripe_plan_id' in columns:
@@ -320,11 +333,34 @@ def auto_upgrade_database():
     try:
         logger.info("🔧 Verificando estado de la base de datos...")
         
-        # Por simplicidad y para evitar bloqueos de Alembic, usar verificación directa
+        # Primero aplicar correcciones manuales urgentes
         if check_database_structure():
-            logger.info("🎉 Base de datos verificada y actualizada correctamente")
-        else:
-            raise Exception("No se pudo verificar/actualizar la estructura de la BD")
+            logger.info("✅ Correcciones manuales aplicadas")
+        
+        # Luego intentar usar Alembic para migraciones formales
+        try:
+            from alembic_manager import AlembicManager
+            
+            logger.info("🚀 Iniciando Alembic Manager...")
+            manager = AlembicManager(settings.SQLALCHEMY_DATABASE_URI)
+            
+            # Verificar salud de migraciones
+            health = manager.verify_migration_health()
+            logger.info(f"📊 Estado de migraciones: {health['status']}")
+            
+            if health['status'] != 'error':
+                # Aplicar migraciones pendientes
+                manager.auto_upgrade(dry_run=False)
+                logger.info("✅ Migraciones de Alembic aplicadas")
+            else:
+                logger.warning(f"⚠️ Alembic no pudo ejecutarse: {health.get('message')}")
+                
+        except ImportError:
+            logger.warning("⚠️ AlembicManager no disponible, usando solo correcciones manuales")
+        except Exception as e:
+            logger.warning(f"⚠️ Error con Alembic (continuando): {e}")
+        
+        logger.info("🎉 Base de datos verificada y actualizada correctamente")
             
     except Exception as e:
         logger.error(f"💥 Error en auto-upgrade de BD: {e}")
