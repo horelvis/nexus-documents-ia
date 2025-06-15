@@ -31,6 +31,8 @@ router = APIRouter()
 
 # Configurar Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
+logger.info(f"[STRIPE] API key configured: {'Yes' if stripe.api_key else 'No'}")
+logger.info(f"[STRIPE] API key length: {len(stripe.api_key) if stripe.api_key else 0}")
 
 
 @router.post("/create-checkout-session")
@@ -255,6 +257,46 @@ async def create_customer_portal(
         )
 
 
+@router.get("/debug-stripe")
+async def debug_stripe_connection(
+    current_user: User = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """
+    Debug endpoint para verificar la conexión con Stripe
+    """
+    try:
+        # Verificar API key
+        api_key_configured = bool(stripe.api_key)
+        api_key_prefix = stripe.api_key[:7] if stripe.api_key else "No key"
+        
+        # Intentar una llamada simple a Stripe
+        stripe_connected = False
+        stripe_error = None
+        customer_count = 0
+        
+        try:
+            # Listar algunos customers como prueba
+            customers = stripe.Customer.list(limit=1)
+            stripe_connected = True
+            customer_count = len(customers.data)
+        except Exception as e:
+            stripe_error = str(e)
+            
+        return {
+            "api_key_configured": api_key_configured,
+            "api_key_prefix": api_key_prefix,
+            "stripe_connected": stripe_connected,
+            "stripe_error": stripe_error,
+            "test_customer_count": customer_count,
+            "user_email": current_user.email,
+            "user_stripe_customer_id": current_user.stripe_customer_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Debug error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/subscription")
 async def get_current_subscription(
     current_user: User = Depends(get_current_active_user),
@@ -318,28 +360,51 @@ async def sync_subscription_from_stripe(
 ) -> Dict[str, Any]:
     """
     Sincroniza la suscripción desde Stripe (útil después del checkout).
-    Opcional: Solo si necesitas forzar una sincronización.
     """
     try:
-        logger.info(f"Syncing subscription for user {current_user.id} ({current_user.email})")
-        logger.info(f"Stripe customer ID: {current_user.stripe_customer_id}")
+        logger.info(f"[SYNC] Starting sync for user {current_user.id} ({current_user.email})")
+        logger.info(f"[SYNC] Current stripe_customer_id: {current_user.stripe_customer_id}")
         
         if not current_user.stripe_customer_id:
-            logger.warning(f"User {current_user.id} has no stripe_customer_id")
-            raise HTTPException(
-                status_code=400,
-                detail="Usuario no tiene cuenta de cliente en Stripe"
-            )
+            logger.warning(f"[SYNC] User {current_user.id} has no stripe_customer_id")
+            
+            # Intentar buscar el customer por email en Stripe
+            logger.info(f"[SYNC] Searching for customer by email: {current_user.email}")
+            customers = stripe.Customer.list(email=current_user.email, limit=1)
+            
+            if customers.data:
+                customer = customers.data[0]
+                logger.info(f"[SYNC] Found customer in Stripe: {customer.id}")
+                
+                # Actualizar el customer_id en la base de datos
+                current_user.stripe_customer_id = customer.id
+                db.commit()
+                logger.info(f"[SYNC] Updated user with stripe_customer_id: {customer.id}")
+            else:
+                logger.error(f"[SYNC] No customer found in Stripe for email: {current_user.email}")
+                return {
+                    "error": "No se encontró cliente en Stripe",
+                    "plan_id": "free",
+                    "status": "no_customer",
+                    "synced": False
+                }
 
         # Obtener suscripciones activas del customer en Stripe
-        logger.info(f"Fetching subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
-        subscriptions = stripe.Subscription.list(
-            customer=current_user.stripe_customer_id,
-            status="active",
-            limit=1
-        )
-        
-        logger.info(f"Found {len(subscriptions.data)} active subscriptions")
+        logger.info(f"[SYNC] Fetching subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
+        try:
+            subscriptions = stripe.Subscription.list(
+                customer=current_user.stripe_customer_id,
+                status="active",
+                limit=1
+            )
+            logger.info(f"[SYNC] Stripe API call successful")
+            logger.info(f"[SYNC] Found {len(subscriptions.data)} active subscriptions")
+        except stripe.error.StripeError as e:
+            logger.error(f"[SYNC] Stripe API error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al consultar Stripe: {str(e)}"
+            )
 
         if not subscriptions.data:
             # No hay suscripciones activas, buscar TODAS las suscripciones
