@@ -389,16 +389,34 @@ async def sync_subscription_from_stripe(
                     "synced": False
                 }
 
-        # Obtener suscripciones activas del customer en Stripe
-        logger.info(f"[SYNC] Fetching subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
+        # Obtener TODAS las suscripciones del customer (incluyendo trials)
+        logger.info(f"[SYNC] Fetching ALL subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
         try:
+            # Primero buscar suscripciones activas o en trial
+            all_statuses = ["active", "trialing", "past_due"]
             subscriptions = stripe.Subscription.list(
                 customer=current_user.stripe_customer_id,
-                status="active",
-                limit=1
+                limit=10
             )
             logger.info(f"[SYNC] Stripe API call successful")
-            logger.info(f"[SYNC] Found {len(subscriptions.data)} active subscriptions")
+            logger.info(f"[SYNC] Found {len(subscriptions.data)} total subscriptions")
+            
+            # Filtrar solo las que nos interesan
+            valid_subscriptions = [
+                sub for sub in subscriptions.data 
+                if sub.status in all_statuses
+            ]
+            
+            if valid_subscriptions:
+                logger.info(f"[SYNC] Found {len(valid_subscriptions)} valid subscriptions:")
+                for sub in valid_subscriptions:
+                    logger.info(f"[SYNC]   - ID: {sub.id}, Status: {sub.status}, Created: {sub.created}")
+                
+                # Usar la primera suscripción válida
+                subscriptions.data = [valid_subscriptions[0]]
+            else:
+                subscriptions.data = []
+                
         except stripe.error.StripeError as e:
             logger.error(f"[SYNC] Stripe API error: {str(e)}")
             raise HTTPException(
@@ -407,41 +425,22 @@ async def sync_subscription_from_stripe(
             )
 
         if not subscriptions.data:
-            # No hay suscripciones activas, buscar TODAS las suscripciones
-            logger.info("No active subscriptions found, checking all subscription statuses...")
-            all_subscriptions = stripe.Subscription.list(
-                customer=current_user.stripe_customer_id,
-                limit=10
-            )
+            # Realmente no hay suscripciones
+            logger.info("[SYNC] No valid subscriptions found for customer")
+            existing_sub = db.query(Subscription).filter(
+                Subscription.user_id == current_user.id
+            ).first()
             
-            if all_subscriptions.data:
-                logger.info(f"Found {len(all_subscriptions.data)} total subscriptions:")
-                for sub in all_subscriptions.data:
-                    logger.info(f"  - ID: {sub.id}, Status: {sub.status}, Plan: {sub.items.data[0].price.id}")
-                    
-                # Si hay alguna suscripción en trial o incomplete, usarla
-                for sub in all_subscriptions.data:
-                    if sub.status in ["trialing", "incomplete", "incomplete_expired"]:
-                        logger.info(f"Found subscription in status '{sub.status}', will sync it")
-                        subscriptions.data = [sub]
-                        break
-            
-            if not subscriptions.data:
-                # Realmente no hay suscripciones
-                existing_sub = db.query(Subscription).filter(
-                    Subscription.user_id == current_user.id
-                ).first()
-                
-                if existing_sub:
-                    existing_sub.status = "canceled"
-                    db.commit()
+            if existing_sub:
+                existing_sub.status = "canceled"
+                db.commit()
 
-                return {
-                    "id": "free",
-                    "plan_id": "free", 
-                    "status": "active",
-                    "synced": True
-                }
+            return {
+                "id": "free",
+                "plan_id": "free", 
+                "status": "active",
+                "synced": True
+            }
 
         # Hay suscripción activa, sincronizar datos
         stripe_sub = subscriptions.data[0]
