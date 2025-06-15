@@ -445,50 +445,94 @@ async def sync_subscription_from_stripe(
         # Hay suscripción activa, sincronizar datos
         stripe_sub = subscriptions.data[0]
         
+        # La respuesta ya es un diccionario, no necesitamos convertir
+        if isinstance(stripe_sub, dict):
+            stripe_sub_dict = stripe_sub
+        else:
+            # Por si acaso es un objeto Stripe
+            if hasattr(stripe_sub, 'to_dict_recursive'):
+                stripe_sub_dict = stripe_sub.to_dict_recursive()
+            else:
+                stripe_sub_dict = dict(stripe_sub)
+        
+        sub_id = stripe_sub_dict.get('id')
+        logger.info(f"[SYNC] Processing subscription: {sub_id}")
+        logger.info(f"[SYNC] Subscription status: {stripe_sub_dict.get('status')}")
+        logger.info(f"[SYNC] Subscription metadata: {stripe_sub_dict.get('metadata', {})}")
+        
         # Buscar o crear suscripción local
         local_sub = db.query(Subscription).filter(
-            Subscription.stripe_subscription_id == stripe_sub.id
+            Subscription.stripe_subscription_id == sub_id
         ).first()
 
         if not local_sub:
             # Determinar el plan_id basado en el price_id o metadata
             plan_id = "pro"  # Default
-            price_id = stripe_sub.items.data[0].price.id
+            interval = "month"  # Default
             
-            # Mapear price_id a plan_id
-            if price_id == settings.STRIPE_PRO_PRICE_ID:
-                plan_id = "pro"
-            elif price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
-                plan_id = "enterprise"
-            elif stripe_sub.metadata.get("plan_id"):
-                plan_id = stripe_sub.metadata["plan_id"]
+            try:
+                # Acceder a los items de la suscripción
+                items = stripe_sub_dict.get("items", {})
+                if isinstance(items, dict) and "data" in items and items["data"]:
+                    price_data = items["data"][0].get("price", {})
+                    price_id = price_data.get("id", "")
+                    
+                    # Mapear price_id a plan_id
+                    if price_id == settings.STRIPE_PRO_PRICE_ID:
+                        plan_id = "pro"
+                    elif price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
+                        plan_id = "enterprise"
+                    
+                    # Obtener interval
+                    recurring = price_data.get("recurring", {})
+                    interval = recurring.get("interval", "month")
+                    
+                    logger.info(f"Creating subscription: price_id={price_id}, plan_id={plan_id}, interval={interval}")
+                else:
+                    logger.warning(f"No items found in subscription {sub_id}, using defaults")
+                
+                # Revisar metadata como alternativa
+                if stripe_sub_dict.get("metadata", {}).get("plan_id"):
+                    plan_id = stripe_sub_dict["metadata"]["plan_id"]
+                    logger.info(f"Using plan_id from metadata: {plan_id}")
+                
+            except Exception as e:
+                logger.error(f"Error parsing subscription items: {e}")
+                # Usar valores por defecto
             
-            logger.info(f"Creating subscription: price_id={price_id}, plan_id={plan_id}")
+            # Obtener timestamps con valores por defecto seguros
+            period_start = stripe_sub_dict.get('current_period_start', int(time.time()))
+            period_end = stripe_sub_dict.get('current_period_end', int(time.time() + 30*24*60*60))
             
             # Crear nueva suscripción local
             local_sub = Subscription(
                 user_id=current_user.id,
-                stripe_subscription_id=stripe_sub.id,
+                stripe_subscription_id=sub_id,
                 stripe_customer_id=current_user.stripe_customer_id,
                 stripe_plan_id=plan_id,
-                status=stripe_sub.status,
-                interval=stripe_sub.items.data[0].price.recurring.interval,
-                current_period_start=datetime.fromtimestamp(stripe_sub.current_period_start),
-                current_period_end=datetime.fromtimestamp(stripe_sub.current_period_end),
-                cancel_at_period_end=stripe_sub.cancel_at_period_end
+                status=stripe_sub_dict.get('status', 'active'),
+                interval=interval,
+                current_period_start=datetime.fromtimestamp(period_start),
+                current_period_end=datetime.fromtimestamp(period_end),
+                cancel_at_period_end=stripe_sub_dict.get('cancel_at_period_end', False)
             )
             db.add(local_sub)
+            logger.info(f"[SYNC] Created new subscription record for {sub_id}")
         else:
             # Actualizar suscripción existente
-            local_sub.status = stripe_sub.status
-            local_sub.current_period_start = datetime.fromtimestamp(stripe_sub.current_period_start)
-            local_sub.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end)
-            local_sub.cancel_at_period_end = stripe_sub.cancel_at_period_end
+            period_start = stripe_sub_dict.get('current_period_start', int(local_sub.current_period_start.timestamp()))
+            period_end = stripe_sub_dict.get('current_period_end', int(local_sub.current_period_end.timestamp()))
+            
+            local_sub.status = stripe_sub_dict.get('status', local_sub.status)
+            local_sub.current_period_start = datetime.fromtimestamp(period_start)
+            local_sub.current_period_end = datetime.fromtimestamp(period_end)
+            local_sub.cancel_at_period_end = stripe_sub_dict.get('cancel_at_period_end', False)
+            logger.info(f"[SYNC] Updated existing subscription {sub_id}")
 
         db.commit()
         db.refresh(local_sub)
 
-        logger.info(f"Subscription synced for user {current_user.id}: {stripe_sub.id}")
+        logger.info(f"Subscription synced for user {current_user.id}: {sub_id}")
 
         return {
             "id": local_sub.stripe_subscription_id,
