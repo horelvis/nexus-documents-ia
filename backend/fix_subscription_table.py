@@ -18,7 +18,7 @@ def fix_subscription_table():
         from app.core.config import settings
         
         # Create engine
-        engine = create_engine(settings.DATABASE_URL)
+        engine = create_engine(settings.SQLALCHEMY_DATABASE_URI)
         
         with engine.begin() as conn:
             # Check existing columns
