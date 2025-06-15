@@ -63,18 +63,33 @@ class ApiClient {
       }
 
       if (!response.ok) {
-        throw new Error(data?.detail || data?.message || `HTTP ${response.status}`)
+        // Create an error object that includes the full response data
+        const errorObj = {
+          response: {
+            status: response.status,
+            data: data
+          },
+          message: data?.detail?.message || data?.detail || data?.message || `HTTP ${response.status}`
+        }
+        throw errorObj
       }
 
       return {
         data,
         status: response.status,
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('API request failed:', error)
+      
+      // If the error has response data (from our throw above), preserve it
+      if (error?.response) {
+        throw error
+      }
+      
+      // Otherwise, wrap it in a standard format
       return {
         error: error instanceof Error ? error.message : 'Unknown error',
-        status: 500,
+        status: error?.response?.status || 500,
       }
     }
   }

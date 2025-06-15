@@ -76,8 +76,13 @@ export class AgentsService {
   }
 
   async chatWithAgent(agentId: string, request: ChatRequest) {
-    const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/${agentId}/chat`, request)
-    return response
+    try {
+      const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/${agentId}/chat`, request)
+      return response
+    } catch (error) {
+      // Re-throw the error to preserve the response structure
+      throw error
+    }
   }
 
   // Streaming chat using EventSource

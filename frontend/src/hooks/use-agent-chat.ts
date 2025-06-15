@@ -38,6 +38,12 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThink
 
   const sendMessage = useCallback(async (content: string, context?: Record<string, any>) => {
     if (!content.trim()) return
+    
+    // Prevent duplicate messages in development (React StrictMode)
+    if (messages.length > 0 && messages[messages.length - 1].content === content && messages[messages.length - 1].role === 'user') {
+      console.log('Duplicate message detected, skipping')
+      return
+    }
 
     // Clear thinking events for new message
     setThinkingEvents([])
@@ -78,21 +84,48 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThink
         setConversationId(response.conversation_id)
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error)
-      const errorMessage: ChatMessage = {
-        role: 'assistant',
-        content: 'Lo siento, ocurrió un error al procesar tu mensaje.',
-        timestamp: new Date().toISOString(),
-        metadata: { error: true }
+      console.log('Error structure:', {
+        hasResponse: !!error?.response,
+        status: error?.response?.status,
+        hasDetail: !!error?.response?.data?.detail,
+        detail: error?.response?.data?.detail
+      })
+      
+      // Check if it's a subscription error (403)
+      if (error?.response?.status === 403 && error?.response?.data?.detail) {
+        console.log('Subscription error detected, showing dialog')
+        // Pass the full error detail to the error handler
+        onError?.(JSON.stringify({
+          type: 'subscription_error',
+          detail: error.response.data.detail
+        }))
+        
+        // Add a custom error message to the chat
+        const errorMessage: ChatMessage = {
+          role: 'assistant',
+          content: 'Esta función requiere una suscripción activa. Por favor, actualiza tu plan para acceder a los agentes AI.',
+          timestamp: new Date().toISOString(),
+          metadata: { error: true, errorType: 'subscription' }
+        }
+        addMessage(errorMessage)
+      } else {
+        // Handle other errors normally
+        const errorMessage: ChatMessage = {
+          role: 'assistant',
+          content: 'Lo siento, ocurrió un error al procesar tu mensaje.',
+          timestamp: new Date().toISOString(),
+          metadata: { error: true }
+        }
+        addMessage(errorMessage)
+        onError?.(error?.message || 'Unknown error')
       }
-      addMessage(errorMessage)
-      onError?.(error instanceof Error ? error.message : 'Unknown error')
     } finally {
       setIsLoading(false)
       setIsStreaming(false)
     }
-  }, [agentId, conversationId, addMessage, onError, agentsService])
+  }, [agentId, conversationId, addMessage, onError, agentsService, messages])
 
   const sendMessageStreaming = useCallback(async (content: string, context?: Record<string, any>) => {
     if (!content.trim()) return

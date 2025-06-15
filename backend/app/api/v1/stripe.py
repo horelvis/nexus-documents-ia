@@ -23,6 +23,8 @@ class CheckoutSessionRequest(BaseModel):
     planId: str  # Only plan ID needed, backend handles price mapping
     interval: str = 'month'  # 'month' or 'year'
     email: Optional[str] = None
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,11 +36,11 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 @router.post("/create-checkout-session")
 async def create_checkout_session(
     request: CheckoutSessionRequest,
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, str]:
     """
-    Crea una sesión de checkout de Stripe para nuevos usuarios.
-    Este endpoint se llama ANTES del registro de usuario.
+    Crea una sesión de checkout de Stripe para usuarios existentes que quieren actualizar su plan.
     """
     try:
         # Validate plan ID
@@ -76,6 +78,24 @@ async def create_checkout_session(
                 detail=f"Price not configured for plan '{request.planId}' with interval '{request.interval}'"
             )
 
+        # Si el usuario ya tiene un customer_id, usarlo
+        customer_id = current_user.stripe_customer_id
+        
+        # Si no tiene customer_id, crear uno nuevo
+        if not customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                metadata={
+                    'user_id': str(current_user.id),
+                    'tenant_id': str(current_user.tenant_id)
+                }
+            )
+            customer_id = customer.id
+            
+            # Guardar el customer_id en la base de datos
+            current_user.stripe_customer_id = customer_id
+            db.commit()
+        
         # Crear sesión de checkout
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -84,13 +104,14 @@ async def create_checkout_session(
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=f"{settings.FRONTEND_URL}/welcome?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{settings.FRONTEND_URL}/pricing",
+            success_url=request.success_url or f"{settings.FRONTEND_URL}/{current_user.tenant_id}/dashboard?upgraded=true&sync=true",
+            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/plans/{current_user.tenant_id}",
             metadata={
                 'plan_id': request.planId,
+                'user_id': str(current_user.id),
+                'tenant_id': str(current_user.tenant_id)
             },
-            # Pre-rellenar email si se proporciona
-            customer_email=request.email,
+            customer=customer_id,
             # Recopilar información adicional
             billing_address_collection='auto',
             # Permitir códigos promocionales

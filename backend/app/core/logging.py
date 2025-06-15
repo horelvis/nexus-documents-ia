@@ -39,14 +39,14 @@ def setup_logging():
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
     
-    # Reducir verbosidad de algunos loggers (solo si no estamos en DEBUG)
-    if not settings.DEBUG:
-        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    else:
-        # En DEBUG, mostrar más info de uvicorn
-        logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-        logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
+    # Reducir verbosidad de algunos loggers
+    # SQLAlchemy engine siempre en WARNING para evitar logs de queries SQL
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    
+    # Desactivar uvicorn access logs para evitar duplicados con nuestro middleware
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
     
     # Logger personalizado para la aplicación
     logger = logging.getLogger("app")

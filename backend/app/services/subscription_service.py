@@ -45,7 +45,7 @@ class SubscriptionPermissions:
             "can_view_documents": True,
             "can_search_documents": True,
             "can_use_chat": True,
-            "can_use_agents": False,
+            "can_use_agents": True,  # Temporarily enabled for development
             "can_export_documents": False,
             "can_use_api": False,
             "max_file_size_mb": 10,

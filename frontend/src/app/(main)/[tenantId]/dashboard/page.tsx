@@ -1,13 +1,17 @@
 import { DataTable } from "@/components/common/data-table"
 import { SectionCards } from "@/components/dashboard/section-cards"
+import { SubscriptionSync } from "@/components/common/subscription-sync"
 
 import data from "./data.json"
 
 export default function Page() {
   return (
-    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-      <SectionCards />
-      <DataTable data={data} />
-    </div>
+    <>
+      <SubscriptionSync />
+      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+        <SectionCards />
+        <DataTable data={data} />
+      </div>
+    </>
   )
 }

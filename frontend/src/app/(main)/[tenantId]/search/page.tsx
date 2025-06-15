@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -28,6 +28,7 @@ import { useAgentsService } from "@/lib/services/agents.service"
 import { DocumentCard } from "@/components/documents/document-card"
 import { useAgentChat } from "@/hooks/use-agent-chat"
 import { ThinkingDisplay } from "@/components/agents/thinking-display"
+import { SubscriptionErrorDialog } from "@/components/common/subscription-error-dialog"
 
 export default function SearchPage() {
   const params = useParams()
@@ -57,6 +58,9 @@ export default function SearchPage() {
     try {
       const response = await agentService.getAgents()
       if (response.data) {
+        // Extract agents array from response
+        const agentsList = response.data.agents || response.data || []
+        
         // Add a default search agent
         const agents = [
           {
@@ -66,7 +70,7 @@ export default function SearchPage() {
             type: 'search',
             icon: 'search'
           },
-          ...response.data
+          ...agentsList
         ]
         setAvailableAgents(agents)
       }
@@ -115,10 +119,12 @@ export default function SearchPage() {
           message: response.error
         })
       } else {
-        setSearchResults(response.data?.results || [])
+        // The API returns the results directly as an array
+        const results = response.data || []
+        setSearchResults(results)
         
         // Auto-select appropriate agent based on query and available agents
-        autoSelectAgent(searchQuery, response.data?.results || [])
+        autoSelectAgent(searchQuery, results)
       }
     } catch (error) {
       console.error('Search failed:', error)
@@ -326,7 +332,7 @@ export default function SearchPage() {
                           key={result.document.id}
                           document={result.document}
                           score={result.score}
-                          highlights={result.highlights}
+                          highlights={result.matches?.map((match: any) => match.text) || []}
                         />
                       ))}
                     </div>
@@ -457,8 +463,11 @@ export default function SearchPage() {
 
 // Agent Interface Component
 function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }: any) {
+  const params = useParams()
+  const tenantId = params.tenantId as string
   const [input, setInput] = useState('')
   const [showThinking, setShowThinking] = useState(false)
+  const [subscriptionError, setSubscriptionError] = useState<any>(null)
   
   const { 
     messages, 
@@ -471,17 +480,56 @@ function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }
     agentId,
     onError: (error) => {
       console.error('Agent error:', error)
+      
+      // Check if it's a subscription error
+      try {
+        console.log('Raw error in onError:', error)
+        const errorData = JSON.parse(error)
+        console.log('Parsed error data:', errorData)
+        if (errorData.type === 'subscription_error') {
+          console.log('Setting subscription error:', errorData.detail)
+          setSubscriptionError(errorData.detail)
+        }
+      } catch (e) {
+        console.log('Failed to parse error:', e)
+        // Not a subscription error
+      }
     }
   })
 
-  // Send initial query when component mounts
+  // Send initial query only once when component mounts with searchQuery
   useEffect(() => {
-    if (searchQuery && messages.length === 0) {
-      handleSendMessage(`Analyze these search results for: "${searchQuery}"`)
+    if (!searchQuery) return
+    
+    // Use a ref to track if we've sent the initial message
+    let mounted = true
+    
+    const sendInitialMessage = async () => {
+      if (mounted && messages.length === 0) {
+        await sendMessage(`Analyze these search results for: "${searchQuery}"`, {
+          query: searchQuery,
+          documents: searchResults.map((r: any) => ({
+            id: r.document.id,
+            title: r.document.title,
+            type: r.document.file_type,
+            score: r.score,
+            highlights: r.highlights
+          }))
+        })
+      }
     }
-  }, [searchQuery])
+    
+    // Small delay to prevent double execution in React StrictMode
+    const timer = setTimeout(sendInitialMessage, 200)
+    
+    return () => {
+      mounted = false
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]) // Only re-run when agentId changes
 
-  const handleSendMessage = async (message: string) => {
+  const handleSendMessage = useCallback(async (message: string) => {
     if (!message.trim()) return
     
     // Include document context
@@ -498,10 +546,18 @@ function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }
     
     await sendMessage(message, context)
     setInput('')
-  }
+  }, [searchQuery, searchResults, sendMessage])
 
   return (
     <div className="space-y-4">
+      {/* Subscription Error Dialog */}
+      <SubscriptionErrorDialog
+        isOpen={!!subscriptionError}
+        onClose={() => setSubscriptionError(null)}
+        errorDetail={subscriptionError || {}}
+        tenantId={tenantId}
+      />
+
       {/* Agent Header */}
       <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
         <CardHeader>

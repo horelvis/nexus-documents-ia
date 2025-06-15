@@ -13,6 +13,7 @@ import asyncio
 from datetime import datetime
 
 from app.core.config import settings
+from app.core.agent_metadata import get_agent_metadata
 from app.services.langroid_agent_service import LangroidAgentService
 # from app.services.digital_signature_langroid_agent import DigitalSignatureLangroidAgent
 
@@ -179,28 +180,15 @@ async def list_agent_types():
                 "ui_config": agent_def.get("ui_config", {})
             }
         else:
-            # Built-in agent - get metadata
-            agent_name = agent_key.replace("_agent", "").replace("_", " ").title() + " Agent"
-            descriptions = {
-                "digital_signature_agent": "Handles digital signature workflows and document signing processes",
-                "document_analyzer_agent": "Analyzes documents for various purposes (legal, financial, etc.)",
-                "rag_assistant_agent": "Retrieval-Augmented Generation assistant for document Q&A",
-                "legal_compliance_agent": "Analyzes documents for legal compliance and regulatory requirements",
-                "financial_analysis_agent": "Analyzes financial documents and provides insights"
-            }
-            capabilities = {
-                "digital_signature_agent": ["signature_requests", "status_tracking", "signer_management"],
-                "document_analyzer_agent": ["content_analysis", "extraction", "summarization"],
-                "rag_assistant_agent": ["document_search", "context_qa", "knowledge_retrieval"],
-                "legal_compliance_agent": ["compliance_check", "risk_assessment", "regulatory_analysis"],
-                "financial_analysis_agent": ["financial_metrics", "trend_analysis", "report_generation"]
-            }
+            # Built-in agent - get metadata from configuration
+            metadata = get_agent_metadata(agent_key)
             
             agent_types[agent_key] = {
-                "name": agent_name,
-                "description": descriptions.get(agent_key, "AI assistant for specialized tasks"),
-                "capabilities": capabilities.get(agent_key, ["general_assistance"]),
-                "source": "built-in"
+                "name": metadata.get("display_name"),
+                "description": metadata.get("description"),
+                "capabilities": metadata.get("capabilities"),
+                "source": "built-in",
+                "category": metadata.get("category", "general")
             }
     
     return {
