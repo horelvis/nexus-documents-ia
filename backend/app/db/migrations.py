@@ -227,13 +227,82 @@ def manual_add_onboarding_column():
         
         return False
 
+def fix_subscription_table():
+    """Corrige el problema de la columna plan_id en la tabla subscriptions"""
+    try:
+        logger.info("🔧 Verificando tabla subscriptions...")
+        
+        with engine.begin() as conn:
+            # Verificar si la tabla subscriptions existe
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subscriptions'
+                )
+            """))
+            
+            if not result.scalar():
+                logger.info("📋 Tabla subscriptions no existe - saltando")
+                return True
+            
+            # Verificar columnas existentes
+            result = conn.execute(text("""
+                SELECT column_name, is_nullable
+                FROM information_schema.columns 
+                WHERE table_name='subscriptions' 
+                AND column_name IN ('plan_id', 'stripe_plan_id')
+            """))
+            
+            columns = {row[0]: row[1] for row in result.fetchall()}
+            logger.info(f"🔍 Columnas encontradas en subscriptions: {columns}")
+            
+            # Si existe plan_id y es NOT NULL, hacerla nullable
+            if 'plan_id' in columns and columns['plan_id'] == 'NO':
+                logger.info("🔧 Haciendo plan_id nullable...")
+                conn.execute(text("""
+                    ALTER TABLE subscriptions 
+                    ALTER COLUMN plan_id DROP NOT NULL
+                """))
+                logger.info("✅ plan_id ahora es nullable")
+            
+            # Asegurar que stripe_plan_id existe
+            if 'stripe_plan_id' not in columns:
+                logger.info("➕ Agregando columna stripe_plan_id...")
+                conn.execute(text("""
+                    ALTER TABLE subscriptions 
+                    ADD COLUMN stripe_plan_id VARCHAR(50)
+                """))
+                logger.info("✅ stripe_plan_id agregada")
+            
+            # Migrar datos si es necesario
+            if 'plan_id' in columns and 'stripe_plan_id' in columns:
+                logger.info("🔄 Migrando datos de plan_id a stripe_plan_id...")
+                conn.execute(text("""
+                    UPDATE subscriptions 
+                    SET stripe_plan_id = COALESCE(stripe_plan_id, 'pro')
+                    WHERE stripe_plan_id IS NULL
+                """))
+                logger.info("✅ Datos migrados")
+            
+            logger.info("✅ Tabla subscriptions verificada y corregida")
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Error verificando/corrigiendo tabla subscriptions: {e}")
+        return False
+
 def check_database_structure():
     """Verifica y corrige la estructura de la BD sin usar Alembic"""
     try:
         logger.info("🔧 Verificando estructura de la base de datos...")
         
         # Verificar columna onboarding_completed
-        if manual_add_onboarding_column():
+        onboarding_ok = manual_add_onboarding_column()
+        
+        # Verificar y corregir tabla subscriptions
+        subscriptions_ok = fix_subscription_table()
+        
+        if onboarding_ok and subscriptions_ok:
             logger.info("✅ Estructura de BD verificada y corregida")
             return True
         else:
