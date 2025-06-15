@@ -49,10 +49,18 @@ def fix_subscription_table():
                     for constraint in constraints:
                         if 'plan_id' in constraint['constrained_columns']:
                             logger.info(f"Dropping constraint: {constraint['name']}")
-                            conn.execute(text(f"ALTER TABLE subscriptions DROP CONSTRAINT {constraint['name']}"))
+                            try:
+                                conn.execute(text(f"ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS {constraint['name']}"))
+                                logger.info(f"✓ Dropped constraint: {constraint['name']}")
+                            except Exception as e:
+                                logger.warning(f"Could not drop constraint {constraint['name']}: {e}")
                     
                     # Then drop the column
-                    conn.execute(text("ALTER TABLE subscriptions DROP COLUMN IF EXISTS plan_id"))
+                    try:
+                        conn.execute(text("ALTER TABLE subscriptions DROP COLUMN IF EXISTS plan_id"))
+                        logger.info("✓ Dropped plan_id column")
+                    except Exception as e:
+                        logger.error(f"Could not drop plan_id column: {e}")
                 
                 # Verify the changes
                 inspector = inspect(engine)
