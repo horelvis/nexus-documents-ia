@@ -6,10 +6,15 @@ import {
   IconLogout,
   IconNotification,
   IconUserCircle,
+  IconCrown,
+  IconReceipt,
 } from "@tabler/icons-react"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useApiClient } from "@/lib/api-client"
 import { useState } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { useUserContext } from "@/contexts/user-context"
+import { Badge } from "@/components/ui/badge"
 
 import {
   Avatar,
@@ -44,8 +49,13 @@ export function NavUser({
   const { isMobile } = useSidebar()
   const { user: clerkUser } = useUser()
   const { signOut, openUserProfile } = useClerk()
+  const { backendUser } = useUserContext()
   const apiClient = useApiClient()
+  const router = useRouter()
+  const params = useParams()
   const [isLoadingBilling, setIsLoadingBilling] = useState(false)
+  
+  const tenantId = params.tenantId as string
 
   // Use Clerk user data if available, fallback to prop
   const user = clerkUser ? {
@@ -98,6 +108,24 @@ export function NavUser({
     }
   }
 
+  const handleViewPlans = () => {
+    if (tenantId) {
+      router.push(`/plans/${tenantId}`)
+    }
+  }
+
+  const getPlanBadge = () => {
+    const planType = backendUser?.subscription?.plan_type || 'free'
+    const planConfigs: Record<string, { name: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+      'free': { name: 'Gratuito', variant: 'secondary' },
+      'pro': { name: 'Profesional', variant: 'default' },
+      'professional': { name: 'Profesional', variant: 'default' },
+      'enterprise': { name: 'Empresarial', variant: 'destructive' }
+    }
+    
+    return planConfigs[planType] || { name: planType, variant: 'secondary' }
+  }
+
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -141,24 +169,41 @@ export function NavUser({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            
+            {/* Plan actual */}
+            <div className="px-2 py-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Plan actual</span>
+                <Badge variant={getPlanBadge().variant} className="text-xs">
+                  {getPlanBadge().name}
+                </Badge>
+              </div>
+            </div>
+            
+            <DropdownMenuSeparator />
+            
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={handleAccountSettings}>
                 <IconUserCircle />
-                Account
+                Mi cuenta
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleViewPlans}>
+                <IconCrown />
+                Ver planes
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleBillingPortal} disabled={isLoadingBilling}>
-                <IconCreditCard />
-                {isLoadingBilling ? 'Opening...' : 'Billing'}
+                <IconReceipt />
+                {isLoadingBilling ? 'Abriendo...' : 'Facturas y pagos'}
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <IconNotification />
-                Notifications
+                Notificaciones
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut}>
               <IconLogout />
-              Log out
+              Cerrar sesión
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -40,6 +40,9 @@ export function SubscriptionSync() {
       })
 
       if (syncResponse.ok) {
+        const syncData = await syncResponse.json()
+        console.log('Sync response:', syncData)
+        
         // Refresh user data to get updated subscription info
         await checkOnboardingStatus()
         
@@ -57,7 +60,9 @@ export function SubscriptionSync() {
         url.searchParams.delete('upgraded')
         window.history.replaceState({}, '', url)
       } else {
-        throw new Error('Failed to sync subscription')
+        const errorData = await syncResponse.json().catch(() => ({}))
+        console.error('Sync error:', errorData)
+        throw new Error(errorData.detail || 'Failed to sync subscription')
       }
     } catch (error) {
       console.error('Error syncing subscription:', error)

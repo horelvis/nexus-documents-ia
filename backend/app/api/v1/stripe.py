@@ -321,36 +321,62 @@ async def sync_subscription_from_stripe(
     Opcional: Solo si necesitas forzar una sincronización.
     """
     try:
+        logger.info(f"Syncing subscription for user {current_user.id} ({current_user.email})")
+        logger.info(f"Stripe customer ID: {current_user.stripe_customer_id}")
+        
         if not current_user.stripe_customer_id:
+            logger.warning(f"User {current_user.id} has no stripe_customer_id")
             raise HTTPException(
                 status_code=400,
                 detail="Usuario no tiene cuenta de cliente en Stripe"
             )
 
         # Obtener suscripciones activas del customer en Stripe
+        logger.info(f"Fetching subscriptions from Stripe for customer: {current_user.stripe_customer_id}")
         subscriptions = stripe.Subscription.list(
             customer=current_user.stripe_customer_id,
             status="active",
             limit=1
         )
+        
+        logger.info(f"Found {len(subscriptions.data)} active subscriptions")
 
         if not subscriptions.data:
-            # No hay suscripciones activas, usuario está en plan gratuito
-            # Actualizar o crear registro local
-            existing_sub = db.query(Subscription).filter(
-                Subscription.user_id == current_user.id
-            ).first()
+            # No hay suscripciones activas, buscar TODAS las suscripciones
+            logger.info("No active subscriptions found, checking all subscription statuses...")
+            all_subscriptions = stripe.Subscription.list(
+                customer=current_user.stripe_customer_id,
+                limit=10
+            )
             
-            if existing_sub:
-                existing_sub.status = "canceled"
-                db.commit()
+            if all_subscriptions.data:
+                logger.info(f"Found {len(all_subscriptions.data)} total subscriptions:")
+                for sub in all_subscriptions.data:
+                    logger.info(f"  - ID: {sub.id}, Status: {sub.status}, Plan: {sub.items.data[0].price.id}")
+                    
+                # Si hay alguna suscripción en trial o incomplete, usarla
+                for sub in all_subscriptions.data:
+                    if sub.status in ["trialing", "incomplete", "incomplete_expired"]:
+                        logger.info(f"Found subscription in status '{sub.status}', will sync it")
+                        subscriptions.data = [sub]
+                        break
+            
+            if not subscriptions.data:
+                # Realmente no hay suscripciones
+                existing_sub = db.query(Subscription).filter(
+                    Subscription.user_id == current_user.id
+                ).first()
+                
+                if existing_sub:
+                    existing_sub.status = "canceled"
+                    db.commit()
 
-            return {
-                "id": "free",
-                "plan_id": "free", 
-                "status": "active",
-                "synced": True
-            }
+                return {
+                    "id": "free",
+                    "plan_id": "free", 
+                    "status": "active",
+                    "synced": True
+                }
 
         # Hay suscripción activa, sincronizar datos
         stripe_sub = subscriptions.data[0]
@@ -361,12 +387,26 @@ async def sync_subscription_from_stripe(
         ).first()
 
         if not local_sub:
+            # Determinar el plan_id basado en el price_id o metadata
+            plan_id = "pro"  # Default
+            price_id = stripe_sub.items.data[0].price.id
+            
+            # Mapear price_id a plan_id
+            if price_id == settings.STRIPE_PRO_PRICE_ID:
+                plan_id = "pro"
+            elif price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
+                plan_id = "enterprise"
+            elif stripe_sub.metadata.get("plan_id"):
+                plan_id = stripe_sub.metadata["plan_id"]
+            
+            logger.info(f"Creating subscription: price_id={price_id}, plan_id={plan_id}")
+            
             # Crear nueva suscripción local
             local_sub = Subscription(
                 user_id=current_user.id,
                 stripe_subscription_id=stripe_sub.id,
                 stripe_customer_id=current_user.stripe_customer_id,
-                stripe_plan_id=stripe_sub.items.data[0].price.lookup_key or "pro",
+                stripe_plan_id=plan_id,
                 status=stripe_sub.status,
                 interval=stripe_sub.items.data[0].price.recurring.interval,
                 current_period_start=datetime.fromtimestamp(stripe_sub.current_period_start),
