@@ -123,10 +123,10 @@ class AuthService:
 
     @staticmethod
     def verify_clerk_token(token: str) -> dict:
-        """Verifica un token de Clerk usando la API oficial de Clerk."""
+        """Verifica un token de Clerk usando JWT verification."""
         import logging
-        import httpx
-        from clerk_backend_api import Clerk, AuthenticateRequestOptions
+        import jwt
+        from jwt import PyJWKClient
         
         logger = logging.getLogger(__name__)
         
@@ -148,61 +148,74 @@ class AuthService:
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             
-            # Inicializar cliente de Clerk y verificar token
-            logger.info("🏗️ [VERIFY_CLERK_TOKEN] Initializing Clerk client...")
-            clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+            # Use Clerk's JWKS endpoint to verify the token
+            # The JWKS URL for Clerk is typically: https://api.clerk.com/v1/jwks
+            logger.info("🏗️ [VERIFY_CLERK_TOKEN] Setting up JWT verification...")
             
-            logger.info("📨 [VERIFY_CLERK_TOKEN] Creating mock request...")
-            mock_request = httpx.Request(
-                method="GET",
-                url="http://localhost:8000",
-                headers={"Authorization": f"Bearer {token}"}
-            )
+            # For Clerk, we need to get the issuer from the token first to construct the JWKS URL
+            # Decode without verification first to get the issuer
+            unverified_payload = jwt.decode(token, options={"verify_signature": False})
+            issuer = unverified_payload.get('iss', '')
             
-            logger.info("⚙️ [VERIFY_CLERK_TOKEN] Setting up auth options...")
-            auth_options = AuthenticateRequestOptions(
-                authorized_parties=[settings.SERVER_HOST, "http://localhost:3000", "http://localhost:8000"]
-            )
-            
-            logger.info("🔎 [VERIFY_CLERK_TOKEN] Calling Clerk authenticate_request...")
-            request_state = clerk.authenticate_request(mock_request, auth_options)
-            logger.info(f"📨 [VERIFY_CLERK_TOKEN] Clerk API responded with: {type(request_state)}")
-            
-            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Checking request_state: {request_state}")
-            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Status: {getattr(request_state, 'status', None) if request_state else None}")
-            
-            if request_state and hasattr(request_state, 'status') and 'SIGNED_IN' in str(request_state.status):
-                # Extraer datos del payload en lugar de atributos directos
-                payload = getattr(request_state, 'payload', {})
-                user_id = payload.get('sub')
-                session_id = payload.get('sid')
-                
-                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Payload: {payload}")
-                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted user_id: {user_id}")
-                logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Extracted session_id: {session_id}")
-                
-                if user_id:
-                    logger.info(f"✅ [VERIFY_CLERK_TOKEN] Token verified for user: {user_id}")
-                    return {
-                        'sub': user_id,
-                        'session_id': session_id,
-                        'iss': 'clerk'
-                    }
-                else:
-                    logger.error("❌ [VERIFY_CLERK_TOKEN] No user_id in token")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="No user ID in token",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-            else:
-                logger.error("❌ [VERIFY_CLERK_TOKEN] Invalid or expired token")
+            if not issuer:
+                logger.error("❌ [VERIFY_CLERK_TOKEN] No issuer in token")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired token",
+                    detail="Invalid token format",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            # Construct JWKS URL from issuer
+            jwks_url = f"{issuer}/.well-known/jwks.json"
+            logger.info(f"🔑 [VERIFY_CLERK_TOKEN] Using JWKS URL: {jwks_url}")
+            
+            # Create JWKS client and verify token
+            jwks_client = PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            
+            # Verify and decode the token
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                options={"verify_aud": False}  # Clerk tokens don't always have audience
+            )
+            
+            logger.info(f"🔍 [VERIFY_CLERK_TOKEN] Token payload: {payload}")
+            
+            # Extract user information
+            user_id = payload.get('sub')
+            session_id = payload.get('sid')
+            
+            if user_id:
+                logger.info(f"✅ [VERIFY_CLERK_TOKEN] Token verified for user: {user_id}")
+                return {
+                    'sub': user_id,
+                    'session_id': session_id,
+                    'iss': issuer
+                }
+            else:
+                logger.error("❌ [VERIFY_CLERK_TOKEN] No user_id in token")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="No user ID in token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
                 
+        except jwt.ExpiredSignatureError:
+            logger.error("❌ [VERIFY_CLERK_TOKEN] Token expired")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except jwt.InvalidTokenError as e:
+            logger.error(f"❌ [VERIFY_CLERK_TOKEN] Invalid token: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         except HTTPException:
             raise
         except Exception as e:

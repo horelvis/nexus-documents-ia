@@ -15,12 +15,7 @@ import {
   ArrowRight, 
   ArrowLeft,
   CheckCircle, 
-  Loader2,
-  Sparkles,
-  Crown,
-  Star,
-  Zap,
-  Check
+  Loader2
 } from 'lucide-react'
 import { useUserContext } from '@/contexts/user-context'
 import { useApiClient } from '@/lib/api-client'
@@ -28,7 +23,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { getAllPlans, formatPrice, calculateYearlyDiscount, type Plan } from '@/lib/stripe-plans'
+// Plan imports removed - no longer needed for simplified onboarding
 
 // Schema simplificado - solo datos esenciales
 const unifiedDataSchema = z.object({
@@ -59,8 +54,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [syncCompleted, setSyncCompleted] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
-  const [selectedInterval, setSelectedInterval] = useState<'month' | 'year'>('month')
+  // Plan selection removed - users start with free plan
 
   const unifiedForm = useForm<UnifiedFormData>({
     resolver: zodResolver(unifiedDataSchema),
@@ -72,7 +66,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     }
   })
 
-  const plans = getAllPlans()
+  // Plans removed from onboarding flow
 
   const steps = [
     {
@@ -83,21 +77,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     },
     {
       id: 'data',
-      title: 'Información de Facturación',
-      description: 'Datos personales y de empresa',
+      title: 'Información Personal',
+      description: 'Completa tu perfil',
       icon: <Building className="h-5 w-5" />
-    },
-    {
-      id: 'plan',
-      title: 'Selecciona tu Plan',
-      description: 'Elige el plan que mejor se adapte a tus necesidades',
-      icon: <Sparkles className="h-5 w-5" />
-    },
-    {
-      id: 'payment',
-      title: 'Proceso de Pago',
-      description: 'Configuración de facturación',
-      icon: <CheckCircle className="h-5 w-5" />
     },
     {
       id: 'complete',
@@ -117,7 +99,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
           setSyncCompleted(true)
           setCurrentStep(1)
         } catch (error) {
-          console.error('Error syncing user:', error)
+          console.log('Error syncing user:', error)
         } finally {
           setIsProcessing(false)
         }
@@ -132,27 +114,10 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       // Validar el formulario unificado
       const isValid = await unifiedForm.trigger()
       if (!isValid) return
-    }
-
-    if (currentStep === 2) {
-      // Validate that a plan is selected
-      if (!selectedPlan) {
-        alert('Por favor, selecciona un plan para continuar')
-        return
-      }
       
-      console.log('🎯 Plan seleccionado:', selectedPlan.id, selectedPlan.name)
-      
-      // If free plan selected, skip payment step
-      if (selectedPlan.id === 'free') {
-        console.log('💰 Plan gratuito seleccionado - saltando pago')
-        setCurrentStep(4) // Go directly to complete
-        await handleComplete()
-        return
-      }
-      
-      console.log('💳 Plan premium seleccionado - ir a pago')
-      // For premium plans, continue to payment step
+      // Después de validar, completar el onboarding
+      await handleComplete()
+      return
     }
 
     if (currentStep < steps.length - 1) {
@@ -227,7 +192,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       console.log('📥 Stripe response status:', response.status)
 
       if (response.error) {
-        console.error('❌ Stripe error response:', response.error)
+        console.log('❌ Stripe error response:', response.error)
         throw new Error(response.error)
       }
 
@@ -250,7 +215,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
         throw new Error('No checkout URL received from server')
       }
     } catch (error) {
-      console.error('💥 Error in payment process:', error)
+      console.log('💥 Error in payment process:', error)
       alert(`Error al procesar el pago: ${error.message}`)
     } finally {
       setIsProcessing(false)
@@ -269,7 +234,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
         last_name: formData.lastName,
         company_name: formData.companyName,
         cif: formData.cif,
-        selected_plan: selectedPlan?.id || 'free',
+        selected_plan: 'free', // Always free during initial onboarding
       }
       
       console.log('Completing onboarding with data:', onboardingData)
@@ -286,7 +251,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       }, 2000)
       
     } catch (error) {
-      console.error('Error completing onboarding:', error)
+      console.log('Error completing onboarding:', error)
       // Still redirect even if there's an error
       setTimeout(() => {
         handleGoToDashboard()
@@ -483,163 +448,8 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                 </div>
               )}
 
-              {/* Step 2: Plan Selection */}
+              {/* Step 2: Complete */}
               {currentStep === 2 && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h3 className="text-xl font-semibold mb-2">Elige el plan perfecto para ti</h3>
-                    <p className="text-gray-600 dark:text-gray-300">
-                      Puedes cambiar o cancelar en cualquier momento
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {plans.map((plan) => (
-                      <div
-                        key={plan.id}
-                        className={`relative cursor-pointer transition-all duration-300 ${
-                          selectedPlan?.id === plan.id
-                            ? 'ring-2 ring-blue-500 scale-105'
-                            : 'hover:scale-105'
-                        }`}
-                        onClick={() => handlePlanSelection(plan)}
-                      >
-                        <Card className={`h-full ${plan.popular ? 'border-blue-500' : ''}`}>
-                          {plan.popular && (
-                            <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                              <Badge className="bg-blue-600 text-white">
-                                <Star className="w-3 h-3 mr-1" />
-                                Más Popular
-                              </Badge>
-                            </div>
-                          )}
-
-                          <CardHeader className="text-center">
-                            <div className="flex items-center justify-center mb-2">
-                              {getPlanIcon(plan.id)}
-                              <CardTitle className="text-lg font-bold ml-2">{plan.name}</CardTitle>
-                            </div>
-                            <div className="text-3xl font-bold">
-                              {plan.price === 0 ? 'Gratis' : formatPrice(plan.price)}
-                              {plan.price > 0 && (
-                                <span className="text-base text-gray-500">/{plan.interval}</span>
-                              )}
-                            </div>
-                            <CardDescription>{plan.description}</CardDescription>
-                          </CardHeader>
-
-                          <CardContent>
-                            <ul className="space-y-2">
-                              {plan.features.slice(0, 4).map((feature, index) => (
-                                <li key={index} className="flex items-start">
-                                  <Check className="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" />
-                                  <span className="text-sm">{feature}</span>
-                                </li>
-                              ))}
-                              {plan.features.length > 4 && (
-                                <li className="text-sm text-gray-500">
-                                  Y {plan.features.length - 4} funciones más...
-                                </li>
-                              )}
-                            </ul>
-
-                            {selectedPlan?.id === plan.id && (
-                              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                                <div className="flex items-center text-blue-600 dark:text-blue-400">
-                                  <CheckCircle className="w-4 h-4 mr-2" />
-                                  <span className="text-sm font-medium">Plan seleccionado</span>
-                                </div>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </div>
-                    ))}
-                  </div>
-
-                  {selectedPlan && selectedPlan.yearlyPrice && selectedPlan.price > 0 && (
-                    <div className="text-center">
-                      <Separator className="my-4" />
-                      <p className="text-sm text-gray-600 mb-2">¿Prefieres pago anual?</p>
-                      <div className="flex justify-center space-x-4">
-                        <Button
-                          variant={selectedInterval === 'month' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSelectedInterval('month')}
-                        >
-                          Mensual
-                        </Button>
-                        <Button
-                          variant={selectedInterval === 'year' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSelectedInterval('year')}
-                        >
-                          Anual
-                          <Badge variant="secondary" className="ml-2">
-                            -{calculateYearlyDiscount(selectedPlan.price * 12, selectedPlan.yearlyPrice)}%
-                          </Badge>
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 3: Payment */}
-              {currentStep === 3 && (
-                <div className="text-center py-8 space-y-6">
-                  <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mx-auto">
-                    {getPlanIcon(selectedPlan?.id || 'pro')}
-                  </div>
-                  
-                  <div>
-                    <h3 className="text-2xl font-bold mb-2">Confirma tu Plan</h3>
-                    <p className="text-gray-600 dark:text-gray-300 mb-4">
-                      Has seleccionado el plan <strong>{selectedPlan?.name}</strong>
-                    </p>
-                    <div className="text-3xl font-bold text-blue-600 mb-2">
-                      {selectedInterval === 'year' && selectedPlan?.yearlyPrice 
-                        ? formatPrice(selectedPlan.yearlyPrice)
-                        : formatPrice(selectedPlan?.price || 0)
-                      }
-                      <span className="text-base text-gray-500">
-                        /{selectedInterval === 'year' ? 'año' : 'mes'}
-                      </span>
-                    </div>
-                    {selectedInterval === 'year' && selectedPlan?.yearlyPrice && (
-                      <p className="text-sm text-green-600">
-                        Ahorras {calculateYearlyDiscount(selectedPlan.price * 12, selectedPlan.yearlyPrice)}% con el pago anual
-                      </p>
-                    )}
-                  </div>
-
-                  <Button 
-                    onClick={handlePayment}
-                    size="lg"
-                    disabled={isProcessing}
-                    className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        Procesando...
-                      </>
-                    ) : (
-                      <>
-                        Proceder al Pago
-                        <ArrowRight className="h-4 w-4 ml-2" />
-                      </>
-                    )}
-                  </Button>
-                  
-                  <p className="text-xs text-gray-500">
-                    Serás redirigido a Stripe para completar el pago de forma segura
-                  </p>
-                </div>
-              )}
-
-              {/* Step 4: Complete */}
-              {currentStep === 4 && (
                 <div className="text-center py-8 space-y-6">
                   <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto">
                     <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
@@ -679,18 +489,17 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
                   <Button
                     onClick={handleNext}
-                    disabled={isProcessing || (currentStep === 2 && !selectedPlan)}
-                    className={currentStep === 2 && !selectedPlan ? 'opacity-50 cursor-not-allowed' : ''}
+                    disabled={isProcessing}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                         Procesando...
                       </>
-                    ) : currentStep === 2 && !selectedPlan ? (
+                    ) : currentStep === 1 ? (
                       <>
-                        Selecciona un Plan
-                        <ArrowRight className="h-4 w-4 ml-2" />
+                        Completar
+                        <CheckCircle className="h-4 w-4 ml-2" />
                       </>
                     ) : (
                       <>

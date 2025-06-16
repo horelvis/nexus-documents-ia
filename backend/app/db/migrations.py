@@ -47,10 +47,10 @@ def get_alembic_config() -> Config:
 
 def auto_upgrade_database():
     """
-    Aplica todas las migraciones pendientes de Alembic
+    Registra la versión actual de Alembic (sin ejecutar migraciones en DB limpia)
     """
     try:
-        logger.info("🔧 Iniciando migraciones con Alembic...")
+        logger.info("🔧 Verificando estado de Alembic...")
         
         # Verificar si alembic_version existe
         with engine.connect() as conn:
@@ -64,17 +64,38 @@ def auto_upgrade_database():
             table_exists = result.scalar()
             
             if not table_exists:
-                logger.info("📋 Creando tabla alembic_version...")
-                # Crear tabla y marcar como head
-                alembic_cfg = get_alembic_config()
-                command.upgrade(alembic_cfg, "head")
-                logger.info("✅ Base de datos inicializada con Alembic")
+                logger.info("📋 Base de datos limpia detectada - registrando versión inicial...")
+                
+                # Solo crear la tabla alembic_version y registrar la versión actual
+                # sin ejecutar migraciones (las tablas ya existen desde models.py)
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS alembic_version (
+                        version_num VARCHAR(32) NOT NULL,
+                        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                    )
+                """))
+                
+                # Registrar la versión actual
+                conn.execute(text("""
+                    INSERT INTO alembic_version (version_num) 
+                    VALUES ('unified_20250615')
+                    ON CONFLICT (version_num) DO NOTHING
+                """))
+                
+                conn.commit()
+                logger.info("✅ Versión de Alembic registrada (sin migraciones)")
             else:
-                # Aplicar migraciones pendientes
-                logger.info("⬆️ Aplicando migraciones pendientes...")
-                alembic_cfg = get_alembic_config()
-                command.upgrade(alembic_cfg, "head")
-                logger.info("✅ Migraciones completadas")
+                # Verificar versión actual
+                result = conn.execute(text("SELECT version_num FROM alembic_version"))
+                current_version = result.scalar()
+                logger.info(f"📌 Versión actual de Alembic: {current_version}")
+                
+                # En una DB reconstruida, no necesitamos migrar
+                if current_version == 'unified_20250615':
+                    logger.info("✅ Base de datos ya está en la versión correcta")
+                else:
+                    logger.warning(f"⚠️ Versión inesperada: {current_version}")
+                    # Aquí podrías manejar migraciones reales si fuera necesario
                 
         logger.info("🎉 Base de datos actualizada correctamente")
         

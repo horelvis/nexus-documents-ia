@@ -62,6 +62,7 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       '/onboarding',
       '/welcome',
       '/billing',
+      '/pricing',  // Add pricing page to allowed paths
       '/auth/',
       '/help'
     ]
@@ -87,7 +88,6 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       // Check subscription status to determine plan
       const subscription = user.subscription
       let planType = 'free'
-      let hasValidPlan = true
       let hasActiveSubscription = false
       
       if (subscription && subscription.status === 'active') {
@@ -95,27 +95,28 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
         hasActiveSubscription = true
       }
       
-      // Consider user as having completed onboarding if:
-      // 1. They explicitly completed onboarding, OR  
-      // 2. They have an active paid subscription (legacy users)
-      const isConsideredComplete = hasCompletedOnboarding || hasActiveSubscription
+      // For access control:
+      // - User must have completed onboarding (basic info)
+      // - User must have an active paid subscription to access most areas
+      const hasCompletedBasicOnboarding = hasCompletedOnboarding
+      const hasFullAccess = hasActiveSubscription // Only paid users get full access
       
-      console.log('🔍 [PROFILE_GUARD] hasCompletedOnboarding:', hasCompletedOnboarding)
+      console.log('🔍 [PROFILE_GUARD] hasCompletedBasicOnboarding:', hasCompletedBasicOnboarding)
       console.log('🔍 [PROFILE_GUARD] hasActiveSubscription:', hasActiveSubscription)
-      console.log('🔍 [PROFILE_GUARD] isConsideredComplete:', isConsideredComplete)
+      console.log('🔍 [PROFILE_GUARD] hasFullAccess:', hasFullAccess)
       console.log('🔍 [PROFILE_GUARD] planType:', planType)
       
       setProfileStatus(prev => ({
         ...prev,
-        hasCompletedNewOnboarding: isConsideredComplete,
+        hasCompletedNewOnboarding: hasCompletedBasicOnboarding,
         selectedPlan: planType,
-        hasValidPlan: hasValidPlan
+        hasValidPlan: hasActiveSubscription
       }))
       
-      return isConsideredComplete
+      return { hasCompletedBasicOnboarding, hasFullAccess }
     } catch (error) {
-      console.error('Error checking new onboarding status:', error)
-      return false
+      console.log('Error checking new onboarding status:', error)
+      return { hasCompletedBasicOnboarding: false, hasFullAccess: false }
     }
   }
 
@@ -129,10 +130,11 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     
     try {
       // Check if user completed the new onboarding flow
-      const hasCompletedNewOnboarding = await checkNewOnboardingStatus()
+      const result = await checkNewOnboardingStatus()
+      const { hasCompletedBasicOnboarding, hasFullAccess } = result
       
-      // User is verified if they completed the new onboarding (which includes plan selection)
-      const isFullyVerified = hasCompletedNewOnboarding
+      // User has full access only with active subscription
+      const isFullyVerified = hasFullAccess
       
       setProfileStatus(prev => ({
         ...prev,
@@ -140,23 +142,30 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
         loading: false
       }))
       
-      // Redirect if profile is incomplete and not on allowed paths
-      console.log('🔍 [PROFILE_GUARD] Final verification result:', isFullyVerified)
+      // Redirect logic based on user status
+      console.log('🔍 [PROFILE_GUARD] Basic onboarding complete:', hasCompletedBasicOnboarding)
+      console.log('🔍 [PROFILE_GUARD] Has full access (paid):', hasFullAccess)
       console.log('🔍 [PROFILE_GUARD] Current path:', pathname)
       console.log('🔍 [PROFILE_GUARD] Is allowed path:', isAllowedPath())
       
-      if (!isFullyVerified && !isAllowedPath()) {
-        const tenantId = backendUser.tenant_id
-        console.log('🚀 [PROFILE_GUARD] Redirecting to welcome:', `/welcome/${tenantId}`)
+      const tenantId = backendUser.tenant_id
+      
+      if (!hasCompletedBasicOnboarding && !isAllowedPath()) {
+        // User hasn't completed basic onboarding - go to welcome
+        console.log('🚀 [PROFILE_GUARD] Redirecting to welcome (no onboarding):', `/welcome/${tenantId}`)
         router.push(`/welcome/${tenantId}`)
-      } else if (isFullyVerified) {
-        console.log('✅ [PROFILE_GUARD] User fully verified, allowing access to:', pathname)
+      } else if (hasCompletedBasicOnboarding && !hasFullAccess && !isAllowedPath()) {
+        // User completed onboarding but has no active subscription - go to pricing
+        console.log('💳 [PROFILE_GUARD] Redirecting to pricing (no subscription):', `/pricing`)
+        router.push(`/pricing`)
+      } else if (hasFullAccess) {
+        console.log('✅ [PROFILE_GUARD] User has full access (paid), allowing access to:', pathname)
       } else {
         console.log('➡️ [PROFILE_GUARD] On allowed path, allowing access')
       }
       
     } catch (error) {
-      console.error('Error verifying profile:', error)
+      console.log('Error verifying profile:', error)
       setProfileStatus(prev => ({ ...prev, loading: false }))
     }
   }
@@ -197,10 +206,14 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Completar Configuración de Cuenta
+              {profileStatus.hasCompletedNewOnboarding && !profileStatus.hasValidPlan
+                ? 'Selecciona un Plan para Continuar'
+                : 'Completar Configuración de Cuenta'}
             </h1>
             <p className="text-lg text-gray-600">
-              Para acceder al dashboard, necesitas completar el proceso de configuración
+              {profileStatus.hasCompletedNewOnboarding && !profileStatus.hasValidPlan
+                ? 'Para acceder al sistema, necesitas seleccionar un plan de pago'
+                : 'Para acceder al dashboard, necesitas completar el proceso de configuración'}
             </p>
           </div>
 
@@ -291,6 +304,20 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
               >
                 <User className="h-4 w-4 mr-2" />
                 Completar Configuración de Cuenta
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            )}
+            
+            {profileStatus.hasCompletedNewOnboarding && !profileStatus.hasValidPlan && (
+              <Button 
+                onClick={() => {
+                  router.push('/pricing')
+                }}
+                className="w-full"
+                size="lg"
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                Ver Planes y Precios
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             )}

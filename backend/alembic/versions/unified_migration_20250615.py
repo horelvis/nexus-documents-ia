@@ -24,6 +24,11 @@ def upgrade():
     # Since database is reset and tables are created from models.py,
     # this migration just serves as the initial alembic version marker
     print("✅ Initial migration - database structure created from models.py")
+    
+    # Add a commit to ensure the migration completes
+    connection = op.get_bind()
+    connection.execute(sa.text("SELECT 1"))  # Simple query to ensure connection works
+    print("✅ Migration completed successfully")
 
 
 def downgrade():
