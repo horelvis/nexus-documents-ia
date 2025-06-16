@@ -304,9 +304,8 @@ class AuthService:
         db.commit()
         db.refresh(new_user)
         
-        # Handle subscription data if provided
-        if subscription_data:
-            AuthService._handle_subscription_data(db, new_user, subscription_data)
+        # Subscription data is now handled by Stripe webhooks
+        # No need to process it here
         
         logger.info(f"✅ New user created: {new_user.id}")
         return new_user

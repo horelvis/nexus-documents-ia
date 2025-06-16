@@ -126,7 +126,7 @@ export function NavUser({
 
   const handleViewPlans = () => {
     if (tenantId) {
-      router.push(`/plans/${tenantId}`)
+      router.push(`/${tenantId}/plans`)
     }
   }
 

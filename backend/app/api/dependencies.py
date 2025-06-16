@@ -222,21 +222,22 @@ def require_document_upload_permission(
     Dependencia específica para verificar permisos de subida de documentos.
     Incluye verificación de límites de documentos.
     """
-    from app.services.subscription_service import SubscriptionService
+    from app.services.subscription_service_v2 import SubscriptionServiceV2
     
-    can_upload, error_message = SubscriptionService.can_user_upload_document(db, current_user)
+    # Check document upload permission
+    can_upload, error_message = SubscriptionServiceV2.check_document_permission(db, current_user)
     
     if not can_upload:
-        subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+        # Get subscription status for error details
+        subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["is_limited"] else status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
             detail={
                 "message": error_message,
                 "subscription_status": subscription_status,
-                "action_required": "upgrade_plan" if not subscription_status["is_limited"] else "reactivate_subscription",
-                "current_document_count": SubscriptionService.get_document_count_for_user(db, current_user),
-                "max_documents": subscription_status["permissions"]["max_documents"]
+                "action_required": "upgrade_plan" if subscription_status["plan"] == "free" else "check_subscription",
+                "limits": subscription_status.get("limits", {})
             }
         )
     

@@ -39,7 +39,7 @@ const PLANS = [
     current: true
   },
   {
-    id: 'professional',
+    id: 'pro',
     name: 'Plan Profesional',
     description: 'Para profesionales y equipos pequeños',
     price: '$29',
@@ -88,7 +88,8 @@ export default function PlansPage() {
   
   const [isLoading, setIsLoading] = useState<string | null>(null)
   
-  const currentPlan = backendUser?.subscription?.plan_type || 'free'
+  // Get current plan from backend user (now stored directly on user)
+  const currentPlan = backendUser?.subscription_plan || 'free'
 
   const handleSelectPlan = async (plan: typeof PLANS[0]) => {
     if (plan.id === currentPlan) {
@@ -163,10 +164,10 @@ export default function PlansPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => router.back()}
+                onClick={() => router.push(`/${params.tenantId}/dashboard`)}
                 className="gap-2"
               >
-                ← Volver
+                ← Volver al dashboard
               </Button>
               <h2 className="text-xl font-semibold">Nexus Document</h2>
             </div>

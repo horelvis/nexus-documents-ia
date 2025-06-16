@@ -254,6 +254,27 @@ class SubscriptionServiceV2:
         return status
     
     @staticmethod
+    def check_document_permission(db: Session, user: User) -> tuple[bool, Optional[str]]:
+        """
+        Verifica si el usuario puede subir más documentos
+        """
+        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
+        limits = status.get('limits', {})
+        max_documents = limits.get('documents', 10)
+        
+        # Count current documents for the user's tenant
+        from app.db.models import Document
+        current_count = db.query(Document).filter(
+            Document.tenant_id == user.tenant_id,
+            Document.is_deleted == False
+        ).count()
+        
+        if current_count >= max_documents:
+            return False, f"Has alcanzado el límite de {max_documents} documentos para tu plan {status['plan']}"
+        
+        return True, None
+    
+    @staticmethod
     def check_agent_permission(db: Session, user: User) -> tuple[bool, Optional[str]]:
         """
         Verifica si el usuario puede usar agentes
