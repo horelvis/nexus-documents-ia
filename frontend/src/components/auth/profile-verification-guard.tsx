@@ -30,15 +30,16 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     
     // Si no está en ruta permitida, verificar estado
     if (!isAllowedPath && backendUser) {
-      // Si no ha completado onboarding
-      if (!backendUser.onboarding_completed) {
+      // Solo redirigir a onboarding si:
+      // 1. No ha completado onboarding
+      // 2. Tiene una suscripción activa (no es plan free)
+      if (!backendUser.onboarding_completed && backendUser.subscription_plan && backendUser.subscription_plan !== 'free') {
         router.push('/onboarding')
         return
       }
       
-      // Si completó onboarding pero no tiene suscripción (verificar con Stripe)
-      // Por ahora asumimos que todos pueden acceder después del onboarding
-      // La verificación de suscripción se hará en páginas específicas
+      // Si es usuario free sin onboarding completado, está bien
+      // El onboarding solo es requerido para usuarios con suscripción pagada
     }
   }, [isClerkLoaded, isSignedIn, backendUser, userLoading, pathname, isAllowedPath])
   

@@ -45,7 +45,6 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const apiClient = useApiClient()
   const { 
     clerkUser, 
-    syncUserWithBackend, 
     markOnboardingComplete,
     backendUser,
     refetchUser
@@ -53,8 +52,6 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
   const [currentStep, setCurrentStep] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [syncCompleted, setSyncCompleted] = useState(false)
-  // Plan selection removed - users start with free plan
 
   const unifiedForm = useForm<UnifiedFormData>({
     resolver: zodResolver(unifiedDataSchema),
@@ -66,19 +63,11 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     }
   })
 
-  // Plans removed from onboarding flow
-
   const steps = [
     {
-      id: 'sync',
-      title: 'Configuración de Cuenta',
-      description: 'Sincronizando tu información',
-      icon: <User className="h-5 w-5" />
-    },
-    {
       id: 'data',
-      title: 'Información Personal',
-      description: 'Completa tu perfil',
+      title: 'Información de la Empresa',
+      description: 'Completa los datos de tu empresa',
       icon: <Building className="h-5 w-5" />
     },
     {
@@ -89,29 +78,17 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
     }
   ]
 
-  // Auto-sync user when component mounts
+  // Check if user already has backend data
   useEffect(() => {
-    const performSync = async () => {
-      if (clerkUser && !syncCompleted && currentStep === 0) {
-        try {
-          setIsProcessing(true)
-          await syncUserWithBackend()
-          setSyncCompleted(true)
-          setCurrentStep(1)
-        } catch (error) {
-          console.log('Error syncing user:', error)
-        } finally {
-          setIsProcessing(false)
-        }
-      }
+    if (backendUser && backendUser.onboarding_completed) {
+      // User already completed onboarding, redirect to dashboard
+      onComplete?.(backendUser.tenant_id)
     }
-
-    performSync()
-  }, [clerkUser, syncCompleted, currentStep, syncUserWithBackend])
+  }, [backendUser, onComplete])
 
   const handleNext = async () => {
-    if (currentStep === 1) {
-      // Validar el formulario unificado
+    if (currentStep === 0) {
+      // Validar el formulario de datos
       const isValid = await unifiedForm.trigger()
       if (!isValid) return
       
@@ -126,101 +103,11 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   }
 
   const handlePrevious = () => {
-    if (currentStep > 1) {
+    if (currentStep > 0) {
       setCurrentStep(currentStep - 1)
     }
   }
 
-  const handlePlanSelection = (plan: Plan, interval: 'month' | 'year' = 'month') => {
-    setSelectedPlan(plan)
-    setSelectedInterval(interval)
-    
-    if (plan.id === 'enterprise') {
-      // For enterprise, redirect to contact
-      window.location.href = 'mailto:sales@nexus.com?subject=Enterprise%20Plan%20Inquiry'
-      return
-    }
-  }
-
-  const handlePayment = async () => {
-    if (!selectedPlan || selectedPlan.id === 'free') {
-      console.log('❌ No plan selected or free plan selected')
-      return
-    }
-
-    console.log('🚀 Iniciando proceso de pago para:', selectedPlan.id, selectedInterval)
-
-    try {
-      setIsProcessing(true)
-      
-      // STEP 1: Save onboarding data to backend FIRST (including plan selection)
-      console.log('💾 Step 1: Saving onboarding data to backend...')
-      const formData = unifiedForm.getValues()
-      
-      const onboardingData = {
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        company_name: formData.companyName,
-        cif: formData.cif,
-        selected_plan: selectedPlan.id,
-        payment_interval: selectedInterval,
-        onboarding_step: 'payment_pending' // Track where user is in the flow
-      }
-      
-      console.log('📝 Saving onboarding data:', onboardingData)
-      
-      // Save to backend first - this ensures data persistence
-      const onboardingResponse = await markOnboardingComplete(onboardingData)
-      if (!onboardingResponse) {
-        throw new Error('Failed to save onboarding data to backend')
-      }
-      
-      console.log('✅ Onboarding data saved to backend successfully')
-      
-      // STEP 2: Create Stripe checkout session
-      console.log('💳 Step 2: Creating Stripe checkout session...')
-      const requestBody = {
-        planId: selectedPlan.id,
-        interval: selectedInterval,
-        email: clerkUser?.emailAddresses[0]?.emailAddress,
-      }
-      
-      console.log('📤 Stripe request body:', requestBody)
-      
-      const response = await apiClient.post('/stripe/create-checkout-session', requestBody)
-
-      console.log('📥 Stripe response status:', response.status)
-
-      if (response.error) {
-        console.log('❌ Stripe error response:', response.error)
-        throw new Error(response.error)
-      }
-
-      console.log('✅ Stripe response data:', response.data)
-      
-      if (response.data?.url) {
-        // STEP 3: Store backup data in sessionStorage for redundancy
-        const backupData = {
-          formData: formData,
-          plan: selectedPlan.id,
-          interval: selectedInterval,
-          timestamp: new Date().toISOString()
-        }
-        
-        sessionStorage.setItem('onboarding_backup', JSON.stringify(backupData))
-        
-        console.log('🔗 Redirecting to Stripe payment:', response.data.url)
-        window.location.href = response.data.url
-      } else {
-        throw new Error('No checkout URL received from server')
-      }
-    } catch (error) {
-      console.log('💥 Error in payment process:', error)
-      alert(`Error al procesar el pago: ${error.message}`)
-    } finally {
-      setIsProcessing(false)
-    }
-  }
 
   const handleComplete = async () => {
     try {
@@ -343,19 +230,8 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
             </CardHeader>
             
             <CardContent>
-              {/* Step 0: User Sync */}
+              {/* Step 0: Company Data Form */}
               {currentStep === 0 && (
-                <div className="text-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600 mb-4" />
-                  <p className="text-lg font-medium mb-2">Configurando tu cuenta...</p>
-                  <p className="text-gray-600 dark:text-gray-300">
-                    Sincronizando tu información de usuario
-                  </p>
-                </div>
-              )}
-
-              {/* Step 1: Unified Data Form */}
-              {currentStep === 1 && (
                 <div className="space-y-6">
                   <Form {...unifiedForm}>
                     <form className="space-y-6">
@@ -438,7 +314,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
               )}
 
               {/* Step 2: Complete */}
-              {currentStep === 2 && (
+              {currentStep === 1 && (
                 <div className="text-center py-8 space-y-6">
                   <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto">
                     <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />

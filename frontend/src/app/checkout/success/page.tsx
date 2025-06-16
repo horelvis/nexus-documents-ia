@@ -57,8 +57,9 @@ export default function CheckoutSuccessPage() {
 
   const handleContinueToSignup = () => {
     if (checkoutData) {
-      // Redirect directly to welcome/onboarding with session data
-      router.push(`/welcome?session_id=${checkoutData.session_id}`)
+      // Redirect to sign-up with session data
+      // The backend will create the user with the subscription when they sign up
+      router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
     }
   }
 

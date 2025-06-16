@@ -3,7 +3,7 @@
 import { Suspense } from 'react'
 import { useUserContext } from '@/contexts/user-context'
 import { useRouter } from 'next/navigation'
-import Onboarding from '@/components/auth/onboarding'
+import { NewUserOnboarding } from '@/components/auth/onboarding'
 
 function OnboardingContent() {
   const { backendUser, isClerkLoaded, isSignedIn } = useUserContext()
@@ -29,7 +29,7 @@ function OnboardingContent() {
     }
   }
 
-  return <Onboarding onComplete={handleComplete} />
+  return <NewUserOnboarding onComplete={handleComplete} />
 }
 
 export default function OnboardingPage() {

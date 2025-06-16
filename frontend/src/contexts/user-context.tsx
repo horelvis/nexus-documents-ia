@@ -29,72 +29,26 @@ export function UserProvider({ children }: UserProviderProps) {
     error: null
   })
 
-  // Helper function to get tenant-aware welcome path
-  const getWelcomePath = (userData?: BackendUser) => {
+  // Helper function to get tenant-aware onboarding path
+  const getOnboardingPath = (userData?: BackendUser) => {
     if (userData?.tenant_id) {
-      return `/welcome/${userData.tenant_id}`
+      return `/${userData.tenant_id}/onboarding`
     }
     // Fallback to extract tenantId from pathname if available
     const tenantMatch = pathname.match(/^\/([^\/]+)\//)
     if (tenantMatch) {
-      return `/welcome/${tenantMatch[1]}`
+      return `/${tenantMatch[1]}/onboarding`
     }
-    return '/welcome' // Fallback
+    return '/onboarding' // Fallback
   }
 
-  // Helper function to check if current path is welcome or onboarding
-  const isWelcomeOrOnboardingPath = () => {
-    return pathname.includes('/welcome') || pathname.includes('/onboarding')
+  // Helper function to check if current path is onboarding
+  const isOnboardingPath = () => {
+    return pathname.includes('/onboarding')
   }
 
-  // Sync user with backend
-  const syncUserWithBackend = async (stripeData?: {
-    sessionId?: string
-    customerId?: string
-    subscriptionId?: string
-    planId?: string
-  }): Promise<void> => {
-    if (!clerkUser) throw new Error('No user found')
-
-    try {
-      const payload = {
-        clerk_user_id: clerkUser.id,
-        email: clerkUser.emailAddresses[0]?.emailAddress,
-        full_name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim(),
-        // Include Stripe data if available
-        ...(stripeData && {
-          stripe_customer_id: stripeData.customerId,
-          stripe_session_id: stripeData.sessionId,
-          subscription_data: stripeData.subscriptionId ? {
-            stripe_subscription_id: stripeData.subscriptionId,
-            plan_id: stripeData.planId
-          } : undefined
-        })
-      }
-
-      const response = await apiClient.post('/auth/sync-user', payload)
-
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
-      setBackendUser(response.data)
-      setOnboarding(prev => ({
-        ...prev,
-        hasCompletedSync: true,
-        isNewUser: false
-      }))
-
-      return response.data
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Sync failed'
-      setOnboarding(prev => ({
-        ...prev,
-        error: errorMsg
-      }))
-      throw error
-    }
-  }
+  // Note: syncUserWithBackend removed - users are created automatically by backend
+  // when they sign up through Clerk after completing checkout
 
   // Mark onboarding as completed
   const markOnboardingComplete = async (onboardingData?: any): Promise<boolean> => {
@@ -145,7 +99,7 @@ export function UserProvider({ children }: UserProviderProps) {
     }
   }
 
-  // Check onboarding status
+  // Check user status in backend
   const checkOnboardingStatus = async (): Promise<void> => {
     if (!clerkUser) return
 
@@ -157,20 +111,16 @@ export function UserProvider({ children }: UserProviderProps) {
       const response = await apiClient.get('/auth/me')
       
       if (response.error) {
-        // User doesn't exist in backend, needs sync
+        // User doesn't exist in backend yet - this is normal for new users
+        // They will be created when they complete checkout
         setBackendUser(null)
         setOnboarding({
-          needsOnboarding: true,
+          needsOnboarding: false,
           isNewUser: true,
           hasCompletedSync: false,
           loading: false,
           error: null
         })
-        
-        // Redirect to welcome page for new users
-        if (!isWelcomeOrOnboardingPath()) {
-          router.push(getWelcomePath())
-        }
         return
       }
 
@@ -178,40 +128,36 @@ export function UserProvider({ children }: UserProviderProps) {
       const userData: BackendUser = response.data
       setBackendUser(userData)
       
-      // Note: We only check onboarding_completed here for basic user flow
-      // The ProfileVerificationGuard does more detailed verification including 
-      // subscription status to handle legacy users with paid subscriptions
+      // Check if user needs onboarding (only after first payment)
       const hasCompletedOnboarding = userData?.onboarding_completed || false
       setOnboarding({
-        needsOnboarding: !hasCompletedOnboarding,
+        needsOnboarding: !hasCompletedOnboarding && userData?.subscription_plan !== 'free',
         isNewUser: false,
         hasCompletedSync: true,
         loading: false,
         error: null
       })
 
-      // Basic redirect - ProfileVerificationGuard will do final verification
-      if (!hasCompletedOnboarding && !isWelcomeOrOnboardingPath()) {
-        router.push(getWelcomePath(userData))
+      // Redirect to onboarding only if:
+      // 1. User has not completed onboarding
+      // 2. User has a paid subscription (just came from checkout)
+      // 3. Not already on onboarding page
+      if (!hasCompletedOnboarding && userData?.subscription_plan !== 'free' && !isOnboardingPath()) {
+        router.push(getOnboardingPath(userData))
       }
 
     } catch (error) {
-      console.error('Error checking onboarding status:', error)
+      console.error('Error checking user status:', error)
       
-      // If there's an error, assume user needs onboarding
+      // On error, just log it - don't assume anything about onboarding
       setBackendUser(null)
       setOnboarding({
-        needsOnboarding: true,
-        isNewUser: true,
+        needsOnboarding: false,
+        isNewUser: false,
         hasCompletedSync: false,
         loading: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       })
-
-      // Redirect to welcome page for error cases
-      if (!isWelcomeOrOnboardingPath()) {
-        router.push(getWelcomePath())
-      }
     } finally {
       setUserLoading(false)
     }
@@ -257,7 +203,6 @@ export function UserProvider({ children }: UserProviderProps) {
     onboarding,
     
     // Actions
-    syncUserWithBackend,
     markOnboardingComplete,
     resetOnboarding,
     checkOnboardingStatus,
