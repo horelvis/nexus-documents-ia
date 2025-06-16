@@ -135,7 +135,58 @@ class ApiClient {
     return fetch(`${this.baseURL}${endpoint}`, config)
   }
 
-  async upload<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
+  async upload<T>(endpoint: string, formData: FormData, onProgress?: (progress: number) => void): Promise<ApiResponse<T>> {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+      
+      // Setup progress tracking
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = Math.round((e.loaded / e.total) * 100)
+            onProgress(percentComplete)
+          }
+        })
+      }
+      
+      // Setup completion handlers
+      xhr.addEventListener('load', async () => {
+        try {
+          const response = JSON.parse(xhr.responseText)
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve({ data: response, error: null })
+          } else {
+            resolve({ data: null, error: response.detail || 'Upload failed' })
+          }
+        } catch (error) {
+          resolve({ data: null, error: 'Invalid response from server' })
+        }
+      })
+      
+      xhr.addEventListener('error', () => {
+        resolve({ data: null, error: 'Network error during upload' })
+      })
+      
+      xhr.addEventListener('abort', () => {
+        resolve({ data: null, error: 'Upload cancelled' })
+      })
+      
+      // Open request and set headers
+      xhr.open('POST', `${this.baseURL}${endpoint}`)
+      
+      this.getAuthToken().then(token => {
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        }
+        
+        // Send the request
+        xhr.send(formData)
+      })
+    })
+  }
+
+  // Keep the old upload method for backward compatibility
+  async uploadWithoutProgress<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
     try {
       const token = await this.getAuthToken()
       

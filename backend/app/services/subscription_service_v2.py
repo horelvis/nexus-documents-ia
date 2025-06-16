@@ -274,6 +274,28 @@ class SubscriptionServiceV2:
         return True, None
     
     @staticmethod
+    def can_user_perform_action(db: Session, user: User, permission: str) -> tuple[bool, Optional[str]]:
+        """
+        Verifica si el usuario puede realizar una acción específica basada en su plan
+        """
+        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
+        plan = status.get('plan', 'free')
+        
+        # Definir permisos por plan
+        permissions_by_plan = {
+            'free': ['view_documents', 'basic_search'],
+            'pro': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'export_documents', 'api_access'],
+            'enterprise': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'export_documents', 'api_access', 'admin_features']
+        }
+        
+        allowed_permissions = permissions_by_plan.get(plan, [])
+        
+        if permission in allowed_permissions:
+            return True, None
+        else:
+            return False, f"El permiso '{permission}' requiere un plan superior. Tu plan actual es '{plan}'."
+    
+    @staticmethod
     def check_agent_permission(db: Session, user: User) -> tuple[bool, Optional[str]]:
         """
         Verifica si el usuario puede usar agentes

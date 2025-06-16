@@ -54,11 +54,13 @@ export function DocumentCard({
   return (
     <Card className="hover:shadow-lg transition-shadow">
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
             {getFileIcon(document.file_type)}
-            <div className="flex-1">
-              <h3 className="font-semibold text-base line-clamp-1">{document.title}</h3>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-base truncate" title={document.title}>
+                {document.title}
+              </h3>
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <IconCalendar className="h-3 w-3" />

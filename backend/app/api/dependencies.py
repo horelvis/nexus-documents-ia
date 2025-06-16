@@ -178,17 +178,17 @@ def require_subscription_permission(permission: str):
         current_user: User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> User:
-        from app.services.subscription_service import SubscriptionService
+        from app.services.subscription_service_v2 import SubscriptionServiceV2
         
-        can_perform, error_message = SubscriptionService.can_user_perform_action(
+        can_perform, error_message = SubscriptionServiceV2.can_user_perform_action(
             db, current_user, permission
         )
         
         if not can_perform:
             # Obtener información de suscripción para personalizar la respuesta
-            subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+            subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
             
-            if subscription_status["is_limited"]:
+            if subscription_status["plan"] == "free":
                 # Usuario con suscripción expirada
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,

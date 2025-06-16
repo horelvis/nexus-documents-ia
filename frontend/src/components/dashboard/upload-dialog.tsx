@@ -118,48 +118,75 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
     }
 
     try {
-      // Mark all files as uploading
-      setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-        f.status === 'pending' ? { ...f, status: 'uploading' as const, progress: 50 } : f
-      ))
-
-      // Upload to backend - simple pattern: loader -> call -> await -> result
-      const response = await documentService.uploadDocuments({
-        files: pendingFiles.map(f => f.file),
-        category: values.category,
-        tags: values.tags,
-        description: values.description,
-      })
-
-      if (response.error) {
-        // Mark all uploading files as error
+      // Upload files one by one
+      for (const fileObj of pendingFiles) {
+        // Mark current file as uploading with initial progress
         setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-          f.status === 'uploading' ? { 
-            ...f, 
-            status: 'error' as const, 
-            error: response.error || 'Upload failed'
-          } : f
+          f.id === fileObj.id ? { ...f, status: 'uploading' as const, progress: 0 } : f
         ))
-      } else {
-        // Mark all uploading files as success
-        setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-          f.status === 'uploading' ? { 
-            ...f, 
-            status: 'success' as const, 
-            progress: 100 
-          } : f
-        ))
+
+        try {
+          // Upload single file with progress tracking
+          const response = await documentService.uploadSingleDocument(
+            fileObj.file,
+            {
+              category: values.category,
+              tags: values.tags,
+              description: values.description,
+            },
+            (progress: number) => {
+              // Update progress for this specific file
+              setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
+                f.id === fileObj.id ? { ...f, progress } : f
+              ))
+            }
+          )
+
+          if (response.error) {
+            // Mark this file as error
+            setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
+              f.id === fileObj.id ? { 
+                ...f, 
+                status: 'error' as const, 
+                error: response.error || 'Upload failed'
+              } : f
+            ))
+          } else {
+            // Mark this file as success
+            setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
+              f.id === fileObj.id ? { 
+                ...f, 
+                status: 'success' as const, 
+                progress: 100 
+              } : f
+            ))
+          }
+
+          // Small delay between uploads to avoid rate limiting (100ms)
+          if (pendingFiles.indexOf(fileObj) < pendingFiles.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100))
+          }
+
+        } catch (error) {
+          // Mark this file as error
+          setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
+            f.id === fileObj.id ? { 
+              ...f, 
+              status: 'error' as const, 
+              error: error instanceof Error ? error.message : 'Upload failed'
+            } : f
+          ))
+        }
+      }
+
+      // Check if all uploads completed successfully
+      const allSuccess = files.every(f => f.status === 'success' || f.status === 'pending')
+      if (allSuccess) {
         setUploadCompleted(true)
       }
+
     } catch (error) {
-      // Mark all uploading files as error
-      setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
-        f.status === 'uploading' ? { 
-          ...f, 
-          status: 'error' as const, 
-          error: error instanceof Error ? error.message : 'Upload failed'
-        } : f
-      ))
+      console.error('Upload error:', error)
     } finally {
       setIsUploading(false)
     }

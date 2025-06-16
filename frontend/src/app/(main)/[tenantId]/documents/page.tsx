@@ -432,13 +432,13 @@ export default function DocumentsPage() {
             {filteredDocuments.map((document: any) => (
               <Card key={document.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="flex-shrink-0">
                         {getFileIcon(document.file_type, document.mime_type, document.filename)}
                       </div>
-                      <div className="min-w-0 flex-1 overflow-hidden">
-                        <CardTitle className="text-sm truncate overflow-hidden text-ellipsis whitespace-nowrap" title={document.title || document.filename}>
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-sm truncate" title={document.title || document.filename}>
                           {document.title || document.filename}
                         </CardTitle>
                       </div>

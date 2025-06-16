@@ -19,8 +19,40 @@ export interface UploadDocumentParams {
   description?: string
 }
 
+export interface SingleDocumentParams {
+  category?: string
+  tags?: string
+  description?: string
+}
+
 export class DocumentService {
   constructor(private apiClient: ReturnType<typeof useApiClient>) {}
+
+  async uploadSingleDocument(
+    file: File, 
+    params: SingleDocumentParams,
+    onProgress?: (progress: number) => void
+  ) {
+    const formData = new FormData()
+    
+    // Add file
+    formData.append('file', file)
+    
+    // Add metadata
+    formData.append('title', file.name)
+    if (params.tags) {
+      formData.append('tags', params.tags)
+    }
+    if (params.description) {
+      formData.append('description', params.description)
+    }
+
+    return this.apiClient.upload<DocumentUploadResponse>(
+      API_CONFIG.ENDPOINTS.DOCUMENTS,
+      formData,
+      onProgress
+    )
+  }
 
   async getDocuments(params: DocumentListParams = {}) {
     const searchParams = new URLSearchParams()

@@ -2,6 +2,7 @@ import httpx
 import logging
 import io
 import mimetypes
+import time
 from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
 from datetime import datetime
 from fastapi import UploadFile, HTTPException
@@ -118,24 +119,36 @@ class StorageClient:
         else:
             kwargs["headers"] = request_headers
         
-        try:
-            with httpx.Client(timeout=30.0) as client:  # Timeout suficiente para archivos grandes
-                response = client.request(method, url, **kwargs)
-                response.raise_for_status()
-                return response
-                
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Storage service HTTP error: {e.response.status_code} - {e.response.text}")
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Storage service error: {e.response.text}"
-            )
-        except (httpx.RequestError, httpx.TimeoutException, httpx.ConnectError) as e:
-            logger.error(f"Storage service connection error: {e}")
-            raise HTTPException(
-                status_code=503,
-                detail="Storage service unavailable"
-            )
+        # Implementar retry con backoff exponencial para rate limits
+        max_retries = 3
+        base_delay = 1  # segundos
+        
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:  # Timeout suficiente para archivos grandes
+                    response = client.request(method, url, **kwargs)
+                    response.raise_for_status()
+                    return response
+                    
+            except httpx.HTTPStatusError as e:
+                # Si es rate limit (429), hacer retry con backoff
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Backoff exponencial: 1s, 2s, 4s
+                    logger.warning(f"Rate limit hit, retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                    
+                logger.error(f"Storage service HTTP error: {e.response.status_code} - {e.response.text}")
+                raise HTTPException(
+                    status_code=e.response.status_code,
+                    detail=f"Storage service error: {e.response.text}"
+                )
+            except (httpx.RequestError, httpx.TimeoutException, httpx.ConnectError) as e:
+                logger.error(f"Storage service connection error: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Storage service unavailable"
+                )
     
     def upload_file(
         self, 
