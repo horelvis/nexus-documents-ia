@@ -32,6 +32,39 @@ class SubscriptionServiceV2:
         Obtiene el estado de suscripción consultando Stripe directamente
         con cache para evitar demasiadas llamadas
         """
+        # Si es team member, hereda la suscripción del admin
+        if user.is_team_member:
+            # Buscar el admin del tenant (primer usuario no team member)
+            from app.db.models import User as UserModel
+            admin_user = db.query(UserModel).filter(
+                UserModel.tenant_id == user.tenant_id,
+                UserModel.is_team_member == False,
+                UserModel.is_active == True
+            ).first()
+            
+            if admin_user:
+                # Obtener la suscripción del admin
+                admin_status = SubscriptionServiceV2.get_user_subscription_status(db, admin_user)
+                # Marcar como team member para el frontend
+                admin_status["is_team_member"] = True
+                admin_status["inherited_from"] = admin_user.email
+                return admin_status
+            else:
+                # Si no hay admin, usar plan gratuito
+                return {
+                    "plan": "free",
+                    "status": "active",
+                    "can_use_agents": False,
+                    "can_use_advanced_features": False,
+                    "message": "Plan gratuito (Team member sin admin)",
+                    "is_team_member": True,
+                    "limits": {
+                        "documents": 10,
+                        "storage_mb": 100,
+                        "agents_per_month": 0
+                    }
+                }
+        
         # Si no tiene stripe_customer_id, es usuario gratuito
         if not user.stripe_customer_id:
             return {

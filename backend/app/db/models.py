@@ -132,6 +132,11 @@ class User(Base):
     subscription_plan = Column(String(50), nullable=True, default="free")
     subscription_status = Column(String(50), nullable=True, default="active")
     
+    # Team member info
+    is_team_member = Column(Boolean(), default=False, nullable=False)
+    invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    invited_at = Column(DateTime(timezone=True), nullable=True)
+    
     is_active = Column(Boolean(), default=True, nullable=False)
     is_superuser = Column(Boolean(), default=False, nullable=False)
     onboarding_completed = Column(Boolean(), default=False, nullable=False)
@@ -222,6 +227,31 @@ class Permission(Base):
     )
 
 
+class TeamInvitation(Base):
+    __tablename__ = "team_invitations"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    invitation_code = Column(String(100), unique=True, nullable=False, index=True)
+    email = Column(String(255), nullable=True)  # Optional: specific email to invite
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean(), default=False, nullable=False)
+    used_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="team_invitations")
+    inviter = relationship("User", foreign_keys=[invited_by], backref="sent_invitations")
+    invited_user = relationship("User", foreign_keys=[used_by], backref="received_invitation")
+    
+    __table_args__ = (
+        Index('idx_invitation_code_expires', 'invitation_code', 'expires_at'),
+    )
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     
@@ -241,6 +271,7 @@ class Tenant(Base):
     documents = relationship("Document", back_populates="tenant")
     tags = relationship("Tag", back_populates="tenant")
     roles = relationship("Role", back_populates="tenant")
+    team_invitations = relationship("TeamInvitation", back_populates="tenant", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),
