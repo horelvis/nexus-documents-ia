@@ -136,8 +136,12 @@ export interface BackendUser {
   onboarding_completed: boolean
   tenant_id: string
   clerk_user_id?: string
+  stripe_customer_id?: string
   created_at: string
   updated_at: string
+  // Subscription info from Stripe (populated dynamically)
+  subscription_plan?: string
+  subscription_status?: string
 }
 
 export interface OnboardingStatus {

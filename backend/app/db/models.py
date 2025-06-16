@@ -127,6 +127,11 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     clerk_user_id = Column(String(255), nullable=True, unique=True, index=True)
     stripe_customer_id = Column(String(255), nullable=True, unique=True, index=True)
+    
+    # Subscription info cached from Stripe
+    subscription_plan = Column(String(50), nullable=True, default="free")
+    subscription_status = Column(String(50), nullable=True, default="active")
+    
     is_active = Column(Boolean(), default=True, nullable=False)
     is_superuser = Column(Boolean(), default=False, nullable=False)
     onboarding_completed = Column(Boolean(), default=False, nullable=False)

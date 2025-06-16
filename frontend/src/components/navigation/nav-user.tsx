@@ -88,6 +88,18 @@ export function NavUser({
   const handleBillingPortal = async () => {
     if (isLoadingBilling) return
     
+    // Check if user has a paid plan
+    const userPlan = backendUser?.subscription_plan || 'free'
+    
+    // If free plan, redirect to billing page with tenantId
+    if (userPlan === 'free') {
+      if (tenantId) {
+        router.push(`/${tenantId}/billing`)
+      }
+      return
+    }
+    
+    // For paid plans, open Stripe customer portal
     setIsLoadingBilling(true)
     try {
       const response = await apiClient.post<{ portal_url: string }>('/stripe/create-customer-portal')
@@ -96,13 +108,17 @@ export function NavUser({
         window.open(response.data.portal_url, '_blank')
       } else {
         console.error('No portal URL received')
-        // Fallback to billing page
-        window.location.href = '/billing'
+        // Fallback to billing page with tenantId
+        if (tenantId) {
+          router.push(`/${tenantId}/billing`)
+        }
       }
     } catch (error) {
       console.error('Error opening billing portal:', error)
-      // Fallback to billing page
-      window.location.href = '/billing'
+      // Fallback to billing page with tenantId
+      if (tenantId) {
+        router.push(`/${tenantId}/billing`)
+      }
     } finally {
       setIsLoadingBilling(false)
     }
@@ -115,7 +131,8 @@ export function NavUser({
   }
 
   const getPlanBadge = () => {
-    const planType = backendUser?.subscription?.plan_type || 'free'
+    // Use subscription_plan from backend user (populated from Stripe)
+    const planType = backendUser?.subscription_plan || 'free'
     const planConfigs: Record<string, { name: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
       'free': { name: 'Gratuito', variant: 'secondary' },
       'pro': { name: 'Profesional', variant: 'default' },
@@ -191,10 +208,15 @@ export function NavUser({
                 <IconCrown />
                 Ver planes
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleBillingPortal} disabled={isLoadingBilling}>
-                <IconReceipt />
-                {isLoadingBilling ? 'Abriendo...' : 'Facturas y pagos'}
-              </DropdownMenuItem>
+              {backendUser?.is_superuser && (
+                <DropdownMenuItem onClick={handleBillingPortal} disabled={isLoadingBilling}>
+                  <IconReceipt />
+                  {isLoadingBilling ? 'Abriendo...' : 
+                   (backendUser?.subscription_plan && backendUser.subscription_plan !== 'free' 
+                     ? 'Portal de facturación' 
+                     : 'Facturas y pagos')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem>
                 <IconNotification />
                 Notificaciones

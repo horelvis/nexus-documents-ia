@@ -13,22 +13,28 @@ export function SubscriptionSync() {
   const { addNotification } = useNotifications()
   const { checkOnboardingStatus } = useUserContext()
   const [isSyncing, setIsSyncing] = useState(false)
+  const [hasSynced, setHasSynced] = useState(false)
 
   useEffect(() => {
     const shouldSync = searchParams.get('sync') === 'true'
     const upgraded = searchParams.get('upgraded') === 'true'
 
-    if (shouldSync && !isSyncing) {
+    // Only sync once per page load
+    if (shouldSync && !isSyncing && !hasSynced) {
+      console.log('SubscriptionSync: Starting sync process...')
       syncSubscription(upgraded)
     }
-  }, [searchParams])
+  }, [searchParams, isSyncing, hasSynced])
 
   const syncSubscription = async (upgraded: boolean) => {
     setIsSyncing(true)
+    setHasSynced(true) // Mark as synced to prevent duplicate calls
     
     try {
       const token = await getToken()
       const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      
+      console.log('SubscriptionSync: Calling sync endpoint...')
       
       // First sync the subscription from Stripe
       const syncResponse = await fetch(`${API_BASE}/api/v1/stripe/sync-subscription`, {
@@ -41,7 +47,7 @@ export function SubscriptionSync() {
 
       if (syncResponse.ok) {
         const syncData = await syncResponse.json()
-        console.log('Sync response:', syncData)
+        console.log('SubscriptionSync: Sync response:', syncData)
         
         // Refresh user data to get updated subscription info
         await checkOnboardingStatus()
@@ -61,11 +67,11 @@ export function SubscriptionSync() {
         window.history.replaceState({}, '', url)
       } else {
         const errorData = await syncResponse.json().catch(() => ({}))
-        console.error('Sync error:', errorData)
+        console.error('SubscriptionSync: Sync error:', errorData)
         throw new Error(errorData.detail || 'Failed to sync subscription')
       }
     } catch (error) {
-      console.error('Error syncing subscription:', error)
+      console.error('SubscriptionSync: Error syncing subscription:', error)
       addNotification({
         type: 'warning',
         title: 'Sincronización pendiente',
