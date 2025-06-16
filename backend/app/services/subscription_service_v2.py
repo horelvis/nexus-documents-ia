@@ -265,8 +265,7 @@ class SubscriptionServiceV2:
         # Count current documents for the user's tenant
         from app.db.models import Document
         current_count = db.query(Document).filter(
-            Document.tenant_id == user.tenant_id,
-            Document.is_deleted == False
+            Document.tenant_id == user.tenant_id
         ).count()
         
         if current_count >= max_documents:
