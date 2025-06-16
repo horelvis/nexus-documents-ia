@@ -438,11 +438,11 @@ async def create_signature_request(
                     context={"user_id": user_id}
                 ):
                     # If event is already a dict, use it directly
-                if isinstance(event, dict):
-                    yield f"data: {json.dumps(event)}\n\n"
-                else:
-                    # Otherwise try to call .dict() if it's a Pydantic model
-                    yield f"data: {json.dumps(event.dict())}\n\n"
+                    if isinstance(event, dict):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    else:
+                        # Otherwise try to call .dict() if it's a Pydantic model
+                        yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
                 # Clean up agent in background
@@ -491,11 +491,11 @@ async def get_signature_status(request_id: str, tenant_id: str, user_id: str):
                     context={"user_id": user_id}
                 ):
                     # If event is already a dict, use it directly
-                if isinstance(event, dict):
-                    yield f"data: {json.dumps(event)}\n\n"
-                else:
-                    # Otherwise try to call .dict() if it's a Pydantic model
-                    yield f"data: {json.dumps(event.dict())}\n\n"
+                    if isinstance(event, dict):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    else:
+                        # Otherwise try to call .dict() if it's a Pydantic model
+                        yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
                 # Clean up agent
@@ -554,11 +554,11 @@ async def analyze_document(
                     context={"user_id": user_id}
                 ):
                     # If event is already a dict, use it directly
-                if isinstance(event, dict):
-                    yield f"data: {json.dumps(event)}\n\n"
-                else:
-                    # Otherwise try to call .dict() if it's a Pydantic model
-                    yield f"data: {json.dumps(event.dict())}\n\n"
+                    if isinstance(event, dict):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    else:
+                        # Otherwise try to call .dict() if it's a Pydantic model
+                        yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
                 # Clean up agent
