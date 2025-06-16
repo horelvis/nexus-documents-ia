@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 from pydantic import BaseModel, EmailStr, Field
 from .rbac import Role
-from .billing import Subscription
+# from .billing import Subscription  # Removed - subscriptions handled by Stripe
 
 # Base schema for UserImage
 class UserImageBase(BaseModel):
@@ -98,7 +98,11 @@ class User(UserBase):
     updated_at: datetime = Field(..., example=datetime.now())
     image: Optional[UserImage] = None
     roles: List[Role] = []
-    subscription: Optional[Subscription] = None
+    # subscription: Optional[Subscription] = None  # Removed - subscriptions handled by Stripe
+    
+    # Subscription info from Stripe (populated dynamically)
+    subscription_plan: Optional[str] = Field(None, example="pro")
+    subscription_status: Optional[str] = Field(None, example="active")
 
     class Config:
         from_attributes = True

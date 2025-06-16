@@ -75,6 +75,30 @@ async def get_current_user_info(
     # Log user status for debugging
     logger.info(f"📋 [AUTH_ENDPOINT] User onboarding completed: {current_user.onboarding_completed}")
     
+    # Get subscription status from Stripe
+    try:
+        from app.services.subscription_service_v2 import SubscriptionServiceV2
+        
+        # Clear cache to ensure fresh data
+        SubscriptionServiceV2.clear_cache(str(current_user.id))
+        
+        # Get subscription status
+        subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+        logger.info(f"📋 [AUTH_ENDPOINT] User subscription status: {subscription_status}")
+        
+        # Add subscription info to user object for response
+        current_user.subscription_plan = subscription_status.get('plan', 'free')
+        current_user.subscription_status = subscription_status.get('status', 'active')
+        
+        logger.info(f"📋 [AUTH_ENDPOINT] User plan: {current_user.subscription_plan}")
+        logger.info(f"📋 [AUTH_ENDPOINT] User subscription status: {current_user.subscription_status}")
+        
+    except Exception as e:
+        logger.error(f"Error getting subscription status: {e}")
+        # Default values if error
+        current_user.subscription_plan = 'free'
+        current_user.subscription_status = 'active'
+    
     return current_user
 
 
