@@ -27,16 +27,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
     logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
     
-    # Auto-upgrade de la base de datos
+    # Crear tablas si no existen
     try:
-        logger.info("🔧 Iniciando auto-upgrade de base de datos...")
+        logger.info("🔧 Verificando estructura de base de datos...")
+        from app.db.base_class import Base
+        from app.db.database import engine
+        from app.db.models import *  # Importar todos los modelos para registrarlos
+        
+        # Crear todas las tablas desde los modelos
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Estructura de base de datos verificada/creada")
+        
+        # Auto-upgrade de la base de datos (solo para registrar versión de Alembic)
+        logger.info("🔧 Registrando versión de Alembic...")
         from app.db.migrations import auto_upgrade_database
         auto_upgrade_database()
-        logger.info("✅ Auto-upgrade de BD completado")
+        logger.info("✅ Versión de Alembic registrada")
     except Exception as e:
-        logger.error(f"❌ Error en auto-upgrade de BD: {e}")
+        logger.log(f"❌ Error en configuración de BD: {e}")
         if not settings.DEBUG:
-            logger.error("💥 Aplicación no puede iniciar sin BD actualizada")
+            logger.log("💥 Aplicación no puede iniciar sin BD")
             raise
         else:
             logger.warning("⚠️ Continuando en modo DEBUG a pesar del error de BD")
