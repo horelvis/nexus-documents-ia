@@ -77,11 +77,101 @@ export class AgentsService {
 
   async chatWithAgent(agentId: string, request: ChatRequest) {
     try {
-      const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/${agentId}/chat`, request)
+      // The backend returns a streaming response, so we need to handle it differently
+      const response = await this.streamChat(agentId, request)
       return response
     } catch (error) {
       // Re-throw the error to preserve the response structure
       throw error
+    }
+  }
+
+  private async streamChat(agentId: string, request: ChatRequest): Promise<any> {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const token = await this.apiClient.getAuthToken()
+    
+    const response = await fetch(`${apiUrl}/api/v1/agents/${agentId}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(request)
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw { response: { status: response.status, data: errorData } }
+    }
+
+    // Read the streaming response
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let fullMessage = ''
+    let metadata = {}
+    let conversation_id = null
+    let buffer = ''
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        // Decode the chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Process complete lines
+        const lines = buffer.split('\n')
+        
+        // Keep the last line in buffer if it's incomplete
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.trim() === '') continue
+          
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim()
+            if (jsonStr === '[DONE]') continue
+            
+            try {
+              const data = JSON.parse(jsonStr)
+              
+              if (data.type === 'message') {
+                fullMessage += data.content
+                metadata = { ...metadata, ...data.metadata }
+              } else if (data.type === 'conversation_id') {
+                conversation_id = data.content
+              } else if (data.type === 'error') {
+                console.error('Agent error:', data.content)
+              }
+              // Log other event types for debugging
+              console.log('SSE Event:', data.type, data)
+            } catch (e) {
+              console.error('Error parsing SSE data:', e, 'Line:', jsonStr)
+            }
+          }
+        }
+      }
+      
+      // Process any remaining data in buffer
+      if (buffer.trim() && buffer.startsWith('data: ')) {
+        const jsonStr = buffer.slice(6).trim()
+        try {
+          const data = JSON.parse(jsonStr)
+          if (data.type === 'message') {
+            fullMessage += data.content
+            metadata = { ...metadata, ...data.metadata }
+          }
+        } catch (e) {
+          console.error('Error parsing final SSE data:', e)
+        }
+      }
+    }
+
+    return {
+      message: fullMessage || 'No response received',
+      metadata,
+      conversation_id
     }
   }
 

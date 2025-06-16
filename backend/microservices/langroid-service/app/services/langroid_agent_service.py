@@ -498,22 +498,14 @@ Always provide clear guidance on signature processes and help users manage their
     ) -> ChatAgent:
         """Create RAG assistant agent"""
         
-        # Configure collection name for tenant
-        try:
-            vector_config = QdrantDBConfig(
-                cloud=False,
-                host=app_settings.QDRANT_HOST,
-                port=app_settings.QDRANT_PORT,
-                collection_name=f"{app_settings.QDRANT_COLLECTION_PREFIX}_{tenant_id}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to create vector config for RAG assistant: {e}")
-            vector_config = None
+        # For now, create a simple chat agent without vector store
+        # to avoid OpenAI embeddings requirement
+        logger.info(f"Creating RAG assistant for tenant {tenant_id}")
         
+        # Configure as a simple chat agent without RAG for now
         agent_config = ChatAgentConfig(
             name="RAGAssistant",
             llm=self.llm_config,
-            vecdb=vector_config,
             system_message="""You are a knowledgeable assistant that helps users find and understand information from their documents.
 
 Your capabilities:
@@ -521,6 +513,8 @@ Your capabilities:
 - Answer questions based on document content
 - Provide detailed explanations with source references
 - Suggest related topics and documents
+
+Note: Currently operating without vector database. Provide helpful responses based on the context provided.
 
 Always cite your sources and indicate confidence levels in your answers."""
         )

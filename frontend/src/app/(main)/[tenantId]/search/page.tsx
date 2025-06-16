@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,8 @@ import {
   IconCurrencyDollar,
   IconFileText,
   IconScale,
-  IconSignature
+  IconSignature,
+  IconInfoCircle
 } from "@tabler/icons-react"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useSearchService } from "@/lib/services/search.service"
@@ -28,22 +29,31 @@ import { useAgentsService } from "@/lib/services/agents.service"
 import { DocumentCard } from "@/components/documents/document-card"
 import { useAgentChat } from "@/hooks/use-agent-chat"
 import { ThinkingDisplay } from "@/components/agents/thinking-display"
+import { AgentMessageRenderer } from "@/components/chat/agent-message-renderer"
 import { SubscriptionErrorDialog } from "@/components/common/subscription-error-dialog"
+import { getAgentUseCase, getQuickPrompts } from "@/lib/agent-use-cases"
+import { AgentDetailsDialog } from "@/components/agents/agent-details-dialog"
 
 export default function SearchPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
   
+  // Get initial values from URL params
+  const initialQuery = searchParams.get('q') || ''
+  const initialAgent = searchParams.get('agent') || 'search'
+  
   // Search state
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(initialQuery)
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   
   // Agent state
   const [availableAgents, setAvailableAgents] = useState<any[]>([])
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('search')
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(initialAgent)
   const [isLoadingAgents, setIsLoadingAgents] = useState(true)
+  const [selectedAgentDetails, setSelectedAgentDetails] = useState<any>(null)
   
   const { addNotification } = useNotifications()
   const searchService = useSearchService()
@@ -53,6 +63,13 @@ export default function SearchPage() {
   useEffect(() => {
     loadAvailableAgents()
   }, [])
+  
+  // Auto-search when page loads with query params
+  useEffect(() => {
+    if (initialQuery && !isLoadingAgents && availableAgents.length > 0) {
+      performSearch()
+    }
+  }, [isLoadingAgents])
 
   const loadAvailableAgents = async () => {
     try {
@@ -73,6 +90,11 @@ export default function SearchPage() {
           ...agentsList
         ]
         setAvailableAgents(agents)
+        
+        // If initial agent is specified and exists, select it
+        if (initialAgent && agents.some(a => a.id === initialAgent)) {
+          setSelectedAgentId(initialAgent)
+        }
       }
     } catch (error) {
       console.error('Failed to load agents:', error)
@@ -374,11 +396,23 @@ export default function SearchPage() {
                       {availableAgents.map((agent) => (
                         <Card 
                           key={agent.id} 
-                          className={`cursor-pointer hover:border-primary transition-colors ${
+                          className={`cursor-pointer hover:border-primary transition-colors relative group ${
                             selectedAgentId === agent.id ? 'border-primary' : ''
                           }`}
                           onClick={() => setSelectedAgentId(agent.id)}
                         >
+                          {/* Info button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedAgentDetails(agent)
+                            }}
+                          >
+                            <IconInfoCircle className="h-4 w-4" />
+                          </Button>
                           <CardHeader className="pb-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
@@ -400,9 +434,57 @@ export default function SearchPage() {
                           </CardHeader>
                           <CardContent>
                             <p className="text-sm text-muted-foreground">
-                              {agent.description}
+                              {(() => {
+                                const useCase = getAgentUseCase(agent.id)
+                                return useCase?.description || agent.description
+                              })()}
                             </p>
-                            {agent.capabilities && agent.capabilities.length > 0 && (
+                            {/* Show use case benefits if available */}
+                            {(() => {
+                              const useCase = getAgentUseCase(agent.id)
+                              if (useCase?.benefits && useCase.benefits.length > 0) {
+                                return (
+                                  <div className="mt-3 space-y-1">
+                                    {useCase.benefits.slice(0, 2).map((benefit, idx) => (
+                                      <div key={idx} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                                        <IconChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-green-600" />
+                                        <span>{benefit}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                              return null
+                            })()}
+                            {/* Show example queries */}
+                            {(() => {
+                              const quickPrompts = getQuickPrompts(agent.id)
+                              if (quickPrompts.length > 0) {
+                                return (
+                                  <div className="mt-3">
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Ejemplos:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {quickPrompts.map((prompt, idx) => (
+                                        <Badge 
+                                          key={idx} 
+                                          variant="secondary" 
+                                          className="text-xs cursor-pointer hover:bg-secondary/80"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setSearchQuery(prompt)
+                                            setSelectedAgentId(agent.id)
+                                          }}
+                                        >
+                                          {prompt}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )
+                              }
+                              return null
+                            })()}
+                            {agent.capabilities && agent.capabilities.length > 0 && !getAgentUseCase(agent.id) && (
                               <div className="flex flex-wrap gap-1 mt-2">
                                 {agent.capabilities.slice(0, 3).map((cap, idx) => (
                                   <Badge key={idx} variant="outline" className="text-xs">
@@ -457,6 +539,18 @@ export default function SearchPage() {
           </div>
         </div>
       </div>
+      
+      {/* Agent Details Dialog */}
+      <AgentDetailsDialog
+        agent={selectedAgentDetails}
+        isOpen={!!selectedAgentDetails}
+        onClose={() => setSelectedAgentDetails(null)}
+        onSelectExample={(agentId, example) => {
+          setSearchQuery(example)
+          setSelectedAgentId(agentId)
+          performSearch()
+        }}
+      />
     </div>
   )
 }
@@ -575,18 +669,25 @@ function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }
           </p>
           {(() => {
             const agent = availableAgents.find(a => a.id === agentId)
-            return agent?.ui_config?.quick_actions && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {agent.ui_config.quick_actions.map((action, idx) => (
-                  <Button
-                    key={idx}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSendMessage(action)}
-                  >
-                    {action}
-                  </Button>
-                ))}
+            const useCase = getAgentUseCase(agentId)
+            const quickActions = agent?.ui_config?.quick_actions || (useCase ? getQuickPrompts(agentId) : [])
+            
+            return quickActions.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Sugerencias:</p>
+                <div className="flex flex-wrap gap-2">
+                  {quickActions.map((action, idx) => (
+                    <Button
+                      key={idx}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSendMessage(action)}
+                      className="text-xs"
+                    >
+                      {action}
+                    </Button>
+                  ))}
+                </div>
               </div>
             )
           })()}
@@ -625,10 +726,20 @@ function AgentInterface({ agentId, searchQuery, searchResults, availableAgents }
                         : 'bg-gray-100 dark:bg-gray-800'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
-                    <span className="text-xs opacity-70 mt-1 block">
-                      {new Date(message.timestamp).toLocaleTimeString()}
-                    </span>
+                    {message.role === 'user' ? (
+                      <>
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <span className="text-xs opacity-70 mt-1 block">
+                          {new Date(message.timestamp).toLocaleTimeString()}
+                        </span>
+                      </>
+                    ) : (
+                      <AgentMessageRenderer 
+                        content={message.content}
+                        timestamp={message.timestamp}
+                        metadata={message.metadata}
+                      />
+                    )}
                   </div>
                 </div>
               ))}
