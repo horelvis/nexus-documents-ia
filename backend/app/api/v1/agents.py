@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 
-from app.api.dependencies import get_current_active_user, require_subscription_permission, get_current_active_superuser
+from app.api.dependencies import get_current_active_user, require_subscription_permission, get_current_active_superuser, require_agent_permission
 from app.db.models import User
 from app.services.langroid_client import langroid_client
 
@@ -147,7 +147,7 @@ async def list_agents(
 async def chat_with_agent(
     agent_id: str,
     request: ChatRequest,
-    current_user: User = Depends(require_subscription_permission("can_use_agents"))
+    current_user: User = Depends(require_agent_permission)
 ):
     """Chat con un agente (streaming)"""
     async def event_stream():

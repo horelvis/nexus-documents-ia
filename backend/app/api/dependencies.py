@@ -244,24 +244,29 @@ def require_document_upload_permission(
     return current_user
 
 
-def require_active_subscription(
+def require_agent_permission(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Dependencia para verificar que el usuario tenga una suscripción activa (no limitada).
+    Dependencia específica para verificar permisos de uso de agentes AI.
     """
-    from app.services.subscription_service import SubscriptionService
+    from app.services.subscription_service_v2 import SubscriptionServiceV2
     
-    subscription_status = SubscriptionService.get_user_subscription_status(db, current_user)
+    # Check agent permission
+    can_use_agents, error_message = SubscriptionServiceV2.check_agent_permission(db, current_user)
     
-    if subscription_status["is_limited"]:
+    if not can_use_agents:
+        # Get subscription status for error details
+        subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+        
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
             detail={
-                "message": subscription_status["message"],
+                "message": error_message,
                 "subscription_status": subscription_status,
-                "action_required": "reactivate_subscription"
+                "action_required": "upgrade_plan" if subscription_status["plan"] == "free" else "check_subscription",
+                "limits": subscription_status.get("limits", {})
             }
         )
     

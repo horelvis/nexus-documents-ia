@@ -317,8 +317,8 @@ class SubscriptionServiceV2:
         # Definir permisos por plan
         permissions_by_plan = {
             'free': ['view_documents', 'basic_search'],
-            'pro': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'export_documents', 'api_access'],
-            'enterprise': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'export_documents', 'api_access', 'admin_features']
+            'pro': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'can_use_agents', 'export_documents', 'api_access'],
+            'enterprise': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'can_use_agents', 'export_documents', 'api_access', 'admin_features']
         }
         
         allowed_permissions = permissions_by_plan.get(plan, [])
