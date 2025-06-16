@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
         logger.info("🔧 Verificando estructura de base de datos...")
         from app.db.base_class import Base
         from app.db.database import engine
-        from app.db.models import *  # Importar todos los modelos para registrarlos
+        import app.db.models  # Importar módulo para registrar los modelos
         
         # Crear todas las tablas desde los modelos
         Base.metadata.create_all(bind=engine)
@@ -44,9 +44,9 @@ async def lifespan(app: FastAPI):
         auto_upgrade_database()
         logger.info("✅ Versión de Alembic registrada")
     except Exception as e:
-        logger.log(f"❌ Error en configuración de BD: {e}")
+        logger.error(f"❌ Error en configuración de BD: {e}")
         if not settings.DEBUG:
-            logger.log("💥 Aplicación no puede iniciar sin BD")
+            logger.error("💥 Aplicación no puede iniciar sin BD")
             raise
         else:
             logger.warning("⚠️ Continuando en modo DEBUG a pesar del error de BD")
