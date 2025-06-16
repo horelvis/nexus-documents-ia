@@ -335,7 +335,12 @@ async def chat_with_agent(agent_id: str, message: AgentMessage, tenant_id: str):
                 conversation_id=message.conversation_id,
                 context=message.context
             ):
-                yield f"data: {json.dumps(event.dict())}\n\n"
+                # If event is already a dict, use it directly
+                if isinstance(event, dict):
+                    yield f"data: {json.dumps(event)}\n\n"
+                else:
+                    # Otherwise try to call .dict() if it's a Pydantic model
+                    yield f"data: {json.dumps(event.dict())}\n\n"
                 
         except Exception as e:
             error_event = StreamingEvent(
@@ -372,7 +377,12 @@ async def execute_agent_task(agent_id: str, task: AgentExecuteTask, tenant_id: s
                 parameters=task.parameters,
                 context=task.context
             ):
-                yield f"data: {json.dumps(event.dict())}\n\n"
+                # If event is already a dict, use it directly
+                if isinstance(event, dict):
+                    yield f"data: {json.dumps(event)}\n\n"
+                else:
+                    # Otherwise try to call .dict() if it's a Pydantic model
+                    yield f"data: {json.dumps(event.dict())}\n\n"
                 
         except Exception as e:
             error_event = StreamingEvent(
@@ -427,6 +437,11 @@ async def create_signature_request(
                     parameters=config.dict(),
                     context={"user_id": user_id}
                 ):
+                    # If event is already a dict, use it directly
+                if isinstance(event, dict):
+                    yield f"data: {json.dumps(event)}\n\n"
+                else:
+                    # Otherwise try to call .dict() if it's a Pydantic model
                     yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
@@ -475,6 +490,11 @@ async def get_signature_status(request_id: str, tenant_id: str, user_id: str):
                     parameters={"request_id": request_id},
                     context={"user_id": user_id}
                 ):
+                    # If event is already a dict, use it directly
+                if isinstance(event, dict):
+                    yield f"data: {json.dumps(event)}\n\n"
+                else:
+                    # Otherwise try to call .dict() if it's a Pydantic model
                     yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
@@ -533,6 +553,11 @@ async def analyze_document(
                     },
                     context={"user_id": user_id}
                 ):
+                    # If event is already a dict, use it directly
+                if isinstance(event, dict):
+                    yield f"data: {json.dumps(event)}\n\n"
+                else:
+                    # Otherwise try to call .dict() if it's a Pydantic model
                     yield f"data: {json.dumps(event.dict())}\n\n"
                     
             finally:
