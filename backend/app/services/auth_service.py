@@ -233,8 +233,7 @@ class AuthService:
         clerk_user_id: str,
         email: str,
         full_name: str,
-        stripe_customer_id: Optional[str] = None,
-        subscription_data: Optional[dict] = None
+        stripe_customer_id: Optional[str] = None
     ) -> User:
         """Sincroniza un usuario desde Clerk. Crea si no existe, actualiza si existe."""
         import logging
@@ -253,9 +252,6 @@ class AuthService:
             if stripe_customer_id and user.stripe_customer_id != stripe_customer_id:
                 user.stripe_customer_id = stripe_customer_id
             
-            # Handle subscription data if provided
-            if subscription_data:
-                AuthService._handle_subscription_data(db, user, subscription_data)
             
             db.commit()
             db.refresh(user)
@@ -271,9 +267,6 @@ class AuthService:
             if stripe_customer_id:
                 user_by_email.stripe_customer_id = stripe_customer_id
             
-            # Handle subscription data if provided
-            if subscription_data:
-                AuthService._handle_subscription_data(db, user_by_email, subscription_data)
             
             db.commit()
             db.refresh(user_by_email)
@@ -318,46 +311,3 @@ class AuthService:
         logger.info(f"✅ New user created: {new_user.id}")
         return new_user
 
-    @staticmethod
-    def _handle_subscription_data(db: Session, user: User, subscription_data: dict) -> None:
-        """Handle subscription data for a user"""
-        from app.db.models import Subscription
-        from datetime import datetime
-        import logging
-        
-        logger = logging.getLogger(__name__)
-        
-        try:
-            # Check if subscription already exists
-            existing_subscription = db.query(Subscription).filter(
-                Subscription.user_id == user.id
-            ).first()
-            
-            if existing_subscription:
-                # Update existing subscription
-                existing_subscription.stripe_subscription_id = subscription_data.get('stripe_subscription_id')
-                existing_subscription.stripe_plan_id = subscription_data.get('plan_id')
-                existing_subscription.status = 'active'
-                existing_subscription.stripe_customer_id = user.stripe_customer_id
-                logger.info(f"🔄 Updated subscription for user: {user.id}")
-            else:
-                # Create new subscription
-                new_subscription = Subscription(
-                    user_id=user.id,
-                    stripe_customer_id=user.stripe_customer_id,
-                    stripe_subscription_id=subscription_data.get('stripe_subscription_id'),
-                    stripe_plan_id=subscription_data.get('plan_id'),
-                    interval='month',  # Default to monthly
-                    status='active',
-                    current_period_start=datetime.utcnow(),
-                    current_period_end=datetime.utcnow(),  # Will be updated by webhooks
-                    cancel_at_period_end=False
-                )
-                db.add(new_subscription)
-                logger.info(f"✅ Created subscription for user: {user.id}")
-            
-            db.commit()
-            
-        except Exception as e:
-            logger.error(f"❌ Error handling subscription data: {str(e)}")
-            db.rollback()

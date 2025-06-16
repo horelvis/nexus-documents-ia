@@ -59,7 +59,6 @@ def get_current_user(
         
         from sqlalchemy.orm import selectinload
         user = db.query(User).options(
-            selectinload(User.subscription),
             selectinload(User.roles),
             selectinload(User.image)
         ).filter(User.clerk_user_id == clerk_user_id).first()

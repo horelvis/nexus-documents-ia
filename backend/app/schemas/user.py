@@ -41,10 +41,6 @@ class UserCreate(UserBase):
     is_superuser: bool = Field(False, example=False)
     is_active: bool = Field(True, example=True)
 
-# Schema for Stripe subscription data
-class StripeSubscriptionData(BaseModel):
-    stripe_subscription_id: str = Field(..., example="sub_1234567890")
-    plan_id: str = Field(..., example="pro")
 
 # Schema for syncing user from Clerk (with optional Stripe data)
 class UserSync(BaseModel):
@@ -54,7 +50,6 @@ class UserSync(BaseModel):
     # Stripe integration fields (optional)
     stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
     stripe_session_id: Optional[str] = Field(None, example="cs_1234567890")
-    subscription_data: Optional[StripeSubscriptionData] = None
 
 # Schema for completing onboarding with simplified data
 class OnboardingComplete(BaseModel):

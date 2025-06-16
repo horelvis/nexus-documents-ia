@@ -52,21 +52,12 @@ async def sync_user(
     """
     logger.info(f"🔄 Syncing user from Clerk: {user_data.clerk_user_id}")
     
-    # Prepare subscription data if provided
-    subscription_data = None
-    if user_data.subscription_data:
-        subscription_data = {
-            'stripe_subscription_id': user_data.subscription_data.stripe_subscription_id,
-            'plan_id': user_data.subscription_data.plan_id
-        }
-    
     user = AuthService.sync_user_from_clerk(
         db=db,
         clerk_user_id=user_data.clerk_user_id,
         email=user_data.email,
         full_name=user_data.full_name,
-        stripe_customer_id=user_data.stripe_customer_id,
-        subscription_data=subscription_data
+        stripe_customer_id=user_data.stripe_customer_id
     )
     
     logger.info(f"✅ User synced successfully: {user.id}")
@@ -81,11 +72,8 @@ async def get_current_user_info(
     """Get current authenticated user information with subscription details."""
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
     
-    # Also log subscription status for debugging
-    if current_user.subscription:
-        logger.info(f"📋 [AUTH_ENDPOINT] User has subscription: {current_user.subscription.status}")
-    else:
-        logger.info(f"📋 [AUTH_ENDPOINT] User has no subscription (free plan)")
+    # Log user status for debugging
+    logger.info(f"📋 [AUTH_ENDPOINT] User onboarding completed: {current_user.onboarding_completed}")
     
     return current_user
 
