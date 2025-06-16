@@ -55,8 +55,8 @@ export function useUserOnboarding() {
           error: null
         })
         
-        // Redirect to onboarding if not already there
-        if (pathname !== '/onboarding') {
+        // Redirect to pricing if not already there
+        if (pathname !== '/pricing' && pathname !== '/onboarding') {
           router.push('/onboarding')
         }
         return
@@ -74,8 +74,8 @@ export function useUserOnboarding() {
         error: null
       })
 
-      // Redirect to onboarding if needed and not already there
-      if (!hasCompletedOnboarding && pathname !== '/onboarding') {
+      // Redirect to pricing if needed and not already there
+      if (!hasCompletedOnboarding && pathname !== '/pricing' && pathname !== '/onboarding') {
         router.push('/onboarding')
       }
 
@@ -91,8 +91,8 @@ export function useUserOnboarding() {
         error: error instanceof Error ? error.message : 'Unknown error'
       })
 
-      // Redirect to onboarding
-      if (pathname !== '/onboarding') {
+      // Redirect to pricing
+      if (pathname !== '/pricing' && pathname !== '/onboarding') {
         router.push('/onboarding')
       }
     }

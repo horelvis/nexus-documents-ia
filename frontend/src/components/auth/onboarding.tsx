@@ -277,17 +277,6 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
   const progressPercentage = ((currentStep + 1) / steps.length) * 100
 
-  const getPlanIcon = (planId: string) => {
-    switch (planId) {
-      case 'enterprise':
-        return <Crown className="h-4 w-4" />
-      case 'pro':
-        return <Zap className="h-4 w-4" />
-      default:
-        return <Star className="h-4 w-4" />
-    }
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <div className="container mx-auto px-4 py-8">
@@ -457,10 +446,10 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                   
                   <div>
                     <h3 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
-                      ¡Cuenta configurada!
+                      ¡Todo listo!
                     </h3>
                     <p className="text-gray-600 dark:text-gray-300 mb-6">
-                      Tu cuenta está lista para usar. ¡Comienza a explorar Nexus!
+                      Tu cuenta está configurada. ¡Bienvenido a Nexus!
                     </p>
                   </div>
 

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Configurar Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
+logger.info(f"Stripe configured with API key: {stripe.api_key[:7]}..." if stripe.api_key else "NO API KEY")
 
 class SubscriptionServiceV2:
     """
@@ -58,19 +59,38 @@ class SubscriptionServiceV2:
             # Consultar Stripe
             logger.info(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
             
+            # Verificar que tenemos API key
+            if not stripe.api_key:
+                logger.error("Stripe API key not configured")
+                raise Exception("Stripe API key not configured")
+            
             # Listar todas las suscripciones del cliente
-            subscriptions = stripe.Subscription.list(
-                customer=user.stripe_customer_id,
-                limit=10,
-                expand=['data.default_payment_method']
-            )
+            logger.info(f"Fetching subscriptions for customer: {user.stripe_customer_id}")
+            try:
+                subscriptions = stripe.Subscription.list(
+                    customer=user.stripe_customer_id,
+                    limit=10,
+                    expand=['data.default_payment_method']
+                )
+                logger.info(f"Subscriptions result type: {type(subscriptions)}")
+            except Exception as e:
+                logger.error(f"Error calling stripe.Subscription.list: {type(e).__name__}: {e}")
+                raise
             
             # Buscar suscripción activa o en trial
+            # Si hay múltiples suscripciones, tomar la más reciente
             active_subscription = None
-            for sub in subscriptions.data:
-                if sub.status in ['active', 'trialing', 'past_due']:
-                    active_subscription = sub
-                    break
+            active_subscriptions = []
+            
+            if hasattr(subscriptions, 'data'):
+                for sub in subscriptions.data:
+                    if sub.status in ['active', 'trialing', 'past_due']:
+                        active_subscriptions.append(sub)
+            
+            # Si hay múltiples suscripciones activas, tomar la más reciente
+            if active_subscriptions:
+                active_subscription = max(active_subscriptions, key=lambda x: x.created)
+                logger.info(f"Found {len(active_subscriptions)} active subscriptions for user {user.id}, using most recent: {active_subscription.id}")
             
             if not active_subscription:
                 # No hay suscripción activa - usuario gratuito
@@ -91,7 +111,7 @@ class SubscriptionServiceV2:
                 plan_id = active_subscription.metadata.get('plan_id', 'pro')
                 
                 # Si no hay metadata, intentar deducir del price_id
-                if plan_id == 'pro' and active_subscription.items.data:
+                if plan_id == 'pro' and hasattr(active_subscription.items, 'data') and active_subscription.items.data:
                     price_id = active_subscription.items.data[0].price.id
                     if price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
                         plan_id = 'enterprise'
@@ -197,13 +217,33 @@ class SubscriptionServiceV2:
         # Si no tiene stripe_customer_id, intentar buscarlo por email
         if not user.stripe_customer_id:
             try:
-                customers = stripe.Customer.list(email=user.email, limit=1)
-                if customers.data:
-                    user.stripe_customer_id = customers.data[0].id
-                    db.commit()
-                    logger.info(f"✅ Updated stripe_customer_id for user {user.id}")
+                logger.info(f"Searching Stripe customer for email: {user.email}")
+                
+                # Verificar que stripe está configurado
+                if not stripe.api_key:
+                    logger.error("Stripe API key not configured for customer search")
+                    return SubscriptionServiceV2.get_user_subscription_status(db, user)
+                
+                # Intentar listar clientes
+                try:
+                    customers = stripe.Customer.list(email=user.email, limit=1)
+                    logger.info(f"Customer search result type: {type(customers)}, hasattr data: {hasattr(customers, 'data')}")
+                    
+                    if hasattr(customers, 'data') and customers.data:
+                        user.stripe_customer_id = customers.data[0].id
+                        db.commit()
+                        logger.info(f"✅ Updated stripe_customer_id for user {user.id}")
+                    else:
+                        logger.info(f"No Stripe customer found for email {user.email}")
+                except AttributeError as ae:
+                    logger.error(f"AttributeError calling stripe.Customer.list: {ae}")
+                    logger.error(f"stripe.Customer type: {type(stripe.Customer)}")
+                    logger.error(f"stripe.Customer.list type: {type(stripe.Customer.list) if hasattr(stripe.Customer, 'list') else 'NO LIST ATTR'}")
+                except Exception as e:
+                    logger.error(f"Error calling stripe.Customer.list: {type(e).__name__}: {e}")
+                    raise
             except Exception as e:
-                logger.error(f"Error searching customer: {e}")
+                logger.error(f"Error searching customer: {type(e).__name__}: {e}")
         
         # Obtener estado actual
         status = SubscriptionServiceV2.get_user_subscription_status(db, user)

@@ -211,8 +211,8 @@ export function SignUpWithCheckout() {
                     card: 'shadow-lg',
                   }
                 }}
-                redirectUrl="/welcome"
-                afterSignUpUrl="/welcome"
+                redirectUrl="/onboarding"
+                afterSignUpUrl="/onboarding"
                 // Pre-fill email if available
                 initialValues={
                   checkoutData?.customer_email || email 
