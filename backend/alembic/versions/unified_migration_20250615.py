@@ -1,7 +1,7 @@
 """Unified migration to fix all issues
 
 Revision ID: unified_20250615
-Revises: add_agents_system
+Revises: None
 Create Date: 2025-06-15 23:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = 'unified_20250615'
-down_revision = 'add_agents_system'
+down_revision = None  # This is the first migration now
 branch_labels = None
 depends_on = None
 
@@ -20,6 +20,27 @@ def upgrade():
     """Apply all necessary changes"""
     connection = op.get_bind()
     inspector = sa.inspect(connection)
+    
+    # 0. Drop unnecessary tables (agents moved to LangChain, subscriptions to Stripe)
+    tables_to_drop = [
+        # Agent tables
+        'agent_messages',
+        'agent_executions', 
+        'agent_conversations',
+        'agent_tools',
+        'agents',
+        # Subscription table (Stripe is source of truth)
+        'subscriptions'
+    ]
+    
+    existing_tables = inspector.get_table_names()
+    for table in tables_to_drop:
+        if table in existing_tables:
+            op.drop_table(table)
+            if 'agent' in table:
+                print(f"✅ Dropped {table} table (agents now handled by LangChain)")
+            elif table == 'subscriptions':
+                print(f"✅ Dropped {table} table (Stripe is source of truth)")
     
     # 1. Add onboarding_completed to users if not exists
     if 'users' in inspector.get_table_names():
@@ -36,30 +57,7 @@ def upgrade():
             op.create_index('idx_users_stripe_customer_id', 'users', ['stripe_customer_id'], unique=True)
             print("✅ Added stripe_customer_id to users")
     
-    # 3. Fix subscriptions table if it exists
-    if 'subscriptions' in inspector.get_table_names():
-        columns = {col['name']: col for col in inspector.get_columns('subscriptions')}
-        
-        # Make problematic columns nullable
-        for col_name in ['plan_id', 'price_id']:
-            if col_name in columns and not columns[col_name]['nullable']:
-                op.alter_column('subscriptions', col_name,
-                               existing_type=columns[col_name]['type'],
-                               nullable=True)
-                print(f"✅ Made {col_name} nullable in subscriptions")
-        
-        # Ensure stripe_plan_id exists
-        if 'stripe_plan_id' not in columns:
-            op.add_column('subscriptions', sa.Column('stripe_plan_id', sa.String(50), nullable=True))
-            op.create_index('idx_subscriptions_stripe_plan', 'subscriptions', ['stripe_plan_id'])
-            print("✅ Added stripe_plan_id to subscriptions")
-        
-        # Drop old foreign key constraints if they exist
-        foreign_keys = inspector.get_foreign_keys('subscriptions')
-        for fk in foreign_keys:
-            if 'plan_id' in fk['constrained_columns']:
-                op.drop_constraint(fk['name'], 'subscriptions', type_='foreignkey')
-                print(f"✅ Dropped foreign key {fk['name']}")
+    # 3. Note: Subscriptions table is dropped above since Stripe is the source of truth
     
     print("✅ Unified migration completed")
 

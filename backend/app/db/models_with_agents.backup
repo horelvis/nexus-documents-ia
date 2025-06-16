@@ -143,8 +143,10 @@ class User(Base):
     image = relationship("UserImage", back_populates="user", uselist=False, cascade="all, delete-orphan")
     # profile eliminado - datos se obtienen de Clerk y Stripe
     roles = relationship("Role", secondary=user_roles, back_populates="users")
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
     document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
+    agent_conversations = relationship("AgentConversation", back_populates="user")
     
     __table_args__ = (
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
@@ -396,7 +398,164 @@ class DocumentMetrics(Base):
 
 
 # =====================================
-# SISTEMA DE FIRMAS DIGITALES
+# SISTEMA DE SUSCRIPCIONES (Simplificado para Stripe)
+# =====================================
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
+    stripe_customer_id = Column(String(255), nullable=True, index=True)
+    stripe_subscription_id = Column(String(255), nullable=True, unique=True, index=True)
+    stripe_plan_id = Column(String(50), nullable=True, index=True)  # 'free', 'pro', 'enterprise'
+    interval = Column(String(20), nullable=False, default='month')  # 'month', 'year'
+    status = Column(String(20), nullable=False, index=True)  # 'active', 'canceled', 'past_due'
+    current_period_start = Column(DateTime, nullable=False)
+    current_period_end = Column(DateTime, nullable=False)
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="subscription")
+    
+    __table_args__ = (
+        Index('idx_subscriptions_status_period', 'status', 'current_period_end'),
+        Index('idx_subscriptions_stripe_plan', 'stripe_plan_id'),
+    )
+
+
+# =====================================
+# SISTEMA DE AGENTES MULTI-TENANT
+# =====================================
+
+class Agent(Base):
+    __tablename__ = "agents"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    type = Column(String(50), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    configuration = Column(JSONB, nullable=False, default={})
+    tools = Column(ARRAY(String), nullable=False, default=[])
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_public = Column(Boolean, default=False, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+    conversations = relationship("AgentConversation", back_populates="agent")
+    executions = relationship("AgentExecution", back_populates="agent")
+    
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_agent_name_tenant'),
+        Index('idx_agents_tenant_type', 'tenant_id', 'type'),
+        Index('idx_agents_tenant_active', 'tenant_id', 'is_active'),
+    )
+
+
+class AgentConversation(Base):
+    __tablename__ = "agent_conversations"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    title = Column(String(200), nullable=True)
+    context = Column(JSONB, nullable=False, default={})
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    agent = relationship("Agent", back_populates="conversations")
+    user = relationship("User", back_populates="agent_conversations")
+    tenant = relationship("Tenant")
+    messages = relationship("AgentMessage", back_populates="conversation", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('idx_agent_conversations_user_updated', 'user_id', 'updated_at'),
+        Index('idx_agent_conversations_agent_active', 'agent_id', 'is_active'),
+    )
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    message_metadata = Column(JSONB, nullable=False, default={})
+    sequence_number = Column(Integer, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    conversation = relationship("AgentConversation", back_populates="messages")
+    
+    __table_args__ = (
+        UniqueConstraint('conversation_id', 'sequence_number', name='uq_conversation_sequence'),
+        Index('idx_agent_messages_conversation_sequence', 'conversation_id', 'sequence_number'),
+    )
+
+
+class AgentExecution(Base):
+    __tablename__ = "agent_executions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("agent_conversations.id"), nullable=True, index=True)
+    task_type = Column(String(100), nullable=False, index=True)
+    input_data = Column(JSONB, nullable=False)
+    output_data = Column(JSONB, nullable=True)
+    status = Column(String(20), nullable=False, default='pending', index=True)
+    error_message = Column(Text, nullable=True)
+    execution_time_ms = Column(Integer, nullable=True)
+    
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    
+    agent = relationship("Agent", back_populates="executions")
+    user = relationship("User")
+    tenant = relationship("Tenant")
+    conversation = relationship("AgentConversation")
+    
+    __table_args__ = (
+        Index('idx_agent_executions_status_started', 'status', 'started_at'),
+        Index('idx_agent_executions_tenant_task', 'tenant_id', 'task_type'),
+    )
+
+
+class AgentTool(Base):
+    __tablename__ = "agent_tools"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=False)
+    tool_type = Column(String(50), nullable=False, index=True)
+    configuration_schema = Column(JSONB, nullable=False)
+    requires_admin = Column(Boolean, default=False, nullable=False)
+    is_tenant_specific = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index('idx_agent_tools_type_active', 'tool_type', 'is_active'),
+    )
+
+
+# =====================================
+# SISTEMA DE FIRMA DIGITAL
 # =====================================
 
 class SignatureProvider(Base):
