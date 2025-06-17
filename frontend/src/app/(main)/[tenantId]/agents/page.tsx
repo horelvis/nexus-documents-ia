@@ -1,123 +1,182 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   IconSparkles,
   IconSearch,
   IconRobot,
   IconBrain,
-  IconArrowRight
+  IconArrowRight,
+  IconUpload,
+  IconRoute,
+  IconDashboard,
+  IconFileText
 } from '@tabler/icons-react'
+import { AgentRouter } from '@/components/agents/agent-router'
+import { AgentAssignment } from '@/components/agents/agent-assignment'
+import { AgentDashboard } from '@/components/agents/agent-dashboard'
+import { useUpload } from '@/contexts/upload-context'
 
 export default function AgentsPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.tenantId as string
-
+  const { openUploadDialog } = useUpload()
+  const [activeTab, setActiveTab] = useState('overview')
+  const [selectedDocument, setSelectedDocument] = useState<any>(null)
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-6 py-4 border-b">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <IconRobot className="h-6 w-6 text-blue-500" />
-          AI Agents
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Descubre cómo nuestros agentes de IA pueden ayudarte a trabajar más eficientemente
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <IconRobot className="h-6 w-6 text-blue-500" />
+              Multi-Agent System
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Intelligent document processing with specialized AI agents
+            </p>
+          </div>
+          <Button onClick={openUploadDialog} className="flex items-center gap-2">
+            <IconUpload className="h-4 w-4" />
+            Upload Document
+          </Button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-6 py-6">
-        {/* Introduction */}
-        <Card className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <IconSparkles className="h-5 w-5 text-yellow-600" />
-              Potencia tu productividad con IA
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground mb-4">
-              Nuestros agentes de inteligencia artificial están diseñados para automatizar tareas complejas,
-              analizar documentos y proporcionar insights valiosos. Cada agente está especializado en un área
-              específica para brindarte los mejores resultados.
-            </p>
-            <Button 
-              onClick={() => router.push(`/${tenantId}/search`)}
-              className="flex items-center gap-2"
-            >
-              <IconSearch className="h-4 w-4" />
-              Ir a búsqueda con IA
-              <IconArrowRight className="h-4 w-4" />
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* How to Use Section */}
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <IconBrain className="h-5 w-5" />
-              ¿Cómo usar los agentes?
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 font-medium">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm">
-                    1
-                  </div>
-                  <span>Busca o sube documentos</span>
+      <div className="flex-1 overflow-auto">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full">
+          <div className="px-6 pt-4">
+            <TabsList className="grid w-full grid-cols-3 max-w-[600px]">
+              <TabsTrigger value="overview" className="flex items-center gap-2">
+                <IconDashboard className="h-4 w-4" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="router" className="flex items-center gap-2">
+                <IconRoute className="h-4 w-4" />
+                Router Analysis
+              </TabsTrigger>
+              <TabsTrigger value="assignments" className="flex items-center gap-2">
+                <IconFileText className="h-4 w-4" />
+                Documents
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          
+          <div className="px-6 py-6">
+            <TabsContent value="overview" className="mt-0">
+              <AgentDashboard />
+            </TabsContent>
+            
+            <TabsContent value="router" className="mt-0">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconBrain className="h-5 w-5" />
+                        How Agent Router Works
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-sm font-medium shrink-0">
+                            1
+                          </div>
+                          <div>
+                            <h4 className="font-medium">Document Analysis</h4>
+                            <p className="text-sm text-muted-foreground">
+                              The Router Agent analyzes your document to determine its type, content, and processing requirements.
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-sm font-medium shrink-0">
+                            2
+                          </div>
+                          <div>
+                            <h4 className="font-medium">Agent Assignment</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Based on the analysis, specialized agents are automatically assigned to handle specific aspects of your document.
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-sm font-medium shrink-0">
+                            3
+                          </div>
+                          <div>
+                            <h4 className="font-medium">Intelligent Processing</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Each agent works on its specialized task, whether it's managing signatures, checking compliance, or generating analytics.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <Separator />
+                      
+                      <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-4">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <IconSparkles className="h-4 w-4" />
+                          Available Agents
+                        </h4>
+                        <ul className="space-y-2 text-sm">
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium text-blue-600">Signature Agent:</span>
+                            <span className="text-muted-foreground">Manages digital signature workflows and tracks signing progress</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium text-green-600">Compliance Agent:</span>
+                            <span className="text-muted-foreground">Validates legal requirements and checks document compliance</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium text-orange-600">Workflow Agent:</span>
+                            <span className="text-muted-foreground">Orchestrates document processes and approval chains</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium text-pink-600">Analytics Agent:</span>
+                            <span className="text-muted-foreground">Generates insights and reports from document data</span>
+                          </li>
+                        </ul>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
-                <p className="text-sm text-muted-foreground ml-10">
-                  Usa la búsqueda para encontrar documentos existentes o sube nuevos archivos
-                </p>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 font-medium">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm">
-                    2
-                  </div>
-                  <span>Selecciona un agente</span>
+                
+                <div>
+                  <AgentRouter 
+                    documentId={selectedDocument?.id}
+                    documentName={selectedDocument?.name || "Sample_Contract.pdf"}
+                    documentType={selectedDocument?.type || "legal"}
+                    onAnalysisComplete={(analysis) => {
+                      console.log('Analysis complete:', analysis)
+                    }}
+                  />
                 </div>
-                <p className="text-sm text-muted-foreground ml-10">
-                  Elige el agente más adecuado para tu tarea específica
-                </p>
               </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 font-medium">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm">
-                    3
-                  </div>
-                  <span>Haz preguntas</span>
-                </div>
-                <p className="text-sm text-muted-foreground ml-10">
-                  Interactúa con el agente para obtener análisis e insights
-                </p>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-4">
-              <h4 className="font-medium mb-2">💡 Tip: Mejora tus resultados</h4>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>• Sé específico en tus preguntas para obtener respuestas más precisas</li>
-                <li>• Usa los ejemplos sugeridos como punto de partida</li>
-                <li>• Combina diferentes agentes para análisis más completos</li>
-                <li>• Los agentes recuerdan el contexto de la conversación</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
+            </TabsContent>
+            
+            <TabsContent value="assignments" className="mt-0">
+              <AgentAssignment 
+                onDocumentClick={(doc) => {
+                  setSelectedDocument(doc)
+                  setActiveTab('router')
+                }}
+              />
+            </TabsContent>
+          </div>
+        </Tabs>
       </div>
     </div>
   )
