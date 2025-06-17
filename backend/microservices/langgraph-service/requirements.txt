@@ -15,7 +15,7 @@ langgraph-checkpoint-sqlite==1.0.0
 
 # Vector database
 qdrant-client==1.7.3
-langchain-qdrant==0.1.0
+langchain-qdrant==0.3.25
 
 # Database
 sqlalchemy==2.0.25
