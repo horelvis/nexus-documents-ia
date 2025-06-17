@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_
 from datetime import datetime, timedelta
 import logging
 
-from app.api.deps import get_db, get_current_active_user, get_current_admin_user
+from app.api.dependencies import get_db, get_current_admin_user
 from app.db.models import User, Document, Tenant
 from app.schemas.user import (
     UserResponse, 
