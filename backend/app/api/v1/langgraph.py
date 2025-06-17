@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 import httpx
 import logging
 
-from app.core.auth import get_current_active_user, get_current_active_superuser
+from app.api.dependencies import get_current_active_user, get_current_active_superuser
 from app.core.database import get_async_db
 from app.db.models import User
 from app.services.langgraph_client import LangGraphClient
