@@ -28,8 +28,7 @@ router = APIRouter()
 @router.post("/run", response_model=GraphRunResponse)
 async def run_graph(
     request: GraphRunRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Run a LangGraph workflow
@@ -82,8 +81,7 @@ async def run_graph(
 @router.post("/tags/generate", response_model=TagGenerationResponse)
 async def generate_tags(
     request: TagGenerationRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Generate tags from text using LangGraph
@@ -124,8 +122,7 @@ async def generate_tags(
 @router.post("/documents/process", response_model=DocumentProcessingResponse)
 async def process_document(
     request: DocumentProcessingRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Process document with intelligent chunking and quality checks
@@ -171,8 +168,7 @@ async def process_document(
 @router.post("/rag/query", response_model=RAGQueryResponse)
 async def rag_query(
     request: RAGQueryRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Execute enhanced RAG query with multiple search strategies
