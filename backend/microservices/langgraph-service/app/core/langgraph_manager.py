@@ -44,8 +44,11 @@ class LangGraphManager:
             logger.info(f"Initialized LLM: {settings.llm_model}")
             
             # Initialize embeddings
+            # Set OLLAMA_HOST environment variable for OllamaEmbeddings
+            import os
+            os.environ["OLLAMA_HOST"] = settings.ollama_base_url
+            
             self.embeddings = OllamaEmbeddings(
-                base_url=settings.ollama_base_url,
                 model=settings.embedding_model
             )
             logger.info(f"Initialized embeddings: {settings.embedding_model}")
