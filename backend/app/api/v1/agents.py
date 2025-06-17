@@ -472,67 +472,75 @@ async def analyze_document_with_router(
             # Check if we have LangGraph service available
             try:
                 from app.services.langgraph_client import LangGraphClient
-                langgraph_client = LangGraphClient()
+                import httpx
                 
-                yield f"data: {json.dumps({'type': 'progress', 'content': 'Connecting to LangGraph service...', 'progress': 10})}\n\n"
-                
-                # Prepare request for LangGraph document analysis crew
-                graph_request = {
-                    "graph_type": "document_analysis_crew",
-                    "input_data": {
-                        "document_id": request.document_id or "temp-doc",
-                        "document_content": request.document_content,
+                # Create HTTP client for LangGraph service
+                async with httpx.AsyncClient() as http_client:
+                    langgraph_client = LangGraphClient(
+                        http_client=http_client,
+                        tenant_id=str(current_user.tenant_id),
+                        user_id=str(current_user.id)
+                    )
+                    
+                    yield f"data: {json.dumps({'type': 'progress', 'content': 'Connecting to LangGraph service...', 'progress': 10})}\n\n"
+                    
+                    # Prepare request for LangGraph document analysis crew
+                    graph_request = {
+                        "graph_type": "document_analysis_crew",
+                        "input_data": {
+                            "document_id": request.document_id or "temp-doc",
+                            "document_content": request.document_content,
+                            "tenant_id": str(current_user.tenant_id),
+                            "user_id": str(current_user.id)
+                        },
                         "tenant_id": str(current_user.tenant_id),
                         "user_id": str(current_user.id)
-                    },
-                    "tenant_id": str(current_user.tenant_id),
-                    "user_id": str(current_user.id)
-                }
-                
-                yield f"data: {json.dumps({'type': 'progress', 'content': 'Starting CrewAI agent analysis...', 'progress': 20})}\n\n"
-                
-                # Execute LangGraph + CrewAI workflow
-                async for event in langgraph_client.stream_graph_execution(graph_request):
-                    if event.get("type") == "node_start":
-                        node_name = event.get("node", "")
-                        progress_map = {
-                            "classify_document": 30,
-                            "select_specialist_agents": 40,
-                            "extract_entities": 50,
-                            "execute_specialist_crew": 60,
-                            "analyze_compliance": 70,
-                            "synthesize_findings": 80,
-                            "generate_recommendations": 90
-                        }
-                        progress = progress_map.get(node_name, 50)
-                        yield f"data: {json.dumps({'type': 'progress', 'content': f'Processing: {node_name}', 'progress': progress})}\n\n"
+                    }
                     
-                    elif event.get("type") == "result":
-                        # Got final result from LangGraph
-                        result_data = event.get("data", {})
-                        
-                        # Transform to our expected format
-                        result = {
-                            "type": "result",
-                            "content": {
-                                "document_type": result_data.get("document_type", "general"),
-                                "is_signable": result_data.get("requires_signature", False),
-                                "required_agents": result_data.get("agents_used", ["document_analyzer"]),
-                                "confidence": result_data.get("confidence_scores", {}).get("overall", 0.85),
-                                "execution_type": "sequential",
-                                "analysis": result_data.get("analysis", {}),
-                                "recommendations": result_data.get("recommendations", []),
-                                "action_items": result_data.get("action_items", []),
-                                "extracted_data": result_data.get("extracted_data", {}),
-                                "compliance_status": result_data.get("compliance_status", {}),
-                                "risk_assessment": result_data.get("risk_assessment", {}),
-                                "analysis_timestamp": datetime.utcnow().isoformat()
+                    yield f"data: {json.dumps({'type': 'progress', 'content': 'Starting CrewAI agent analysis...', 'progress': 20})}\n\n"
+                    
+                    # Execute LangGraph + CrewAI workflow
+                    async for event in langgraph_client.stream_graph_execution(graph_request):
+                        if event.get("type") == "node_start":
+                            node_name = event.get("node", "")
+                            progress_map = {
+                                "classify_document": 30,
+                                "select_specialist_agents": 40,
+                                "extract_entities": 50,
+                                "execute_specialist_crew": 60,
+                                "analyze_compliance": 70,
+                                "synthesize_findings": 80,
+                                "generate_recommendations": 90
                             }
-                        }
+                            progress = progress_map.get(node_name, 50)
+                            yield f"data: {json.dumps({'type': 'progress', 'content': f'Processing: {node_name}', 'progress': progress})}\n\n"
                         
-                        yield f"data: {json.dumps(result)}\n\n"
-                
-                yield f"data: {json.dumps({'type': 'progress', 'content': 'Analysis complete', 'progress': 100})}\n\n"
+                        elif event.get("type") == "result":
+                            # Got final result from LangGraph
+                            result_data = event.get("data", {})
+                            
+                            # Transform to our expected format
+                            result = {
+                                "type": "result",
+                                "content": {
+                                    "document_type": result_data.get("document_type", "general"),
+                                    "is_signable": result_data.get("requires_signature", False),
+                                    "required_agents": result_data.get("agents_used", ["document_analyzer"]),
+                                    "confidence": result_data.get("confidence_scores", {}).get("overall", 0.85),
+                                    "execution_type": "sequential",
+                                    "analysis": result_data.get("analysis", {}),
+                                    "recommendations": result_data.get("recommendations", []),
+                                    "action_items": result_data.get("action_items", []),
+                                    "extracted_data": result_data.get("extracted_data", {}),
+                                    "compliance_status": result_data.get("compliance_status", {}),
+                                    "risk_assessment": result_data.get("risk_assessment", {}),
+                                    "analysis_timestamp": datetime.utcnow().isoformat()
+                                }
+                            }
+                            
+                            yield f"data: {json.dumps(result)}\n\n"
+                    
+                    yield f"data: {json.dumps({'type': 'progress', 'content': 'Analysis complete', 'progress': 100})}\n\n"
                 
             except Exception as e:
                 logger.warning(f"LangGraph service not available, falling back to basic analysis: {e}")

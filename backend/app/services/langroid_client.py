@@ -300,6 +300,7 @@ class LangroidClient:
         async with httpx.AsyncClient() as client:
             url = f"{self.base_url}/document/analyze"
             
+            # Send as form data, not JSON
             data = {
                 "document_content": document_content,
                 "analysis_type": analysis_type,
@@ -310,7 +311,7 @@ class LangroidClient:
             async with client.stream(
                 "POST",
                 url,
-                json=data,
+                data=data,  # Changed from json=data to data=data
                 timeout=120.0
             ) as response:
                 if response.status_code >= 400:
