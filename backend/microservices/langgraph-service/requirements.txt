@@ -60,4 +60,3 @@ pyyaml==6.0.2
 
 # Agent orchestration
 crewai==0.130.0
-crewai-tools==0.47.1
