@@ -87,14 +87,16 @@ class LangGraphManager:
         from app.graphs.tag_generation_graph import TagGenerationGraph
         from app.graphs.document_processing_graph import DocumentProcessingGraph
         from app.graphs.rag_graph import EnhancedRAGGraph
-        from app.graphs.crewai_orchestration_graph import CrewAIOrchestrationGraph
+        # Removed CrewAI graphs due to dependency conflicts
+        # from app.graphs.crewai_orchestration_graph import CrewAIOrchestrationGraph
+        # from app.graphs.multi_agent_workflows import MultiAgentWorkflowGraph
         
         # Register graph classes
         self.graphs = {
             "tag_generation": TagGenerationGraph,
             "document_processing": DocumentProcessingGraph,
             "rag": EnhancedRAGGraph,
-            "crew_orchestration": CrewAIOrchestrationGraph
+            # "crew_orchestration": CrewAIOrchestrationGraph
         }
         logger.info(f"Registered {len(self.graphs)} graph types")
     
