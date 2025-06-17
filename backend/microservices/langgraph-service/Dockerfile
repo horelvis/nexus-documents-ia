@@ -37,7 +37,7 @@ COPY app/ ./app/
 
 
 # APLICAR EL PARCHE después de instalar
-RUN python graphs/patch/patch_litellm.py
+RUN python patch/patch_litellm.py
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
