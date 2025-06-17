@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Invitation to join {{ tenant_name }}{% endblock %}
+
+{% block content %}
+<h2>You're invited to join {{ tenant_name }}!</h2>
+
+<p>Hi there,</p>
+
+<p><strong>{{ inviter_name }}</strong> has invited you to join <strong>{{ tenant_name }}</strong> as a <strong>{{ role }}</strong>.</p>
+
+<p>To accept this invitation and create your account, please click the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ invitation_link }}" class="button">Accept Invitation</a>
+</div>
+
+<p style="margin-top: 30px;">Or copy and paste this link into your browser:</p>
+<p style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; word-break: break-all;">
+    {{ invitation_link }}
+</p>
+
+<p style="margin-top: 30px;">This invitation link will expire in 7 days. If you need a new invitation, please contact {{ inviter_name }}.</p>
+
+<p>Best regards,<br>
+The {{ tenant_name }} Team</p>
+{% endblock %}

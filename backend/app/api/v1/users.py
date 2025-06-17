@@ -3,8 +3,8 @@ API endpoints for user management
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, func
 from datetime import datetime, timedelta
 import logging
 
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/list", response_model=List[UserWithStats])
-async def list_users(
+def list_users(
     current_user: User = Depends(get_current_active_superuser),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: Optional[str] = None
@@ -36,38 +36,33 @@ async def list_users(
     """
     try:
         # Base query for users in the same tenant
-        query = select(User).where(User.tenant_id == current_user.tenant_id)
+        query = db.query(User).filter(User.tenant_id == current_user.tenant_id)
         
         # Apply search filter if provided
         if search:
             search_filter = f"%{search}%"
-            query = query.where(
-                User.email.ilike(search_filter) | 
-                User.name.ilike(search_filter)
+            query = query.filter(
+                or_(
+                    User.email.ilike(search_filter),
+                    User.full_name.ilike(search_filter)
+                )
             )
         
         # Execute query
-        result = await db.execute(query.offset(skip).limit(limit))
-        users = result.scalars().all()
+        users = query.offset(skip).limit(limit).all()
         
         # Get additional stats for each user
         users_with_stats = []
         for user in users:
             # Count documents
-            doc_count_result = await db.execute(
-                select(func.count(Document.id)).where(
-                    Document.user_id == user.id
-                )
-            )
-            doc_count = doc_count_result.scalar() or 0
+            doc_count = db.query(func.count(Document.id)).filter(
+                Document.created_by == user.id
+            ).scalar() or 0
             
             # Calculate storage used (sum of file sizes)
-            storage_result = await db.execute(
-                select(func.sum(Document.file_size)).where(
-                    Document.user_id == user.id
-                )
-            )
-            storage_used = storage_result.scalar() or 0
+            storage_used = db.query(func.sum(Document.file_size)).filter(
+                Document.created_by == user.id
+            ).scalar() or 0
             
             # Determine user status
             if not user.is_active:
@@ -77,15 +72,21 @@ async def list_users(
             else:
                 status = "active"
             
+            # Determine role - check if user is superuser
+            if user.is_superuser:
+                role = "admin"
+            else:
+                role = "user"
+            
             users_with_stats.append({
                 "id": str(user.id),
                 "email": user.email,
-                "name": user.name,
-                "role": user.role,
+                "name": user.full_name,
+                "role": role,
                 "status": status,
                 "createdAt": user.created_at.isoformat(),
                 "lastLogin": user.last_login_at.isoformat() if user.last_login_at else None,
-                "avatar": user.avatar_url,
+                "avatar": None,  # Add avatar URL if available
                 "documentsCount": doc_count,
                 "storageUsed": storage_used
             })
@@ -100,46 +101,56 @@ async def list_users(
         )
 
 @router.post("/invite")
-async def invite_user(
+def invite_user(
     invite_data: UserInvite,
     current_user: User = Depends(get_current_active_superuser),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Send invitation to a new user (admin only)
     """
     try:
         # Check if user already exists
-        existing_user = await db.execute(
-            select(User).where(User.email == invite_data.email)
-        )
-        if existing_user.scalar_one_or_none():
+        existing_user = db.query(User).filter(User.email == invite_data.email).first()
+        
+        if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this email already exists"
             )
         
-        # TODO: In a real implementation, this would:
-        # 1. Create a pending invitation in the database
-        # 2. Send an invitation email with a signup link
-        # 3. The link would include a token to associate the new user with this tenant
+        # Get tenant info
+        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        tenant_name = tenant.name if tenant else "Organization"
         
-        # For now, we'll just return success
-        logger.info(f"Invitation sent to {invite_data.email} by {current_user.email}")
+        # Generate invitation link (in a real implementation, you'd create a token)
+        invitation_link = f"{settings.FRONTEND_URL}/auth/sign-up?tenant={current_user.tenant_id}&role={invite_data.role}"
         
-        # Send invitation email (mock for now)
-        if email_service:
-            await email_service.send_invitation_email(
-                to_email=invite_data.email,
-                inviter_name=current_user.name or current_user.email,
-                tenant_name=current_user.tenant.name if hasattr(current_user, 'tenant') else "Organization",
+        # Send invitation email
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        email_sent = loop.run_until_complete(
+            email_service.send_user_invitation(
+                email=invite_data.email,
+                inviter_name=current_user.full_name or current_user.email,
+                tenant_name=tenant_name,
+                invitation_link=invitation_link,
                 role=invite_data.role
             )
+        )
+        
+        if not email_sent:
+            logger.warning(f"Failed to send invitation email to {invite_data.email}")
+        
+        logger.info(f"Invitation sent to {invite_data.email} by {current_user.email}")
         
         return {
             "message": f"Invitation sent to {invite_data.email}",
             "email": invite_data.email,
-            "role": invite_data.role
+            "role": invite_data.role,
+            "email_sent": email_sent
         }
         
     except HTTPException:
@@ -152,26 +163,23 @@ async def invite_user(
         )
 
 @router.put("/{user_id}/role")
-async def update_user_role(
+def update_user_role(
     user_id: str,
     role_update: UserRoleUpdate,
     current_user: User = Depends(get_current_active_superuser),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Update user role (admin only)
     """
     try:
         # Get the user
-        result = await db.execute(
-            select(User).where(
-                and_(
-                    User.id == user_id,
-                    User.tenant_id == current_user.tenant_id
-                )
+        user = db.query(User).filter(
+            and_(
+                User.id == user_id,
+                User.tenant_id == current_user.tenant_id
             )
-        )
-        user = result.scalar_one_or_none()
+        ).first()
         
         if not user:
             raise HTTPException(
@@ -186,9 +194,13 @@ async def update_user_role(
                 detail="Cannot change your own admin role"
             )
         
-        # Update role
-        user.role = role_update.role
-        await db.commit()
+        # Update role - set is_superuser based on role
+        if role_update.role == "admin":
+            user.is_superuser = True
+        else:
+            user.is_superuser = False
+            
+        db.commit()
         
         logger.info(f"User {user.email} role updated to {role_update.role} by {current_user.email}")
         
@@ -202,31 +214,29 @@ async def update_user_role(
         raise
     except Exception as e:
         logger.error(f"Error updating user role: {str(e)}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update user role"
         )
 
 @router.delete("/{user_id}")
-async def delete_user(
+def delete_user(
     user_id: str,
     current_user: User = Depends(get_current_active_superuser),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Delete a user (admin only)
     """
     try:
         # Get the user
-        result = await db.execute(
-            select(User).where(
-                and_(
-                    User.id == user_id,
-                    User.tenant_id == current_user.tenant_id
-                )
+        user = db.query(User).filter(
+            and_(
+                User.id == user_id,
+                User.tenant_id == current_user.tenant_id
             )
-        )
-        user = result.scalar_one_or_none()
+        ).first()
         
         if not user:
             raise HTTPException(
@@ -242,17 +252,16 @@ async def delete_user(
             )
         
         # Check if this is the last admin
-        if user.role == "admin":
-            admin_count = await db.execute(
-                select(func.count(User.id)).where(
-                    and_(
-                        User.tenant_id == current_user.tenant_id,
-                        User.role == "admin",
-                        User.is_active == True
-                    )
+        if user.is_superuser:
+            admin_count = db.query(func.count(User.id)).filter(
+                and_(
+                    User.tenant_id == current_user.tenant_id,
+                    User.is_superuser == True,
+                    User.is_active == True
                 )
-            )
-            if admin_count.scalar() <= 1:
+            ).scalar()
+            
+            if admin_count <= 1:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot delete the last admin user"
@@ -260,8 +269,7 @@ async def delete_user(
         
         # Soft delete the user
         user.is_active = False
-        user.deleted_at = datetime.utcnow()
-        await db.commit()
+        db.commit()
         
         logger.info(f"User {user.email} deleted by {current_user.email}")
         
@@ -274,16 +282,17 @@ async def delete_user(
         raise
     except Exception as e:
         logger.error(f"Error deleting user: {str(e)}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user"
         )
 
 @router.get("/{user_id}/activity")
-async def get_user_activity(
+def get_user_activity(
     user_id: str,
     current_user: User = Depends(get_current_active_superuser),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     days: int = Query(30, ge=1, le=365)
 ):
     """
@@ -291,15 +300,12 @@ async def get_user_activity(
     """
     try:
         # Verify user exists and belongs to same tenant
-        result = await db.execute(
-            select(User).where(
-                and_(
-                    User.id == user_id,
-                    User.tenant_id == current_user.tenant_id
-                )
+        user = db.query(User).filter(
+            and_(
+                User.id == user_id,
+                User.tenant_id == current_user.tenant_id
             )
-        )
-        user = result.scalar_one_or_none()
+        ).first()
         
         if not user:
             raise HTTPException(
@@ -312,22 +318,20 @@ async def get_user_activity(
         start_date = end_date - timedelta(days=days)
         
         # Get document activity
-        doc_activity = await db.execute(
-            select(
-                func.date(Document.created_at).label('date'),
-                func.count(Document.id).label('count')
-            ).where(
-                and_(
-                    Document.user_id == user_id,
-                    Document.created_at >= start_date
-                )
-            ).group_by(func.date(Document.created_at))
-        )
+        doc_activity = db.query(
+            func.date(Document.created_at).label('date'),
+            func.count(Document.id).label('count')
+        ).filter(
+            and_(
+                Document.created_by == user_id,
+                Document.created_at >= start_date
+            )
+        ).group_by(func.date(Document.created_at)).all()
         
         activity_data = {
             "user_id": user_id,
             "email": user.email,
-            "name": user.name,
+            "name": user.full_name,
             "period_days": days,
             "document_uploads": [
                 {

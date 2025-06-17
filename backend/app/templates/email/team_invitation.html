@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Invitation to join {{ team_name }}{% endblock %}
+
+{% block content %}
+<h2>You're invited to join the {{ team_name }} team!</h2>
+
+<p>Hi there,</p>
+
+<p><strong>{{ inviter_name }}</strong> has invited you to join the <strong>{{ team_name }}</strong> team.</p>
+
+<p>To accept this invitation and join the team, please click the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ invitation_link }}" class="button">Join Team</a>
+</div>
+
+<p style="margin-top: 30px;">Or copy and paste this link into your browser:</p>
+<p style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; word-break: break-all;">
+    {{ invitation_link }}
+</p>
+
+<p style="margin-top: 30px; color: #dc3545;">
+    <strong>Important:</strong> This invitation will expire on {{ expires_at }}.
+</p>
+
+<p>If you have any questions, please contact {{ inviter_name }}.</p>
+
+<p>Best regards,<br>
+The {{ team_name }} Team</p>
+{% endblock %}
