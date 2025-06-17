@@ -113,3 +113,45 @@ UserResponse = User
 # Update forward refs for models that might not be defined yet when User is defined
 User.update_forward_refs()
 UserImage.update_forward_refs()
+
+# Additional schemas for user management
+
+class UserWithStats(BaseModel):
+    """User with usage statistics for admin panel"""
+    id: str
+    email: str
+    name: Optional[str] = None
+    role: str
+    status: str  # active, inactive, pending
+    createdAt: str
+    lastLogin: Optional[str] = None
+    avatar: Optional[str] = None
+    documentsCount: int = 0
+    storageUsed: int = 0
+
+class UserInvite(BaseModel):
+    """Schema for inviting new users"""
+    email: EmailStr
+    role: str = Field(default="user", pattern="^(admin|user|viewer)$")
+    name: Optional[str] = None
+
+class UserRoleUpdate(BaseModel):
+    """Schema for updating user role"""
+    role: str = Field(..., pattern="^(admin|user|viewer)$")
+
+class UserActivity(BaseModel):
+    """User activity information"""
+    user_id: str
+    email: str
+    name: Optional[str] = None
+    period_days: int
+    document_uploads: List[dict]
+    last_login: Optional[str] = None
+    account_created: str
+
+class UserListResponse(BaseModel):
+    """Response for user list endpoint"""
+    users: List[UserWithStats]
+    total: int
+    skip: int
+    limit: int

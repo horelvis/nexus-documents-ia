@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import { NavLink } from "@/components/ui/nav-link"
 import {
   type Icon,
 } from "@tabler/icons-react"
@@ -41,10 +41,10 @@ export function NavDocuments({
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton asChild>
-                <Link href={item.url}>
+                <NavLink href={item.url}>
                   <item.icon />
                   <span>{item.name}</span>
-                </Link>
+                </NavLink>
               </SidebarMenuButton>
             )}
           </SidebarMenuItem>

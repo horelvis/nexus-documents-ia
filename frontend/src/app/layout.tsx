@@ -4,6 +4,8 @@ import "./globals.css";
 import { ClerkProvider } from '@clerk/nextjs'
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { UserProvider } from "@/contexts/user-context";
+import { PageLoaderProvider } from "@/components/providers/page-loader";
+import { TopLoader } from "@/components/providers/top-loader";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -55,9 +57,12 @@ export default function RootLayout({
             enableSystem
             storageKey="nexus-theme"
           >
-            <UserProvider>
-              {children}
-            </UserProvider>
+            <PageLoaderProvider>
+              <TopLoader />
+              <UserProvider>
+                {children}
+              </UserProvider>
+            </PageLoaderProvider>
           </ThemeProvider>
         </body>
         

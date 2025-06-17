@@ -148,6 +148,11 @@ const data = {
       icon: IconUsers,
     },
     {
+      title: "Team Management",
+      url: "/admin/teams",
+      icon: IconUsers,
+    },
+    {
       title: "Billing",
       url: "/billing",
       icon: IconCreditCard,

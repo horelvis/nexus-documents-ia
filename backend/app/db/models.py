@@ -252,6 +252,49 @@ class TeamInvitation(Base):
     )
 
 
+class Team(Base):
+    __tablename__ = "teams"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="teams")
+    creator = relationship("User", foreign_keys=[created_by], backref="created_teams")
+    members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_team_name_tenant'),
+        Index('idx_teams_tenant', 'tenant_id'),
+    )
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="member")  # leader, member
+    
+    joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    team = relationship("Team", back_populates="members")
+    user = relationship("User", backref="team_memberships")
+    
+    __table_args__ = (
+        UniqueConstraint('team_id', 'user_id', name='uq_team_member'),
+        Index('idx_team_members_user', 'user_id'),
+    )
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     
@@ -272,6 +315,7 @@ class Tenant(Base):
     tags = relationship("Tag", back_populates="tenant")
     roles = relationship("Role", back_populates="tenant")
     team_invitations = relationship("TeamInvitation", back_populates="tenant", cascade="all, delete-orphan")
+    teams = relationship("Team", back_populates="tenant", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),

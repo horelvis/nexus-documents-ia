@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import { NavLink } from "@/components/ui/nav-link"
 import { type Icon } from "@tabler/icons-react"
 import { useActiveRoute } from "@/hooks/use-active-route"
 import {
@@ -59,9 +59,9 @@ export function NavMain({
                             asChild
                             isActive={isActive(subItem.url)}
                           >
-                            <Link href={subItem.url}>
+                            <NavLink href={subItem.url}>
                               <span>{subItem.title}</span>
-                            </Link>
+                            </NavLink>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
@@ -74,10 +74,10 @@ export function NavMain({
                   tooltip={item.title}
                   isActive={isActive(item.url)}
                 >
-                  <Link href={item.url}>
+                  <NavLink href={item.url}>
                     {item.icon && <item.icon />}
                     <span>{item.title}</span>
-                  </Link>
+                  </NavLink>
                 </SidebarMenuButton>
               )}
             </SidebarMenuItem>

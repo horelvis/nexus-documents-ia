@@ -4,8 +4,63 @@ Team management schemas
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+import uuid
 
 from pydantic import BaseModel, EmailStr, Field
+
+
+class TeamBase(BaseModel):
+    """Base schema for teams"""
+    name: str = Field(..., min_length=1, max_length=255, example="Engineering Team")
+    description: Optional[str] = Field(None, max_length=1000, example="Team responsible for product development")
+
+
+class TeamCreate(TeamBase):
+    """Schema for creating a team"""
+    pass
+
+
+class TeamUpdate(BaseModel):
+    """Schema for updating a team"""
+    name: Optional[str] = Field(None, min_length=1, max_length=255, example="Updated Team Name")
+    description: Optional[str] = Field(None, max_length=1000, example="Updated description")
+
+
+class Team(TeamBase):
+    """Complete team schema"""
+    id: UUID = Field(..., example=uuid.uuid4())
+    tenant_id: UUID = Field(..., example=uuid.uuid4())
+    created_by: UUID = Field(..., example=uuid.uuid4())
+    created_at: datetime = Field(..., example=datetime.now())
+    updated_at: datetime = Field(..., example=datetime.now())
+    members_count: int = Field(0, example=5)
+    
+    class Config:
+        from_attributes = True
+
+
+class TeamWithMembers(Team):
+    """Team with members list"""
+    members: List['TeamMemberResponse'] = []
+
+
+class TeamListResponse(BaseModel):
+    """Response for team list endpoint"""
+    teams: List[Team]
+    total: int
+    skip: int
+    limit: int
+
+
+class TeamMemberAdd(BaseModel):
+    """Schema for adding a member to a team"""
+    user_id: UUID = Field(..., example=uuid.uuid4())
+    role: str = Field(default="member", pattern="^(leader|member)$", example="member")
+
+
+class TeamMemberRoleUpdate(BaseModel):
+    """Schema for updating team member role"""
+    role: str = Field(..., pattern="^(leader|member)$", example="leader")
 
 
 class TeamInvitationCreate(BaseModel):

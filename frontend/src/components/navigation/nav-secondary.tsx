@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
+import { NavLink } from "@/components/ui/nav-link"
 import { type Icon } from "@tabler/icons-react"
 import { useActiveRoute } from "@/hooks/use-active-route"
 
@@ -35,10 +35,10 @@ export function NavSecondary({
                 asChild
                 isActive={isActive(item.url)}
               >
-                <Link href={item.url}>
+                <NavLink href={item.url}>
                   <item.icon />
                   <span>{item.title}</span>
-                </Link>
+                </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}

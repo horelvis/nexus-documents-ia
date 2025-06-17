@@ -20,7 +20,8 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Agent, useAgentsService } from "@/lib/services/agents.service"
 import { useNotifications } from "@/contexts/notifications-context"
-import { useRouter, useParams, useSearchParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
+import { useNavigation } from "@/hooks/use-navigation"
 
 export function NavAgents() {
   const [agents, setAgents] = useState<Agent[]>([])
@@ -29,7 +30,7 @@ export function NavAgents() {
   
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
-  const router = useRouter()
+  const { navigate } = useNavigation()
   const params = useParams()
   const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
@@ -102,7 +103,7 @@ export function NavAgents() {
 
   const handleAgentClick = (agent: Agent) => {
     // Navigate to agents page with agent selection
-    router.push(`/${tenantId}/agents?agentId=${agent.id}`)
+    navigate(`/${tenantId}/agents?agentId=${agent.id}`)
   }
 
   const getStatusBadge = (isActive: boolean) => {
