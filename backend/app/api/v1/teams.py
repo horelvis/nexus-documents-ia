@@ -10,11 +10,10 @@ from typing import List, Optional, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import and_, or_, func
 
-from app.api.deps import get_db, get_current_active_user, get_current_admin_user
+from app.api.dependencies import get_db, get_current_active_user, get_current_active_superuser
 from app.db.models import User, Team, TeamMember, Document, Tenant, TeamInvitation
 from app.schemas.team import (
     TeamCreate,
@@ -42,9 +41,9 @@ router = APIRouter()
 # ===========================
 
 @router.get("/", response_model=TeamListResponse)
-async def list_teams(
+def list_teams(
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: Optional[str] = None
@@ -54,12 +53,12 @@ async def list_teams(
     """
     try:
         # Base query for teams in the same tenant
-        query = select(Team).where(Team.tenant_id == current_user.tenant_id)
+        query = db.query(Team).filter(Team.tenant_id == current_user.tenant_id)
         
         # Apply search filter if provided
         if search:
             search_filter = f"%{search}%"
-            query = query.where(
+            query = query.filter(
                 or_(
                     Team.name.ilike(search_filter),
                     Team.description.ilike(search_filter)
@@ -67,20 +66,15 @@ async def list_teams(
             )
         
         # Get total count
-        count_query = select(func.count()).select_from(query.subquery())
-        total_result = await db.execute(count_query)
-        total = total_result.scalar() or 0
+        total = query.count()
         
         # Execute query with pagination
-        result = await db.execute(query.offset(skip).limit(limit).order_by(Team.created_at.desc()))
-        teams = result.scalars().all()
+        teams = query.offset(skip).limit(limit).order_by(Team.created_at.desc()).all()
         
         # Get member count for each team
         teams_with_count = []
         for team in teams:
-            member_count = await db.execute(
-                select(func.count(TeamMember.id)).where(TeamMember.team_id == team.id)
-            )
+            member_count = db.query(func.count(TeamMember.id)).filter(TeamMember.team_id == team.id).scalar() or 0
             team_dict = {
                 "id": team.id,
                 "name": team.name,
@@ -89,7 +83,7 @@ async def list_teams(
                 "created_by": team.created_by,
                 "created_at": team.created_at,
                 "updated_at": team.updated_at,
-                "members_count": member_count.scalar() or 0
+                "members_count": member_count
             }
             teams_with_count.append(team_dict)
         
@@ -108,25 +102,24 @@ async def list_teams(
         )
 
 @router.post("/", response_model=TeamSchema)
-async def create_team(
+def create_team(
     team_data: TeamCreate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Create a new team (admin only)
     """
     try:
         # Check if team name already exists in tenant
-        existing_team = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.name == team_data.name,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        existing_team = db.query(Team).filter(
+            and_(
+                Team.name == team_data.name,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        if existing_team.scalar_one_or_none():
+        ).first()
+        
+        if existing_team:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Team with this name already exists"
@@ -140,8 +133,8 @@ async def create_team(
             created_by=current_user.id
         )
         db.add(team)
-        await db.commit()
-        await db.refresh(team)
+        db.commit()
+        db.refresh(team)
         
         # Add creator as team leader
         team_member = TeamMember(
@@ -150,7 +143,7 @@ async def create_team(
             role="leader"
         )
         db.add(team_member)
-        await db.commit()
+        db.commit()
         
         logger.info(f"Team {team.name} created by {current_user.email}")
         
@@ -169,32 +162,29 @@ async def create_team(
         raise
     except Exception as e:
         logger.error(f"Error creating team: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create team"
         )
 
 @router.get("/{team_id}", response_model=TeamWithMembers)
-async def get_team(
+def get_team(
     team_id: str,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Get team details with members
     """
     try:
         # Get team
-        result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        team = result.scalar_one_or_none()
+        ).first()
         
         if not team:
             raise HTTPException(
@@ -203,10 +193,7 @@ async def get_team(
             )
         
         # Get team members
-        members_result = await db.execute(
-            select(TeamMember, User).join(User).where(TeamMember.team_id == team_id)
-        )
-        members_data = members_result.all()
+        members_data = db.query(TeamMember, User).join(User).filter(TeamMember.team_id == team_id).all()
         
         members = []
         for member, user in members_data:
@@ -243,26 +230,23 @@ async def get_team(
         )
 
 @router.put("/{team_id}", response_model=TeamSchema)
-async def update_team(
+def update_team(
     team_id: str,
     team_update: TeamUpdate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Update team details (admin only)
     """
     try:
         # Get team
-        result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        team = result.scalar_one_or_none()
+        ).first()
         
         if not team:
             raise HTTPException(
@@ -272,16 +256,15 @@ async def update_team(
         
         # Check if new name already exists
         if team_update.name and team_update.name != team.name:
-            existing_team = await db.execute(
-                select(Team).where(
-                    and_(
-                        Team.name == team_update.name,
-                        Team.tenant_id == current_user.tenant_id,
-                        Team.id != team_id
-                    )
+            existing_team = db.query(Team).filter(
+                and_(
+                    Team.name == team_update.name,
+                    Team.tenant_id == current_user.tenant_id,
+                    Team.id != team_id
                 )
-            )
-            if existing_team.scalar_one_or_none():
+            ).first()
+            
+            if existing_team:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Team with this name already exists"
@@ -293,13 +276,11 @@ async def update_team(
         if team_update.description is not None:
             team.description = team_update.description
         
-        await db.commit()
-        await db.refresh(team)
+        db.commit()
+        db.refresh(team)
         
         # Get member count
-        member_count = await db.execute(
-            select(func.count(TeamMember.id)).where(TeamMember.team_id == team.id)
-        )
+        member_count = db.query(func.count(TeamMember.id)).filter(TeamMember.team_id == team.id).scalar() or 0
         
         logger.info(f"Team {team.name} updated by {current_user.email}")
         
@@ -311,39 +292,36 @@ async def update_team(
             created_by=team.created_by,
             created_at=team.created_at,
             updated_at=team.updated_at,
-            members_count=member_count.scalar() or 0
+            members_count=member_count
         )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating team: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update team"
         )
 
 @router.delete("/{team_id}")
-async def delete_team(
+def delete_team(
     team_id: str,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Delete a team (admin only)
     """
     try:
         # Get team
-        result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        team = result.scalar_one_or_none()
+        ).first()
         
         if not team:
             raise HTTPException(
@@ -352,8 +330,8 @@ async def delete_team(
             )
         
         # Delete team (cascade will delete members)
-        await db.delete(team)
-        await db.commit()
+        db.delete(team)
+        db.commit()
         
         logger.info(f"Team {team.name} deleted by {current_user.email}")
         
@@ -363,33 +341,30 @@ async def delete_team(
         raise
     except Exception as e:
         logger.error(f"Error deleting team: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete team"
         )
 
 @router.post("/{team_id}/members", response_model=dict)
-async def add_team_member(
+def add_team_member(
     team_id: str,
     member_data: TeamMemberAdd,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Add a member to a team (admin only)
     """
     try:
         # Verify team exists and belongs to tenant
-        team_result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        team = team_result.scalar_one_or_none()
+        ).first()
         
         if not team:
             raise HTTPException(
@@ -398,15 +373,12 @@ async def add_team_member(
             )
         
         # Verify user exists and belongs to same tenant
-        user_result = await db.execute(
-            select(User).where(
-                and_(
-                    User.id == member_data.user_id,
-                    User.tenant_id == current_user.tenant_id
-                )
+        user = db.query(User).filter(
+            and_(
+                User.id == member_data.user_id,
+                User.tenant_id == current_user.tenant_id
             )
-        )
-        user = user_result.scalar_one_or_none()
+        ).first()
         
         if not user:
             raise HTTPException(
@@ -415,15 +387,14 @@ async def add_team_member(
             )
         
         # Check if user is already a member
-        existing_member = await db.execute(
-            select(TeamMember).where(
-                and_(
-                    TeamMember.team_id == team_id,
-                    TeamMember.user_id == member_data.user_id
-                )
+        existing_member = db.query(TeamMember).filter(
+            and_(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == member_data.user_id
             )
-        )
-        if existing_member.scalar_one_or_none():
+        ).first()
+        
+        if existing_member:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User is already a member of this team"
@@ -436,7 +407,7 @@ async def add_team_member(
             role=member_data.role
         )
         db.add(team_member)
-        await db.commit()
+        db.commit()
         
         logger.info(f"User {user.email} added to team {team.name} by {current_user.email}")
         
@@ -451,34 +422,31 @@ async def add_team_member(
         raise
     except Exception as e:
         logger.error(f"Error adding team member: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to add team member"
         )
 
 @router.put("/{team_id}/members/{user_id}/role", response_model=dict)
-async def update_member_role(
+def update_member_role(
     team_id: str,
     user_id: str,
     role_update: TeamMemberRoleUpdate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Update team member role (admin only)
     """
     try:
         # Get team member
-        result = await db.execute(
-            select(TeamMember).where(
-                and_(
-                    TeamMember.team_id == team_id,
-                    TeamMember.user_id == user_id
-                )
+        member = db.query(TeamMember).filter(
+            and_(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id
             )
-        )
-        member = result.scalar_one_or_none()
+        ).first()
         
         if not member:
             raise HTTPException(
@@ -487,15 +455,14 @@ async def update_member_role(
             )
         
         # Verify team belongs to tenant
-        team_result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        if not team_result.scalar_one_or_none():
+        ).first()
+        
+        if not team:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Team not found"
@@ -503,7 +470,7 @@ async def update_member_role(
         
         # Update role
         member.role = role_update.role
-        await db.commit()
+        db.commit()
         
         logger.info(f"Team member role updated for user {user_id} in team {team_id}")
         
@@ -518,33 +485,30 @@ async def update_member_role(
         raise
     except Exception as e:
         logger.error(f"Error updating member role: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update member role"
         )
 
 @router.delete("/{team_id}/members/{user_id}")
-async def remove_team_member(
+def remove_team_member(
     team_id: str,
     user_id: str,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_active_superuser),
+    db: Session = Depends(get_db)
 ):
     """
     Remove a member from a team (admin only)
     """
     try:
         # Get team member
-        result = await db.execute(
-            select(TeamMember).where(
-                and_(
-                    TeamMember.team_id == team_id,
-                    TeamMember.user_id == user_id
-                )
+        member = db.query(TeamMember).filter(
+            and_(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id
             )
-        )
-        member = result.scalar_one_or_none()
+        ).first()
         
         if not member:
             raise HTTPException(
@@ -553,15 +517,13 @@ async def remove_team_member(
             )
         
         # Verify team belongs to tenant
-        team_result = await db.execute(
-            select(Team).where(
-                and_(
-                    Team.id == team_id,
-                    Team.tenant_id == current_user.tenant_id
-                )
+        team = db.query(Team).filter(
+            and_(
+                Team.id == team_id,
+                Team.tenant_id == current_user.tenant_id
             )
-        )
-        team = team_result.scalar_one_or_none()
+        ).first()
+        
         if not team:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -570,23 +532,22 @@ async def remove_team_member(
         
         # Don't allow removing the last leader
         if member.role == "leader":
-            leader_count = await db.execute(
-                select(func.count(TeamMember.id)).where(
-                    and_(
-                        TeamMember.team_id == team_id,
-                        TeamMember.role == "leader"
-                    )
+            leader_count = db.query(func.count(TeamMember.id)).filter(
+                and_(
+                    TeamMember.team_id == team_id,
+                    TeamMember.role == "leader"
                 )
-            )
-            if leader_count.scalar() <= 1:
+            ).scalar() or 0
+            
+            if leader_count <= 1:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot remove the last team leader"
                 )
         
         # Remove member
-        await db.delete(member)
-        await db.commit()
+        db.delete(member)
+        db.commit()
         
         logger.info(f"User {user_id} removed from team {team.name} by {current_user.email}")
         
@@ -596,7 +557,7 @@ async def remove_team_member(
         raise
     except Exception as e:
         logger.error(f"Error removing team member: {str(e)}")
-        await db.rollback()
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove team member"
@@ -607,10 +568,10 @@ async def remove_team_member(
 # ================================
 
 @router.post("/invitations", response_model=TeamInvitationResponse)
-async def create_team_invitation(
+def create_team_invitation(
     invitation: TeamInvitationCreate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create a new team invitation with QR code.
@@ -636,8 +597,8 @@ async def create_team_invitation(
     )
     
     db.add(db_invitation)
-    await db.commit()
-    await db.refresh(db_invitation)
+    db.commit()
+    db.refresh(db_invitation)
     
     # Generate invitation URL
     invitation_url = f"{settings.FRONTEND_URL}/join-team/{invitation_code}"
@@ -655,10 +616,7 @@ async def create_team_invitation(
     logger.info(f"Created team invitation for tenant {current_user.tenant_id}")
     
     # Get tenant name
-    tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == current_user.tenant_id)
-    )
-    tenant = tenant_result.scalar_one_or_none()
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     
     return TeamInvitationResponse(
         id=db_invitation.id,
@@ -674,9 +632,9 @@ async def create_team_invitation(
     )
 
 @router.get("/invitations", response_model=List[TeamInvitationResponse])
-async def get_team_invitations(
+def get_team_invitations(
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all invitations for the current tenant.
@@ -688,14 +646,11 @@ async def get_team_invitations(
             detail="Team members cannot view invitations"
         )
     
-    result = await db.execute(
-        select(TeamInvitation, Tenant)
-        .join(Tenant)
-        .where(TeamInvitation.tenant_id == current_user.tenant_id)
-        .order_by(TeamInvitation.created_at.desc())
-    )
-    
-    invitations_data = result.all()
+    invitations_data = db.query(TeamInvitation, Tenant)\
+        .join(Tenant)\
+        .filter(TeamInvitation.tenant_id == current_user.tenant_id)\
+        .order_by(TeamInvitation.created_at.desc())\
+        .all()
     
     invitations = []
     for invitation, tenant in invitations_data:
@@ -726,22 +681,19 @@ async def get_team_invitations(
     return invitations
 
 @router.post("/invitations/{invitation_code}/accept")
-async def accept_team_invitation(
+def accept_team_invitation(
     invitation_code: str,
     accept_data: TeamInvitationAccept,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Accept a team invitation.
     This creates a new user account as a team member.
     """
     # Find invitation
-    result = await db.execute(
-        select(TeamInvitation).where(
-            TeamInvitation.invitation_code == invitation_code
-        )
-    )
-    invitation = result.scalar_one_or_none()
+    invitation = db.query(TeamInvitation).filter(
+        TeamInvitation.invitation_code == invitation_code
+    ).first()
     
     if not invitation:
         raise HTTPException(
@@ -771,10 +723,7 @@ async def accept_team_invitation(
         )
     
     # Check if user already exists
-    existing_user_result = await db.execute(
-        select(User).where(User.email == accept_data.email)
-    )
-    existing_user = existing_user_result.scalar_one_or_none()
+    existing_user = db.query(User).filter(User.email == accept_data.email).first()
     
     if existing_user:
         raise HTTPException(
@@ -789,13 +738,10 @@ async def accept_team_invitation(
     invitation.used = True
     invitation.used_at = datetime.utcnow()
     
-    await db.commit()
+    db.commit()
     
     # Get tenant name
-    tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == invitation.tenant_id)
-    )
-    tenant = tenant_result.scalar_one_or_none()
+    tenant = db.query(Tenant).filter(Tenant.id == invitation.tenant_id).first()
     
     logger.info(f"Team invitation {invitation_code} accepted by {accept_data.email}")
     
@@ -811,29 +757,23 @@ async def accept_team_invitation(
 # =====================================
 
 @router.get("/members", response_model=List[TeamMemberResponse])
-async def get_all_tenant_members(
+def get_all_tenant_members(
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all members for the current tenant (legacy endpoint).
     This shows all users in the tenant, not specific to a team.
     """
-    result = await db.execute(
-        select(User).where(
-            and_(
-                User.tenant_id == current_user.tenant_id,
-                User.is_active == True
-            )
-        ).order_by(User.created_at.desc())
-    )
-    members = result.scalars().all()
+    members = db.query(User).filter(
+        and_(
+            User.tenant_id == current_user.tenant_id,
+            User.is_active == True
+        )
+    ).order_by(User.created_at.desc()).all()
     
     # Get tenant's subscription plan
-    tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == current_user.tenant_id)
-    )
-    tenant = tenant_result.scalar_one_or_none()
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     
     # The subscription plan of the admin user (first non-team member)
     admin_user = next((u for u in members if not u.is_team_member), None)
@@ -852,10 +792,10 @@ async def get_all_tenant_members(
     ) for member in members]
 
 @router.delete("/members/{member_id}")
-async def remove_tenant_member(
+def remove_tenant_member(
     member_id: UUID,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Remove a tenant member (legacy endpoint).
@@ -868,15 +808,12 @@ async def remove_tenant_member(
         )
     
     # Find member
-    result = await db.execute(
-        select(User).where(
-            and_(
-                User.id == member_id,
-                User.tenant_id == current_user.tenant_id
-            )
+    member = db.query(User).filter(
+        and_(
+            User.id == member_id,
+            User.tenant_id == current_user.tenant_id
         )
-    )
-    member = result.scalar_one_or_none()
+    ).first()
     
     if not member:
         raise HTTPException(
@@ -892,7 +829,7 @@ async def remove_tenant_member(
     
     # Deactivate user
     member.is_active = False
-    await db.commit()
+    db.commit()
     
     logger.info(f"Team member {member_id} removed from tenant {current_user.tenant_id}")
     
