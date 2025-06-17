@@ -1,7 +1,7 @@
-# Core dependencies with exact versions
+# Core dependencies with compatible versions
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic==2.5.3
+pydantic==2.7.4
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 
@@ -16,15 +16,16 @@ langchain-text-splitters==0.2.2
 # LangGraph with dependencies
 langgraph==0.1.19
 langgraph-checkpoint==1.0.2
+langgraph-checkpoint-sqlite==1.0.2
 
 # Community packages
 langchain-community==0.2.10
 
-# Ollama - requires httpx>=0.27.0
+# Ollama integration
 ollama==0.3.3
 langchain-ollama==0.1.0
 
-# Vector database
+# Vector database - compatible versions
 qdrant-client==1.10.1
 langchain-qdrant==0.1.3
 
@@ -37,13 +38,9 @@ asyncpg==0.29.0
 redis==5.0.1
 hiredis==2.3.2
 
-# HTTP clients - updated to match ollama requirements
+# HTTP clients
 httpx==0.27.0
 aiohttp==3.9.5
-aiosignal==1.3.1
-frozenlist==1.4.1
-multidict==6.0.5
-yarl==1.9.4
 
 # Other dependencies
 loguru==0.7.2
@@ -52,14 +49,11 @@ tenacity==8.2.3
 orjson==3.10.6
 jsonpatch==1.33
 
-# Additional langchain dependencies
+# Additional dependencies
 numpy==1.26.4
 typing-extensions==4.12.2
-typing-inspect==0.9.0
-mypy-extensions==1.0.0
 packaging==24.1
-requests==2.32.3
-urllib3==2.2.2
-certifi==2024.7.4
-charset-normalizer==3.3.2
-idna==3.7
+tiktoken==0.7.0
+dataclasses-json==0.6.7
+marshmallow==3.22.0
+pyyaml==6.0.2

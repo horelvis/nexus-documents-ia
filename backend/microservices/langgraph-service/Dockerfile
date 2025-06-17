@@ -13,10 +13,24 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip and install dependencies
-# Use --use-deprecated=legacy-resolver for complex dependencies
-RUN pip install --no-cache-dir --upgrade pip==24.0 setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and setuptools
+RUN pip install --no-cache-dir --upgrade pip==24.0 setuptools wheel
+
+# Install dependencies in stages to handle complex dependencies
+# First install pydantic and core dependencies
+RUN pip install --no-cache-dir \
+    pydantic==2.7.4 \
+    fastapi==0.109.0 \
+    uvicorn[standard]==0.27.0 \
+    pydantic-settings==2.1.0
+
+# Then install langchain core
+RUN pip install --no-cache-dir \
+    langchain-core==0.2.23 \
+    langsmith==0.1.93
+
+# Install remaining requirements
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
