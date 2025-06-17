@@ -107,6 +107,10 @@ app = FastAPI(
         {
             "name": "storage",
             "description": "Operaciones de almacenamiento directo"
+        },
+        {
+            "name": "langgraph",
+            "description": "Flujos de trabajo avanzados con grafos y estado persistente"
         }
     ]
 )

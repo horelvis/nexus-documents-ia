@@ -67,7 +67,15 @@ export class DocumentService {
     }
 
     const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}?${searchParams.toString()}`
-    return this.apiClient.get<Document[]>(endpoint)
+    return this.apiClient.get<{
+      documents: Document[]
+      pagination: {
+        page: number
+        per_page: number
+        total: number
+        pages: number
+      }
+    }>(endpoint)
   }
 
   async getDocument(id: string) {

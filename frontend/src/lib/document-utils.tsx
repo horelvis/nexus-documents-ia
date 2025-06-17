@@ -94,10 +94,34 @@ export function formatFileSize(bytes: number | null | undefined): string {
 }
 
 /**
+ * Maps numeric or string status values to proper labels
+ */
+export function getStatusLabel(status: string | number | null | undefined): string {
+  // Map numeric status values to labels
+  const statusMap: Record<string | number, string> = {
+    '1': 'INDEXED',
+    '2': 'PROCESSING', 
+    '3': 'INDEXING_ERROR',
+    '0': 'PENDING',
+    1: 'INDEXED',
+    2: 'PROCESSING',
+    3: 'INDEXING_ERROR',
+    0: 'PENDING'
+  }
+  
+  // Return mapped value or original if it's already a valid status
+  if (status === null || status === undefined) return 'PENDING'
+  return statusMap[status] || String(status)
+}
+
+/**
  * Returns status color classes based on indexing status
  */
-export function getStatusColor(indexed: string | null | undefined): string {
-  switch (indexed) {
+export function getStatusColor(indexed: string | number | null | undefined): string {
+  // First map the status to a label
+  const status = getStatusLabel(indexed)
+  
+  switch (status) {
     case 'INDEXED':
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
     case 'PROCESSING':

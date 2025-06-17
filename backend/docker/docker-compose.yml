@@ -12,6 +12,7 @@ services:
       - qdrant
       - langchain-service
       - langroid-service
+      - langgraph-service
       - ollama-service
       - storage-service
       - gotenberg
@@ -25,6 +26,7 @@ services:
       - STORAGE_API_KEY=dev-storage-api-key-12345
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGROID_SERVICE_URL=http://langroid-service:8002
+      - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
@@ -153,6 +155,46 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # LangGraph microservice - DEVELOPMENT MODE
+  langgraph-service:
+    build:
+      context: ../microservices/langgraph-service
+      dockerfile: Dockerfile
+    ports:
+      - "8007:8007"
+    depends_on:
+      - qdrant
+      - ollama-service
+      - redis
+      - db
+    networks:
+      - backend-network
+    environment:
+      - SERVICE_API_KEY=langgraph-secret-key-12345
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+      - LLM_MODEL=llama3.2
+      - EMBEDDING_MODEL=nomic-embed-text
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+      - LANGGRAPH_BACKEND=sqlite
+      - CHECKPOINT_DB_PATH=/tmp/langgraph_checkpoints.db
+      - LOG_LEVEL=INFO
+      - DEBUG=true  # Enable reload in dev
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/langgraph-service/app:/app/app:rw
+      # Mount checkpoints directory
+      - langgraph_checkpoints:/tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -290,3 +332,4 @@ volumes:
   qdrant_data:
   ollama_data:
   langflow_data:
+  langgraph_checkpoints:

@@ -55,6 +55,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
   const [isUploading, setIsUploading] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [uploadCompleted, setUploadCompleted] = useState(false)
+  const [currentUploadIndex, setCurrentUploadIndex] = useState(0)
   const documentService = useDocumentService()
 
   const form = useForm<z.infer<typeof UploadDocumentSchema>>({
@@ -110,6 +111,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
 
   const handleSubmit = async (values: z.infer<typeof UploadDocumentSchema>) => {
     setIsUploading(true)
+    setCurrentUploadIndex(0)
     const pendingFiles = files.filter((f: UploadFile) => f.status === 'pending')
     
     // Auto-minimize during upload if there are many files
@@ -119,7 +121,9 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
 
     try {
       // Upload files one by one
-      for (const fileObj of pendingFiles) {
+      for (let index = 0; index < pendingFiles.length; index++) {
+        const fileObj = pendingFiles[index]
+        setCurrentUploadIndex(index + 1)
         // Mark current file as uploading with initial progress
         setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
           f.id === fileObj.id ? { ...f, status: 'uploading' as const, progress: 0 } : f
@@ -189,6 +193,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       console.error('Upload error:', error)
     } finally {
       setIsUploading(false)
+      setCurrentUploadIndex(0)
     }
   }
 
@@ -234,7 +239,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
 
   const completedFiles = files.filter((f: UploadFile) => f.status === 'success').length
   const errorFiles = files.filter((f: UploadFile) => f.status === 'error').length
-  const uploadingFiles = files.filter((f: UploadFile) => f.status === 'uploading').length
+  const totalFiles = files.length
 
   // Reset form when dialog closes
   useEffect(() => {
@@ -243,6 +248,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       setFiles([])
       setIsMinimized(false)
       setUploadCompleted(false)
+      setCurrentUploadIndex(0)
     }
   }, [open, form])
 
@@ -287,7 +293,10 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
           <div className="py-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">
-                Uploading {uploadingFiles} of {files.length} files...
+                {isUploading 
+                  ? `Uploading ${currentUploadIndex} of ${totalFiles} files...`
+                  : `Upload complete: ${completedFiles} of ${totalFiles} files`
+                }
               </span>
               <span className="text-sm text-muted-foreground">
                 {Math.round(totalProgress)}%

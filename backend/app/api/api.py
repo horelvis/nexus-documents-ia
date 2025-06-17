@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search, teams
+    agents, signatures, webhooks, search, teams, langgraph
 )
 from fastapi import APIRouter
 
@@ -34,3 +34,6 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"]
 
 # Teams management routes
 api_router.include_router(teams.router, prefix="/teams", tags=["teams"])
+
+# LangGraph routes for advanced workflows
+api_router.include_router(langgraph.router, prefix="/langgraph", tags=["langgraph"])

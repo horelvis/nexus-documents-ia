@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     
     # Langroid Microservice (Advanced AI Agents)
     LANGROID_SERVICE_URL: str = "http://langroid-service:8002"
+    
+    # LangGraph Microservice (State-based Workflows)
+    LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    LANGGRAPH_API_KEY: str = "langgraph-secret-key-12345"
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"

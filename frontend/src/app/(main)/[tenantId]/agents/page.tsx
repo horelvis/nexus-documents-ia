@@ -12,22 +12,11 @@ import {
   IconBrain,
   IconArrowRight
 } from '@tabler/icons-react'
-import { agentUseCases } from '@/lib/agent-use-cases'
-import { AgentUseCaseCard } from '@/components/agents/agent-use-case-card'
 
 export default function AgentsPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.tenantId as string
-
-  const handleSelectExample = (example: string, agentId: string) => {
-    // Navigate to search page with pre-filled query and selected agent
-    const searchParams = new URLSearchParams({
-      q: example,
-      agent: agentId
-    })
-    router.push(`/${tenantId}/search?${searchParams.toString()}`)
-  }
 
 
   return (
@@ -68,17 +57,6 @@ export default function AgentsPage() {
             </Button>
           </CardContent>
         </Card>
-
-        {/* Agent Use Cases Grid */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {Object.values(agentUseCases).map((useCase) => (
-            <AgentUseCaseCard
-              key={useCase.agentId}
-              useCase={useCase}
-              onSelectExample={(example) => handleSelectExample(example, useCase.agentId)}
-            />
-          ))}
-        </div>
 
         {/* How to Use Section */}
         <Card className="mt-8">

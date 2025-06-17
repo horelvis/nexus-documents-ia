@@ -15,7 +15,11 @@ import {
   IconTrash,
   IconEdit,
   IconLoader2,
-  IconPhoto
+  IconPhoto,
+  IconChevronLeft,
+  IconChevronRight,
+  IconLayoutGrid,
+  IconLayoutList
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,9 +39,10 @@ import {
   EditDocumentDialog, 
   DocumentViewerDialog, 
   DeleteDocumentDialog,
-  DocumentPreviewDialog 
+  DocumentPreviewDialog,
+  DocumentsDataTable 
 } from "@/components/documents"
-import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
   const params = useParams()
@@ -49,6 +54,15 @@ export default function DocumentsPage() {
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalDocuments, setTotalDocuments] = useState(0)
+  const [perPage] = useState(10)
+  
+  // View state
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
@@ -67,17 +81,21 @@ export default function DocumentsPage() {
     setError(null)
     
     try {
+      // For table view, load all documents to handle pagination client-side
+      const itemsPerPage = viewMode === 'table' ? 100 : perPage
       const response = await documentService.getDocuments({
         search: searchQuery || undefined,
         status: selectedFilter !== 'all' ? selectedFilter : undefined,
-        per_page: 50,
-        page: 1
+        per_page: itemsPerPage,
+        page: viewMode === 'table' ? 1 : currentPage
       })
       
       if (response.error) {
         setError(response.error)
       } else {
         setDocuments(response.data?.documents || [])
+        setTotalPages(response.data?.pagination?.pages || 1)
+        setTotalDocuments(response.data?.pagination?.total || 0)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents')
@@ -91,20 +109,19 @@ export default function DocumentsPage() {
     loadDocuments()
   }, [])
 
-  // Reload when filters change
+  // Reload when filters, pagination or view mode changes
   useEffect(() => {
     loadDocuments()
-  }, [selectedFilter])
+  }, [selectedFilter, currentPage, viewMode])
+  
+  // Reset to page 1 when filter or view mode changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedFilter, searchQuery, viewMode])
 
 
-  const filteredDocuments = (documents || []).filter((doc: any) => {
-    const matchesSearch = doc.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         (doc.tags || []).some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
-    
-    if (selectedFilter === 'all') return matchesSearch
-    // Backend uses 'indexed' field instead of 'status'
-    return matchesSearch && doc.indexed === selectedFilter
-  })
+  // Documents are already filtered server-side
+  const filteredDocuments = documents || []
 
   const handleUploadComplete = (uploadedFiles: Array<{file: File, id: string, status: string}>) => {
     // Reload documents from server to get the latest data
@@ -380,28 +397,50 @@ export default function DocumentsPage() {
                 </Button>
               </div>
               
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <IconFilter className="mr-2 h-4 w-4" />
-                    Filter: {selectedFilter === 'all' ? 'All' : selectedFilter}
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline">
+                      <IconFilter className="mr-2 h-4 w-4" />
+                      Filter: {selectedFilter === 'all' ? 'All' : selectedFilter}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => setSelectedFilter('all')}>
+                      All Documents
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSelectedFilter('INDEXED')}>
+                      Indexed
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSelectedFilter('PROCESSING')}>
+                      Processing
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSelectedFilter('INDEXING_ERROR')}>
+                      Error
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                
+                {/* View Toggle */}
+                <div className="flex items-center rounded-md border">
+                  <Button
+                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('grid')}
+                    className="rounded-r-none"
+                  >
+                    <IconLayoutGrid className="h-4 w-4" />
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setSelectedFilter('all')}>
-                    All Documents
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedFilter('INDEXED')}>
-                    Indexed
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedFilter('PROCESSING')}>
-                    Processing
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedFilter('INDEXING_ERROR')}>
-                    Error
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  <Button
+                    variant={viewMode === 'table' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('table')}
+                    className="rounded-l-none"
+                  >
+                    <IconLayoutList className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -426,118 +465,138 @@ export default function DocumentsPage() {
           </Card>
         )}
 
-        {/* Documents Grid */}
-        {!isLoading && !error && (
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {/* Documents List */}
+        {!isLoading && !error && viewMode === 'grid' && (
+          <div className="space-y-2">
             {filteredDocuments.map((document: any) => (
               <Card key={document.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <div className="flex-shrink-0">
-                        {getFileIcon(document.file_type, document.mime_type, document.filename)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <CardTitle className="text-sm truncate" title={document.title || document.filename}>
-                          {document.title || document.filename}
-                        </CardTitle>
-                      </div>
-                    </div>
-                    <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
-                      {document.indexed}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground">
-                      <p>Size: {formatFileSize(document.file_size)}</p>
-                      <p>Uploaded: {new Date(document.created_at).toLocaleDateString()}</p>
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    {/* File Icon */}
+                    <div className="flex-shrink-0">
+                      {getFileIcon(document.file_type, document.mime_type, document.filename)}
                     </div>
                     
-                    {(document.tags || []).length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {(document.tags || []).slice(0, 2).map((tag: string) => (
-                          <Badge key={tag} variant="outline" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))}
-                        {(document.tags || []).length > 2 && (
-                          <Badge variant="outline" className="text-xs">
-                            +{(document.tags || []).length - 2}
-                          </Badge>
-                        )}
+                    {/* Document Info */}
+                    <div className="flex-grow min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-base font-medium truncate" title={document.title || document.filename}>
+                            {document.title || document.filename}
+                          </h3>
+                          {document.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                              {document.description}
+                            </p>
+                          )}
+                        </div>
+                        <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
+                          {getStatusLabel(document.indexed)}
+                        </Badge>
                       </div>
-                    )}
-                    
-                    <div className="flex justify-between pt-1">
-                      <div className="flex gap-1">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              title="Preview options"
-                              className="h-7 w-7 p-0"
-                            >
-                              <IconPhoto className="h-3 w-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start">
-                            <DropdownMenuItem onClick={() => handlePreviewDocument(document)}>
-                              <IconPhoto className="mr-2 h-4 w-4" />
-                              Quick Preview
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
-                              <IconEye className="mr-2 h-4 w-4" />
-                              Full Page Preview
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => handleViewDocument(document)}
-                          title="View document details"
-                          className="h-7 w-7 p-0"
-                        >
-                          <IconEye className="h-3 w-3" />
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => handleDownloadDocument(document)}
-                          title="Download document"
-                          className="h-7 w-7 p-0"
-                        >
-                          <IconDownload className="h-3 w-3" />
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => handleEditDocument(document)}
-                          title="Edit document"
-                          className="h-7 w-7 p-0"
-                        >
-                          <IconEdit className="h-3 w-3" />
-                        </Button>
+                      
+                      {/* Metadata and Actions */}
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span>Size: {formatFileSize(document.file_size)}</span>
+                          <span>•</span>
+                          <span>Uploaded: {new Date(document.created_at).toLocaleDateString()}</span>
+                          <span>•</span>
+                          <span>{document.category || 'Sin Categoría'}</span>
+                        </div>
+                        
+                        {/* Actions */}
+                        <div className="flex gap-0.5 flex-shrink-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button 
+                                size="sm" 
+                                variant="ghost"
+                                title="Preview options"
+                                className="h-7 w-7 p-0"
+                              >
+                                <IconPhoto className="h-3.5 w-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handlePreviewDocument(document)}>
+                                <IconPhoto className="mr-2 h-4 w-4" />
+                                Quick Preview
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
+                                <IconEye className="mr-2 h-4 w-4" />
+                                Full Page Preview
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
+                            onClick={() => handleViewDocument(document)}
+                            title="View details"
+                            className="h-7 w-7 p-0"
+                          >
+                            <IconEye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
+                            onClick={() => handleDownloadDocument(document)}
+                            title="Download"
+                            className="h-7 w-7 p-0"
+                          >
+                            <IconDownload className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
+                            onClick={() => handleEditDocument(document)}
+                            title="Edit"
+                            className="h-7 w-7 p-0"
+                          >
+                            <IconEdit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0"
+                            onClick={() => handleDeleteDocument(document)}
+                            title="Delete"
+                          >
+                            <IconTrash className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="text-red-600 hover:text-red-700 h-7 w-7 p-0"
-                        onClick={() => handleDeleteDocument(document)}
-                        title="Delete document"
-                      >
-                        <IconTrash className="h-3 w-3" />
-                      </Button>
+                      
+                      {/* Tags */}
+                      {(document.tags || []).length > 0 && (
+                        <div className="flex flex-wrap gap-0.5">
+                          {(document.tags || []).map((tag: string) => (
+                            <Badge key={tag} variant="outline" className="text-xs px-1.5 py-0 h-5">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
             ))}
           </div>
+        )}
+
+        {/* Documents Table */}
+        {!isLoading && !error && viewMode === 'table' && (
+          <DocumentsDataTable
+            data={filteredDocuments}
+            onViewDocument={handleViewDocument}
+            onEditDocument={handleEditDocument}
+            onDeleteDocument={handleDeleteDocument}
+            onDownloadDocument={handleDownloadDocument}
+            onPreviewDocument={handlePreviewDocument}
+            onFullPagePreview={handleFullPagePreview}
+          />
         )}
 
         {!isLoading && !error && filteredDocuments.length === 0 && (
@@ -557,6 +616,91 @@ export default function DocumentsPage() {
                   Upload Document
                 </Button>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pagination - Only show for grid view */}
+        {!isLoading && !error && totalPages > 1 && viewMode === 'grid' && (
+          <Card className="mt-6">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-sm text-muted-foreground">
+                  Showing {((currentPage - 1) * perPage) + 1} to {Math.min(currentPage * perPage, totalDocuments)} of {totalDocuments} documents
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <IconChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  
+                  <div className="flex items-center gap-1">
+                    {/* Show first page */}
+                    <Button
+                      size="sm"
+                      variant={currentPage === 1 ? "default" : "outline"}
+                      onClick={() => setCurrentPage(1)}
+                      className="min-w-[40px]"
+                    >
+                      1
+                    </Button>
+                    
+                    {/* Show dots if needed */}
+                    {currentPage > 3 && (
+                      <span className="px-2 text-muted-foreground">...</span>
+                    )}
+                    
+                    {/* Show pages around current page */}
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(page => page > 1 && page < totalPages && Math.abs(page - currentPage) <= 1)
+                      .map(page => (
+                        <Button
+                          key={page}
+                          size="sm"
+                          variant={currentPage === page ? "default" : "outline"}
+                          onClick={() => setCurrentPage(page)}
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      ))
+                    }
+                    
+                    {/* Show dots if needed */}
+                    {currentPage < totalPages - 2 && (
+                      <span className="px-2 text-muted-foreground">...</span>
+                    )}
+                    
+                    {/* Show last page */}
+                    {totalPages > 1 && (
+                      <Button
+                        size="sm"
+                        variant={currentPage === totalPages ? "default" : "outline"}
+                        onClick={() => setCurrentPage(totalPages)}
+                        className="min-w-[40px]"
+                      >
+                        {totalPages}
+                      </Button>
+                    )}
+                  </div>
+                  
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                    <IconChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}
