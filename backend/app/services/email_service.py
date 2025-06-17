@@ -231,6 +231,41 @@ class EmailService:
             return False
     
     @staticmethod
+    async def send_share_notification(
+        to_email: str,
+        subject: str,
+        template_data: Dict[str, Any]
+    ) -> bool:
+        """Send document share notification email"""
+        try:
+            template = env.get_template("document_share.html")
+            
+            # Add current year to context
+            template_data['current_year'] = datetime.now().year
+            
+            # Format expires_at if present
+            if 'expires_at' in template_data and template_data['expires_at']:
+                if isinstance(template_data['expires_at'], datetime):
+                    template_data['expires_at'] = template_data['expires_at'].strftime("%B %d, %Y at %I:%M %p")
+            
+            html_content = template.render(**template_data)
+            
+            message = MessageSchema(
+                subject=subject,
+                recipients=[to_email],
+                body=html_content,
+                subtype=MessageType.html
+            )
+            
+            await fm.send_message(message)
+            logger.info(f"Share notification email sent to {to_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send share notification email: {str(e)}")
+            return False
+    
+    @staticmethod
     async def send_bulk_email(
         recipients: List[str],
         subject: str,

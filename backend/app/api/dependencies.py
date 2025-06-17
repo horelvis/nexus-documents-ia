@@ -163,6 +163,20 @@ def get_current_active_superuser(
         )
     return current_user
 
+def get_current_tenant_admin(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """
+    Verifies that the current active user is a tenant admin (not a team member).
+    Tenant admins are users who are NOT team members (is_team_member = False).
+    """
+    if current_user.is_team_member:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only team administrators can perform this action"
+        )
+    return current_user
+
 
 def require_subscription_permission(permission: str):
     """

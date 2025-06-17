@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Shared with You</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #4f46e5;
+            color: #ffffff;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .greeting {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .document-info {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .document-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 10px;
+        }
+        .share-message {
+            background-color: #e5e7eb;
+            border-left: 4px solid #4f46e5;
+            padding: 15px;
+            margin: 20px 0;
+            font-style: italic;
+        }
+        .button-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 14px 32px;
+            background-color: #4f46e5;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .button:hover {
+            background-color: #4338ca;
+        }
+        .details {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f3f4f6;
+            border-radius: 6px;
+        }
+        .detail-item {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #6b7280;
+            display: inline-block;
+            width: 120px;
+        }
+        .warning {
+            background-color: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .footer a {
+            color: #4f46e5;
+            text-decoration: none;
+        }
+        .icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="icon">📄</div>
+            <h1>Document Shared with You</h1>
+        </div>
+        
+        <div class="content">
+            <p class="greeting">Hi {{ recipient_name }},</p>
+            
+            <p>{{ creator_name }} has shared a document with you through Nexus Document.</p>
+            
+            <div class="document-info">
+                <div class="document-title">{{ document_title }}</div>
+                <div class="detail-item">
+                    <span class="detail-label">Access Type:</span>
+                    <span>{{ share_type|title }} Only</span>
+                </div>
+            </div>
+            
+            {% if share_message %}
+            <div class="share-message">
+                <strong>Message from {{ creator_name }}:</strong><br>
+                {{ share_message }}
+            </div>
+            {% endif %}
+            
+            <div class="details">
+                <h3 style="margin-top: 0;">Share Details</h3>
+                
+                {% if expires_at %}
+                <div class="detail-item">
+                    <span class="detail-label">Expires:</span>
+                    <span>{{ expires_at|date:"F d, Y at h:i A" }}</span>
+                </div>
+                {% endif %}
+                
+                {% if has_password %}
+                <div class="detail-item">
+                    <span class="detail-label">Protection:</span>
+                    <span>Password Protected</span>
+                </div>
+                {% endif %}
+                
+                <div class="detail-item">
+                    <span class="detail-label">Permissions:</span>
+                    <span>
+                        {% if share_type == 'view' %}
+                            View document only
+                        {% elif share_type == 'download' %}
+                            View and download document
+                        {% elif share_type == 'edit' %}
+                            View, download, and edit document
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            
+            {% if expires_at %}
+            <div class="warning">
+                ⚠️ This share link will expire on {{ expires_at|date:"F d, Y at h:i A" }}. 
+                Please access the document before this date.
+            </div>
+            {% endif %}
+            
+            {% if has_password %}
+            <div class="warning">
+                🔒 This document is password protected. You'll need to enter the password provided by {{ creator_name }} to access it.
+            </div>
+            {% endif %}
+            
+            <div class="button-container">
+                <a href="{{ share_url }}" class="button">Access Document</a>
+            </div>
+            
+            <p style="font-size: 14px; color: #6b7280; text-align: center;">
+                Or copy this link to your browser:<br>
+                <code style="background-color: #f3f4f6; padding: 4px 8px; border-radius: 4px;">{{ share_url }}</code>
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>This email was sent by Nexus Document on behalf of {{ creator_name }}.</p>
+            <p>If you believe this email was sent in error, please ignore it.</p>
+            <p>
+                <a href="https://nexus-document.com">Nexus Document</a> | 
+                <a href="https://nexus-document.com/privacy">Privacy Policy</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

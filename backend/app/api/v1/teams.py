@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 
-from app.api.dependencies import get_db, get_current_active_user, get_current_active_superuser
+from app.api.dependencies import get_db, get_current_active_user, get_current_active_superuser, get_current_tenant_admin
 from app.db.models import User, Document, Tenant, TeamInvitation
 from app.schemas.team import (
     TeamUpdate,
@@ -66,6 +66,9 @@ def get_team_info(
             )
         ).scalar() or 0
         
+        # Convert storage from MB to GB for display
+        storage_quota_gb = (tenant.max_storage_mb or 5120) // 1024  # Default 5GB if not set
+        
         return TeamResponse(
             id=tenant.id,
             name=tenant.name,
@@ -73,7 +76,7 @@ def get_team_info(
             created_at=tenant.created_at,
             updated_at=tenant.updated_at,
             members_count=members_count,
-            storage_quota=tenant.storage_quota,
+            storage_quota=storage_quota_gb,
             is_active=tenant.is_active
         )
         
@@ -89,7 +92,7 @@ def get_team_info(
 @router.put("/", response_model=TeamResponse)
 def update_team_info(
     team_update: TeamUpdate,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_tenant_admin),
     db: Session = Depends(get_db)
 ):
     """
@@ -126,6 +129,9 @@ def update_team_info(
         
         logger.info(f"Team {tenant.name} updated by {current_user.email}")
         
+        # Convert storage from MB to GB for display
+        storage_quota_gb = (tenant.max_storage_mb or 5120) // 1024  # Default 5GB if not set
+        
         return TeamResponse(
             id=tenant.id,
             name=tenant.name,
@@ -133,7 +139,7 @@ def update_team_info(
             created_at=tenant.created_at,
             updated_at=tenant.updated_at,
             members_count=members_count,
-            storage_quota=tenant.storage_quota,
+            storage_quota=storage_quota_gb,
             is_active=tenant.is_active
         )
         
@@ -206,7 +212,7 @@ def get_team_members(
 @router.post("/members/invite")
 def invite_team_member(
     member_data: TeamMemberAdd,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_tenant_admin),
     db: Session = Depends(get_db)
 ):
     """
@@ -280,7 +286,7 @@ def invite_team_member(
 @router.delete("/members/{member_id}")
 def remove_team_member(
     member_id: UUID,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_tenant_admin),
     db: Session = Depends(get_db)
 ):
     """
@@ -349,7 +355,7 @@ def remove_team_member(
 @router.post("/invitations", response_model=TeamInvitationResponse)
 def create_team_invitation(
     invitation: TeamInvitationCreate,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_tenant_admin),
     db: Session = Depends(get_db)
 ):
     """
@@ -428,7 +434,7 @@ def create_team_invitation(
 
 @router.get("/invitations", response_model=List[TeamInvitationResponse])
 def get_team_invitations(
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_tenant_admin),
     db: Session = Depends(get_db)
 ):
     """

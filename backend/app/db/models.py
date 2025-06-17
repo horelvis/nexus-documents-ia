@@ -310,6 +310,7 @@ class Document(Base):
     tags = relationship("Tag", secondary=document_tags, back_populates="documents")
     metrics = relationship("DocumentMetrics", back_populates="document", uselist=False, cascade="all, delete-orphan")
     views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
+    shares = relationship("DocumentShare", back_populates="document", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_documents_tenant_created', 'tenant_id', 'created_at'),
@@ -386,6 +387,170 @@ class DocumentView(Base):
         Index('idx_document_views_user_date', 'user_id', 'viewed_at'),
     )
 
+
+class DocumentShare(Base):
+    __tablename__ = "document_shares"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    # Share settings
+    share_token = Column(String(255), nullable=False, unique=True, index=True)
+    share_type = Column(String(50), nullable=False, default='view')  # view, download, edit
+    permissions = Column(JSONB, nullable=True)  # Additional permissions
+    
+    # Access control
+    password_hash = Column(String(255), nullable=True)  # Optional password protection
+    max_access_count = Column(Integer, nullable=True)  # Limit number of accesses
+    current_access_count = Column(Integer, nullable=False, default=0)
+    
+    # Expiration
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
+    # Recipient info (optional)
+    recipient_email = Column(String(255), nullable=True)
+    recipient_name = Column(String(255), nullable=True)
+    share_message = Column(Text, nullable=True)
+    
+    # Tracking
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    first_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    document = relationship("Document", back_populates="shares")
+    tenant = relationship("Tenant")
+    creator = relationship("User", foreign_keys=[created_by])
+    revoker = relationship("User", foreign_keys=[revoked_by])
+    access_logs = relationship("DocumentShareAccessLog", back_populates="share", cascade="all, delete-orphan")
+    recipients = relationship("DocumentShareRecipient", back_populates="share", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('idx_document_shares_document', 'document_id'),
+        Index('idx_document_shares_tenant', 'tenant_id'),
+        Index('idx_document_shares_expires', 'expires_at'),
+        Index('idx_document_shares_created_by', 'created_by'),
+    )
+    
+    def is_valid(self):
+        """Check if the share link is still valid"""
+        now = datetime.now(timezone.utc)
+        
+        # Check if active
+        if not self.is_active:
+            return False
+        
+        # Check if expired
+        if self.expires_at and self.expires_at < now:
+            return False
+        
+        # Check if revoked
+        if self.revoked_at:
+            return False
+        
+        # Check access count limit
+        if self.max_access_count and self.current_access_count >= self.max_access_count:
+            return False
+        
+        return True
+    
+    def increment_access_count(self):
+        """Increment the access count"""
+        self.current_access_count += 1
+        if not self.first_accessed_at:
+            self.first_accessed_at = datetime.now(timezone.utc)
+        self.last_accessed_at = datetime.now(timezone.utc)
+
+
+class DocumentShareAccessLog(Base):
+    __tablename__ = "document_share_access_logs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    share_id = Column(UUID(as_uuid=True), ForeignKey("document_shares.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    
+    # Access details
+    accessed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    referrer = Column(Text, nullable=True)
+    
+    # Action performed
+    action = Column(String(50), nullable=False, default='view')  # view, download, print
+    success = Column(Boolean, nullable=False, default=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Geographic info (optional)
+    country_code = Column(String(2), nullable=True)
+    city = Column(String(100), nullable=True)
+    
+    # Device info
+    device_type = Column(String(50), nullable=True)  # desktop, mobile, tablet
+    browser = Column(String(50), nullable=True)
+    os = Column(String(50), nullable=True)
+    
+    # User info if authenticated
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
+    # Relationships
+    share = relationship("DocumentShare", back_populates="access_logs")
+    document = relationship("Document")
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    
+    __table_args__ = (
+        Index('idx_share_access_logs_share', 'share_id'),
+        Index('idx_share_access_logs_document', 'document_id'),
+        Index('idx_share_access_logs_accessed', 'accessed_at'),
+        Index('idx_share_access_logs_tenant', 'tenant_id'),
+    )
+
+
+class DocumentShareRecipient(Base):
+    __tablename__ = "document_share_recipients"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    share_id = Column(UUID(as_uuid=True), ForeignKey("document_shares.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    
+    # Recipient info
+    email = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+    verification_code = Column(String(100), nullable=True)  # For email verification
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Notification status
+    notified_at = Column(DateTime(timezone=True), nullable=True)
+    notification_error = Column(Text, nullable=True)
+    
+    # Access status
+    first_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    access_count = Column(Integer, nullable=False, default=0)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    share = relationship("DocumentShare", back_populates="recipients")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        UniqueConstraint('share_id', 'email', name='uq_share_recipient_email'),
+        Index('idx_share_recipients_share', 'share_id'),
+        Index('idx_share_recipients_email', 'email'),
+        Index('idx_share_recipients_tenant', 'tenant_id'),
+    )
 
 
 class Tag(Base):
