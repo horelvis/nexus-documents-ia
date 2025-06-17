@@ -25,7 +25,8 @@ langchain-community==0.2.10
 ollama==0.3.3
 langchain-ollama==0.1.0
 
-litellm==1.70.0  # Forzar versión más nueva
+# Add litellm with specific version to avoid httpx conflicts
+litellm==1.72.0
 
 # Vector database - compatible versions
 qdrant-client==1.10.1
@@ -61,4 +62,4 @@ marshmallow==3.22.0
 pyyaml==6.0.2
 
 # Agent orchestration
-crewai==0.125.0
+crewai==0.130.0

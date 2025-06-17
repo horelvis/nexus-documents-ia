@@ -5,6 +5,12 @@ from loguru import logger
 import sys
 from contextlib import asynccontextmanager
 
+# main.py
+from patch.fix_crewai_litellm import apply_litellm_patch
+
+# APLICAR ANTES de importar CrewAI/LangGraph
+apply_litellm_patch()
+
 from app.core.config import settings
 from app.api import graphs as graph_routes
 from app.core.langgraph_manager import LangGraphManager
