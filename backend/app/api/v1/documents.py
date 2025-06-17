@@ -569,4 +569,3 @@ async def get_document_agents(
             status_code=500,
             detail=f"Failed to retrieve document agents: {str(e)}"
         )
-EOF < /dev/null
