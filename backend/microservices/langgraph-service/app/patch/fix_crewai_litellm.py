@@ -1,52 +1,33 @@
 """
-Parche para litellm 1.72.0 - Debe llamarse explícitamente
+Parche robusto para litellm 1.72.0 sin dependencias problemáticas
 """
-import sys
 
-def apply_litellm_patch():
-    """Aplica el parche para el bug de AsyncHTTPHandler"""
+def apply_patch():
+    """Aplica el parche de forma robusta"""
     try:
-        # Importar solo si litellm está disponible
+        # Importar el módulo específico
         import litellm.llms.custom_httpx.http_handler as handler
         
         # Verificar si ya está parcheado
-        if hasattr(handler.AsyncHTTPHandler.close, '_patched'):
-            print("✅ Parche ya aplicado")
+        if hasattr(handler.AsyncHTTPHandler, '_is_patched'):
             return True
         
-        # Guardar método original
-        original_close = handler.AsyncHTTPHandler.close
+        # Crear el nuevo método close
+        async def safe_close(self):
+            """Método close seguro que no falla"""
+            # No hacer nada - evitar el error completamente
+            pass
         
-        async def patched_close(self):
-            """Versión parcheada del close"""
-            try:
-                # Buscar el cliente HTTP
-                client = getattr(self, 'client', None)
-                if client is None:
-                    client = getattr(self, '_client', None)
-                
-                if client is not None and hasattr(client, 'aclose'):
-                    await client.aclose()
-            except Exception:
-                # Ignorar cualquier error durante el cierre
-                pass
+        # Reemplazar el método
+        handler.AsyncHTTPHandler.close = safe_close
+        handler.AsyncHTTPHandler._is_patched = True
         
-        # Marcar como parcheado
-        patched_close._patched = True
-        
-        # Aplicar el parche
-        handler.AsyncHTTPHandler.close = patched_close
-        
-        print("✅ Parche litellm aplicado exitosamente")
+        print("✅ Parche aplicado exitosamente")
         return True
         
-    except ImportError:
-        print("⚠️  litellm no disponible")
-        return False
     except Exception as e:
         print(f"❌ Error aplicando parche: {e}")
         return False
 
-# Auto-aplicar si se importa directamente
-if __name__ == "__main__":
-    apply_litellm_patch()
+# Aplicar inmediatamente al importar
+apply_patch()

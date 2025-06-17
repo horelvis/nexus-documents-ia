@@ -6,10 +6,9 @@ import sys
 from contextlib import asynccontextmanager
 
 # main.py
-from app.patch.fix_crewai_litellm import apply_litellm_patch
+from app.patch.fix_crewai_litellm import apply_patch
 
-# APLICAR ANTES de importar CrewAI/LangGraph
-apply_litellm_patch()
+apply_patch()
 
 from app.core.config import settings
 from app.api import graphs as graph_routes
