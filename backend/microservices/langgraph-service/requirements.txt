@@ -25,6 +25,9 @@ langchain-community==0.2.10
 ollama==0.3.3
 langchain-ollama==0.1.0
 
+# Add litellm with specific version to avoid httpx conflicts
+litellm==1.40.19
+
 # Vector database - compatible versions
 qdrant-client==1.10.1
 langchain-qdrant==0.1.3
