@@ -57,3 +57,7 @@ tiktoken==0.7.0
 dataclasses-json==0.6.7
 marshmallow==3.22.0
 pyyaml==6.0.2
+
+# Agent orchestration
+crewai==0.41.1
+crewai-tools==0.4.26
