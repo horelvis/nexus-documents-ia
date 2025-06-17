@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { UserProvider } from "@/contexts/user-context";
 import { PageLoaderProvider } from "@/components/providers/page-loader";
 import { TopLoader } from "@/components/providers/top-loader";
+import { Toaster } from "@/components/ui/toaster";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -61,6 +62,7 @@ export default function RootLayout({
               <TopLoader />
               <UserProvider>
                 {children}
+                <Toaster />
               </UserProvider>
             </PageLoaderProvider>
           </ThemeProvider>

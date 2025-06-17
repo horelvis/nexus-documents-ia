@@ -1,66 +1,48 @@
 """
-Team management schemas
+Schemas for team management (tenant-based teams)
 """
-from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional, Any
 from uuid import UUID
-import uuid
-
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
-
+# Team schemas (Tenant-based - one team per tenant)
 class TeamBase(BaseModel):
-    """Base schema for teams"""
-    name: str = Field(..., min_length=1, max_length=255, example="Engineering Team")
-    description: Optional[str] = Field(None, max_length=1000, example="Team responsible for product development")
-
-
-class TeamCreate(TeamBase):
-    """Schema for creating a team"""
-    pass
-
+    """Base schema for team (tenant)"""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=1000)
 
 class TeamUpdate(BaseModel):
-    """Schema for updating a team"""
-    name: Optional[str] = Field(None, min_length=1, max_length=255, example="Updated Team Name")
-    description: Optional[str] = Field(None, max_length=1000, example="Updated description")
+    """Schema for updating team (tenant) info"""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=1000)
 
-
-class Team(TeamBase):
-    """Complete team schema"""
-    id: UUID = Field(..., example=uuid.uuid4())
-    tenant_id: UUID = Field(..., example=uuid.uuid4())
-    created_by: UUID = Field(..., example=uuid.uuid4())
-    created_at: datetime = Field(..., example=datetime.now())
-    updated_at: datetime = Field(..., example=datetime.now())
-    members_count: int = Field(0, example=5)
+class TeamResponse(BaseModel):
+    """Response schema for team (tenant) info"""
+    id: UUID
+    name: str
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    members_count: int = 0
+    storage_quota: int
+    is_active: bool
     
     class Config:
         from_attributes = True
 
-
-class TeamWithMembers(Team):
-    """Team with members list"""
-    members: List['TeamMemberResponse'] = []
-
-
-class TeamListResponse(BaseModel):
-    """Response for team list endpoint"""
-    teams: List[Team]
-    total: int
+class TeamWithMembers(TeamResponse):
+    """Team (tenant) response with member list"""
+    members: List['TeamMemberResponse']
     skip: int
     limit: int
 
 
+# Team Member schemas (Users in a tenant)
 class TeamMemberAdd(BaseModel):
-    """Schema for adding a member to a team"""
-    user_id: UUID = Field(..., example=uuid.uuid4())
-    role: str = Field(default="member", pattern="^(leader|member)$", example="member")
-
-
-class TeamMemberRoleUpdate(BaseModel):
-    """Schema for updating team member role"""
-    role: str = Field(..., pattern="^(leader|member)$", example="leader")
+    """Schema for inviting a new team member"""
+    email: EmailStr = Field(..., description="Email address to invite")
+    role: str = Field(default="member", pattern="^(admin|member)$", description="Role: admin or member")
 
 
 class TeamInvitationCreate(BaseModel):
