@@ -12,7 +12,7 @@ import uuid
 
 # revision identifiers, used by Alembic.
 revision = 'add_document_sharing_20250617'
-down_revision = '20250617_remove_teams_tables'
+down_revision = 'remove_teams_tables'
 branch_labels = None
 depends_on = None
 
