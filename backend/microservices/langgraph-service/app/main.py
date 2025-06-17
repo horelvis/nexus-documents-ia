@@ -5,10 +5,6 @@ from loguru import logger
 import sys
 from contextlib import asynccontextmanager
 
-# main.py
-from app.patch.fix_crewai_litellm import apply_patch
-
-apply_patch()
 
 from app.core.config import settings
 from app.api import graphs as graph_routes
