@@ -1,7 +1,6 @@
 """
 CrewAI Orchestration Graph - Combines LangGraph state management with CrewAI agent coordination
 """
-import fix_crewai_litellm
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, SystemMessage

@@ -1,33 +1,50 @@
 """
-Parche robusto para litellm 1.72.0 sin dependencias problemáticas
+Parche directo que modifica el archivo fuente de litellm
 """
+import os
+import sys
 
-def apply_patch():
-    """Aplica el parche de forma robusta"""
+def patch_litellm_source():
+    """Modifica directamente el código fuente de litellm"""
     try:
-        # Importar el módulo específico
-        import litellm.llms.custom_httpx.http_handler as handler
+        # Encontrar la ubicación del archivo
+        import litellm.llms.custom_httpx.http_handler
+        handler_file = litellm.llms.custom_httpx.http_handler.__file__
         
-        # Verificar si ya está parcheado
-        if hasattr(handler.AsyncHTTPHandler, '_is_patched'):
+        print(f"📁 Parcheando archivo: {handler_file}")
+        
+        # Leer el archivo
+        with open(handler_file, 'r') as f:
+            content = f.read()
+        
+        # Buscar y reemplazar el método problemático
+        old_close = """    async def close(self):
+        await self.client.aclose()"""
+        
+        new_close = """    async def close(self):
+        try:
+            if hasattr(self, 'client') and self.client is not None:
+                await self.client.aclose()
+        except (AttributeError, RuntimeError):
+            pass"""
+        
+        # Reemplazar
+        if old_close in content:
+            content = content.replace(old_close, new_close)
+            
+            # Escribir el archivo modificado
+            with open(handler_file, 'w') as f:
+                f.write(content)
+            
+            print("✅ Archivo litellm parcheado exitosamente")
             return True
-        
-        # Crear el nuevo método close
-        async def safe_close(self):
-            """Método close seguro que no falla"""
-            # No hacer nada - evitar el error completamente
-            pass
-        
-        # Reemplazar el método
-        handler.AsyncHTTPHandler.close = safe_close
-        handler.AsyncHTTPHandler._is_patched = True
-        
-        print("✅ Parche aplicado exitosamente")
-        return True
-        
+        else:
+            print("⚠️ No se encontró el código a reemplazar")
+            return False
+            
     except Exception as e:
-        print(f"❌ Error aplicando parche: {e}")
+        print(f"❌ Error parcheando archivo: {e}")
         return False
 
-# Aplicar inmediatamente al importar
-apply_patch()
+if __name__ == "__main__":
+    patch_litellm_source()
