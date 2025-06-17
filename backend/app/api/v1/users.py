@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_
 from datetime import datetime, timedelta
 import logging
 
-from app.api.dependencies import get_db, get_current_admin_user
+from app.api.dependencies import get_db, get_current_active_superuser
 from app.db.models import User, Document, Tenant
 from app.schemas.user import (
     UserResponse, 
@@ -25,7 +25,7 @@ router = APIRouter()
 
 @router.get("/list", response_model=List[UserWithStats])
 async def list_users(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -102,7 +102,7 @@ async def list_users(
 @router.post("/invite")
 async def invite_user(
     invite_data: UserInvite,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -155,7 +155,7 @@ async def invite_user(
 async def update_user_role(
     user_id: str,
     role_update: UserRoleUpdate,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -210,7 +210,7 @@ async def update_user_role(
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: str,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -282,7 +282,7 @@ async def delete_user(
 @router.get("/{user_id}/activity")
 async def get_user_activity(
     user_id: str,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db),
     days: int = Query(30, ge=1, le=365)
 ):

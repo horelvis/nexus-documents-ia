@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 
-from app.api.dependencies import get_current_active_user, require_subscription_permission, get_current_active_superuser, require_agent_permission
+from app.api.dependencies import get_current_active_user, get_current_active_superuser, require_agent_permission
 from app.db.models import User
 from app.services.langroid_client import langroid_client
 
