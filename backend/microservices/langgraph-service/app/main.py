@@ -6,7 +6,7 @@ import sys
 from contextlib import asynccontextmanager
 
 # main.py
-from patch.fix_crewai_litellm import apply_litellm_patch
+from app.patch.fix_crewai_litellm import apply_litellm_patch
 
 # APLICAR ANTES de importar CrewAI/LangGraph
 apply_litellm_patch()
