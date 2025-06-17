@@ -141,7 +141,7 @@ export default function TeamsPage() {
     setIsLoading(true)
     try {
       // Load team info
-      const teamResponse = await apiClient.get('/api/v1/teams/')
+      const teamResponse = await apiClient.get('/teams/')
       if (!teamResponse.error) {
         setTeamInfo(teamResponse.data)
         setEditTeamData({
@@ -151,13 +151,13 @@ export default function TeamsPage() {
       }
 
       // Load team members
-      const membersResponse = await apiClient.get('/api/v1/teams/members')
+      const membersResponse = await apiClient.get('/teams/members')
       if (!membersResponse.error) {
         setMembers(membersResponse.data)
       }
 
       // Load invitations
-      const invitationsResponse = await apiClient.get('/api/v1/teams/invitations')
+      const invitationsResponse = await apiClient.get('/teams/invitations')
       if (!invitationsResponse.error) {
         setInvitations(invitationsResponse.data)
       }
@@ -175,7 +175,7 @@ export default function TeamsPage() {
 
   const handleUpdateTeam = async () => {
     try {
-      const response = await apiClient.put('/api/v1/teams/', editTeamData)
+      const response = await apiClient.put('/teams/', editTeamData)
       if (!response.error) {
         setTeamInfo(response.data)
         setShowEditTeam(false)
@@ -197,7 +197,7 @@ export default function TeamsPage() {
 
   const handleInviteMember = async () => {
     try {
-      const response = await apiClient.post('/api/v1/teams/members/invite', inviteData)
+      const response = await apiClient.post('/teams/members/invite', inviteData)
       if (!response.error) {
         setShowInviteDialog(false)
         setInviteData({ email: '', role: 'member' })
@@ -220,7 +220,7 @@ export default function TeamsPage() {
 
   const handleCreateInvitationLink = async () => {
     try {
-      const response = await apiClient.post('/api/v1/teams/invitations', {
+      const response = await apiClient.post('/teams/invitations', {
         expires_in_days: invitationExpiry
       })
       if (!response.error) {
@@ -243,7 +243,7 @@ export default function TeamsPage() {
     if (!confirm('Are you sure you want to remove this member?')) return
 
     try {
-      const response = await apiClient.delete(`/api/v1/teams/members/${memberId}`)
+      const response = await apiClient.delete(`/teams/members/${memberId}`)
       if (!response.error) {
         toast({
           title: 'Success',
