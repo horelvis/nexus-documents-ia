@@ -5,6 +5,9 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import json
 import hashlib
+
+import fix_crewai_litellm
+
 from loguru import logger
 import redis.asyncio as redis
 from langchain_core.embeddings import Embeddings
