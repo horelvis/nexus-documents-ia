@@ -471,3 +471,102 @@ async def get_preview_info(
             await preview_service.cleanup()
         except Exception as e:
             logger.warning(f"Preview service cleanup failed: {e}")
+
+@router.get("/{doc_id}/agents")
+async def get_document_agents(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(get_current_tenant_id)
+):
+    """
+    Get agents assigned to a specific document based on its type and tags.
+    """
+    try:
+        # Get document details
+        document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+        document = document_service.get_document(db, doc_id, include_content=False)
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Determine document type and tags
+        doc_tags = document.get("tags", [])
+        doc_type = document.get("category", "general")
+        
+        # Map document characteristics to agent types
+        assigned_agents = []
+        
+        # Check if document is signable
+        is_signable = any(tag in ["signable", "contract", "agreement"] for tag in doc_tags)
+        if is_signable:
+            assigned_agents.append({
+                "id": f"sig-{doc_id}",
+                "name": "Digital Signature Agent",
+                "type": "digital_signature",
+                "status": "ready",
+                "description": "Manages digital signature workflows",
+                "capabilities": ["signature_requests", "status_tracking", "signer_management"]
+            })
+        
+        # Check if document needs legal compliance
+        is_legal = any(tag in ["legal", "contract", "compliance"] for tag in doc_tags) or doc_type == "legal"
+        if is_legal:
+            assigned_agents.append({
+                "id": f"legal-{doc_id}",
+                "name": "Legal Compliance Agent",
+                "type": "legal_compliance",
+                "status": "ready",
+                "description": "Validates legal requirements",
+                "capabilities": ["compliance_check", "risk_assessment", "regulatory_analysis"]
+            })
+        
+        # Check if document is financial
+        is_financial = any(tag in ["financial", "invoice", "report"] for tag in doc_tags) or doc_type == "financial"
+        if is_financial:
+            assigned_agents.append({
+                "id": f"fin-{doc_id}",
+                "name": "Financial Analysis Agent",
+                "type": "financial_analyzer",
+                "status": "ready",
+                "description": "Analyzes financial documents",
+                "capabilities": ["financial_metrics", "trend_analysis", "report_generation"]
+            })
+        
+        # Document analyzer is always available
+        assigned_agents.append({
+            "id": f"doc-{doc_id}",
+            "name": "Document Analyzer",
+            "type": "document_analyzer",
+            "status": "ready",
+            "description": "Analyzes document content and structure",
+            "capabilities": ["content_analysis", "extraction", "summarization"]
+        })
+        
+        # RAG assistant for Q&A
+        assigned_agents.append({
+            "id": f"rag-{doc_id}",
+            "name": "RAG Assistant",
+            "type": "rag_assistant",
+            "status": "ready",
+            "description": "Answers questions about the document",
+            "capabilities": ["document_search", "context_qa", "knowledge_retrieval"]
+        })
+        
+        return {
+            "document_id": doc_id,
+            "document_type": doc_type,
+            "tags": doc_tags,
+            "assigned_agents": assigned_agents,
+            "total_agents": len(assigned_agents)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document agents for {doc_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve document agents: {str(e)}"
+        )
+EOF < /dev/null

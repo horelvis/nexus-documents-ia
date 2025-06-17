@@ -1,4 +1,5 @@
-import { apiClient } from '@/lib/api-client'
+import { useMemo } from 'react'
+import { useApiClient } from '@/lib/api-client'
 
 export interface Agent {
   id: string
@@ -71,9 +72,18 @@ export interface ChatMessage {
 }
 
 class AgentService {
+  constructor(private apiClient: ReturnType<typeof useApiClient>) {}
+
   async getAgents(): Promise<{ data?: Agent[]; error?: string }> {
     try {
-      const response = await apiClient.get('/agents/list')
+      const response = await this.apiClient.get('/agents/list')
+      
+      // Handle the nested structure from the API
+      if (response.data && typeof response.data === 'object' && 'agents' in response.data) {
+        return { data: response.data.agents }
+      }
+      
+      // Fallback to direct array if API changes
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to fetch agents:', error)
@@ -83,7 +93,7 @@ class AgentService {
 
   async createAgent(data: CreateAgentRequest): Promise<{ data?: Agent; error?: string }> {
     try {
-      const response = await apiClient.post('/agents/create', data)
+      const response = await this.apiClient.post('/agents/create', data)
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to create agent:', error)
@@ -93,7 +103,7 @@ class AgentService {
 
   async deleteAgent(agentId: string): Promise<{ success?: boolean; error?: string }> {
     try {
-      await apiClient.delete(`/agents/${agentId}`)
+      await this.apiClient.delete(`/agents/${agentId}`)
       return { success: true }
     } catch (error: any) {
       console.error('Failed to delete agent:', error)
@@ -103,7 +113,7 @@ class AgentService {
 
   async getAgentHealth(): Promise<{ data?: AgentHealth; error?: string }> {
     try {
-      const response = await apiClient.get('/agents/health')
+      const response = await this.apiClient.get('/agents/health')
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to fetch agent health:', error)
@@ -113,7 +123,7 @@ class AgentService {
 
   async getAgentStatus(): Promise<{ data?: AgentServiceStatus; error?: string }> {
     try {
-      const response = await apiClient.get('/agents/status')
+      const response = await this.apiClient.get('/agents/status')
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to fetch agent status:', error)
@@ -128,11 +138,10 @@ class AgentService {
     onComplete?: () => void
   ): Promise<{ error?: string }> {
     try {
-      const response = await fetch(`${apiClient.defaults.baseURL}/agents/${agentId}/chat`, {
+      const response = await this.apiClient.fetchRaw(`/agents/${agentId}/chat`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...apiClient.defaults.headers
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ message })
       })
@@ -189,11 +198,10 @@ class AgentService {
     onComplete?: () => void
   ): Promise<{ error?: string }> {
     try {
-      const response = await fetch(`${apiClient.defaults.baseURL}/agents/${agentId}/execute`, {
+      const response = await this.apiClient.fetchRaw(`/agents/${agentId}/execute`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...apiClient.defaults.headers
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ task, document_ids: documentIds })
       })
@@ -239,6 +247,103 @@ class AgentService {
     } catch (error: any) {
       console.error('Failed to execute task:', error)
       return { error: error.message || 'Failed to execute task' }
+    }
+  }
+
+  async getAgentStats(agentId: string): Promise<{ data?: any; error?: string }> {
+    try {
+      const response = await this.apiClient.get(`/agents/${agentId}/stats`)
+      return { data: response.data }
+    } catch (error: any) {
+      console.error('Failed to fetch agent stats:', error)
+      return { error: error.message || 'Failed to fetch agent stats' }
+    }
+  }
+
+  async getAgentActivity(limit: number = 10): Promise<{ data?: any; error?: string }> {
+    try {
+      const response = await this.apiClient.get(`/agents/activity?limit=${limit}`)
+      return { data: response.data }
+    } catch (error: any) {
+      console.error('Failed to fetch agent activity:', error)
+      return { error: error.message || 'Failed to fetch agent activity' }
+    }
+  }
+
+  async analyzeDocument(
+    documentId: string,
+    documentType: string,
+    onProgress?: (event: any) => void,
+    onResult?: (result: any) => void,
+    onError?: (error: string) => void
+  ): Promise<{ error?: string }> {
+    try {
+      const response = await this.apiClient.fetchRaw('/agents/document/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          document_content: documentId, // For now, just pass ID
+          analysis_type: documentType
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            if (data === '[DONE]') {
+              return {}
+            }
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.type === 'progress' && onProgress) {
+                onProgress(parsed)
+              } else if (parsed.type === 'result' && onResult) {
+                onResult(parsed.content)
+              } else if (parsed.type === 'error' && onError) {
+                onError(parsed.content)
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e)
+            }
+          }
+        }
+      }
+
+      return {}
+    } catch (error: any) {
+      console.error('Failed to analyze document:', error)
+      if (onError) onError(error.message)
+      return { error: error.message || 'Failed to analyze document' }
+    }
+  }
+
+  async getDocumentAgents(documentId: string): Promise<{ data?: any; error?: string }> {
+    try {
+      const response = await this.apiClient.get(`/documents/${documentId}/agents`)
+      return { data: response.data }
+    } catch (error: any) {
+      console.error('Failed to fetch document agents:', error)
+      return { error: error.message || 'Failed to fetch document agents' }
     }
   }
 
@@ -298,8 +403,8 @@ class AgentService {
   }
 }
 
-export const agentService = new AgentService()
-
+// Hook to use the agent service with authentication
 export function useAgentService() {
-  return agentService
+  const apiClient = useApiClient()
+  return useMemo(() => new AgentService(apiClient), [apiClient])
 }

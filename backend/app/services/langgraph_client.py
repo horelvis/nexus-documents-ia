@@ -296,6 +296,53 @@ class LangGraphClient:
         except Exception as e:
             logger.error(f"Error streaming graph {graph_type}: {str(e)}")
             yield {"event": "error", "data": str(e)}
+    
+    async def stream_graph_execution(
+        self,
+        request_data: Dict[str, Any]
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream graph execution events in a format compatible with SSE
+        
+        Args:
+            request_data: Complete request including graph_type, input_data, tenant_id, etc.
+            
+        Yields:
+            Events from graph execution
+        """
+        try:
+            headers = self._get_auth_headers(
+                request_data.get("tenant_id"), 
+                request_data.get("user_id")
+            )
+            
+            request_data["mode"] = "stream"
+            
+            async with self.http_client.stream(
+                "POST",
+                f"{self.base_url}/api/v1/graphs/stream",
+                json=request_data,
+                headers=headers,
+                timeout=300.0  # 5 minutes for complex workflows
+            ) as response:
+                response.raise_for_status()
+                
+                async for line in response.aiter_lines():
+                    if line and line.startswith("data: "):
+                        try:
+                            import json
+                            event_data = json.loads(line[6:])  # Skip "data: " prefix
+                            yield event_data
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse event: {line}")
+                            continue
+                        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error streaming graph: {e.response.status_code} - {e.response.text}")
+            yield {"type": "error", "error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            logger.error(f"Error streaming graph execution: {str(e)}")
+            yield {"type": "error", "error": str(e)}
 
     async def get_graph_types(self) -> List[str]:
         """Get list of available graph types"""

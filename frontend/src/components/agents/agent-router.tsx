@@ -18,6 +18,7 @@ import {
   IconCheck,
   IconAlertCircle
 } from "@tabler/icons-react"
+import { useAgentService } from "@/lib/services/agent.service"
 
 interface AgentType {
   id: string
@@ -100,58 +101,72 @@ export function AgentRouter({
   onAnalysisComplete,
   className
 }: AgentRouterProps) {
+  const agentService = useAgentService()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisProgress, setAnalysisProgress] = useState(0)
   const [activeAgents, setActiveAgents] = useState<string[]>([])
   const [analysis, setAnalysis] = useState<DocumentAnalysis | null>(null)
   const [agents, setAgents] = useState<AgentType[]>(AGENT_TYPES)
+  const [error, setError] = useState<string | null>(null)
 
   const analyzeDocument = async () => {
     setIsAnalyzing(true)
     setAnalysisProgress(0)
     setActiveAgents([])
     setAnalysis(null)
+    setError(null)
     
     // Update router agent status
     updateAgentStatus('router', 'processing')
     
-    // Simulate analysis progress
-    const progressInterval = setInterval(() => {
-      setAnalysisProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(progressInterval)
-          return 100
+    try {
+      // Use real document analysis API
+      await agentService.analyzeDocument(
+        documentId || 'demo-doc',
+        documentType || 'general',
+        // Progress handler
+        (event) => {
+          if (event.progress) {
+            setAnalysisProgress(event.progress)
+          }
+        },
+        // Result handler
+        (result) => {
+          const analysisResult: DocumentAnalysis = {
+            documentType: result.document_type || documentType || 'general',
+            isSignable: result.is_signable || false,
+            requiredAgents: result.required_agents || ['document_analyzer'],
+            confidence: result.confidence || 0.85,
+            executionType: result.execution_type || 'sequential'
+          }
+          
+          setAnalysis(analysisResult)
+          setActiveAgents(analysisResult.requiredAgents)
+          
+          // Update agent statuses
+          updateAgentStatus('router', 'active')
+          analysisResult.requiredAgents.forEach(agentId => {
+            updateAgentStatus(agentId, 'active')
+          })
+          
+          if (onAnalysisComplete) {
+            onAnalysisComplete(analysisResult)
+          }
+        },
+        // Error handler
+        (error) => {
+          setError(error)
+          updateAgentStatus('router', 'error')
         }
-        return prev + 10
-      })
-    }, 200)
-    
-    // Simulate analysis result
-    setTimeout(() => {
-      const mockAnalysis: DocumentAnalysis = {
-        documentType: documentType || 'legal',
-        isSignable: true,
-        requiredAgents: ['signature', 'compliance', 'workflow'],
-        confidence: 0.95,
-        executionType: 'sequential'
-      }
-      
-      setAnalysis(mockAnalysis)
-      setActiveAgents(mockAnalysis.requiredAgents)
-      
-      // Update agent statuses
-      updateAgentStatus('router', 'active')
-      mockAnalysis.requiredAgents.forEach(agentId => {
-        updateAgentStatus(agentId, 'active')
-      })
-      
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Analysis failed')
+      updateAgentStatus('router', 'error')
+    } finally {
       setIsAnalyzing(false)
-      
-      if (onAnalysisComplete) {
-        onAnalysisComplete(mockAnalysis)
-      }
-    }, 2000)
+    }
   }
+  
   
   const updateAgentStatus = (agentId: string, status: AgentType['status']) => {
     setAgents(prev => prev.map(agent => 

@@ -99,22 +99,38 @@ const getAgentColor = (agentType: string) => {
   }
 }
 
-const getDocumentAgents = (docType: string, tags: string[]): AssignedAgent[] => {
+// Helper function to map API agent data to UI format
+const mapApiAgentToAssigned = (apiAgent: any): AssignedAgent => {
+  return {
+    id: apiAgent.id,
+    name: apiAgent.name,
+    type: apiAgent.type,
+    status: apiAgent.status === 'ready' ? 'standby' : apiAgent.status,
+    progress: undefined,
+    message: apiAgent.description || 'Ready',
+    icon: getAgentIcon(apiAgent.type),
+    color: getAgentColor(apiAgent.type)
+  }
+}
+
+// Fallback function for when API is not available
+const getDocumentAgentsFallback = (docType: string, tags: string[], documentId: string): AssignedAgent[] => {
   const agents: AssignedAgent[] = []
   
   // Determine agents based on document type and tags
+  // TODO: This logic should match the backend's agent assignment logic
   const isSignable = tags.includes('signable') || tags.includes('contract') || tags.includes('agreement')
   const isLegal = tags.includes('legal') || tags.includes('contract') || tags.includes('compliance')
   const isFinancial = tags.includes('financial') || tags.includes('invoice') || tags.includes('report')
   
   if (isSignable) {
     agents.push({
-      id: 'sig-' + Math.random().toString(36).substr(2, 9),
+      id: `sig-${documentId}`, // Use document ID for consistent agent IDs
       name: 'Digital Signature Agent',
       type: 'digital_signature',
-      status: Math.random() > 0.5 ? 'processing' : 'standby',
-      progress: Math.floor(Math.random() * 100),
-      message: 'Managing signature workflow',
+      status: 'standby', // TODO: Get real status from API
+      progress: undefined, // Will be set when processing
+      message: 'Ready to manage signatures',
       icon: IconSignature,
       color: 'bg-blue-500'
     })
@@ -122,11 +138,11 @@ const getDocumentAgents = (docType: string, tags: string[]): AssignedAgent[] => 
   
   if (isLegal) {
     agents.push({
-      id: 'comp-' + Math.random().toString(36).substr(2, 9),
+      id: `legal-${documentId}`,
       name: 'Legal Compliance Agent',
       type: 'legal_compliance',
-      status: Math.random() > 0.7 ? 'completed' : 'active',
-      message: 'Checking legal requirements',
+      status: 'standby',
+      message: 'Ready for compliance check',
       icon: IconScale,
       color: 'bg-green-500'
     })
@@ -134,23 +150,23 @@ const getDocumentAgents = (docType: string, tags: string[]): AssignedAgent[] => 
   
   if (isFinancial) {
     agents.push({
-      id: 'fin-' + Math.random().toString(36).substr(2, 9),
+      id: `fin-${documentId}`,
       name: 'Financial Analysis Agent',
       type: 'financial_analyzer',
-      status: 'active',
-      message: 'Analyzing financial data',
+      status: 'standby',
+      message: 'Ready to analyze',
       icon: IconChartBar,
       color: 'bg-pink-500'
     })
   }
   
-  // Always add document analyzer for insights
+  // Document analyzer is always available
   agents.push({
-    id: 'doc-' + Math.random().toString(36).substr(2, 9),
+    id: `doc-${documentId}`,
     name: 'Document Analyzer',
     type: 'document_analyzer',
-    status: 'completed',
-    message: 'Content analyzed',
+    status: 'standby',
+    message: 'Ready to analyze content',
     icon: IconFileText,
     color: 'bg-purple-500'
   })
@@ -169,6 +185,15 @@ export function AgentAssignment({
   const [filter, setFilter] = useState<'all' | 'processing' | 'completed'>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [availableAgents, setAvailableAgents] = useState<any[]>([])
+  
+  // Load available agents first
+  const loadAvailableAgents = async () => {
+    const response = await agentService.getAgents()
+    if (response.data) {
+      setAvailableAgents(response.data)
+    }
+  }
   
   // Load documents and transform them with agent assignments
   const loadDocuments = async () => {
@@ -187,32 +212,49 @@ export function AgentAssignment({
       
       if (response.data?.documents) {
         // Transform documents to include agent assignments
-        const docsWithAgents: DocumentWithAgents[] = response.data.documents.map(doc => {
-          const tags = doc.tags || []
-          const docType = tags[0] || 'general'
-          const agents = getDocumentAgents(docType, tags)
-          
-          // Determine document status based on agent statuses
-          let docStatus: DocumentWithAgents['status'] = 'pending'
-          if (agents.some(a => a.status === 'processing')) {
-            docStatus = 'processing'
-          } else if (agents.every(a => a.status === 'completed')) {
-            docStatus = 'completed'
-          }
-          
-          return {
-            id: doc.id,
-            name: doc.filename,
-            type: docType,
-            fileType: doc.file_type || 'unknown',
-            mimeType: doc.mime_type,
-            isSignable: tags.includes('signable') || tags.includes('contract'),
-            status: docStatus,
-            agents: agents,
-            uploadedAt: doc.created_at,
-            tags: tags
-          }
-        })
+        const docsWithAgents: DocumentWithAgents[] = await Promise.all(
+          response.data.documents.map(async (doc) => {
+            const tags = doc.tags || []
+            const docType = tags[0] || 'general'
+            
+            // Try to fetch real agent assignments
+            let agents: AssignedAgent[] = []
+            try {
+              const agentResponse = await agentService.getDocumentAgents(doc.id)
+              if (agentResponse.data?.assigned_agents) {
+                agents = agentResponse.data.assigned_agents.map(mapApiAgentToAssigned)
+              } else {
+                // Fallback to local logic if API fails
+                agents = getDocumentAgentsFallback(docType, tags, doc.id)
+              }
+            } catch (err) {
+              console.warn('Failed to fetch agents for document', doc.id, err)
+              // Use fallback
+              agents = getDocumentAgentsFallback(docType, tags, doc.id)
+            }
+            
+            // Determine document status based on agent statuses
+            let docStatus: DocumentWithAgents['status'] = 'pending'
+            if (agents.some(a => a.status === 'processing')) {
+              docStatus = 'processing'
+            } else if (agents.every(a => a.status === 'completed')) {
+              docStatus = 'completed'
+            }
+            
+            return {
+              id: doc.id,
+              name: doc.filename,
+              type: docType,
+              fileType: doc.file_type || 'unknown',
+              mimeType: doc.mime_type,
+              isSignable: tags.includes('signable') || tags.includes('contract'),
+              status: docStatus,
+              agents: agents,
+              uploadedAt: doc.created_at,
+              tags: tags
+            }
+          })
+        )
         
         setDocuments(docsWithAgents)
       }
@@ -225,7 +267,10 @@ export function AgentAssignment({
   }
   
   useEffect(() => {
-    loadDocuments()
+    // Load agents first, then documents
+    loadAvailableAgents().then(() => {
+      loadDocuments()
+    })
   }, [])
   
   const getStatusIcon = (status: AssignedAgent['status']) => {
@@ -439,7 +484,7 @@ export function AgentAssignment({
                           </div>
                         </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 </ScrollArea>
               </TabsContent>

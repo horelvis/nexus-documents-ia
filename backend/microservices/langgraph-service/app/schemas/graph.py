@@ -12,6 +12,7 @@ class GraphType(str, Enum):
     CONVERSATIONAL = "conversational"
     ANALYTICAL = "analytical"
     CREW_ORCHESTRATION = "crew_orchestration"
+    DOCUMENT_ANALYSIS_CREW = "document_analysis_crew"
 
 
 class GraphExecutionMode(str, Enum):

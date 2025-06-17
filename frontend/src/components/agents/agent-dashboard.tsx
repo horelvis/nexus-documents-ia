@@ -130,11 +130,12 @@ export function AgentDashboard({ className }: { className?: string }) {
           ...agent,
           icon: getAgentIcon(agent.agent_type),
           color: getAgentColor(agent.agent_type),
-          tasksCompleted: Math.floor(Math.random() * 200) + 50, // TODO: Get from real stats
-          avgResponseTime: Math.random() * 10 + 0.5,
-          successRate: 95 + Math.random() * 5,
-          currentLoad: agent.status === 'busy' ? 60 + Math.random() * 30 : 
-                      agent.status === 'active' ? 10 + Math.random() * 40 : 0
+          // TODO: Connect to real agent statistics from API
+          tasksCompleted: 0, // Placeholder - needs API endpoint for agent stats
+          avgResponseTime: 0, // Placeholder - needs API endpoint for agent metrics
+          successRate: 0, // Placeholder - needs API endpoint for agent performance
+          currentLoad: agent.status === 'busy' ? 75 : 
+                      agent.status === 'active' ? 25 : 0
         }))
         setAgents(agentMetrics)
         
@@ -152,17 +153,18 @@ export function AgentDashboard({ className }: { className?: string }) {
       if (statusResponse.data) {
         setServiceStatus(statusResponse.data)
         
-        // Create activities from recent agent activity
-        const mockActivities: AgentActivity[] = agentsResponse.data?.slice(0, 5).map((agent, index) => ({
-          id: `act-${index}`,
+        // TODO: Connect to real agent activity endpoint
+        // Currently using agent list data as placeholder
+        const activities: AgentActivity[] = agentsResponse.data?.slice(0, 5).map((agent, index) => ({
+          id: agent.id,
           agentId: agent.id,
           agentName: agent.name,
-          action: getAgentAction(agent.agent_type),
-          timestamp: agent.last_activity || new Date(Date.now() - 1000 * 60 * (index + 1) * 10).toISOString(),
+          action: agent.last_activity ? 'Task completed' : 'Agent initialized',
+          timestamp: agent.last_activity || agent.updated_at,
           status: agent.status === 'error' ? 'error' : 'success' as const,
-          duration: Math.random() * 5 + 0.5
+          duration: 0 // Placeholder - needs real execution time from API
         })) || []
-        setActivities(mockActivities)
+        setActivities(activities)
       }
     } catch (err) {
       console.error('Failed to load agent data:', err)
@@ -206,8 +208,9 @@ export function AgentDashboard({ className }: { className?: string }) {
       ]
     }
     
+    // TODO: This should come from actual agent execution logs
     const typeActions = actions[agentType] || ['Task completed']
-    return typeActions[Math.floor(Math.random() * typeActions.length)]
+    return typeActions[0] // Use first action as placeholder instead of random
   }
   
   // Load data on mount

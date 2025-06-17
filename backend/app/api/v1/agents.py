@@ -3,7 +3,8 @@ API endpoints for Agent management - Proxy to Langroid microservice
 """
 import logging
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
@@ -404,3 +405,184 @@ async def test_langroid_integration(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Integration test failed: {str(e)}"
         )
+
+# =====================================
+# AGENT STATISTICS & ACTIVITY
+# =====================================
+
+@router.get("/{agent_id}/stats")
+async def get_agent_stats(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get statistics for a specific agent"""
+    try:
+        # TODO: Implement real statistics tracking in database
+        # For now, return placeholder data structure
+        return {
+            "agent_id": agent_id,
+            "tasks_completed": 0,
+            "avg_response_time": 0.0,
+            "success_rate": 0.0,
+            "total_executions": 0,
+            "last_24h_executions": 0,
+            "error_count": 0,
+            "avg_execution_time": 0.0,
+            "created_at": datetime.utcnow().isoformat(),
+            "last_activity": None
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent stats: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get agent statistics: {str(e)}"
+        )
+
+@router.get("/activity")
+async def get_agent_activity(
+    limit: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get recent agent activity for the tenant"""
+    try:
+        # TODO: Implement activity tracking in database
+        # For now, return empty list
+        return {
+            "activities": [],
+            "total": 0,
+            "tenant_id": str(current_user.tenant_id)
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent activity: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get agent activity: {str(e)}"
+        )
+
+@router.post("/document/analyze")
+async def analyze_document_with_router(
+    request: DocumentAnalysisRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Analyze a document using LangGraph + CrewAI document analysis workflow"""
+    async def event_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'progress', 'content': 'Initializing advanced document analysis...', 'progress': 5})}\n\n"
+            
+            # Check if we have LangGraph service available
+            try:
+                from app.services.langgraph_client import LangGraphClient
+                langgraph_client = LangGraphClient()
+                
+                yield f"data: {json.dumps({'type': 'progress', 'content': 'Connecting to LangGraph service...', 'progress': 10})}\n\n"
+                
+                # Prepare request for LangGraph document analysis crew
+                graph_request = {
+                    "graph_type": "document_analysis_crew",
+                    "input_data": {
+                        "document_id": request.document_id or "temp-doc",
+                        "document_content": request.document_content,
+                        "tenant_id": str(current_user.tenant_id),
+                        "user_id": str(current_user.id)
+                    },
+                    "tenant_id": str(current_user.tenant_id),
+                    "user_id": str(current_user.id)
+                }
+                
+                yield f"data: {json.dumps({'type': 'progress', 'content': 'Starting CrewAI agent analysis...', 'progress': 20})}\n\n"
+                
+                # Execute LangGraph + CrewAI workflow
+                async for event in langgraph_client.stream_graph_execution(graph_request):
+                    if event.get("type") == "node_start":
+                        node_name = event.get("node", "")
+                        progress_map = {
+                            "classify_document": 30,
+                            "select_specialist_agents": 40,
+                            "extract_entities": 50,
+                            "execute_specialist_crew": 60,
+                            "analyze_compliance": 70,
+                            "synthesize_findings": 80,
+                            "generate_recommendations": 90
+                        }
+                        progress = progress_map.get(node_name, 50)
+                        yield f"data: {json.dumps({'type': 'progress', 'content': f'Processing: {node_name}', 'progress': progress})}\n\n"
+                    
+                    elif event.get("type") == "result":
+                        # Got final result from LangGraph
+                        result_data = event.get("data", {})
+                        
+                        # Transform to our expected format
+                        result = {
+                            "type": "result",
+                            "content": {
+                                "document_type": result_data.get("document_type", "general"),
+                                "is_signable": result_data.get("requires_signature", False),
+                                "required_agents": result_data.get("agents_used", ["document_analyzer"]),
+                                "confidence": result_data.get("confidence_scores", {}).get("overall", 0.85),
+                                "execution_type": "sequential",
+                                "analysis": result_data.get("analysis", {}),
+                                "recommendations": result_data.get("recommendations", []),
+                                "action_items": result_data.get("action_items", []),
+                                "extracted_data": result_data.get("extracted_data", {}),
+                                "compliance_status": result_data.get("compliance_status", {}),
+                                "risk_assessment": result_data.get("risk_assessment", {}),
+                                "analysis_timestamp": datetime.utcnow().isoformat()
+                            }
+                        }
+                        
+                        yield f"data: {json.dumps(result)}\n\n"
+                
+                yield f"data: {json.dumps({'type': 'progress', 'content': 'Analysis complete', 'progress': 100})}\n\n"
+                
+            except Exception as e:
+                logger.warning(f"LangGraph service not available, falling back to basic analysis: {e}")
+                
+                # Fallback to basic analysis
+                document_type = request.analysis_type or "general"
+                
+                yield f"data: {json.dumps({'type': 'progress', 'content': 'Using basic analysis...', 'progress': 50})}\n\n"
+                
+                # Basic agent mapping
+                agent_mapping = {
+                    "contract": ["digital_signature", "legal_compliance", "document_analyzer"],
+                    "legal": ["legal_compliance", "document_analyzer"],
+                    "financial": ["financial_analyzer", "document_analyzer"],
+                    "agreement": ["digital_signature", "document_analyzer"],
+                    "invoice": ["digital_signature", "financial_analyzer"],
+                    "general": ["document_analyzer"]
+                }
+                
+                required_agents = agent_mapping.get(document_type, ["document_analyzer"])
+                signable_types = ["contract", "agreement", "legal", "invoice"]
+                is_signable = document_type in signable_types
+                
+                result = {
+                    "type": "result",
+                    "content": {
+                        "document_type": document_type,
+                        "is_signable": is_signable,
+                        "required_agents": required_agents,
+                        "confidence": 0.75,
+                        "execution_type": "sequential",
+                        "analysis_timestamp": datetime.utcnow().isoformat(),
+                        "note": "Basic analysis - LangGraph service unavailable"
+                    }
+                }
+                
+                yield f"data: {json.dumps(result)}\n\n"
+            
+            yield f"data: [DONE]\n\n"
+            
+        except Exception as e:
+            logger.error(f"Error in document analysis: {str(e)}")
+            error_response = {"type": "error", "content": str(e)}
+            yield f"data: {json.dumps(error_response)}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
