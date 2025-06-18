@@ -26,7 +26,8 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconChevronsLeft,
-  IconChevronsRight
+  IconChevronsRight,
+  IconShare2
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -64,6 +65,7 @@ interface DocumentsDataTableProps {
   onDownloadDocument: (document: ApiDocument) => void
   onPreviewDocument: (document: ApiDocument) => void
   onFullPagePreview: (document: ApiDocument) => void
+  onShareDocument: (document: ApiDocument) => void
 }
 
 export function DocumentsDataTable({
@@ -74,6 +76,7 @@ export function DocumentsDataTable({
   onDownloadDocument,
   onPreviewDocument,
   onFullPagePreview,
+  onShareDocument,
 }: DocumentsDataTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -260,6 +263,10 @@ export function DocumentsDataTable({
               <DropdownMenuItem onClick={() => onDownloadDocument(document)}>
                 <IconDownload className="mr-2 h-4 w-4" />
                 Download
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onShareDocument(document)}>
+                <IconShare2 className="mr-2 h-4 w-4" />
+                Share
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEditDocument(document)}>
                 <IconEdit className="mr-2 h-4 w-4" />

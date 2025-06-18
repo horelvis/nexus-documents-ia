@@ -19,7 +19,8 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconLayoutGrid,
-  IconLayoutList
+  IconLayoutList,
+  IconShare2
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,6 +43,7 @@ import {
   DocumentPreviewDialog,
   DocumentsDataTable 
 } from "@/components/documents"
+import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
 import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
@@ -69,6 +71,7 @@ export default function DocumentsPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
   const { openUploadDialog, setOnUploadComplete } = useUpload()
@@ -168,6 +171,11 @@ export default function DocumentsPage() {
   const handlePreviewDocument = (document: ApiDocument) => {
     setSelectedDocument(document)
     setPreviewDialogOpen(true)
+  }
+
+  const handleShareDocument = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setShareDialogOpen(true)
   }
 
   const handleFullPagePreview = (document: ApiDocument) => {
@@ -550,6 +558,15 @@ export default function DocumentsPage() {
                           <Button 
                             size="sm" 
                             variant="ghost"
+                            onClick={() => handleShareDocument(document)}
+                            title="Share"
+                            className="h-7 w-7 p-0"
+                          >
+                            <IconShare2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
                             onClick={() => handleEditDocument(document)}
                             title="Edit"
                             className="h-7 w-7 p-0"
@@ -596,6 +613,7 @@ export default function DocumentsPage() {
             onDownloadDocument={handleDownloadDocument}
             onPreviewDocument={handlePreviewDocument}
             onFullPagePreview={handleFullPagePreview}
+            onShareDocument={handleShareDocument}
           />
         )}
 
@@ -733,6 +751,12 @@ export default function DocumentsPage() {
           document={selectedDocument}
           open={previewDialogOpen}
           onOpenChange={setPreviewDialogOpen}
+        />
+
+        <ShareDocumentDialog
+          document={selectedDocument}
+          open={shareDialogOpen}
+          onOpenChange={setShareDialogOpen}
         />
 
       </div>

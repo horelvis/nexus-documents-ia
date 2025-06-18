@@ -90,38 +90,30 @@ export class SharedDocumentsService {
     if (params?.is_active !== undefined) queryParams.append('is_active', params.is_active.toString())
     
     const query = queryParams.toString()
-    const url = query ? `/document-shares?${query}` : '/document-shares'
+    const url = query ? `/shares?${query}` : '/shares'
     
-    return this.apiClient.request<SharedDocumentsListResponse>(url)
+    return this.apiClient.get<SharedDocumentsListResponse>(url)
   }
 
   async createShare(data: DocumentShareCreate): Promise<ApiResponse<SharedDocument>> {
-    return this.apiClient.request<SharedDocument>('/document-shares', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
+    return this.apiClient.post<SharedDocument>('/shares', data)
   }
 
   async getShare(shareId: string): Promise<ApiResponse<SharedDocument>> {
-    return this.apiClient.request<SharedDocument>(`/document-shares/${shareId}`)
+    return this.apiClient.get<SharedDocument>(`/shares/${shareId}`)
   }
 
   async updateShare(shareId: string, data: DocumentShareUpdate): Promise<ApiResponse<SharedDocument>> {
-    return this.apiClient.request<SharedDocument>(`/document-shares/${shareId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data)
-    })
+    return this.apiClient.patch<SharedDocument>(`/shares/${shareId}`, data)
   }
 
   async revokeShare(shareId: string): Promise<ApiResponse<{ message: string }>> {
-    return this.apiClient.request<{ message: string }>(`/document-shares/${shareId}`, {
-      method: 'DELETE'
-    })
+    return this.apiClient.delete<{ message: string }>(`/shares/${shareId}`)
   }
 
   async getShareStatistics(documentId?: string): Promise<ApiResponse<ShareStatistics>> {
     const params = documentId ? `?document_id=${documentId}` : ''
-    return this.apiClient.request<ShareStatistics>(`/document-shares/statistics${params}`)
+    return this.apiClient.get<ShareStatistics>(`/shares/statistics${params}`)
   }
 
   async getShareAccessLogs(shareId: string, params?: {
@@ -133,9 +125,9 @@ export class SharedDocumentsService {
     if (params?.per_page) queryParams.append('per_page', params.per_page.toString())
     
     const query = queryParams.toString()
-    const url = query ? `/document-shares/${shareId}/logs?${query}` : `/document-shares/${shareId}/logs`
+    const url = query ? `/shares/${shareId}/logs?${query}` : `/shares/${shareId}/logs`
     
-    return this.apiClient.request<any>(url)
+    return this.apiClient.get<any>(url)
   }
 }
 

@@ -399,7 +399,10 @@ export function SharedDocumentsDataTable({
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <p className="text-lg font-medium mb-2">No shared documents found</p>
+                    <p className="text-sm text-muted-foreground">Go to the Document Library to share your first document.</p>
+                  </div>
                 </TableCell>
               </TableRow>
             )}

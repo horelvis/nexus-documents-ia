@@ -395,20 +395,6 @@ export default function SharedDocumentsPage() {
           </Card>
         )}
         
-        {!isLoading && !error && sharedDocuments.length === 0 && (
-          <Card className="text-center py-12">
-            <CardContent>
-              <IconShare2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No shared documents found</h3>
-              <p className="text-muted-foreground mb-4">
-                {searchQuery || selectedFilter !== 'all' 
-                  ? 'Try adjusting your search or filter criteria.'
-                  : 'Go to the Document Library to share your first document.'
-                }
-              </p>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Edit Permissions Dialog */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>

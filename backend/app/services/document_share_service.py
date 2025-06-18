@@ -539,7 +539,7 @@ class DocumentShareService:
             
             # Get creator info
             creator = share.creator
-            creator_name = creator.name if creator else "Someone"
+            creator_name = creator.full_name if creator and creator.full_name else creator.email if creator else "Someone"
             
             # Prepare email data
             subject = f"{creator_name} shared a document with you: {document.title}"
