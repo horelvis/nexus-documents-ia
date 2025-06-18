@@ -218,14 +218,14 @@ export class AgentsService {
     await this.apiClient.post(`${API_CONFIG.ENDPOINTS.AGENTS}/${agentId}/execute/stream`, request)
   }
 
-  // Health check for Langroid integration
-  async checkLangroidHealth() {
+  // Health check for LangGraph integration
+  async checkLangGraphHealth() {
     const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/health`)
     return response
   }
 
-  // Test Langroid integration
-  async testLangroidAgent() {
+  // Test LangGraph integration
+  async testLangGraphAgent() {
     const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/test`)
     return response
   }

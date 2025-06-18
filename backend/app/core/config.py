@@ -93,8 +93,6 @@ class Settings(BaseSettings):
     # LangChain Microservice
     LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
     
-    # Langroid Microservice (Advanced AI Agents)
-    LANGROID_SERVICE_URL: str = "http://langroid-service:8002"
     
     # LangGraph Microservice (State-based Workflows)
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"

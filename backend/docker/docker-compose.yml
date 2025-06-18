@@ -11,7 +11,6 @@ services:
       - redis
       - qdrant
       - langchain-service
-      - langroid-service
       - langgraph-service
       - ollama-service
       - storage-service
@@ -25,7 +24,6 @@ services:
       - STORAGE_SERVICE_URL=http://storage-service:8001
       - STORAGE_API_KEY=dev-storage-api-key-12345
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
-      - LANGROID_SERVICE_URL=http://langroid-service:8002
       - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
@@ -126,39 +124,6 @@ services:
       - ../microservices/langchain-service/app:/app/app:rw
     restart: unless-stopped
 
-  # Langroid microservice - DEVELOPMENT MODE
-  langroid-service:
-    build:
-      context: ../microservices/langroid-service
-      dockerfile: Dockerfile
-    ports:
-      - "8002:8002"
-    depends_on:
-      - qdrant
-      - ollama-service
-    networks:
-      - backend-network
-    environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - OLLAMA_BASE_URL=http://ollama-service:11434
-      - DEFAULT_LLM_MODEL=llama3.1:8b
-      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
-      - SECRET_KEY=${SECRET_KEY:-langroid-secret-key}
-      - LOG_LEVEL=INFO
-      - DEBUG=true  # Enable reload in dev
-    volumes:
-      # Mount the Python code for live reloading
-      - ../microservices/langroid-service/app:/app/app:rw
-      # Mount agents directory for dynamic agent loading
-      - ./langflow/flows:/app/agents:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   # LangGraph microservice - DEVELOPMENT MODE
   langgraph-service:

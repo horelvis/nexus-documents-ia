@@ -41,9 +41,9 @@ export interface AgentHealth {
 }
 
 export interface AgentServiceStatus {
-  langroid_service: {
+  langgraph_service: {
     status: string
-    agents_loaded: number
+    graphs_loaded: number
     active_sessions: number
   }
   system_resources: {
@@ -51,10 +51,10 @@ export interface AgentServiceStatus {
     memory_percent: number
     disk_percent: number
   }
-  agent_stats: {
-    total_agents: number
-    active_agents: number
-    agents_by_type: Record<string, number>
+  graph_stats: {
+    total_graphs: number
+    active_graphs: number
+    graphs_by_type: Record<string, number>
   }
 }
 

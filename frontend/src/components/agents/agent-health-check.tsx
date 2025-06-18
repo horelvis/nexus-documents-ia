@@ -33,7 +33,7 @@ export function AgentHealthCheck() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [services, setServices] = useState<ServiceStatus[]>([
     {
-      name: 'Langroid Service',
+      name: 'LangGraph Service',
       status: 'unknown',
     },
     {
@@ -61,29 +61,29 @@ export function AgentHealthCheck() {
     const startTime = Date.now()
 
     try {
-      // Check Langroid health
-      const langroidHealth = await checkLangroidHealth()
+      // Check LangGraph health
+      const langgraphHealth = await checkLangGraphHealth()
       
       // Update services status
       setServices([
         {
-          name: 'Langroid Service',
-          status: langroidHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
-          response_time: langroidHealth.response_time,
+          name: 'LangGraph Service',
+          status: langgraphHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
+          response_time: langgraphHealth.response_time,
           last_check: new Date().toISOString(),
-          details: langroidHealth.details,
-          error: langroidHealth.error
+          details: langgraphHealth.details,
+          error: langgraphHealth.error
         },
         {
           name: 'Ollama LLM',
-          status: langroidHealth.ollama_status || 'unknown',
-          response_time: langroidHealth.ollama_response_time,
+          status: langgraphHealth.ollama_status || 'unknown',
+          response_time: langgraphHealth.ollama_response_time,
           last_check: new Date().toISOString(),
         },
         {
           name: 'Qdrant Vector DB',
-          status: langroidHealth.qdrant_status || 'unknown',
-          response_time: langroidHealth.qdrant_response_time,
+          status: langgraphHealth.qdrant_status || 'unknown',
+          response_time: langgraphHealth.qdrant_response_time,
           last_check: new Date().toISOString(),
         },
         {
@@ -109,10 +109,10 @@ export function AgentHealthCheck() {
     }
   }
 
-  const checkLangroidHealth = async () => {
+  const checkLangGraphHealth = async () => {
     const startTime = Date.now()
     try {
-      const result = await agentsService.checkLangroidHealth()
+      const result = await agentsService.checkLangGraphHealth()
       if (result.error) {
         return {
           status: 'unhealthy',
@@ -124,9 +124,9 @@ export function AgentHealthCheck() {
         status: result.data?.status || 'healthy',
         response_time: Date.now() - startTime,
         details: result.data,
-        ollama_status: result.data?.langroid_service?.models ? 'healthy' : 'unknown',
+        ollama_status: result.data?.langgraph_service?.models ? 'healthy' : 'unknown',
         ollama_response_time: 50, // Mock
-        qdrant_status: result.data?.langroid_service?.active_agents !== undefined ? 'healthy' : 'unknown',
+        qdrant_status: result.data?.langgraph_service?.active_agents !== undefined ? 'healthy' : 'unknown',
         qdrant_response_time: 30, // Mock
       }
     } catch (error) {
@@ -141,7 +141,7 @@ export function AgentHealthCheck() {
   const runIntegrationTest = async () => {
     setIsChecking(true)
     try {
-      const result = await agentsService.testLangroidAgent()
+      const result = await agentsService.testLangGraphAgent()
       if (result.error) {
         alert('❌ Integration test failed!\n\n' + result.error)
       } else {
@@ -334,7 +334,7 @@ export function AgentHealthCheck() {
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               This test will create a temporary agent, execute a simple task, and clean up. 
-              It verifies the complete integration between frontend, backend, and Langroid services.
+              It verifies the complete integration between frontend, backend, and LangGraph services.
             </p>
             
             <Button
