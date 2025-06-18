@@ -1,7 +1,7 @@
 # app/api/api.py
 
 from app.api.v1 import (
-    document_insights, documents, document_shares, tenants, stripe, auth, admin, chat,
+    document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, langgraph, users
 )
 from fastapi import APIRouter
@@ -21,6 +21,7 @@ api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
 api_router.include_router(document_shares.router, prefix="/shares", tags=["document-shares"])
+api_router.include_router(document_categorization.router, prefix="/categorization", tags=["categorization"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])

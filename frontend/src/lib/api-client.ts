@@ -79,7 +79,7 @@ class ApiClient {
         status: response.status,
       }
     } catch (error: any) {
-      console.error('API request failed:', error)
+      console.log('API request failed:', error)
       
       // If the error has response data (from our throw above), preserve it
       if (error?.response) {

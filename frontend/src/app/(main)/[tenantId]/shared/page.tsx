@@ -266,9 +266,9 @@ export default function SharedDocumentsPage() {
                 <IconShare2 className="h-8 w-8 text-blue-500" />
                 <div className="ml-3">
                   <p className="text-sm font-medium text-muted-foreground">Total Shared</p>
-                  <p className="text-2xl font-bold">
+                  <div className="text-2xl font-bold">
                     {isLoading ? <Skeleton className="h-8 w-12" /> : totalShares}
-                  </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -280,9 +280,9 @@ export default function SharedDocumentsPage() {
                 <IconCheck className="h-8 w-8 text-green-500" />
                 <div className="ml-3">
                   <p className="text-sm font-medium text-muted-foreground">Active Links</p>
-                  <p className="text-2xl font-bold">
+                  <div className="text-2xl font-bold"> 
                     {isLoading ? <Skeleton className="h-8 w-12" /> : activeShares}
-                  </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -294,9 +294,9 @@ export default function SharedDocumentsPage() {
                 <IconEye className="h-8 w-8 text-purple-500" />
                 <div className="ml-3">
                   <p className="text-sm font-medium text-muted-foreground">Total Views</p>
-                  <p className="text-2xl font-bold">
+                  <div className="text-2xl font-bold">
                     {isLoading ? <Skeleton className="h-8 w-12" /> : totalViews}
-                  </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -308,9 +308,9 @@ export default function SharedDocumentsPage() {
                 <IconAlertCircle className="h-8 w-8 text-orange-500" />
                 <div className="ml-3">
                   <p className="text-sm font-medium text-muted-foreground">Expiring Soon</p>
-                  <p className="text-2xl font-bold">
+                  <div className="text-2xl font-bold">
                     {isLoading ? <Skeleton className="h-8 w-12" /> : expiringSoon}
-                  </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
