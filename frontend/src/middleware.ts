@@ -5,7 +5,8 @@ const isPublicRoute = createRouteMatcher([
   '/pricing',
   '/auth/sign-in(.*)', 
   '/auth/sign-up(.*)',
-  '/auth/sign-out(.*)'
+  '/auth/sign-out(.*)',
+  '/shared/(.*)'  // Public share links
 ])
 
 export default clerkMiddleware(async (auth, req) => {

@@ -133,7 +133,7 @@
                 <div class="document-title">{{ document_title }}</div>
                 <div class="detail-item">
                     <span class="detail-label">Access Type:</span>
-                    <span>{{ share_type|title }} Only</span>
+                    <span>{{ share_type.title() }} Only</span>
                 </div>
             </div>
             
@@ -150,7 +150,7 @@
                 {% if expires_at %}
                 <div class="detail-item">
                     <span class="detail-label">Expires:</span>
-                    <span>{{ expires_at|date:"F d, Y at h:i A" }}</span>
+                    <span>{{ expires_at }}</span>
                 </div>
                 {% endif %}
                 
@@ -177,7 +177,7 @@
             
             {% if expires_at %}
             <div class="warning">
-                ⚠️ This share link will expire on {{ expires_at|date:"F d, Y at h:i A" }}. 
+                ⚠️ This share link will expire on {{ expires_at }}. 
                 Please access the document before this date.
             </div>
             {% endif %}

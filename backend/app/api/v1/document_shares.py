@@ -425,7 +425,8 @@ async def access_shared_document(
                 "file_type": document.file_type,
                 "file_size": document.file_size,
                 "description": document.description,
-                "share_type": share.share_type
+                "share_type": share.share_type,
+                "mime_type": document.mime_type
             }
         )
         

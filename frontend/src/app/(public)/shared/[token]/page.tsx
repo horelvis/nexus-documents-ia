@@ -9,8 +9,6 @@ import {
   IconEye,
   IconFile,
   IconAlertCircle,
-  IconCalendar,
-  IconUser,
   IconClock,
   IconX
 } from "@tabler/icons-react"
@@ -21,8 +19,19 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
-import { formatDistanceToNow } from "date-fns"
 import { API_CONFIG } from "@/lib/config"
+import dynamic from 'next/dynamic'
+
+// Lazy load the PDF viewer
+const PDFViewer = dynamic(() => import('@/components/documents/pdf-viewer'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <IconLoader2 className="h-8 w-8 animate-spin text-purple-600 dark:text-purple-400" />
+      <span className="ml-2">Loading PDF viewer...</span>
+    </div>
+  )
+})
 
 interface ShareInfo {
   success: boolean
@@ -36,6 +45,7 @@ interface ShareInfo {
     file_size: number
     description?: string
     share_type: string
+    mime_type?: string
   }
 }
 
@@ -249,37 +259,161 @@ export default function SharedDocumentPage() {
     
     // If view-only and we have the document URL, show it in an iframe
     if (isViewOnly && documentUrl) {
-      return (
-        <div className="fixed inset-0 bg-background">
-          {/* Header Bar */}
-          <div className="absolute top-0 left-0 right-0 bg-background border-b z-10">
-            <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  {getFileIcon(doc.file_type, undefined, doc.filename, 'h-5 w-5')}
-                  <h1 className="text-lg font-semibold">{doc.title || doc.filename}</h1>
+      // Check if it's a PDF or image that can be displayed inline
+      const isPDF = doc.file_type === 'pdf' || doc.mime_type === 'application/pdf'
+      const isImage = doc.file_type?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(doc.file_type?.toLowerCase() || '')
+      
+      // For PDFs, use our custom PDF viewer
+      if (isPDF) {
+        return (
+          <div className="fixed inset-0 bg-background flex flex-col">
+            {/* Header Bar */}
+            <div className="bg-background border-b">
+              <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    {getFileIcon(doc.file_type, undefined, doc.filename, 'h-5 w-5')}
+                    <h1 className="text-lg font-semibold">{doc.title || doc.filename}</h1>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    View Only
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-xs">
-                  View Only
-                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDocumentUrl(null)}
+                >
+                  <IconX className="h-4 w-4" />
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setDocumentUrl(null)}
-              >
-                <IconX className="h-4 w-4" />
-              </Button>
+            </div>
+            
+            {/* PDF Viewer */}
+            <div className="flex-1 overflow-hidden">
+              <PDFViewer
+                url={documentUrl}
+                fileName={doc.filename}
+                showToolbar={true}
+                initialScale={1.0}
+                className="h-full"
+              />
             </div>
           </div>
-          
-          {/* Document Viewer */}
-          <div className="pt-16 h-full">
-            <iframe
-              src={documentUrl}
-              className="w-full h-full border-0"
-              title={doc.title || doc.filename}
-            />
+        )
+      }
+      
+      // For images, show them directly
+      if (isImage) {
+        return (
+          <div className="fixed inset-0 bg-background">
+            {/* Header Bar */}
+            <div className="absolute top-0 left-0 right-0 bg-background border-b z-10">
+              <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    {getFileIcon(doc.file_type, undefined, doc.filename, 'h-5 w-5')}
+                    <h1 className="text-lg font-semibold">{doc.title || doc.filename}</h1>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    View Only
+                  </Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDocumentUrl(null)}
+                >
+                  <IconX className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            
+            {/* Image Viewer */}
+            <div className="pt-16 h-full flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
+              <img
+                src={documentUrl}
+                alt={doc.title || doc.filename}
+                className="max-w-full max-h-full object-contain"
+              />
+            </div>
+          </div>
+        )
+      }
+      
+      // For other file types, show info and download button
+      return (
+        <div className="min-h-screen bg-background">
+          <div className="container mx-auto py-8 px-4 max-w-4xl">
+            {/* Header */}
+            <div className="mb-8 text-center">
+              <h1 className="text-3xl font-bold mb-2">Document Preview Not Available</h1>
+              <p className="text-muted-foreground">
+                This file type cannot be previewed in the browser
+              </p>
+            </div>
+
+            {/* Document Card */}
+            <Card className="mb-6">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-6">
+                  {/* File Icon */}
+                  <div className="flex-shrink-0">
+                    <div className="w-16 h-16 flex items-center justify-center rounded-lg bg-muted">
+                      {getFileIcon(doc.file_type, undefined, doc.filename, 'h-10 w-10')}
+                    </div>
+                  </div>
+
+                  {/* Document Info */}
+                  <div className="flex-grow space-y-4">
+                    <div>
+                      <h2 className="text-2xl font-semibold mb-1">
+                        {doc.title || doc.filename}
+                      </h2>
+                      {doc.description && (
+                        <p className="text-muted-foreground">
+                          {doc.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Metadata */}
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <div className="flex items-center gap-1">
+                        <IconFile className="h-4 w-4 text-muted-foreground" />
+                        <span>{doc.filename}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <IconClock className="h-4 w-4 text-muted-foreground" />
+                        <span>{formatFileSize(doc.file_size)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="mt-6">
+                  <Button 
+                    onClick={() => window.open(documentUrl, '_blank')}
+                    size="lg"
+                    className="w-full sm:w-auto"
+                  >
+                    <IconDownload className="mr-2 h-5 w-5" />
+                    Download Document
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Info Alert */}
+            <Alert>
+              <IconAlertCircle className="h-4 w-4" />
+              <AlertTitle>Preview Not Available</AlertTitle>
+              <AlertDescription>
+                This document type ({doc.file_type}) cannot be previewed directly in the browser. 
+                Please download the file to view it on your device.
+              </AlertDescription>
+            </Alert>
           </div>
         </div>
       )
