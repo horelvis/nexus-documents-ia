@@ -27,7 +27,7 @@ export function NavigationLoader() {
     <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
       <div className="fixed left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
         <div className="flex flex-col items-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          <Loader2 className="h-12 w-12 animate-spin text-purple-600 dark:text-purple-400" />
           <p className="text-sm text-muted-foreground">Cargando...</p>
         </div>
       </div>

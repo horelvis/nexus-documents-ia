@@ -1,13 +1,16 @@
 "use client"
 
 import { useParams } from "next/navigation"
+import Link from "next/link"
+import { Suspense } from "react"
 import { DocumentStats } from "@/components/dashboard/document-stats"
 import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { QuickActions } from "@/components/dashboard/quick-actions"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
-import { IconChartBar, IconAlertCircle } from "@tabler/icons-react"
+import { IconChartBar, IconAlertCircle, IconShare2, IconUsers, IconLink, IconMail } from "@tabler/icons-react"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function DashboardPage() {
   const params = useParams()
@@ -24,53 +27,131 @@ export default function DashboardPage() {
       </div>
 
       {/* Document Stats */}
-      <DocumentStats />
+      <Suspense fallback={
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 px-4 lg:px-6">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-8 w-8 mb-2" />
+                <Skeleton className="h-4 w-24" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      }>
+        <DocumentStats />
+      </Suspense>
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 gap-6 px-4 lg:px-6 @3xl/main:grid-cols-2">
         {/* Recent Activity */}
-        <RecentActivity tenantId={tenantId} />
+        <Suspense fallback={
+          <Card className="h-full">
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-48 mt-2" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <Skeleton className="h-8 w-8 rounded-full" />
+                    <div className="flex-1">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-3 w-32 mt-2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        }>
+          <RecentActivity tenantId={tenantId} />
+        </Suspense>
 
         {/* Quick Actions */}
         <QuickActions tenantId={tenantId} />
       </div>
 
-      {/* Storage Usage and Insights */}
+      {/* Shared Documents and Insights */}
       <div className="grid grid-cols-1 gap-6 px-4 lg:px-6 @3xl/main:grid-cols-2">
-        {/* Storage Usage */}
+        {/* Shared Documents */}
         <Card>
           <CardHeader>
-            <CardTitle>Storage Usage</CardTitle>
-            <CardDescription>Your plan includes 10 GB of storage</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <IconShare2 className="h-5 w-5" />
+              Shared Documents
+            </CardTitle>
+            <CardDescription>Documents shared with external parties</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span>Used</span>
-                <span className="font-medium">3.2 GB of 10 GB</span>
+            {/* Summary Stats */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-2xl font-bold">24</p>
+                <p className="text-xs text-muted-foreground">Total shared</p>
               </div>
-              <Progress value={32} className="h-2" />
+              <div className="space-y-1">
+                <p className="text-2xl font-bold">18</p>
+                <p className="text-xs text-muted-foreground">Active links</p>
+              </div>
             </div>
             
-            <div className="space-y-2 pt-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Documents</span>
-                <span>2.1 GB</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Images</span>
-                <span>892 MB</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Others</span>
-                <span>208 MB</span>
+            {/* Recent Shares */}
+            <div className="space-y-3 pt-4 border-t">
+              <h4 className="text-sm font-medium">Recent Shares</h4>
+              
+              <div className="space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium leading-none">Contract_Q4_2024.pdf</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <IconMail className="h-3 w-3" />
+                      <span>john.doe@company.com</span>
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="text-xs">
+                    Expires in 3 days
+                  </Badge>
+                </div>
+                
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium leading-none">Product_Roadmap.docx</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <IconLink className="h-3 w-3" />
+                      <span>Public link • 5 views</span>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    Active
+                  </Badge>
+                </div>
+                
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium leading-none">Financial_Report.xlsx</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <IconUsers className="h-3 w-3" />
+                      <span>3 recipients</span>
+                    </div>
+                  </div>
+                  <Badge variant="destructive" className="text-xs">
+                    Expired
+                  </Badge>
+                </div>
               </div>
             </div>
 
             <div className="pt-4 border-t">
-              <Button variant="outline" className="w-full">
-                <IconChartBar className="mr-2 h-4 w-4" />
-                View Detailed Analytics
+              <Button variant="outline" className="w-full" asChild>
+                <Link href={`/${tenantId}/shared`}>
+                  <IconShare2 className="mr-2 h-4 w-4" />
+                  Manage All Shares
+                </Link>
               </Button>
             </div>
           </CardContent>

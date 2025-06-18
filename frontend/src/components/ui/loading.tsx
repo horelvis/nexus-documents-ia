@@ -31,7 +31,7 @@ export function Loading({ className, size = "md", text, showLogo = false }: Load
       <div className={cn("flex flex-col items-center justify-center gap-4", className)}>
         <CompanyLogo />
         <div className="flex items-center gap-2">
-          <IconLoader2 className={cn("animate-spin", sizeClasses[size])} />
+          <IconLoader2 className={cn("animate-spin text-purple-600 dark:text-purple-400", sizeClasses[size])} />
           {text && <span className="text-sm text-muted-foreground">{text}</span>}
         </div>
       </div>
@@ -40,7 +40,7 @@ export function Loading({ className, size = "md", text, showLogo = false }: Load
 
   return (
     <div className={cn("flex items-center justify-center gap-2", className)}>
-      <IconLoader2 className={cn("animate-spin", sizeClasses[size])} />
+      <IconLoader2 className={cn("animate-spin text-purple-600 dark:text-purple-400", sizeClasses[size])} />
       {text && <span className="text-sm text-muted-foreground">{text}</span>}
     </div>
   )

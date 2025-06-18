@@ -48,11 +48,13 @@ const data = {
       title: "Dashboard",
       url: "/dashboard",
       icon: IconDashboard,
+      color: "blue",
     },
     {
       title: "Documents",
       url: "/documents",
       icon: IconFiles,
+      color: "green",
       items: [
         {
           title: "Document Library",
@@ -62,12 +64,17 @@ const data = {
           title: "Recent Documents",
           url: "/documents/recent",
         },
+        {
+          title: "Shared Documents",
+          url: "/shared",
+        },
       ],
     },
     {
       title: "Search & AI",
       url: "#",
       icon: IconBrain,
+      color: "purple",
       items: [
         {
           title: "Semantic Search",
@@ -87,6 +94,7 @@ const data = {
       title: "AI Agents",
       url: "#",
       icon: IconRobot,
+      color: "indigo",
       items: [
         {
           title: "Agent Library",
@@ -102,6 +110,7 @@ const data = {
       title: "Digital Signatures",
       url: "#",
       icon: IconSignature,
+      color: "pink",
       items: [
         {
           title: "Signature Requests",
@@ -117,6 +126,7 @@ const data = {
       title: "Analytics",
       url: "/analytics",
       icon: IconChartBar,
+      color: "orange",
     },
   ],
   quickActions: [
@@ -124,16 +134,19 @@ const data = {
       name: "Upload Document", 
       url: "#", // Will be handled by context
       icon: IconCloudUpload,
+      color: "blue",
     },
     {
       name: "Search",
       url: "/search",
       icon: IconSearch,
+      color: "green",
     },
     {
       name: "Start AI Chat",
       url: "/chat",
       icon: IconMessages,
+      color: "purple",
     },
   ],
   navSecondary: [
@@ -141,31 +154,37 @@ const data = {
       title: "Tenant Settings",
       url: "/settings/tenant",
       icon: IconSettings,
+      color: "gray",
     },
     {
       title: "User Management",
       url: "/admin/users",
       icon: IconUsers,
+      color: "blue",
     },
     {
       title: "Team Management",
       url: "/admin/teams",
       icon: IconUsers,
+      color: "indigo",
     },
     {
       title: "Billing",
       url: "/billing",
       icon: IconCreditCard,
+      color: "green",
     },
     {
       title: "Storage",
       url: "/storage",
       icon: IconDatabase,
+      color: "purple",
     },
     {
       title: "Help",
       url: "/help",
       icon: IconHelp,
+      color: "orange",
     },
   ],
   recentDocuments: [
@@ -197,6 +216,7 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       navMain: data.navMain.map(item => ({
         ...item,
         url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`,
+        color: item.color,
         items: item.items?.map(subItem => ({
           ...subItem,
           url: `${basePath}${subItem.url}`
@@ -204,7 +224,8 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       })),
       navSecondary: data.navSecondary.map(item => ({
         ...item,
-        url: `${basePath}${item.url}`
+        url: `${basePath}${item.url}`,
+        color: item.color
       }))
     };
   };
