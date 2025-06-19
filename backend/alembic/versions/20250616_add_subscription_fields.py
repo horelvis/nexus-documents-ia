@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_sub_fields_001'
-down_revision = 'unified_20250615'
+down_revision = 'add_doc_categorization'
 branch_labels = None
 depends_on = None
 
