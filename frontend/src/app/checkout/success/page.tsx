@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { CheckCircle, Loader2, AlertCircle } from 'lucide-react'
+import { CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { UnifiedLoader } from '@/components/ui/unified-loader'
 
 interface CheckoutSession {
   session_id: string
@@ -80,13 +81,13 @@ export default function CheckoutSuccessPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin mx-auto text-blue-600" />
-          <p className="text-lg font-medium text-gray-600 dark:text-gray-300">
-            Verificando tu pago...
-          </p>
-        </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+        <UnifiedLoader 
+          variant="initial"
+          size="lg"
+          text="Verificando tu pago..."
+          showLogo={true}
+        />
       </div>
     )
   }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { TopProgressBar } from '@/components/ui/unified-loader'
 
 export function TopLoader() {
   const pathname = usePathname()
@@ -117,19 +118,5 @@ export function TopLoader() {
     }
   }, [])
 
-  if (!isLoading) return null
-
-  return (
-    <div
-      className="fixed top-0 left-0 right-0 z-[100] h-1 bg-purple-600/20 dark:bg-purple-400/20"
-    >
-      <div
-        className="h-full bg-purple-600 dark:bg-purple-400 transition-all duration-300 ease-out"
-        style={{
-          width: `${progress}%`,
-          boxShadow: '0 0 10px currentColor, 0 0 5px currentColor'
-        }}
-      />
-    </div>
-  )
+  return <TopProgressBar isLoading={isLoading} progress={progress} />
 }

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # API Security
-    service_api_key: Optional[str] = None
+    service_api_key: str = "unified-microservices-key-12345"
     
     # External services
     ollama_base_url: str = "http://ollama-service:11434"

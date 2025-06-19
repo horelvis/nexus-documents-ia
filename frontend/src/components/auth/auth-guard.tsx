@@ -3,6 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
+import { InitialLoader } from '@/components/ui/unified-loader'
 
 import type { AuthGuardProps } from '@/lib/types'
 
@@ -23,11 +24,7 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   }, [isClerkLoaded, isSignedIn, router])
 
   if (!isClerkLoaded || userLoading || onboardingLoading) {
-    return fallback || (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-      </div>
-    )
+    return fallback || <InitialLoader />
   }
 
   if (!isSignedIn) {

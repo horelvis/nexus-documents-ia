@@ -20,9 +20,10 @@ services:
     env_file:
       - ../.env
     environment:
+      # Unified API Key for all microservices
+      - MICROSERVICES_API_KEY=unified-microservices-key-12345
       # Services URLs
       - STORAGE_SERVICE_URL=http://storage-service:8001
-      - STORAGE_API_KEY=dev-storage-api-key-12345
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
       - OLLAMA_BASE_URL=http://ollama-service:11434
@@ -112,12 +113,12 @@ services:
     networks:
       - backend-network
     environment:
+      - MICROSERVICES_API_KEY=unified-microservices-key-12345
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - OLLAMA_MODEL=llama3.1:8b
       - EMBEDDING_MODEL=nomic-embed-text
-      - API_KEY=your-secret-api-key-here
       - DEBUG=true  # Enable reload in dev
     volumes:
       # Mount the Python code for live reloading
@@ -140,7 +141,8 @@ services:
     networks:
       - backend-network
     environment:
-      - SERVICE_API_KEY=langgraph-secret-key-12345
+      - MICROSERVICES_API_KEY=unified-microservices-key-12345
+      - SERVICE_API_KEY=unified-microservices-key-12345
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - OLLAMA_BASE_URL=http://ollama-service:11434
@@ -253,7 +255,7 @@ services:
     env_file:
       - ../.env
     environment:
-      - API_KEY=dev-storage-api-key-12345
+      - MICROSERVICES_API_KEY=unified-microservices-key-12345
       - GCS_PROJECT_ID=nexus-document-ia
       - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
       - GCS_BUCKET_NAME=nexus-docs-eu

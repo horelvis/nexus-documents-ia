@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Security configuration
-    API_KEY: str = "your-secret-api-key-here"
+    API_KEY: str = "unified-microservices-key-12345"
     
     # LangChain/Ollama configuration
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"

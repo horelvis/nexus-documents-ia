@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
+import { InitialLoader } from '@/components/ui/unified-loader'
 import { 
   HeroSection, 
   FeaturesSection, 
@@ -28,11 +29,7 @@ export default function Home() {
   }, [isLoaded, isSignedIn, backendUser, userLoading, router])
 
   if (!isLoaded || userLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600"></div>
-      </div>
-    )
+    return <InitialLoader />
   }
 
   if (isSignedIn && backendUser) {

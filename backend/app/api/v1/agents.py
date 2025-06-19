@@ -55,8 +55,9 @@ class DocumentAnalysisRequest(BaseModel):
 async def check_langgraph_health():
     """Check connectivity with LangGraph service"""
     try:
+        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health")
+            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             health_data = response.json()
             
@@ -76,8 +77,9 @@ async def check_langgraph_health():
 async def get_service_status():
     """Get detailed service status from LangGraph"""
     try:
+        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/status")
+            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/status", headers=headers)
             response.raise_for_status()
             
         return response.json()
@@ -96,8 +98,9 @@ async def get_service_status():
 async def list_agent_types():
     """List available agent types from LangGraph"""
     try:
+        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types")
+            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
             response.raise_for_status()
             
         graph_types = response.json()
@@ -445,8 +448,9 @@ async def test_agent_integration(
     """Test LangGraph integration"""
     try:
         # Test health check
+        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health")
+            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             
         # Test simple graph execution

@@ -96,7 +96,6 @@ class Settings(BaseSettings):
     
     # LangGraph Microservice (State-based Workflows)
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
-    LANGGRAPH_API_KEY: str = "langgraph-secret-key-12345"
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -116,7 +115,10 @@ class Settings(BaseSettings):
     MULTI_TENANT: bool = True
     DEFAULT_TENANT: str = "default"
 
-    # Temporary API Key for basic auth during development
+    # Unified API Key for all microservices
+    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    
+    # Legacy API Key (for backward compatibility)
     API_KEY: str = "your-secret-api-key-here" # Default value, should be overridden by env var
     
     # Clerk Configuration
@@ -124,9 +126,8 @@ class Settings(BaseSettings):
     CLERK_PUBLISHABLE_KEY: Optional[str] = os.getenv("CLERK_PUBLISHABLE_KEY")
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
-    # Microservices - Usando la misma API_KEY para todos
+    # Microservices URLs
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
-    STORAGE_API_KEY: str = os.getenv("STORAGE_API_KEY", "dev-storage-api-key-12345")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")
@@ -145,6 +146,15 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "extra": "ignore"  # Ignorar campos extra del .env
     }
+    
+    # Propiedades de compatibilidad para API keys antiguos
+    @property
+    def LANGGRAPH_API_KEY(self) -> str:
+        return self.MICROSERVICES_API_KEY
+    
+    @property
+    def STORAGE_API_KEY(self) -> str:
+        return self.MICROSERVICES_API_KEY
 
 
 settings = Settings()

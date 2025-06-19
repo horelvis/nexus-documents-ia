@@ -1,16 +1,4 @@
-import { IconLoader2 } from "@tabler/icons-react"
-import { cn } from "@/lib/utils"
-
-// Company Logo Component
-function CompanyLogo({ className }: { className?: string }) {
-  return (
-    <div className={cn("flex items-center justify-center", className)}>
-      <div className="bg-gradient-to-br from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500 text-white rounded-lg p-2 shadow-lg">
-        <span className="font-bold text-xl">N</span>
-      </div>
-    </div>
-  )
-}
+import { UnifiedLoader, InlineLoader as UnifiedInlineLoader } from "./unified-loader"
 
 interface LoadingProps {
   className?: string
@@ -19,30 +7,17 @@ interface LoadingProps {
   showLogo?: boolean
 }
 
-const sizeClasses = {
-  sm: "h-4 w-4",
-  md: "h-6 w-6", 
-  lg: "h-8 w-8"
-}
-
+// Backwards compatibility wrapper for existing Loading component
 export function Loading({ className, size = "md", text, showLogo = false }: LoadingProps) {
-  if (showLogo) {
-    return (
-      <div className={cn("flex flex-col items-center justify-center gap-4", className)}>
-        <CompanyLogo />
-        <div className="flex items-center gap-2">
-          <IconLoader2 className={cn("animate-spin text-purple-600 dark:text-purple-400", sizeClasses[size])} />
-          {text && <span className="text-sm text-muted-foreground">{text}</span>}
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className={cn("flex items-center justify-center gap-2", className)}>
-      <IconLoader2 className={cn("animate-spin text-purple-600 dark:text-purple-400", sizeClasses[size])} />
-      {text && <span className="text-sm text-muted-foreground">{text}</span>}
-    </div>
+    <UnifiedLoader
+      variant="inline"
+      size={size}
+      text={text}
+      showLogo={showLogo}
+      className={className}
+      fullScreen={false}
+    />
   )
 }
 
@@ -50,13 +25,15 @@ export function PageLoading({ text = "Loading..." }: { text?: string }) {
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
-        <div className="min-h-96 flex flex-col items-center justify-center gap-6">
-          <CompanyLogo className="mb-2" />
-          <div className="flex flex-col items-center gap-3">
-            <Loading size="lg" />
-            <span className="text-sm text-muted-foreground font-medium">Nexus Document System</span>
-            {text && <span className="text-xs text-muted-foreground">{text}</span>}
-          </div>
+        <div className="min-h-96">
+          <UnifiedLoader
+            variant="page"
+            size="lg"
+            text={text}
+            subtext="Nexus Document System"
+            showLogo={true}
+            fullScreen={false}
+          />
         </div>
       </div>
     </div>
@@ -64,9 +41,5 @@ export function PageLoading({ text = "Loading..." }: { text?: string }) {
 }
 
 export function InlineLoading({ text }: { text?: string }) {
-  return (
-    <div className="flex items-center justify-center py-4">
-      <Loading size="sm" text={text} />
-    </div>
-  )
+  return <UnifiedInlineLoader text={text} />
 }
