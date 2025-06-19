@@ -251,6 +251,109 @@ If you encounter module resolution errors like "Export default doesn't exist":
 4. Apply migration: `alembic upgrade head`
 5. Update corresponding Pydantic schemas
 
+#### Migration Management (IMPORTANT)
+To prevent multiple heads in Alembic migrations, use the provided tools:
+
+**Check for problems:**
+```bash
+cd backend
+python scripts/alembic_utils.py check
+# or
+python scripts/create_migration.py --check
+```
+
+**Create new migration safely:**
+```bash
+cd backend
+# Manual migration
+python scripts/create_migration.py -m "your migration message"
+
+# Auto-generate from model changes
+python scripts/create_migration.py -m "your migration message" --autogenerate
+```
+
+**Fix multiple heads if they exist:**
+```bash
+cd backend
+python scripts/create_migration.py --fix-heads
+# or manually
+python scripts/alembic_utils.py fix
+```
+
+**Visualize migration chain:**
+```bash
+cd backend
+python scripts/alembic_utils.py visualize
+```
+
+**Common issues and solutions:**
+- **Multiple heads error**: Run `python scripts/create_migration.py --fix-heads`
+- **Missing dependencies**: Check with `python scripts/alembic_utils.py check`
+- **Circular dependencies**: Use `visualize` command to identify and manually fix
+- **Duplicate table/column errors**: Use safe migration tools (see below)
+
+**Best practices:**
+- Always use `create_migration.py` instead of `alembic revision` directly
+- Check for problems before creating new migrations
+- Never manually set `down_revision = None` unless creating the initial migration
+- Use descriptive migration messages for better tracking
+
+#### Safe Migration Management (Prevents Duplicate Errors)
+To prevent errors when migrations try to create tables/columns that already exist:
+
+**Check for conflicts before migrating:**
+```bash
+cd backend
+python scripts/alembic_safe_migrate.py --check
+```
+
+**Run migrations safely with conflict detection:**
+```bash
+cd backend
+# Default: upgrade to head with safety checks
+python scripts/alembic_safe_migrate.py
+
+# Upgrade to specific revision
+python scripts/alembic_safe_migrate.py --target abc123
+
+# Dry run to see what would happen
+python scripts/alembic_safe_migrate.py --dry-run
+```
+
+**Fix duplicate table/column issues:**
+```bash
+cd backend
+# Generate SQL script to fix conflicts
+python scripts/alembic_safe_migrate.py --fix-script
+
+# Mark a migration as already applied (when database already has the changes)
+python scripts/alembic_safe_migrate.py --mark-applied revision_id
+
+# Sync alembic version with actual database state
+python scripts/alembic_safe_migrate.py --sync
+```
+
+**Recovery from failed migrations:**
+1. If migration fails with "table already exists" or "column already exists":
+   ```bash
+   # Check what conflicts exist
+   python scripts/alembic_safe_migrate.py --check
+   
+   # Option 1: Generate fix SQL to remove duplicates
+   python scripts/alembic_safe_migrate.py --fix-script > fix.sql
+   # Review and run the SQL manually if needed
+   
+   # Option 2: Mark the migration as already applied
+   python scripts/alembic_safe_migrate.py --mark-applied failed_revision_id
+   
+   # Option 3: Sync to match current database state
+   python scripts/alembic_safe_migrate.py --sync
+   ```
+
+2. Always backup your database before running fix scripts
+
+3. Use `--dry-run` flag to preview changes before applying them
+
 ### Frontend Component Development
 1. Use existing patterns from `components/` directory
 2. Follow shadcn/ui component structure

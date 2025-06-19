@@ -30,7 +30,7 @@ router = APIRouter()
 async def list_documents(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: str = Depends(get_current_tenant_id_async),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None),
