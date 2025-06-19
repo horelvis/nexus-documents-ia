@@ -66,7 +66,6 @@ async def categorize_documents(
         # Get documents to categorize
         query = select(Document).filter(
             Document.tenant_id == current_user.tenant_id,
-            Document.deleted_at.is_(None)
         )
         
         if request.document_ids:
@@ -194,7 +193,6 @@ async def get_categorization_stats(
         # Total documents
         total_query = select(func.count(Document.id)).filter(
             Document.tenant_id == current_user.tenant_id,
-            Document.deleted_at.is_(None)
         )
         total_result = await db.execute(total_query)
         total_documents = total_result.scalar() or 0
@@ -216,7 +214,6 @@ async def get_categorization_stats(
             func.count(Document.id)
         ).filter(
             Document.tenant_id == current_user.tenant_id,
-            Document.deleted_at.is_(None),
             Document.category.isnot(None),
             Document.category != ""
         ).group_by(Document.category)
@@ -392,7 +389,6 @@ async def update_document_category(
         select(Document).filter(
             Document.id == document_id,
             Document.tenant_id == current_user.tenant_id,
-            Document.deleted_at.is_(None)
         )
     )
     document = result.scalar_one_or_none()
@@ -432,7 +428,6 @@ async def update_document_tags(
         select(Document).filter(
             Document.id == document_id,
             Document.tenant_id == current_user.tenant_id,
-            Document.deleted_at.is_(None)
         )
     )
     document = result.scalar_one_or_none()

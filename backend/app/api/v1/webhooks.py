@@ -235,7 +235,6 @@ async def handle_user_deleted(db: AsyncSession, user_data: Dict[str, Any]) -> Di
         
         # Soft delete - deactivate user instead of hard delete
         existing_user.is_active = False
-        existing_user.deleted_at = datetime.utcnow()
         
         await db.commit()
         

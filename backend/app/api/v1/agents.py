@@ -128,14 +128,24 @@ async def list_agent_types():
         }
         
         # Add graph types as agent types
-        for graph_type in graph_types.get("available_graphs", []):
-            if graph_type not in agent_types:
-                agent_types[graph_type] = {
-                    "name": graph_type.replace("_", " ").title(),
-                    "description": f"LangGraph {graph_type} workflow",
-                    "capabilities": ["workflow", "automation"],
-                    "source": "langgraph"
-                }
+        if isinstance(graph_types, dict):
+            for graph_type in graph_types.get("available_graphs", []):
+                if graph_type not in agent_types:
+                    agent_types[graph_type] = {
+                        "name": graph_type.replace("_", " ").title(),
+                        "description": f"LangGraph {graph_type} workflow",
+                        "capabilities": ["workflow", "automation"],
+                        "source": "langgraph"
+                    }
+        elif isinstance(graph_types, list):
+            for graph_type in graph_types:
+                if graph_type not in agent_types:
+                    agent_types[graph_type] = {
+                        "name": graph_type.replace("_", " ").title(),
+                        "description": f"LangGraph {graph_type} workflow",
+                        "capabilities": ["workflow", "automation"],
+                        "source": "langgraph"
+                    }
         
         return {"available_types": agent_types, "total": len(agent_types)}
         

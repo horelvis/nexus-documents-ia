@@ -126,8 +126,7 @@ class AsyncDocumentService:
         try:
             # Base query
             query = select(Document).filter(
-                Document.tenant_id == self.tenant_id,
-                Document.deleted_at.is_(None)
+                Document.tenant_id == self.tenant_id
             ).options(
                 selectinload(Document.tags),
                 selectinload(Document.creator)
@@ -358,8 +357,7 @@ class AsyncDocumentService:
         """Get single document by ID"""
         stmt = select(Document).filter(
             Document.id == doc_id,
-            Document.tenant_id == self.tenant_id,
-            Document.deleted_at.is_(None)
+            Document.tenant_id == self.tenant_id
         ).options(
             selectinload(Document.tags),
             selectinload(Document.creator)
@@ -377,8 +375,8 @@ class AsyncDocumentService:
         """Delete a document"""
         doc = await self.get_document(db, doc_id)
         
-        # Soft delete
-        doc.deleted_at = datetime.datetime.now(datetime.timezone.utc)
+        # Mark document as deleted by removing it from database
+        # Note: Consider implementing soft delete with is_active field if needed
         
         # Delete from vector DB
         try:
@@ -392,6 +390,8 @@ class AsyncDocumentService:
         except Exception as e:
             logger.error(f"Error deleting from storage: {e}")
         
+        # Delete from database
+        await db.delete(doc)
         await db.commit()
         
         return {"success": True, "message": "Document deleted successfully"}
