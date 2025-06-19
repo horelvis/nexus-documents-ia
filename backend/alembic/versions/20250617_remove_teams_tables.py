@@ -17,11 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Check if tables exist before dropping
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = inspector.get_table_names()
+    
     # Drop team_members table first (due to foreign key constraints)
-    op.drop_table('team_members')
+    if 'team_members' in tables:
+        op.drop_table('team_members')
     
     # Drop teams table
-    op.drop_table('teams')
+    if 'teams' in tables:
+        op.drop_table('teams')
 
 
 def downgrade() -> None:

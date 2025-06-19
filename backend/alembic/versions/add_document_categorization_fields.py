@@ -17,25 +17,45 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Check if columns already exist
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = [col['name'] for col in inspector.get_columns('documents')]
+    
     # Add category field to documents
-    op.add_column('documents', sa.Column('category', sa.String(50), nullable=True))
+    if 'category' not in columns:
+        op.add_column('documents', sa.Column('category', sa.String(50), nullable=True))
     
     # Add metadata JSONB field to documents
-    op.add_column('documents', sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True, default={}))
+    if 'metadata' not in columns and 'document_metadata' not in columns:
+        op.add_column('documents', sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True, default={}))
     
     # Add content field for storing extracted text
-    op.add_column('documents', sa.Column('content', sa.Text(), nullable=True))
+    if 'content' not in columns:
+        op.add_column('documents', sa.Column('content', sa.Text(), nullable=True))
     
     # Add extracted_entities JSONB field
-    op.add_column('documents', sa.Column('extracted_entities', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    if 'extracted_entities' not in columns:
+        op.add_column('documents', sa.Column('extracted_entities', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
     
     # Create indexes for better performance
-    op.create_index('idx_documents_category', 'documents', ['category'])
-    op.create_index('idx_documents_category_tenant', 'documents', ['category', 'tenant_id'])
+    indexes = [idx['name'] for idx in inspector.get_indexes('documents')]
+    if 'idx_documents_category' not in indexes:
+        try:
+            op.create_index('idx_documents_category', 'documents', ['category'])
+        except:
+            pass
+    if 'idx_documents_category_tenant' not in indexes:
+        try:
+            op.create_index('idx_documents_category_tenant', 'documents', ['category', 'tenant_id'])
+        except:
+            pass
     
     # Set default category for existing documents
-    op.execute("UPDATE documents SET category = 'general' WHERE category IS NULL")
-    op.execute("UPDATE documents SET metadata = '{}' WHERE metadata IS NULL")
+    if 'category' not in columns:
+        op.execute("UPDATE documents SET category = 'general' WHERE category IS NULL")
+    if 'metadata' not in columns and 'document_metadata' not in columns:
+        op.execute("UPDATE documents SET metadata = '{}' WHERE metadata IS NULL")
 
 
 def downgrade() -> None:

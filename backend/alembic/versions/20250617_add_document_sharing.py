@@ -18,6 +18,15 @@ depends_on = None
 
 
 def upgrade():
+    # Check if table already exists
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = inspector.get_table_names()
+    
+    if 'document_shares' in tables:
+        print("Table 'document_shares' already exists, skipping creation")
+        return
+    
     # Create document_shares table
     op.create_table(
         'document_shares',
