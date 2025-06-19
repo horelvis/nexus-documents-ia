@@ -183,7 +183,7 @@ class AsyncDocumentService:
                     "file_type": doc.file_type,
                     "file_size": doc.file_size,
                     "mime_type": doc.mime_type,
-                    "indexed": doc.indexed.value if doc.indexed else "PROCESSING",
+                    "indexed": self._get_indexed_status_string(doc.indexed),
                     "category": doc.category if hasattr(doc, 'category') else None,
                     "created_at": doc.created_at.isoformat() if doc.created_at else None,
                     "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
@@ -528,3 +528,14 @@ class AsyncDocumentService:
             return "presentation"
         else:
             return "general"
+    
+    def _get_indexed_status_string(self, indexed_value: int) -> str:
+        """Convert indexed integer value to string representation"""
+        if indexed_value == IndexingStatus.INDEXED:
+            return "INDEXED"
+        elif indexed_value == IndexingStatus.PROCESSING:
+            return "PROCESSING"
+        elif indexed_value == IndexingStatus.INDEXING_ERROR:
+            return "INDEXING_ERROR"
+        else:  # NOT_INDEXED or unknown
+            return "NOT_INDEXED"
