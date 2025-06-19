@@ -151,8 +151,8 @@ async def update_user(
         user.hashed_password = get_password_hash(user_in.password)
     
     db.add(user)
-    await await db.commit()
-    await await db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     
     return user
 
@@ -181,7 +181,7 @@ async def delete_user(
     
     # Eliminar usuario
     db.delete(user)
-    await await db.commit()
+    await db.commit()
     
     return {"message": f"Usuario {user_id} eliminado exitosamente"}
 

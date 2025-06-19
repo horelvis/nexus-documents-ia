@@ -94,15 +94,15 @@ async def get_current_user_info(
         current_user.subscription_status = subscription_info.get('status', 'active')
         
         # Save to database
-        await await db.commit()
-        await await db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"📋 [AUTH_ENDPOINT] User plan updated: {current_user.subscription_plan}")
         logger.info(f"📋 [AUTH_ENDPOINT] User subscription status updated: {current_user.subscription_status}")
         
     except Exception as e:
         logger.error(f"Error getting subscription status: {e}")
-        await await db.rollback()
+        await db.rollback()
         # Use existing values or defaults
         if not current_user.subscription_plan:
             current_user.subscription_plan = 'free'
@@ -140,15 +140,15 @@ async def complete_onboarding(
             logger.info(f"  - Industria: {onboarding_data.industry}")
             logger.info(f"  - Datos disponibles en Clerk y Stripe")
         
-        await await db.commit()
-        await await db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"✅ Onboarding completed for user: {current_user.id}")
         return current_user
         
     except Exception as e:
         logger.error(f"Error completing onboarding: {str(e)}")
-        await await db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error completing onboarding"
@@ -167,15 +167,15 @@ async def reset_onboarding(
         # Reset onboarding status
         current_user.onboarding_completed = False
         
-        await await db.commit()
-        await await db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
         return current_user
         
     except Exception as e:
         logger.error(f"Error resetting onboarding: {str(e)}")
-        await await db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error resetting onboarding"
@@ -207,12 +207,12 @@ async def delete_user_dev(
         # Delete the user (this should cascade delete other relationships like documents)
         await db.delete(current_user)
         
-        await await db.commit()
+        await db.commit()
         logger.info(f"✅ [DEV] User {current_user.email} deleted completely")
         
     except Exception as e:
         logger.error(f"❌ [DEV] Error deleting user: {str(e)}")
-        await await db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting user"

@@ -124,8 +124,8 @@ async def update_tenant(
         setattr(tenant, key, value)
     
     db.add(tenant)
-    await await db.commit()
-    await await db.refresh(tenant)
+    await db.commit()
+    await db.refresh(tenant)
     
     return tenant
 
@@ -166,7 +166,7 @@ async def delete_tenant(
     
     # Eliminar tenant
     await db.delete(tenant)
-    await await db.commit()
+    await db.commit()
     
     return {"message": f"Tenant {tenant_id} eliminado exitosamente"}
 

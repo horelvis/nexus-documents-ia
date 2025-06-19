@@ -425,7 +425,7 @@ async def access_shared_document(
                 recipient.last_accessed_at = datetime.now(timezone.utc)
                 recipient.access_count += 1
         
-        await await db.commit()
+        await db.commit()
         
         # Generate temporary access URL
         from app.services.storage_service import StorageService

@@ -99,7 +99,7 @@ async def create_checkout_session(
             
             # Guardar el customer_id en la base de datos
             current_user.stripe_customer_id = customer_id
-            await await db.commit()
+            await db.commit()
         
         # Crear sesión de checkout
         checkout_session = stripe.checkout.Session.create(
@@ -619,7 +619,7 @@ async def handle_checkout_session_completed(db: AsyncSession, session: Dict[str,
     # Update user's stripe_customer_id if not set
     if not user.stripe_customer_id:
         user.stripe_customer_id = customer_id
-        await await db.commit()
+        await db.commit()
         logger.info(f"Updated stripe_customer_id for user {user.id}")
     
     # If there's a subscription, it will be handled by subscription.created event
