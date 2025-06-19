@@ -96,9 +96,9 @@ export default function DocumentsPage() {
       if (response.error) {
         setError(response.error)
       } else {
-        setDocuments(response.data?.documents || [])
-        setTotalPages(response.data?.pagination?.pages || 1)
-        setTotalDocuments(response.data?.pagination?.total || 0)
+        setDocuments(response.data?.items || [])
+        setTotalPages(response.data?.pages || 1)
+        setTotalDocuments(response.data?.total || 0)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents')

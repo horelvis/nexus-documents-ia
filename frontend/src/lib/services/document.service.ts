@@ -46,6 +46,9 @@ export class DocumentService {
     if (params.description) {
       formData.append('description', params.description)
     }
+    if (params.category) {
+      formData.append('category', params.category)
+    }
 
     return this.apiClient.upload<DocumentUploadResponse>(
       API_CONFIG.ENDPOINTS.DOCUMENTS,
@@ -68,13 +71,11 @@ export class DocumentService {
 
     const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}?${searchParams.toString()}`
     return this.apiClient.get<{
-      documents: Document[]
-      pagination: {
-        page: number
-        per_page: number
-        total: number
-        pages: number
-      }
+      items: Document[]
+      total: number
+      page: number
+      per_page: number
+      pages: number
     }>(endpoint)
   }
 
@@ -102,6 +103,9 @@ export class DocumentService {
         }
         if (params.description) {
           formData.append('description', params.description)
+        }
+        if (params.category) {
+          formData.append('category', params.category)
         }
 
         const result = await this.apiClient.upload<DocumentUploadResponse>(

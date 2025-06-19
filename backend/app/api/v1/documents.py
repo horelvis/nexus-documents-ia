@@ -1,5 +1,6 @@
 from typing import List, Optional
 import os
+import datetime
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +36,8 @@ async def list_documents(
     search: Optional[str] = Query(None),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None)
+    date_to: Optional[str] = Query(None),
+    category: Optional[str] = Query(None)
 ):
     """
     Obtiene lista paginada de documentos con filtros opcionales.
@@ -49,7 +51,8 @@ async def list_documents(
         search=search,
         tags=tags,
         date_from=date_from,
-        date_to=date_to
+        date_to=date_to,
+        category=category
     )
 
 
@@ -59,6 +62,7 @@ async def create_document(
     title: str = Form(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(require_document_upload_permission_async),
     tenant_id: str = Depends(get_current_tenant_id_async)
@@ -77,7 +81,8 @@ async def create_document(
         file=file,
         title=title,
         description=description,
-        tags=tag_list
+        tags=tag_list,
+        category=category
     )
 
 
@@ -605,3 +610,150 @@ async def get_document_agents(
             status_code=500,
             detail=f"Failed to retrieve document agents: {str(e)}"
         )
+
+
+@router.post("/{doc_id}/recategorize")
+async def recategorize_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Recategoriza un documento específico (lo agrega a la cola de procesamiento)
+    """
+    from app.services.async_document_service import AsyncDocumentService
+    from app.services.queue_service import queue_service
+    
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    doc = await document_service.get_document(db=db, doc_id=doc_id)
+    
+    # Check if document has content
+    if not doc.content:
+        return {
+            "document_id": doc_id,
+            "status": "failed",
+            "error": "Document has no extracted content"
+        }
+    
+    # Queue for categorization
+    job_id = await queue_service.enqueue_document_categorization(
+        document_id=doc_id,
+        tenant_id=tenant_id,
+        user_id=str(current_user.id),
+        priority="high"  # High priority for manual requests
+    )
+    
+    if job_id:
+        return {
+            "document_id": doc_id,
+            "status": "queued",
+            "job_id": job_id,
+            "message": "Document queued for recategorization"
+        }
+    else:
+        return {
+            "document_id": doc_id,
+            "status": "failed",
+            "error": "Failed to queue document for categorization"
+        }
+
+
+@router.post("/recategorize-all")
+async def recategorize_all_documents(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    only_uncategorized: bool = Query(True, description="Only recategorize documents without category"),
+    batch_size: int = Query(10, ge=1, le=50, description="Batch size for processing")
+):
+    """
+    Recategoriza todos los documentos del tenant (los agrega a la cola por lotes)
+    """
+    from app.services.queue_service import queue_service
+    from sqlalchemy import or_
+    
+    # Get documents to recategorize
+    query = select(Document.id).filter(
+        Document.tenant_id == tenant_id,
+        Document.content.isnot(None)  # Only documents with content
+    )
+    
+    if only_uncategorized:
+        query = query.filter(
+            or_(
+                Document.category.is_(None),
+                Document.category == "",
+                Document.category == "general"
+            )
+        )
+    
+    result = await db.execute(query)
+    document_ids = [str(row[0]) for row in result.fetchall()]
+    
+    if not document_ids:
+        return {
+            "total_documents": 0,
+            "message": "No documents found to categorize"
+        }
+    
+    # Queue in batches
+    job_id = await queue_service.enqueue_batch_categorization(
+        document_ids=document_ids,
+        tenant_id=tenant_id,
+        user_id=str(current_user.id),
+        batch_size=batch_size,
+        priority="default"
+    )
+    
+    if job_id:
+        return {
+            "total_documents": len(document_ids),
+            "status": "queued",
+            "job_id": job_id,
+            "batch_size": batch_size,
+            "message": f"Queued {len(document_ids)} documents for batch categorization"
+        }
+    else:
+        return {
+            "status": "failed",
+            "error": "Failed to queue documents for categorization"
+        }
+
+
+@router.get("/categorization/job/{job_id}")
+async def get_categorization_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Obtiene el estado de un trabajo de categorización
+    """
+    from app.services.queue_service import queue_service
+    
+    status = await queue_service.get_job_status(job_id)
+    
+    if status:
+        return status
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+
+
+@router.get("/categorization/queue-stats")
+async def get_categorization_queue_stats(
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Obtiene estadísticas de la cola de categorización
+    """
+    from app.services.queue_service import queue_service
+    
+    stats = await queue_service.get_queue_stats()
+    
+    return {
+        "queues": stats,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }

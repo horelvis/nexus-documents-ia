@@ -29,6 +29,10 @@ docker compose build
 echo "🎯 Starting services in development mode..."
 docker compose up -d
 
+# Start the categorization worker
+echo "👷 Starting categorization worker..."
+docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d categorization-worker
+
 # Show status
 echo ""
 echo "✅ Development environment started!"
@@ -49,8 +53,10 @@ echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
 echo "   docker compose logs -f [service-name]"
+echo "   docker compose -f docker-compose.worker.yml logs -f categorization-worker"
 echo ""
 echo "🛑 Stop services with:"
 echo "   docker compose down"
+echo "   docker compose -f docker-compose.worker.yml down"
 echo ""
 echo "💡 Code changes will automatically reload services!"

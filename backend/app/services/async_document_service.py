@@ -120,12 +120,11 @@ class AsyncDocumentService:
         search: Optional[str] = None,
         tags: Optional[List[str]] = None,
         date_from: Optional[str] = None,
-        date_to: Optional[str] = None
+        date_to: Optional[str] = None,
+        category: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get paginated list of documents with filters"""
         try:
-            logger.info(f"Getting documents for tenant_id: {self.tenant_id}")
-            
             # Base query
             query = select(Document).filter(
                 Document.tenant_id == self.tenant_id
@@ -142,6 +141,9 @@ class AsyncDocumentService:
                         Document.description.ilike(f"%{search}%")
                     )
                 )
+            
+            if category:
+                query = query.filter(Document.category == category)
             
             if tags:
                 # Join with tags
@@ -162,8 +164,6 @@ class AsyncDocumentService:
             total_result = await db.execute(count_query)
             total = total_result.scalar()
             
-            logger.info(f"Found {total} documents for tenant {self.tenant_id}")
-            
             # Apply pagination
             offset = (page - 1) * per_page
             query = query.offset(offset).limit(per_page).order_by(Document.created_at.desc())
@@ -183,6 +183,8 @@ class AsyncDocumentService:
                     "file_type": doc.file_type,
                     "file_size": doc.file_size,
                     "mime_type": doc.mime_type,
+                    "indexed": doc.indexed.value if doc.indexed else "PROCESSING",
+                    "category": doc.category if hasattr(doc, 'category') else None,
                     "created_at": doc.created_at.isoformat() if doc.created_at else None,
                     "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                     "tags": [{"id": str(tag.id), "name": tag.name} for tag in doc.tags],
@@ -212,7 +214,8 @@ class AsyncDocumentService:
         file: UploadFile,
         title: str,
         description: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None
     ) -> Document:
         """Upload a new document"""
         try:
@@ -233,6 +236,7 @@ class AsyncDocumentService:
                 file_type=file_ext,
                 file_size=file_size,
                 mime_type=file.content_type,
+                category=category,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id
             )
@@ -313,6 +317,16 @@ class AsyncDocumentService:
                         doc.indexed = IndexingStatus.INDEXED
                         doc.content = text[:1000]  # Store first 1000 chars
                         await db.commit()
+                
+                # Queue document for auto-categorization
+                from app.services.queue_service import queue_service
+                await queue_service.enqueue_document_categorization(
+                    document_id=doc_id,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    priority="default"
+                )
+                logger.info(f"Document {doc_id} queued for categorization")
             
         except Exception as e:
             logger.error(f"Error processing document {doc_id}: {e}")
@@ -399,3 +413,118 @@ class AsyncDocumentService:
         await db.commit()
         
         return {"success": True, "message": "Document deleted successfully"}
+    
+    async def _auto_categorize_document(self, doc_id: str, text_content: str):
+        """Auto-categorize document using the LangChain service"""
+        try:
+            import httpx
+            from app.core.config import settings
+            
+            async with AsyncSessionLocal() as db:
+                # Get document info
+                stmt = select(Document).filter(Document.id == doc_id)
+                result = await db.execute(stmt)
+                doc = result.scalar_one_or_none()
+                
+                if not doc:
+                    return
+                
+                # First try LangChain service for simple categorization
+                try:
+                    async with httpx.AsyncClient() as client:
+                        # Use LangChain service for document analysis
+                        response = await client.post(
+                            f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
+                            json={
+                                "messages": [{
+                                    "role": "system",
+                                    "content": """You are a document categorization expert. Analyze the document and categorize it into one of these categories:
+                                    - contract: Legal contracts, agreements, terms
+                                    - invoice: Invoices, bills, receipts
+                                    - report: Reports, analysis, research documents
+                                    - legal: Legal documents, policies, regulations
+                                    - financial: Financial statements, budgets, accounting
+                                    - technical: Technical documentation, manuals, specifications
+                                    - correspondence: Letters, emails, memos
+                                    - presentation: Slides, presentations
+                                    - general: Other documents
+                                    
+                                    Respond with ONLY the category name, nothing else."""
+                                }, {
+                                    "role": "user", 
+                                    "content": f"Document name: {doc.filename}\nContent preview: {text_content[:1000]}"
+                                }],
+                                "model": settings.OLLAMA_MODEL,
+                                "max_tokens": 50,
+                                "temperature": 0.1
+                            },
+                            headers={
+                                "X-API-Key": settings.MICROSERVICES_API_KEY,
+                                "Content-Type": "application/json"
+                            },
+                            timeout=30.0
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            category = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
+                            
+                            # Validate category
+                            valid_categories = ["contract", "invoice", "report", "legal", "financial", 
+                                              "technical", "correspondence", "presentation", "general"]
+                            if category not in valid_categories:
+                                category = "general"
+                            
+                            # Update document category
+                            doc.category = category
+                            doc.document_metadata = doc.document_metadata or {}
+                            doc.document_metadata["auto_categorization"] = {
+                                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                "method": "langchain",
+                                "model": settings.OLLAMA_MODEL
+                            }
+                            await db.commit()
+                            
+                            logger.info(f"Document {doc_id} auto-categorized as '{category}'")
+                        else:
+                            logger.warning(f"Failed to auto-categorize document {doc_id}: HTTP {response.status_code}")
+                            
+                except Exception as e:
+                    logger.warning(f"LangChain categorization failed for {doc_id}: {e}")
+                    # Fallback to simple rule-based categorization
+                    category = self._simple_categorize(doc.filename, text_content)
+                    doc.category = category
+                    doc.document_metadata = doc.document_metadata or {}
+                    doc.document_metadata["auto_categorization"] = {
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "method": "rule_based"
+                    }
+                    await db.commit()
+                    logger.info(f"Document {doc_id} categorized as '{category}' using rules")
+                        
+        except Exception as e:
+            logger.error(f"Error auto-categorizing document {doc_id}: {e}")
+            # Don't fail the whole process if categorization fails
+    
+    def _simple_categorize(self, filename: str, content: str) -> str:
+        """Simple rule-based categorization as fallback"""
+        filename_lower = filename.lower()
+        content_lower = content.lower()[:1000]  # Check first 1000 chars
+        
+        # Check filename and content for patterns
+        if any(word in filename_lower for word in ["contract", "agreement", "terms"]):
+            return "contract"
+        elif any(word in filename_lower for word in ["invoice", "bill", "receipt"]):
+            return "invoice"
+        elif any(word in filename_lower for word in ["report", "analysis"]):
+            return "report"
+        elif any(word in content_lower for word in ["whereas", "agreement", "party", "shall"]):
+            return "contract"
+        elif any(word in content_lower for word in ["invoice", "total", "payment due", "bill to"]):
+            return "invoice"
+        elif any(word in content_lower for word in ["executive summary", "findings", "conclusion"]):
+            return "report"
+        elif filename_lower.endswith((".pptx", ".ppt")):
+            return "presentation"
+        else:
+            return "general"

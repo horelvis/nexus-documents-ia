@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  categorization-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python start_worker.py
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexus_document
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
+      - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY:-unified-microservices-key-12345}
+    depends_on:
+      - postgres
+      - redis
+      - langchain-service
+    networks:
+      - nexus-network
+    volumes:
+      - ../:/app
+    restart: unless-stopped
+
+networks:
+  nexus-network:
+    external: true
