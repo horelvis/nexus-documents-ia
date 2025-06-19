@@ -1,14 +1,14 @@
-version: '3.8'
-
 services:
   # Unified worker that handles all job types
   unified-worker:
     build:
-      context: ../..
-      dockerfile: backend/Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     command: python start_worker.py unified
+    env_file:
+      - ../.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexus_document
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
@@ -24,12 +24,12 @@ services:
       - MAIL_PORT=${MAIL_PORT:-587}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
-      - postgres
+      - db
       - redis
       - langchain-service
       - gotenberg
     networks:
-      - nexus-network
+      - backend-network
     volumes:
       - ../:/app
       - ./credentials:/app/credentials:ro
@@ -59,6 +59,4 @@ services:
   #   deploy:
   #     replicas: 1
 
-networks:
-  nexus-network:
-    external: true
+# Networks are defined in the main docker-compose.yml file

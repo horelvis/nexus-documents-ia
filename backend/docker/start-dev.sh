@@ -29,7 +29,7 @@ docker compose build
 echo "🎯 Starting services in development mode..."
 docker compose up -d
 
-# Start the unified worker
+# Start the unified worker (using both compose files together)
 echo "👷 Starting unified background worker..."
 docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
 
