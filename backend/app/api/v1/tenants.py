@@ -11,6 +11,7 @@ from app.db.async_database import get_async_db
 from app.db.models import User, Tenant
 from app.schemas.tenant import TenantCreate, TenantUpdate, TenantResponse, TenantWithUsers
 from app.services.async_auth_service import AsyncAuthService
+from sqlalchemy import select, func
 
 router = APIRouter()
 
@@ -123,8 +124,8 @@ async def update_tenant(
         setattr(tenant, key, value)
     
     db.add(tenant)
-    await db.commit()
-    await db.refresh(tenant)
+    await await db.commit()
+    await await db.refresh(tenant)
     
     return tenant
 
@@ -165,7 +166,7 @@ async def delete_tenant(
     
     # Eliminar tenant
     await db.delete(tenant)
-    await db.commit()
+    await await db.commit()
     
     return {"message": f"Tenant {tenant_id} eliminado exitosamente"}
 

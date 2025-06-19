@@ -2,6 +2,8 @@ import logging
 import os
 from typing import Optional, Union
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import settings
 
@@ -11,7 +13,7 @@ class StorageServiceFactory:
     """Factory que decide qué implementación de storage usar basado en la disponibilidad"""
     
     @staticmethod
-    def create_storage_service(tenant_id: str, user_id: Optional[str] = None, db: Optional[Session] = None):
+    def create_storage_service(tenant_id: str, user_id: Optional[str] = None, db: Optional[Union[Session, AsyncSession]] = None):
         """
         Crea la instancia apropiada de storage service.
         
@@ -44,9 +46,16 @@ class StorageServiceFactory:
         bucket_name = None
         if db:
             from app.db.models import Tenant
-            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-            if tenant and tenant.bucket_name:
-                bucket_name = tenant.bucket_name
+            # Check if this is an async session
+            if isinstance(db, AsyncSession):
+                # For async sessions, we can't query here directly
+                # The bucket_name should be passed or retrieved elsewhere
+                logger.warning("Async session detected in storage factory, bucket_name lookup skipped")
+            else:
+                # Sync session - use regular query
+                tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                if tenant and tenant.bucket_name:
+                    bucket_name = tenant.bucket_name
 
         # Usar storage service (microservicio)
         try:

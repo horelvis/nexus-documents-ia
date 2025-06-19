@@ -11,10 +11,11 @@ from typing import List, Optional, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, func, select
+from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import get_db, get_current_active_user, get_current_active_superuser, get_current_tenant_admin
+from app.api.async_dependencies import get_async_db, get_current_active_user_async, get_current_active_superuser_async, get_current_tenant_admin_async
 from app.db.models import User, Document, Tenant, TeamInvitation
 from app.schemas.team import (
     TeamUpdate,
@@ -41,16 +42,17 @@ router = APIRouter()
 # ===========================
 
 @router.get("/", response_model=TeamResponse)
-def get_team_info(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+async def get_team_info(
+    current_user: User = Depends(get_current_active_user_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get current team (tenant) information
     """
     try:
         # Get tenant info
-        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        result = db.query(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
         
         if not tenant:
             raise HTTPException(
@@ -90,10 +92,10 @@ def get_team_info(
         )
 
 @router.put("/", response_model=TeamResponse)
-def update_team_info(
+async def update_team_info(
     team_update: TeamUpdate,
-    current_user: User = Depends(get_current_tenant_admin),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Update team (tenant) information (admin only)
@@ -154,9 +156,9 @@ def update_team_info(
         )
 
 @router.get("/members", response_model=List[TeamMemberResponse])
-def get_team_members(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+async def get_team_members(
+    current_user: User = Depends(get_current_active_user_async),
+    db: AsyncSession = Depends(get_async_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: Optional[str] = None
@@ -210,10 +212,10 @@ def get_team_members(
         )
 
 @router.post("/members/invite")
-def invite_team_member(
+async def invite_team_member(
     member_data: TeamMemberAdd,
-    current_user: User = Depends(get_current_tenant_admin),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Invite a new team member (admin only)
@@ -284,10 +286,10 @@ def invite_team_member(
         )
 
 @router.delete("/members/{member_id}")
-def remove_team_member(
+async def remove_team_member(
     member_id: UUID,
-    current_user: User = Depends(get_current_tenant_admin),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Remove a team member (admin only)
@@ -353,10 +355,10 @@ def remove_team_member(
 # ================================
 
 @router.post("/invitations", response_model=TeamInvitationResponse)
-def create_team_invitation(
+async def create_team_invitation(
     invitation: TeamInvitationCreate,
-    current_user: User = Depends(get_current_tenant_admin),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Create a new team invitation with QR code (admin only)
@@ -433,9 +435,9 @@ def create_team_invitation(
         )
 
 @router.get("/invitations", response_model=List[TeamInvitationResponse])
-def get_team_invitations(
-    current_user: User = Depends(get_current_tenant_admin),
-    db: Session = Depends(get_db)
+async def get_team_invitations(
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get all invitations for the current team (admin only)
@@ -485,10 +487,10 @@ def get_team_invitations(
         )
 
 @router.post("/invitations/{invitation_code}/accept")
-def accept_team_invitation(
+async def accept_team_invitation(
     invitation_code: str,
     accept_data: TeamInvitationAccept,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Accept a team invitation (public endpoint)

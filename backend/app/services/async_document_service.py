@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.db.models import Document, Tag, Tenant
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
-from app.services.storage_factory import StorageServiceFactory
+from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.llm_service import LLMService
@@ -69,14 +69,13 @@ class AsyncDocumentService:
                 else:
                     raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
                 
-                # Create storage service
-                # Note: StorageServiceFactory might need async version too
-                self.storage_service = StorageServiceFactory.create_storage_service(
+                # Create storage service using async factory
+                self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
         else:
             async with AsyncSessionLocal() as db:
-                self.storage_service = StorageServiceFactory.create_storage_service(
+                self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
         

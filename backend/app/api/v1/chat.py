@@ -14,6 +14,8 @@ from app.db.models import User
 from app.schemas.document import ChatMessage
 from app.services.search_service import SearchService
 from app.services.llm_service import LLMService
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

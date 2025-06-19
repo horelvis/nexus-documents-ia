@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 import httpx
 import logging
 
-from app.api.dependencies import get_current_active_user, get_current_active_superuser
+from app.api.async_dependencies import get_current_active_user_async, get_current_active_superuser_async
 from app.db.models import User
 from app.services.langgraph_client import LangGraphClient
 from app.schemas.langgraph import (
@@ -28,7 +28,7 @@ router = APIRouter()
 @router.post("/run", response_model=GraphRunResponse)
 async def run_graph(
     request: GraphRunRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """
     Run a LangGraph workflow
@@ -81,7 +81,7 @@ async def run_graph(
 @router.post("/tags/generate", response_model=TagGenerationResponse)
 async def generate_tags(
     request: TagGenerationRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """
     Generate tags from text using LangGraph
@@ -122,7 +122,7 @@ async def generate_tags(
 @router.post("/documents/process", response_model=DocumentProcessingResponse)
 async def process_document(
     request: DocumentProcessingRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """
     Process document with intelligent chunking and quality checks
@@ -168,7 +168,7 @@ async def process_document(
 @router.post("/rag/query", response_model=RAGQueryResponse)
 async def rag_query(
     request: RAGQueryRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """
     Execute enhanced RAG query with multiple search strategies
@@ -212,7 +212,7 @@ async def rag_query(
 
 @router.get("/graphs/types", response_model=GraphTypeResponse)
 async def list_graph_types(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get list of available graph types"""
     try:
@@ -240,7 +240,7 @@ async def list_graph_types(
 @router.get("/graphs/structure/{graph_type}")
 async def get_graph_structure(
     graph_type: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get structure of a specific graph type"""
     try:
@@ -272,7 +272,7 @@ async def get_graph_structure(
 
 @router.get("/health")
 async def langgraph_health_check(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Check LangGraph service health"""
     try:
@@ -301,10 +301,10 @@ async def langgraph_health_check(
 
 
 # Admin endpoints for graph management
-@router.post("/graphs/import", dependencies=[Depends(get_current_active_superuser)])
+@router.post("/graphs/import", dependencies=[Depends(get_current_active_superuser_async)])
 async def import_graph_definition(
     graph_definition: Dict[str, Any],
-    current_user: User = Depends(get_current_active_superuser)
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Import a custom graph definition (Admin only)

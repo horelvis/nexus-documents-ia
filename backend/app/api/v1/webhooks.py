@@ -6,13 +6,15 @@ import json
 from datetime import datetime
 from typing import Any, Dict
 from fastapi import APIRouter, Request, HTTPException, status, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.database import get_db
+from app.db.async_database import get_async_db
 from app.db.models import User
 from app.services.auth_service import AuthService
 from app.schemas.user import UserSync
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,7 +22,7 @@ router = APIRouter()
 @router.post("/clerk/user", tags=["webhooks"])
 async def clerk_user_webhook(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Dict[str, Any]:
     """
     Handle Clerk user webhooks for automatic user synchronization.
@@ -186,8 +188,8 @@ async def handle_user_updated(db: Session, user_data: Dict[str, Any]) -> Dict[st
         banned = user_data.get('banned', False)
         existing_user.is_active = not banned
         
-        db.commit()
-        db.refresh(existing_user)
+        await db.commit()
+        await db.refresh(existing_user)
         
         logger.info(f"✅ User updated successfully: {existing_user.id}")
         
@@ -235,7 +237,7 @@ async def handle_user_deleted(db: Session, user_data: Dict[str, Any]) -> Dict[st
         existing_user.is_active = False
         existing_user.deleted_at = datetime.utcnow()
         
-        db.commit()
+        await db.commit()
         
         logger.info(f"✅ User deactivated successfully: {existing_user.id}")
         

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import json
 import httpx
 
-from app.api.dependencies import get_current_active_user, get_current_active_superuser, require_agent_permission
+from app.api.async_dependencies import get_current_active_user_async, get_current_active_superuser_async, require_agent_permission_async
 from app.db.models import User
 from app.core.config import settings
 
@@ -147,7 +147,7 @@ async def list_agent_types():
         )
 
 @router.get("/list")
-async def list_agents(current_user: User = Depends(get_current_active_user)):
+async def list_agents(current_user: User = Depends(get_current_active_user_async)):
     """List available agents/graphs for the tenant"""
     # Since LangGraph doesn't persist agents, return available types
     return await list_agent_types()
@@ -159,7 +159,7 @@ async def list_agents(current_user: User = Depends(get_current_active_user)):
 @router.post("/document/analyze")
 async def analyze_document(
     request: DocumentAnalysisRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Analyze document using LangGraph document analysis workflow"""
     async def event_stream():
@@ -270,7 +270,7 @@ async def analyze_document(
 @router.post("/chat")
 async def chat_with_agent(
     request: ChatRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Chat using RAG or conversational graphs"""
     async def event_stream():
@@ -329,7 +329,7 @@ async def chat_with_agent(
 @router.post("/create")
 async def create_agent(
     request: CreateAgentRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Create agent - for backward compatibility"""
     # LangGraph doesn't create persistent agents, return mock response
@@ -344,7 +344,7 @@ async def create_agent(
 @router.delete("/{agent_id}")
 async def delete_agent(
     agent_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Delete agent - for backward compatibility"""
     return {
@@ -357,7 +357,7 @@ async def delete_agent(
 async def chat_with_specific_agent(
     agent_id: str,
     request: ChatRequest,
-    current_user: User = Depends(require_agent_permission)
+    current_user: User = Depends(require_agent_permission_async)
 ):
     """Chat with specific agent - routes to appropriate graph"""
     # Map agent IDs to graph types
@@ -380,7 +380,7 @@ async def chat_with_specific_agent(
 async def execute_agent_task(
     agent_id: str,
     request: ExecuteTaskRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Execute task with agent - uses appropriate graph"""
     async def event_stream():
@@ -443,7 +443,7 @@ async def execute_agent_task(
 
 @router.post("/test")
 async def test_agent_integration(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Test LangGraph integration"""
     try:
@@ -501,7 +501,7 @@ async def test_agent_integration(
 @router.get("/{agent_id}/stats")
 async def get_agent_stats(
     agent_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get statistics for a specific agent/graph"""
     # LangGraph doesn't track persistent stats, return placeholder
@@ -522,7 +522,7 @@ async def get_agent_stats(
 @router.get("/activity")
 async def get_agent_activity(
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Get recent agent activity"""
     # Would need to implement activity tracking in LangGraph

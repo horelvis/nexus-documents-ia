@@ -4,17 +4,17 @@ from fastapi import APIRouter, Depends, Query
 from typing import List
 from app.schemas.document import DocumentWithMetrics, DocumentBasic
 from app.services.document_insights_service import DocumentInsightsService
-from app.api.dependencies import get_current_user
+from app.api.async_dependencies import get_current_user_async
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/trending", response_model=List[DocumentWithMetrics])
-def get_trending_documents(
+async def get_trending_documents(
     limit: int = Query(10, ge=1, le=50),
     time_period_days: int = Query(30, ge=1, le=365),
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user_async)
 ):
     """Obtiene los documentos más populares/tendencia en el tenant"""
     insights_service = DocumentInsightsService(
@@ -28,10 +28,10 @@ def get_trending_documents(
     )
 
 @router.get("/recently-viewed", response_model=List[DocumentBasic])
-def get_recently_viewed_documents(
+async def get_recently_viewed_documents(
     limit: int = Query(10, ge=1, le=50),
     user_specific: bool = Query(True),
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user_async)
 ):
     """Obtiene los documentos vistos recientemente por el usuario o en el tenant"""
     insights_service = DocumentInsightsService(
@@ -47,7 +47,7 @@ def get_recently_viewed_documents(
 @router.get("/recommendations", response_model=List[DocumentBasic])
 async def get_document_recommendations(
     limit: int = Query(5, ge=1, le=20),
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user_async)
 ):
     """Obtiene recomendaciones de documentos para el usuario"""
     insights_service = DocumentInsightsService(

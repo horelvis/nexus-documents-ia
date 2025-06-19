@@ -113,7 +113,7 @@ def migrate_file(filepath: Path, dry_run: bool = True):
     else:
         print(f"No changes needed for {filepath.name}")
 
-def main():
+def main(auto_run=False):
     """Main migration function"""
     print("Starting migration to async database operations...")
     print("=" * 60)
@@ -127,9 +127,14 @@ def main():
         else:
             print(f"⚠️  File not found: {filepath}")
     
-    # Ask for confirmation
+    # Ask for confirmation or auto-run
     print("\n" + "=" * 60)
-    response = input("\nProceed with actual migration? (yes/no): ")
+    
+    if auto_run:
+        response = 'yes'
+        print("\nAuto-running migration (--auto flag)...")
+    else:
+        response = input("\nProceed with actual migration? (yes/no): ")
     
     if response.lower() == 'yes':
         print("\nPerforming actual migration...")
@@ -141,4 +146,6 @@ def main():
         print("Migration cancelled.")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    auto_run = '--auto' in sys.argv
+    main(auto_run=auto_run)

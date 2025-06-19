@@ -30,6 +30,7 @@ from app.schemas.document_share import (
 from app.services.document_share_service import DocumentShareService
 from app.core.security import get_password_hash, verify_password
 from app.core.config import settings
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -424,7 +425,7 @@ async def access_shared_document(
                 recipient.last_accessed_at = datetime.now(timezone.utc)
                 recipient.access_count += 1
         
-        await db.commit()
+        await await db.commit()
         
         # Generate temporary access URL
         from app.services.storage_service import StorageService

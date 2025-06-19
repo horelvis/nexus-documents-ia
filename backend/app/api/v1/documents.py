@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import require_document_upload_permission
 from app.api.async_dependencies import (
     get_current_user_async, 
     get_current_active_user_async,

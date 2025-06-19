@@ -1,7 +1,7 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, Query
-from app.api.dependencies import get_current_user, get_current_tenant_id, get_current_active_superuser
+from fastapi import APIRouter, Depends, Query, HTTPException
+from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async, get_current_active_superuser_async
 from app.db.models import User
 from app.schemas.document import UploadRequest
 from app.services.storage_service import StorageService
@@ -16,8 +16,8 @@ router = APIRouter()
 @router.get("/list", response_model=List[dict])
 async def list_files(
     prefix: str = Query("", description="Prefijo para filtrar archivos"),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Lista los archivos en el almacenamiento del tenant.
@@ -32,8 +32,8 @@ async def list_files(
 @router.delete("/{object_name:path}", response_model=dict)
 async def delete_file(
     object_name: str,
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Elimina un archivo del almacenamiento.
@@ -53,7 +53,7 @@ async def delete_file(
 
 @router.get("/buckets", response_model=List[str])
 async def list_buckets(
-    current_user: User = Depends(get_current_active_superuser)
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Lista todos los buckets disponibles (solo administradores).
