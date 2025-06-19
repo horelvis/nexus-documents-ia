@@ -29,9 +29,9 @@ docker compose build
 echo "🎯 Starting services in development mode..."
 docker compose up -d
 
-# Start the categorization worker
-echo "👷 Starting categorization worker..."
-docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d categorization-worker
+# Start the unified worker
+echo "👷 Starting unified background worker..."
+docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
 
 # Show status
 echo ""
@@ -53,7 +53,7 @@ echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
 echo "   docker compose logs -f [service-name]"
-echo "   docker compose -f docker-compose.worker.yml logs -f categorization-worker"
+echo "   docker compose -f docker-compose.worker.yml logs -f unified-worker"
 echo ""
 echo "🛑 Stop services with:"
 echo "   docker compose down"

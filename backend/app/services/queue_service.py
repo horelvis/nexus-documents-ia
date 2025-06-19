@@ -149,13 +149,16 @@ class QueueService:
         try:
             pool = await self.connect()
             
-            # Get queue lengths
-            queues = ["categorization:high", "categorization:default", "categorization:low"]
+            # Get queue lengths for all queues
+            queue_types = ["categorization", "preview", "email"]
+            priorities = ["high", "default", "low"]
             stats = {}
             
-            for queue_name in queues:
-                queue_length = await pool.zcard(f"arq:queue:{queue_name}")
-                stats[queue_name] = queue_length
+            for queue_type in queue_types:
+                for priority in priorities:
+                    queue_name = f"{queue_type}:{priority}"
+                    queue_length = await pool.zcard(f"arq:queue:{queue_name}")
+                    stats[queue_name] = queue_length
             
             # Get job counts
             stats["completed"] = await pool.zcard("arq:results")
@@ -165,6 +168,171 @@ class QueueService:
         except Exception as e:
             logger.error(f"Failed to get queue stats: {e}")
             return {}
+    
+    async def enqueue_preview_generation(
+        self,
+        document_id: str,
+        tenant_id: str,
+        user_id: str,
+        preview_type: str = "all",
+        force_regenerate: bool = False,
+        priority: str = "default"
+    ) -> Optional[str]:
+        """
+        Enqueue document preview generation
+        
+        Args:
+            document_id: Document ID
+            tenant_id: Tenant ID
+            user_id: User ID
+            preview_type: Type of preview ("pdf", "thumbnail", "all")
+            force_regenerate: Force regeneration even if preview exists
+            priority: Job priority
+            
+        Returns:
+            Job ID if successful
+        """
+        try:
+            pool = await self.connect()
+            
+            job = await pool.enqueue_job(
+                'generate_document_preview',
+                document_id,
+                tenant_id,
+                user_id,
+                preview_type,
+                force_regenerate,
+                _queue_name=f"preview:{priority}",
+                _job_try=2  # Retry once on failure
+            )
+            
+            logger.info(f"Enqueued preview generation for document {document_id}, job: {job.job_id}")
+            return job.job_id
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue preview generation: {e}")
+            return None
+    
+    async def enqueue_preview_batch(
+        self,
+        document_ids: List[str],
+        tenant_id: str,
+        user_id: str,
+        preview_type: str = "all",
+        batch_size: int = 5,
+        priority: str = "default"
+    ) -> Optional[str]:
+        """
+        Enqueue batch preview generation
+        
+        Args:
+            document_ids: List of document IDs
+            tenant_id: Tenant ID
+            user_id: User ID
+            preview_type: Type of preview
+            batch_size: Concurrent processing size
+            priority: Job priority
+            
+        Returns:
+            Job ID if successful
+        """
+        try:
+            pool = await self.connect()
+            
+            job = await pool.enqueue_job(
+                'generate_preview_batch',
+                document_ids,
+                tenant_id,
+                user_id,
+                preview_type,
+                batch_size,
+                _queue_name=f"preview:{priority}",
+                _job_try=2
+            )
+            
+            logger.info(f"Enqueued batch preview for {len(document_ids)} documents, job: {job.job_id}")
+            return job.job_id
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue batch preview: {e}")
+            return None
+    
+    async def enqueue_email(
+        self,
+        to_email: str,
+        subject: str,
+        template_name: str,
+        template_data: Dict[str, Any],
+        priority: str = "default"
+    ) -> Optional[str]:
+        """
+        Enqueue single email
+        
+        Args:
+            to_email: Recipient email
+            subject: Email subject
+            template_name: Template to use
+            template_data: Template variables
+            priority: Job priority
+            
+        Returns:
+            Job ID if successful
+        """
+        try:
+            pool = await self.connect()
+            
+            job = await pool.enqueue_job(
+                'send_email',
+                to_email,
+                subject,
+                template_name,
+                template_data,
+                0,  # retry_count
+                _queue_name=f"email:{priority}",
+                _job_try=3  # Retry up to 3 times
+            )
+            
+            logger.info(f"Enqueued email to {to_email}, job: {job.job_id}")
+            return job.job_id
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue email: {e}")
+            return None
+    
+    async def enqueue_bulk_emails(
+        self,
+        email_batch: List[Dict[str, Any]],
+        batch_size: int = 10,
+        priority: str = "low"
+    ) -> Optional[str]:
+        """
+        Enqueue bulk email sending
+        
+        Args:
+            email_batch: List of email data
+            batch_size: Concurrent sending size
+            priority: Job priority
+            
+        Returns:
+            Job ID if successful
+        """
+        try:
+            pool = await self.connect()
+            
+            job = await pool.enqueue_job(
+                'send_bulk_emails',
+                email_batch,
+                batch_size,
+                _queue_name=f"email:{priority}",
+                _job_try=2
+            )
+            
+            logger.info(f"Enqueued bulk email batch of {len(email_batch)} emails, job: {job.job_id}")
+            return job.job_id
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue bulk emails: {e}")
+            return None
 
 
 # Global queue service instance

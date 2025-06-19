@@ -757,3 +757,106 @@ async def get_categorization_queue_stats(
         "queues": stats,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
+
+
+@router.post("/{doc_id}/preview/generate")
+async def queue_preview_generation(
+    doc_id: str,
+    preview_type: str = Query("all", description="Type of preview: pdf, thumbnail, or all"),
+    force_regenerate: bool = Query(False, description="Force regeneration even if preview exists"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Queue document preview generation (asynchronous)
+    """
+    from app.services.queue_service import queue_service
+    from app.services.async_document_service import AsyncDocumentService
+    
+    # Verify document exists
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    doc = await document_service.get_document(db=db, doc_id=doc_id)
+    
+    # Queue preview generation
+    job_id = await queue_service.enqueue_preview_generation(
+        document_id=doc_id,
+        tenant_id=tenant_id,
+        user_id=str(current_user.id),
+        preview_type=preview_type,
+        force_regenerate=force_regenerate,
+        priority="high" if force_regenerate else "default"
+    )
+    
+    if job_id:
+        return {
+            "document_id": doc_id,
+            "status": "queued",
+            "job_id": job_id,
+            "preview_type": preview_type,
+            "message": f"Preview generation queued for document"
+        }
+    else:
+        return {
+            "document_id": doc_id,
+            "status": "failed",
+            "error": "Failed to queue preview generation"
+        }
+
+
+@router.post("/preview/generate-batch")
+async def queue_batch_preview_generation(
+    document_ids: List[str] = Body(..., description="List of document IDs"),
+    preview_type: str = Query("all", description="Type of preview: pdf, thumbnail, or all"),
+    batch_size: int = Query(5, ge=1, le=20, description="Concurrent processing size"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Queue batch preview generation for multiple documents
+    """
+    from app.services.queue_service import queue_service
+    from app.services.async_document_service import AsyncDocumentService
+    
+    # Verify documents exist and belong to tenant
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    valid_ids = []
+    for doc_id in document_ids:
+        try:
+            doc = await document_service.get_document(db=db, doc_id=doc_id)
+            valid_ids.append(doc_id)
+        except:
+            pass  # Skip invalid documents
+    
+    if not valid_ids:
+        return {
+            "status": "failed",
+            "error": "No valid documents found"
+        }
+    
+    # Queue batch processing
+    job_id = await queue_service.enqueue_preview_batch(
+        document_ids=valid_ids,
+        tenant_id=tenant_id,
+        user_id=str(current_user.id),
+        preview_type=preview_type,
+        batch_size=batch_size,
+        priority="default"
+    )
+    
+    if job_id:
+        return {
+            "total_documents": len(valid_ids),
+            "status": "queued",
+            "job_id": job_id,
+            "preview_type": preview_type,
+            "batch_size": batch_size,
+            "message": f"Queued {len(valid_ids)} documents for preview generation"
+        }
+    else:
+        return {
+            "status": "failed",
+            "error": "Failed to queue batch preview generation"
+        }

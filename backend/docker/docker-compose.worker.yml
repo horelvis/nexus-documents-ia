@@ -1,11 +1,12 @@
 version: '3.8'
 
 services:
-  categorization-worker:
+  # Unified worker that handles all job types
+  unified-worker:
     build:
       context: ../..
       dockerfile: backend/Dockerfile
-    command: python start_worker.py
+    command: python start_worker.py unified
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexus_document
       - REDIS_HOST=redis
@@ -14,16 +15,49 @@ services:
       - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
       - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
       - OLLAMA_BASE_URL=http://ollama-service:11434
+      - GOTENBERG_BASE_URL=http://gotenberg:3000
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY:-unified-microservices-key-12345}
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_FROM=${MAIL_FROM:-noreply@nexusdocument.com}
+      - MAIL_SERVER=${MAIL_SERVER:-smtp.gmail.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       - postgres
       - redis
       - langchain-service
+      - gotenberg
     networks:
       - nexus-network
     volumes:
       - ../:/app
+      - ./credentials:/app/credentials:ro
     restart: unless-stopped
+
+  # Optional: Separate workers for scaling specific job types
+  # Uncomment if you need dedicated workers for specific tasks
+  
+  # categorization-worker:
+  #   extends:
+  #     service: unified-worker
+  #   command: python start_worker.py categorization
+  #   deploy:
+  #     replicas: 2
+  
+  # preview-worker:
+  #   extends:
+  #     service: unified-worker
+  #   command: python start_worker.py preview
+  #   deploy:
+  #     replicas: 1
+  
+  # email-worker:
+  #   extends:
+  #     service: unified-worker
+  #   command: python start_worker.py email
+  #   deploy:
+  #     replicas: 1
 
 networks:
   nexus-network:
