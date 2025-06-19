@@ -136,8 +136,8 @@ async def categorize_documents(
                     doc.category = categorization_result["category"]
                     if request.include_tags and categorization_result.get("tags"):
                         doc.tags_array = categorization_result["tags"]
-                    doc.metadata = doc.metadata or {}
-                    doc.metadata["categorization"] = {
+                    doc.document_metadata = doc.document_metadata or {}
+                    doc.document_metadata["categorization"] = {
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "confidence": categorization_result.get("confidence", 0),
                         "analysis": categorization_result.get("analysis", {})
@@ -406,8 +406,8 @@ async def update_document_category(
     
     # Update category
     document.category = category
-    document.metadata = document.metadata or {}
-    document.metadata["manual_categorization"] = {
+    document.document_metadata = document.document_metadata or {}
+    document.document_metadata["manual_categorization"] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": str(current_user.id)
     }
@@ -446,8 +446,8 @@ async def update_document_tags(
     
     # Update tags
     document.tags_array = tags
-    document.metadata = document.metadata or {}
-    document.metadata["manual_tagging"] = {
+    document.document_metadata = document.document_metadata or {}
+    document.document_metadata["manual_tagging"] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": str(current_user.id)
     }

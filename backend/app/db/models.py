@@ -302,7 +302,7 @@ class Document(Base):
     # Categorization fields
     category = Column(String(50), nullable=True)
     tags_array = Column(JSONB, nullable=True)  # Array of tags stored as JSONB
-    metadata = Column(JSONB, nullable=True, default={})
+    document_metadata = Column(JSONB, nullable=True, default={})
     content = Column(Text, nullable=True)
     extracted_entities = Column(JSONB, nullable=True)
     
