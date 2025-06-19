@@ -23,6 +23,7 @@ export const API_CONFIG = {
     // Admin
     ADMIN_USERS: '/admin/users',
     ADMIN_STATS: '/admin/stats',
+    ADMIN: '/admin',
     
     // Tenants
     TENANTS: '/tenants',

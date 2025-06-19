@@ -25,7 +25,10 @@ class ReindexService:
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         self.user_id = user_id
         self.vector_service = VectorService(tenant_id=self.tenant_id, user_id=self.user_id)
-        self.storage_service = StorageServiceFactory.get_storage_service()
+        self.storage_service = StorageServiceFactory.create_storage_service(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id
+        )
         logger.info(f"ReindexService initialized for tenant: {self.tenant_id}")
     
     async def get_documents_needing_reindex(self, db: Session) -> List[Document]:
@@ -91,8 +94,8 @@ class ReindexService:
             db.commit()
             
             # Download file content from storage
-            file_path = f"{self.tenant_id}/{document.id}/{document.filename}"
-            file_content = await self.storage_service.download_file(file_path)
+            file_path = document.file_path or f"{self.tenant_id}/{document.id}/{document.filename}"
+            file_content = self.storage_service.download_file(file_path)
             
             if not file_content:
                 logger.error(f"Could not download file content for document {document.id}")
