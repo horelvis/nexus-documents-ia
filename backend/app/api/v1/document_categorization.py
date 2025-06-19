@@ -14,7 +14,6 @@ from app.api.async_dependencies import get_current_active_user_async
 from app.db.async_database import get_async_db
 from app.db.models import User, Document
 from app.core.config import settings
-from app.schemas.document import DocumentCategorization, DocumentTagUpdate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
