@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.api.dependencies import get_current_user, get_current_tenant_id
+from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.models import User
 from app.services.search_service import SearchService
 from app.services.vector_service import VectorService
@@ -18,8 +18,8 @@ async def search_documents(
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Realiza una búsqueda semántica entre los documentos.
@@ -46,8 +46,8 @@ async def search_documents(
 @router.post("/ask", response_model=dict)
 async def ask_documents(
     message: ChatMessage,
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Responde a una pregunta basada en los documentos.
@@ -67,8 +67,8 @@ async def ask_documents(
 
 @router.get("/health", response_model=dict)
 async def check_search_system_health(
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Verifica la salud del sistema de búsqueda semántica.
@@ -81,8 +81,8 @@ async def check_search_system_health(
 
 @router.post("/fix-embedding-model", response_model=dict)
 async def fix_embedding_model(
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Intenta descargar automáticamente el modelo de embeddings si falta.
@@ -104,8 +104,8 @@ async def fix_embedding_model(
 
 @router.get("/reindex/status", response_model=dict)
 async def get_reindex_status(
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Obtiene el estado del reindexado para el tenant actual.
@@ -117,8 +117,8 @@ async def get_reindex_status(
 
 @router.post("/reindex/all", response_model=dict)
 async def reindex_all_documents(
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Reindexa todos los documentos que faltan en el vector store.
@@ -131,8 +131,8 @@ async def reindex_all_documents(
 @router.post("/reindex/documents", response_model=dict)
 async def reindex_specific_documents(
     document_ids: List[str],
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Reindexa documentos específicos por sus IDs.
@@ -147,8 +147,8 @@ async def reindex_specific_documents(
 
 @router.post("/fix-and-reindex", response_model=dict)
 async def fix_collection_and_reindex(
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Arregla problemas de dimensiones y reindexa automáticamente.

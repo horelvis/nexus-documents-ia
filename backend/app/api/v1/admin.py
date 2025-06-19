@@ -2,17 +2,18 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
-from sqlalchemy.orm import Session
-from sqlalchemy.sql import func, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, desc, and_
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 import logging
 
-from app.api.dependencies import get_current_active_superuser, get_db
+from app.api.async_dependencies import get_current_active_superuser_async
+from app.db.async_database import get_async_db
 from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
-from app.services.auth_service import AuthService
-from app.services.document_service import DocumentService
-from sqlalchemy.orm import Session
+from app.services.async_auth_service import AsyncAuthService
+from app.services.async_document_service import AsyncDocumentService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,33 +24,37 @@ async def list_users(
     skip: int = 0,
     limit: int = 100,
     tenant_id: Optional[UUID] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Lista todos los usuarios del sistema (solo administradores).
     """
     print(f"DEBUG - Current user: {current_user}")  # Agrega este print para depuración
-    query = db.query(User)
     
+    stmt = select(User)
     if tenant_id:
-        query = query.filter(User.tenant_id == tenant_id)
+        stmt = stmt.filter(User.tenant_id == tenant_id)
+    stmt = stmt.offset(skip).limit(limit)
     
-    users = query.offset(skip).limit(limit).all()
+    result = await db.execute(stmt)
+    users = result.scalars().all()
     return users
 
 
 @router.post("/users", response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Crea un nuevo usuario (solo administradores).
     """
     # Verificar si el email ya existe
-    db_user = db.query(User).filter(User.email == user_in.email).first()
+    stmt = select(User).filter(User.email == user_in.email)
+    result = await db.execute(stmt)
+    db_user = result.scalar_one_or_none()
     if db_user:
         raise HTTPException(
             status_code=400,
@@ -57,7 +62,9 @@ async def create_user(
         )
     
     # Verificar que el tenant exista
-    tenant = db.query(Tenant).filter(Tenant.id == user_in.tenant_id).first()
+    stmt = select(Tenant).filter(Tenant.id == user_in.tenant_id)
+    result = await db.execute(stmt)
+    tenant = result.scalar_one_or_none()
     if not tenant:
         raise HTTPException(
             status_code=404,
@@ -65,7 +72,7 @@ async def create_user(
         )
     
     # Crear usuario
-    user = AuthService.create_user(
+    user = await AsyncAuthService.create_user(
         db=db,
         email=user_in.email,
         password=user_in.password,
@@ -80,13 +87,15 @@ async def create_user(
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Obtiene información detallada de un usuario (solo administradores).
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).filter(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
@@ -97,19 +106,23 @@ async def get_user(
 async def update_user(
     user_id: UUID,
     user_in: UserUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Actualiza un usuario existente (solo administradores).
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).filter(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
     # Verificar email duplicado si se está cambiando
     if user_in.email and user_in.email != user.email:
-        db_user = db.query(User).filter(User.email == user_in.email).first()
+        stmt = select(User).filter(User.email == user_in.email)
+        result = await db.execute(stmt)
+        db_user = result.scalar_one_or_none()
         if db_user:
             raise HTTPException(
                 status_code=400,
@@ -118,7 +131,9 @@ async def update_user(
     
     # Verificar que el tenant exista si se está cambiando
     if user_in.tenant_id and user_in.tenant_id != user.tenant_id:
-        tenant = db.query(Tenant).filter(Tenant.id == user_in.tenant_id).first()
+        stmt = select(Tenant).filter(Tenant.id == user_in.tenant_id)
+        result = await db.execute(stmt)
+        tenant = result.scalar_one_or_none()
         if not tenant:
             raise HTTPException(
                 status_code=404,
@@ -136,8 +151,8 @@ async def update_user(
         user.hashed_password = get_password_hash(user_in.password)
     
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     
     return user
 
@@ -145,13 +160,15 @@ async def update_user(
 @router.delete("/users/{user_id}", response_model=dict)
 async def delete_user(
     user_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Elimina un usuario (solo administradores).
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).filter(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
@@ -164,7 +181,7 @@ async def delete_user(
     
     # Eliminar usuario
     db.delete(user)
-    db.commit()
+    await db.commit()
     
     return {"message": f"Usuario {user_id} eliminado exitosamente"}
 
@@ -174,8 +191,8 @@ async def list_all_documents(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     tenant_id: Optional[UUID] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Lista todos los documentos del sistema (solo administradores).
@@ -188,12 +205,12 @@ async def list_all_documents(
         # Usar el tenant del usuario actual como fallback
         tenant_id_str = str(current_user.tenant_id)
     
-    document_service = DocumentService(
+    document_service = await AsyncDocumentService.create(
         tenant_id=tenant_id_str, 
         user_id=str(current_user.id)
     )
     
-    return document_service.get_documents(
+    return await document_service.get_documents(
         db=db,
         page=page,
         per_page=per_page
@@ -202,33 +219,55 @@ async def list_all_documents(
 
 @router.get("/stats", response_model=dict)
 async def get_system_stats(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Obtiene estadísticas generales del sistema (solo administradores).
     """
     # Contar usuarios
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.is_active == True).count()
+    stmt = select(func.count(User.id))
+    result = await db.execute(stmt)
+    total_users = result.scalar() or 0
+    
+    stmt = select(func.count(User.id)).filter(User.is_active == True)
+    result = await db.execute(stmt)
+    active_users = result.scalar() or 0
     
     # Contar tenants
-    total_tenants = db.query(Tenant).count()
-    active_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
+    stmt = select(func.count(Tenant.id))
+    result = await db.execute(stmt)
+    total_tenants = result.scalar() or 0
+    
+    stmt = select(func.count(Tenant.id)).filter(Tenant.is_active == True)
+    result = await db.execute(stmt)
+    active_tenants = result.scalar() or 0
     
     # Contar documentos
-    total_documents = db.query(Document).count()
-    indexed_documents = db.query(Document).filter(Document.indexed == 1).count()
-    error_documents = db.query(Document).filter(Document.indexed == 2).count()
+    stmt = select(func.count(Document.id))
+    result = await db.execute(stmt)
+    total_documents = result.scalar() or 0
+    
+    stmt = select(func.count(Document.id)).filter(Document.indexed == 1)
+    result = await db.execute(stmt)
+    indexed_documents = result.scalar() or 0
+    
+    stmt = select(func.count(Document.id)).filter(Document.indexed == 2)
+    result = await db.execute(stmt)
+    error_documents = result.scalar() or 0
     
     # Calcular tamaño total de almacenamiento
-    storage_size = db.query(func.sum(Document.file_size)).scalar() or 0
+    stmt = select(func.sum(Document.file_size))
+    result = await db.execute(stmt)
+    storage_size = result.scalar() or 0
     
     # Contar documentos por tipo
-    doc_types = db.query(
+    stmt = select(
         Document.file_type, 
         func.count(Document.id)
-    ).group_by(Document.file_type).all()
+    ).group_by(Document.file_type)
+    result = await db.execute(stmt)
+    doc_types = result.all()
     
     doc_type_stats = {
         file_type: count for file_type, count in doc_types
@@ -259,7 +298,7 @@ async def get_system_stats(
 @router.post("/init-ollama-model", response_model=dict)
 async def initialize_ollama_model(
     model_name: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_active_superuser)
+    current_user: User = Depends(get_current_active_superuser_async)
 ):
     """
     Inicializa un modelo en Ollama si no está disponible (solo administradores).
@@ -302,8 +341,8 @@ async def initialize_ollama_model(
 @router.get("/stats/document-activity", response_model=Dict[str, Any])
 async def get_document_activity_stats(
     time_period_days: int = Query(30, ge=1, le=365),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_superuser)
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_active_superuser_async)
 ):
     """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
     try:
@@ -311,17 +350,19 @@ async def get_document_activity_stats(
         cutoff_date = datetime.now() - timedelta(days=time_period_days)
         
         # Estadísticas generales
-        general_stats = db.query(
+        stmt = select(
             func.count(DocumentView.c.id).label("total_views"),
             func.count(func.distinct(DocumentView.c.document_id)).label("documents_viewed"),
             func.count(func.distinct(DocumentView.c.user_id)).label("active_users")
         ).filter(
             DocumentView.c.tenant_id == tenant_id,
             DocumentView.c.viewed_at >= cutoff_date
-        ).first()
+        )
+        result = await db.execute(stmt)
+        general_stats = result.first()
         
         # Formatos más populares
-        top_formats = db.query(
+        stmt = select(
             Document.file_type,
             func.count(DocumentView.c.id).label("view_count")
         ).join(
@@ -333,10 +374,12 @@ async def get_document_activity_stats(
             Document.file_type
         ).order_by(
             desc("view_count")
-        ).limit(5).all()
+        ).limit(5)
+        result = await db.execute(stmt)
+        top_formats = result.all()
         
         # Usuarios más activos
-        top_users = db.query(
+        stmt = select(
             User.id,
             User.email,
             User.full_name,
@@ -350,10 +393,12 @@ async def get_document_activity_stats(
             User.id
         ).order_by(
             desc("view_count")
-        ).limit(5).all()
+        ).limit(5)
+        result = await db.execute(stmt)
+        top_users = result.all()
         
         # Documentos más consultados
-        top_queried_docs = db.query(
+        stmt = select(
             Document.id,
             Document.title,
             DocumentMetrics.query_count
@@ -364,7 +409,9 @@ async def get_document_activity_stats(
             DocumentMetrics.query_count > 0
         ).order_by(
             desc(DocumentMetrics.query_count)
-        ).limit(5).all()
+        ).limit(5)
+        result = await db.execute(stmt)
+        top_queried_docs = result.all()
         
         # Formatear resultados
         return {

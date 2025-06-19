@@ -6,10 +6,15 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse, RedirectResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, or_, func
+from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import get_current_user, get_current_tenant_id, get_db
+from app.api.async_dependencies import (
+    get_current_user_async,
+    get_current_tenant_id_async
+)
+from app.db.async_database import get_async_db
 from app.db.models import User, Document, DocumentShare, DocumentShareAccessLog, DocumentShareRecipient
 from app.schemas.document_share import (
     DocumentShareCreate,
@@ -33,9 +38,9 @@ router = APIRouter()
 @router.post("", response_model=DocumentShareResponse)
 async def create_document_share(
     share_data: DocumentShareCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Create a new share link for a document.
@@ -51,12 +56,15 @@ async def create_document_share(
         share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
         
         # Verify document exists and user has access
-        document = db.query(Document).filter(
-            and_(
-                Document.id == share_data.document_id,
-                Document.tenant_id == UUID(tenant_id)
+        result = await db.execute(
+            select(Document).filter(
+                and_(
+                    Document.id == share_data.document_id,
+                    Document.tenant_id == UUID(tenant_id)
+                )
             )
-        ).first()
+        )
+        document = result.scalar_one_or_none()
         
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -88,9 +96,9 @@ async def create_document_share(
 @router.post("/bulk", response_model=BulkShareResult)
 async def create_bulk_shares(
     share_data: DocumentShareCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Create multiple share links for a document with different recipients.
@@ -102,12 +110,15 @@ async def create_bulk_shares(
         share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
         
         # Verify document exists
-        document = db.query(Document).filter(
-            and_(
-                Document.id == share_data.document_id,
-                Document.tenant_id == UUID(tenant_id)
+        result = await db.execute(
+            select(Document).filter(
+                and_(
+                    Document.id == share_data.document_id,
+                    Document.tenant_id == UUID(tenant_id)
+                )
             )
-        ).first()
+        )
+        document = result.scalar_one_or_none()
         
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -134,9 +145,9 @@ async def create_bulk_shares(
 
 @router.get("", response_model=DocumentShareListResponse)
 async def list_document_shares(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
     document_id: Optional[UUID] = Query(None),
     is_active: Optional[bool] = Query(None),
     page: int = Query(1, ge=1),
@@ -174,9 +185,9 @@ async def list_document_shares(
 
 @router.get("/statistics", response_model=ShareStatistics)
 async def get_share_statistics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
     document_id: Optional[UUID] = Query(None)
 ):
     """
@@ -195,9 +206,9 @@ async def get_share_statistics(
 @router.get("/{share_id}", response_model=DocumentShareResponse)
 async def get_document_share(
     share_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get details of a specific document share.
@@ -222,9 +233,9 @@ async def get_document_share(
 async def update_document_share(
     share_id: UUID,
     update_data: DocumentShareUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Update a document share's settings.
@@ -252,9 +263,9 @@ async def update_document_share(
 @router.delete("/{share_id}")
 async def revoke_document_share(
     share_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Revoke a document share link.
@@ -282,9 +293,9 @@ async def revoke_document_share(
 @router.get("/{share_id}/logs", response_model=ShareAccessLogListResponse)
 async def get_share_access_logs(
     share_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100)
 ):
@@ -295,12 +306,15 @@ async def get_share_access_logs(
         share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
         
         # Verify share belongs to tenant
-        share = db.query(DocumentShare).filter(
-            and_(
-                DocumentShare.id == share_id,
-                DocumentShare.tenant_id == UUID(tenant_id)
+        result = await db.execute(
+            select(DocumentShare).filter(
+                and_(
+                    DocumentShare.id == share_id,
+                    DocumentShare.tenant_id == UUID(tenant_id)
+                )
             )
-        ).first()
+        )
+        share = result.scalar_one_or_none()
         
         if not share:
             raise HTTPException(status_code=404, detail="Share not found")
@@ -332,7 +346,7 @@ async def get_share_access_logs(
 async def access_shared_document(
     share_token: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     password: Optional[str] = Query(None)
 ):
     """
@@ -341,9 +355,12 @@ async def access_shared_document(
     """
     try:
         # Find share by token
-        share = db.query(DocumentShare).filter(
-            DocumentShare.share_token == share_token
-        ).first()
+        result = await db.execute(
+            select(DocumentShare).options(selectinload(DocumentShare.document)).filter(
+                DocumentShare.share_token == share_token
+            )
+        )
+        share = result.scalar_one_or_none()
         
         if not share:
             raise HTTPException(status_code=404, detail="Invalid share link")
@@ -391,12 +408,15 @@ async def access_shared_document(
         
         # Update recipient access if email matches
         if share.recipient_email:
-            recipient = db.query(DocumentShareRecipient).filter(
-                and_(
-                    DocumentShareRecipient.share_id == share.id,
-                    DocumentShareRecipient.email == share.recipient_email
+            result = await db.execute(
+                select(DocumentShareRecipient).filter(
+                    and_(
+                        DocumentShareRecipient.share_id == share.id,
+                        DocumentShareRecipient.email == share.recipient_email
+                    )
                 )
-            ).first()
+            )
+            recipient = result.scalar_one_or_none()
             
             if recipient:
                 if not recipient.first_accessed_at:
@@ -404,7 +424,7 @@ async def access_shared_document(
                 recipient.last_accessed_at = datetime.now(timezone.utc)
                 recipient.access_count += 1
         
-        db.commit()
+        await db.commit()
         
         # Generate temporary access URL
         from app.services.storage_service import StorageService
@@ -441,7 +461,7 @@ async def access_shared_document(
 async def view_shared_document(
     share_token: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Query(...)  # Temporary access token
 ):
     """
@@ -450,9 +470,12 @@ async def view_shared_document(
     """
     try:
         # Find share by token
-        share = db.query(DocumentShare).filter(
-            DocumentShare.share_token == share_token
-        ).first()
+        result = await db.execute(
+            select(DocumentShare).options(selectinload(DocumentShare.document)).filter(
+                DocumentShare.share_token == share_token
+            )
+        )
+        share = result.scalar_one_or_none()
         
         if not share or not share.is_valid():
             raise HTTPException(status_code=404, detail="Invalid or expired share link")

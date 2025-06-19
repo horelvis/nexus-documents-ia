@@ -3,14 +3,15 @@ API endpoints for Document Categorization and Tagging
 """
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 import json
 
-from app.api.dependencies import get_current_active_user, get_async_db
+from app.api.async_dependencies import get_current_active_user_async
+from app.db.async_database import get_async_db
 from app.db.models import User, Document
 from app.core.config import settings
 from app.schemas.document import DocumentCategorization, DocumentTagUpdate
@@ -51,7 +52,7 @@ class CategoryStats(BaseModel):
 async def categorize_documents(
     request: CategorizeRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -134,10 +135,10 @@ async def categorize_documents(
                     # Update document in database
                     doc.category = categorization_result["category"]
                     if request.include_tags and categorization_result.get("tags"):
-                        doc.tags = categorization_result["tags"]
+                        doc.tags_array = categorization_result["tags"]
                     doc.metadata = doc.metadata or {}
                     doc.metadata["categorization"] = {
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "confidence": categorization_result.get("confidence", 0),
                         "analysis": categorization_result.get("analysis", {})
                     }
@@ -186,7 +187,7 @@ async def categorize_documents(
 
 @router.get("/stats", response_model=CategoryStats)
 async def get_categorization_stats(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Get categorization statistics for the tenant"""
@@ -247,7 +248,7 @@ async def get_categorization_stats(
 async def schedule_batch_categorization(
     background_tasks: BackgroundTasks,
     batch_size: int = Query(50, ge=1, le=500),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user_async)
 ):
     """Schedule batch categorization as a background task"""
     background_tasks.add_task(
@@ -383,7 +384,7 @@ async def process_categorization_batch(
 async def update_document_category(
     document_id: str,
     category: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document category"""
@@ -407,7 +408,7 @@ async def update_document_category(
     document.category = category
     document.metadata = document.metadata or {}
     document.metadata["manual_categorization"] = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": str(current_user.id)
     }
     
@@ -423,7 +424,7 @@ async def update_document_category(
 async def update_document_tags(
     document_id: str,
     tags: List[str],
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document tags"""
@@ -444,10 +445,10 @@ async def update_document_tags(
         )
     
     # Update tags
-    document.tags = tags
+    document.tags_array = tags
     document.metadata = document.metadata or {}
     document.metadata["manual_tagging"] = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": str(current_user.id)
     }
     

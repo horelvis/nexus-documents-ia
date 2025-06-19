@@ -1,11 +1,15 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 import logging
-from app.api.dependencies import get_current_user, get_current_tenant_id, require_subscription_permission
-from app.db.database import get_db
+from app.api.async_dependencies import (
+    get_current_user_async, 
+    get_current_tenant_id_async,
+    require_subscription_permission_async
+)
+from app.db.async_database import get_async_db
 from app.db.models import User
 from app.schemas.document import ChatMessage
 from app.services.search_service import SearchService
@@ -17,9 +21,9 @@ router = APIRouter()
 @router.post("/", response_model=dict)
 async def chat_with_documents(
     message: ChatMessage,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_subscription_permission("can_use_chat")),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_subscription_permission_async("can_use_chat")),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Envía un mensaje para chatear con los documentos y obtiene una respuesta.
@@ -41,9 +45,9 @@ async def chat_with_documents(
 async def suggest_document_tags(
     text: str = Body(..., embed=True),
     num_tags: int = Body(5, embed=True),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Sugiere etiquetas basadas en el contenido de texto proporcionado.
@@ -57,9 +61,9 @@ async def suggest_document_tags(
 @router.post("/extract-metadata", response_model=dict)
 async def extract_document_metadata(
     text: str = Body(..., embed=True),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Extrae metadatos estructurados del texto proporcionado.

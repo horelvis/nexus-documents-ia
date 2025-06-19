@@ -2,7 +2,18 @@ from typing import List, Optional
 import os
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
-from app.api.dependencies import get_current_user, get_current_tenant_id, require_document_upload_permission
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
+
+from app.api.dependencies import require_document_upload_permission
+from app.api.async_dependencies import (
+    get_current_user_async, 
+    get_current_active_user_async,
+    get_current_tenant_id_async,
+    require_document_upload_permission_async
+)
+from app.db.async_database import get_async_db
 from app.db.models import User
 from app.schemas.document import (
     Document, DocumentDetail,
@@ -10,8 +21,6 @@ from app.schemas.document import (
 )
 from app.services.document_service import DocumentService
 import logging
-from sqlalchemy.orm import Session
-from app.db.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,8 +28,8 @@ router = APIRouter()
 
 @router.get("", response_model=dict)
 async def list_documents(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
     tenant_id: str = Depends(get_current_tenant_id),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
@@ -32,8 +41,9 @@ async def list_documents(
     """
     Obtiene lista paginada de documentos con filtros opcionales.
     """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_documents(
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    return await document_service.get_documents(
         db=db,
         page=page,
         per_page=per_page,
@@ -46,13 +56,13 @@ async def list_documents(
 
 @router.post("", response_model=Document)
 async def create_document(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     title: str = Form(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     file: UploadFile = File(...),
-    current_user: User = Depends(require_document_upload_permission),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(require_document_upload_permission_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Sube un nuevo documento al sistema.
@@ -61,8 +71,9 @@ async def create_document(
     tag_list = tags.split(",") if tags else []
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
     
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return await document_service.process_document(
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    return await document_service.upload_document(
         db=db,
         file=file,
         title=title,
@@ -78,15 +89,37 @@ async def create_document(
 @router.get("/{doc_id}", response_model=DocumentDetail)
 async def get_document(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Obtiene detalles de un documento específico.
     """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.get_document(db=db, doc_id=doc_id)
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    doc = await document_service.get_document(db=db, doc_id=doc_id)
+    
+    # Convert to DocumentDetail schema
+    return DocumentDetail(
+        id=str(doc.id),
+        title=doc.title,
+        description=doc.description,
+        filename=doc.filename,
+        file_type=doc.file_type,
+        file_size=doc.file_size,
+        mime_type=doc.mime_type,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+        tags=[{"id": str(tag.id), "name": tag.name} for tag in doc.tags] if hasattr(doc, 'tags') else [],
+        created_by={
+            "id": str(doc.creator.id),
+            "email": doc.creator.email,
+            "full_name": doc.creator.full_name
+        } if doc.creator else None,
+        category=doc.category if hasattr(doc, 'category') else None,
+        indexed=doc.indexed
+    )
 
 
 # Signed URL endpoint removed for security reasons
@@ -96,9 +129,9 @@ async def get_document(
 @router.get("/{doc_id}/stream")
 async def stream_document(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Sirve documentos a través del proxy con cache Redis.
@@ -108,10 +141,11 @@ async def stream_document(
     from fastapi import HTTPException
     import httpx
     
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     
     # Obtener información del documento
-    document = document_service.get_document(db=db, doc_id=doc_id)
+    document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -169,9 +203,9 @@ async def stream_document(
 @router.get("/{doc_id}/pdf")
 async def serve_pdf(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Sirve el PDF directamente para visualización en el navegador.
@@ -180,10 +214,11 @@ async def serve_pdf(
     from fastapi.responses import StreamingResponse
     from fastapi import HTTPException
     
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     
     # Obtener información del documento
-    document = document_service.get_document(db=db, doc_id=doc_id)
+    document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -227,9 +262,9 @@ async def serve_pdf(
 @router.get("/{doc_id}/converted-pdf")
 async def serve_converted_pdf(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Sirve el PDF convertido para documentos no-PDF que han sido convertidos a PDF.
@@ -297,27 +332,29 @@ async def serve_converted_pdf(
 @router.delete("/{doc_id}", response_model=dict)
 async def delete_document(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Elimina un documento y sus datos asociados.
     """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.delete_document(db=db, doc_id=doc_id)
 
 
 @router.get("/{doc_id}/summary", response_model=dict)
 async def get_document_summary(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Genera un resumen del documento utilizando LLM.
     """
+    # TODO: Implement async version of generate_summary
     document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return document_service.generate_summary(db=db,doc_id=doc_id)
 
@@ -326,9 +363,9 @@ async def get_document_summary(
 async def add_document_tag(
     doc_id: str,
     tag: str = Body(..., embed=True),
-    db: Session = Depends(get_db), # Added db session
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Añade una etiqueta a un documento.
@@ -341,9 +378,9 @@ async def add_document_tag(
 async def remove_document_tag(
     doc_id: str,
     tag_name: str,
-    db: Session = Depends(get_db), # Added db session
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Elimina una etiqueta de un documento.
@@ -356,9 +393,9 @@ async def remove_document_tag(
 async def get_document_preview(
     doc_id: str,
     force_regenerate: bool = Query(False, description="Force regeneration of preview"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Genera preview del documento usando Gotenberg.
@@ -435,8 +472,8 @@ async def get_document_preview(
 @router.get("/{doc_id}/preview/info", response_model=dict)
 async def get_preview_info(
     doc_id: str,
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Obtiene información de preview existente sin regenerar.
@@ -475,9 +512,9 @@ async def get_preview_info(
 @router.get("/{doc_id}/agents")
 async def get_document_agents(
     doc_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get agents assigned to a specific document based on its type and tags.

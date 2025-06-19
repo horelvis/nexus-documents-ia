@@ -2,12 +2,12 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db
+from app.db.async_database import get_async_db
 from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingComplete
-from app.services.auth_service import AuthService
-from app.api.dependencies import get_current_user
+from app.services.async_auth_service import AsyncAuthService
+from app.api.async_dependencies import get_current_user_async
 from app.db.models import User
 from app.core.config import settings
 
@@ -22,14 +22,14 @@ logger.info("🚀 Auth router loaded with endpoints: register, sync-user, me, co
 @router.post("/register", response_model=UserResponse)
 async def register_user(
     user_in: UserCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> Any:
     """
     Create new user without the need to be logged in.
     Only creates regular users, not superusers.
     """
     # Security: Force is_superuser to False for public registration
-    user = AuthService.create_user(
+    user = await AsyncAuthService.create_user(
         db=db,
         email=user_in.email,
         password=user_in.password,
@@ -44,7 +44,7 @@ async def register_user(
 @router.post("/sync-user", response_model=UserResponse, tags=["auth"])
 async def sync_user(
     user_data: UserSync,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Any:
     """
     Sync user from Clerk authentication system.
@@ -52,7 +52,7 @@ async def sync_user(
     """
     logger.info(f"🔄 Syncing user from Clerk: {user_data.clerk_user_id}")
     
-    user = AuthService.sync_user_from_clerk(
+    user = await AsyncAuthService.sync_user_from_clerk(
         db=db,
         clerk_user_id=user_data.clerk_user_id,
         email=user_data.email,
@@ -66,8 +66,8 @@ async def sync_user(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get current authenticated user information with subscription details."""
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
@@ -82,6 +82,8 @@ async def get_current_user_info(
         SubscriptionServiceV2.clear_cache(str(current_user.id))
         
         # Get subscription status from Stripe
+        # Note: SubscriptionServiceV2 would need async versions of these methods
+        # For now, we'll use the sync version
         subscription_info = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         logger.info(f"📋 [AUTH_ENDPOINT] User subscription status: {subscription_info}")
         
@@ -90,15 +92,15 @@ async def get_current_user_info(
         current_user.subscription_status = subscription_info.get('status', 'active')
         
         # Save to database
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"📋 [AUTH_ENDPOINT] User plan updated: {current_user.subscription_plan}")
         logger.info(f"📋 [AUTH_ENDPOINT] User subscription status updated: {current_user.subscription_status}")
         
     except Exception as e:
         logger.error(f"Error getting subscription status: {e}")
-        db.rollback()
+        await db.rollback()
         # Use existing values or defaults
         if not current_user.subscription_plan:
             current_user.subscription_plan = 'free'
@@ -111,8 +113,8 @@ async def get_current_user_info(
 @router.post("/complete-onboarding", response_model=UserResponse)
 async def complete_onboarding(
     onboarding_data: OnboardingComplete = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async)
 ) -> Any:
     """
     Mark user onboarding as completed. 
@@ -136,15 +138,15 @@ async def complete_onboarding(
             logger.info(f"  - Industria: {onboarding_data.industry}")
             logger.info(f"  - Datos disponibles en Clerk y Stripe")
         
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"✅ Onboarding completed for user: {current_user.id}")
         return current_user
         
     except Exception as e:
         logger.error(f"Error completing onboarding: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error completing onboarding"
@@ -152,8 +154,8 @@ async def complete_onboarding(
 
 @router.post("/reset-onboarding", response_model=UserResponse)
 async def reset_onboarding(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async)
 ) -> Any:
     """
     Reset user onboarding status for testing the new flow.
@@ -163,15 +165,15 @@ async def reset_onboarding(
         # Reset onboarding status
         current_user.onboarding_completed = False
         
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
         logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
         return current_user
         
     except Exception as e:
         logger.error(f"Error resetting onboarding: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error resetting onboarding"
@@ -179,8 +181,8 @@ async def reset_onboarding(
 
 @router.delete("/dev/delete-user", status_code=204)
 async def delete_user_dev(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async)
 ) -> None:
     """
     DEVELOPMENT ONLY: Delete current user completely from database.
@@ -192,21 +194,23 @@ async def delete_user_dev(
         # Delete all related data (cascade should handle most, but let's be explicit)
         # Delete user subscriptions
         from app.db.models import Subscription
-        db.query(Subscription).filter(Subscription.user_id == current_user.id).delete()
+        from sqlalchemy import delete
+        
+        await db.execute(delete(Subscription).where(Subscription.user_id == current_user.id))
         
         # Delete user image
         from app.db.models import UserImage
-        db.query(UserImage).filter(UserImage.user_id == current_user.id).delete()
+        await db.execute(delete(UserImage).where(UserImage.user_id == current_user.id))
         
         # Delete the user (this should cascade delete other relationships like documents)
-        db.delete(current_user)
+        await db.delete(current_user)
         
-        db.commit()
+        await db.commit()
         logger.info(f"✅ [DEV] User {current_user.email} deleted completely")
         
     except Exception as e:
         logger.error(f"❌ [DEV] Error deleting user: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting user"

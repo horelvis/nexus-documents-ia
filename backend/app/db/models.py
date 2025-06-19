@@ -299,6 +299,13 @@ class Document(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
+    # Categorization fields
+    category = Column(String(50), nullable=True)
+    tags_array = Column(JSONB, nullable=True)  # Array of tags stored as JSONB
+    metadata = Column(JSONB, nullable=True, default={})
+    content = Column(Text, nullable=True)
+    extracted_entities = Column(JSONB, nullable=True)
+    
     indexed = Column(Integer, default=0, nullable=False)
     indexing_error = Column(Text, nullable=True)
     
@@ -317,6 +324,8 @@ class Document(Base):
         Index('idx_documents_creator_created', 'created_by', 'created_at'),
         Index('idx_documents_type_tenant', 'file_type', 'tenant_id'),
         Index('idx_documents_indexed', 'indexed'),
+        Index('idx_documents_category', 'category'),
+        Index('idx_documents_category_tenant', 'category', 'tenant_id'),
     )
     
     def increment_metric(self, metric_name: str, session, amount: int = 1):
