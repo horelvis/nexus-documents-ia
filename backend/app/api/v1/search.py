@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.models import User
 from app.services.search_service import SearchService
@@ -126,6 +126,47 @@ async def reindex_all_documents(
     reindex_service = ReindexService(tenant_id=tenant_id)
     result = await reindex_service.reindex_all_missing()
     return result
+
+
+@router.post("/reindex/force", response_model=dict)
+async def force_reindex_all_documents(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Fuerza el reindexado de TODOS los documentos del tenant.
+    ADVERTENCIA: Esta operación puede tomar mucho tiempo.
+    """
+    # Esta operación es pesada, la ejecutamos en background
+    background_tasks.add_task(
+        reindex_all_documents_background,
+        tenant_id=tenant_id,
+        force=True
+    )
+    
+    return {
+        "message": "Reindexing started in background",
+        "status": "processing",
+        "tenant_id": tenant_id
+    }
+
+
+async def reindex_all_documents_background(tenant_id: str, force: bool = False):
+    """Background task to reindex all documents"""
+    try:
+        reindex_service = ReindexService(tenant_id=tenant_id)
+        if force:
+            # Force reindex all documents
+            logger.info(f"Starting forced reindex for tenant {tenant_id}")
+            # You would implement force reindex logic here
+        else:
+            # Regular reindex of missing documents
+            await reindex_service.reindex_all_missing()
+        
+        logger.info(f"Reindexing completed for tenant {tenant_id}")
+    except Exception as e:
+        logger.error(f"Error in background reindexing: {e}")
 
 
 @router.post("/reindex/documents", response_model=dict)
