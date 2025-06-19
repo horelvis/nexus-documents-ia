@@ -51,7 +51,7 @@ async def get_team_info(
     """
     try:
         # Get tenant info
-        result = db.query(Tenant).filter(Tenant.id == current_user.tenant_id))
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
         tenant = result.scalar_one_or_none()
         
         if not tenant:
