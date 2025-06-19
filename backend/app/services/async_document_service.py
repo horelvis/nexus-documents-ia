@@ -124,6 +124,8 @@ class AsyncDocumentService:
     ) -> Dict[str, Any]:
         """Get paginated list of documents with filters"""
         try:
+            logger.info(f"Getting documents for tenant_id: {self.tenant_id}")
+            
             # Base query
             query = select(Document).filter(
                 Document.tenant_id == self.tenant_id
@@ -159,6 +161,8 @@ class AsyncDocumentService:
             count_query = select(func.count()).select_from(query.subquery())
             total_result = await db.execute(count_query)
             total = total_result.scalar()
+            
+            logger.info(f"Found {total} documents for tenant {self.tenant_id}")
             
             # Apply pagination
             offset = (page - 1) * per_page

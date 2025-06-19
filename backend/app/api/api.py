@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search, teams, langgraph, users
+    agents, signatures, webhooks, search, teams, langgraph, users, debug_documents
 )
 from fastapi import APIRouter
 
@@ -42,3 +42,6 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 
 # LangGraph routes for advanced workflows
 api_router.include_router(langgraph.router, prefix="/langgraph", tags=["langgraph"])
+
+# Debug routes (temporary)
+api_router.include_router(debug_documents.router, prefix="/debug", tags=["debug"])
