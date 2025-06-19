@@ -79,7 +79,7 @@ async def clerk_user_webhook(
         )
 
 
-async def handle_user_created(db: Session, user_data: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_user_created(db: AsyncSession, user_data: Dict[str, Any]) -> Dict[str, Any]:
     """Handle user.created webhook from Clerk"""
     try:
         clerk_user_id = user_data.get('id')
@@ -144,7 +144,7 @@ async def handle_user_created(db: Session, user_data: Dict[str, Any]) -> Dict[st
         )
 
 
-async def handle_user_updated(db: Session, user_data: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_user_updated(db: AsyncSession, user_data: Dict[str, Any]) -> Dict[str, Any]:
     """Handle user.updated webhook from Clerk"""
     try:
         clerk_user_id = user_data.get('id')
@@ -209,7 +209,7 @@ async def handle_user_updated(db: Session, user_data: Dict[str, Any]) -> Dict[st
         )
 
 
-async def handle_user_deleted(db: Session, user_data: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_user_deleted(db: AsyncSession, user_data: Dict[str, Any]) -> Dict[str, Any]:
     """Handle user.deleted webhook from Clerk"""
     try:
         clerk_user_id = user_data.get('id')
