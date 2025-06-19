@@ -26,9 +26,9 @@ def upgrade() -> None:
     if 'category' not in columns:
         op.add_column('documents', sa.Column('category', sa.String(50), nullable=True))
     
-    # Add metadata JSONB field to documents
-    if 'metadata' not in columns and 'document_metadata' not in columns:
-        op.add_column('documents', sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True, default={}))
+    # Add document_metadata JSONB field to documents (using correct name to avoid SQLAlchemy conflict)
+    if 'document_metadata' not in columns:
+        op.add_column('documents', sa.Column('document_metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default='{}'))
     
     # Add content field for storing extracted text
     if 'content' not in columns:
@@ -51,20 +51,45 @@ def upgrade() -> None:
         except:
             pass
     
-    # Set default category for existing documents
-    if 'category' not in columns:
-        op.execute("UPDATE documents SET category = 'general' WHERE category IS NULL")
-    if 'metadata' not in columns and 'document_metadata' not in columns:
-        op.execute("UPDATE documents SET metadata = '{}' WHERE metadata IS NULL")
+    # Set default values for existing documents only if columns were just created
+    bind = op.get_bind()
+    result = bind.execute(sa.text("SELECT COUNT(*) FROM documents"))
+    if result.scalar() > 0:
+        try:
+            op.execute("UPDATE documents SET category = 'general' WHERE category IS NULL")
+        except:
+            pass
+        try:
+            op.execute("UPDATE documents SET document_metadata = '{}' WHERE document_metadata IS NULL")
+        except:
+            pass
 
 
 def downgrade() -> None:
     # Drop indexes
-    op.drop_index('idx_documents_category_tenant', 'documents')
-    op.drop_index('idx_documents_category', 'documents')
+    try:
+        op.drop_index('idx_documents_category_tenant', 'documents')
+    except:
+        pass
+    try:
+        op.drop_index('idx_documents_category', 'documents')
+    except:
+        pass
     
     # Drop columns
-    op.drop_column('documents', 'extracted_entities')
-    op.drop_column('documents', 'content')
-    op.drop_column('documents', 'metadata')
-    op.drop_column('documents', 'category')
+    try:
+        op.drop_column('documents', 'extracted_entities')
+    except:
+        pass
+    try:
+        op.drop_column('documents', 'content')
+    except:
+        pass
+    try:
+        op.drop_column('documents', 'document_metadata')
+    except:
+        pass
+    try:
+        op.drop_column('documents', 'category')
+    except:
+        pass
