@@ -703,3 +703,26 @@ class SignatureEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     request = relationship("SignatureRequest", back_populates="events")
+
+
+class SignatureProviderAudit(Base):
+    """Auditoría de cambios en proveedores de firma digital"""
+    __tablename__ = "signature_provider_audits"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("signature_providers.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    action = Column(String(20), nullable=False, index=True)  # 'created', 'updated', 'deleted', 'activated', 'deactivated', 'set_default'
+    changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    changes = Column(JSONB, nullable=False, default={})  # Cambios realizados (excepto credenciales)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    provider = relationship("SignatureProvider")
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    
+    __table_args__ = (
+        Index('idx_provider_audits_provider_action', 'provider_id', 'action'),
+        Index('idx_provider_audits_tenant_created', 'tenant_id', 'created_at'),
+    )

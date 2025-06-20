@@ -5,6 +5,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -45,7 +46,8 @@ async def create_signature_provider(
         signature_service = AsyncSignatureService(db)
         provider = await signature_service.create_provider(
             provider_data,
-            current_user.tenant_id
+            current_user.tenant_id,
+            current_user.id
         )
         return provider
         
@@ -145,9 +147,277 @@ async def get_default_signature_provider(
         )
 
 
+@router.put("/providers/{provider_id}", response_model=SignatureProvider)
+async def update_signature_provider(
+    provider_id: UUID,
+    provider_data: SignatureProviderCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
+):
+    """Actualizar un proveedor de firma (solo admin)"""
+    
+    try:
+        signature_service = AsyncSignatureService(db)
+        provider = await signature_service.update_provider(
+            provider_id,
+            provider_data,
+            current_user.tenant_id,
+            current_user.id
+        )
+        
+        if not provider:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signature provider not found"
+            )
+        
+        return provider
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error updating signature provider: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error updating signature provider"
+        )
+
+
+@router.delete("/providers/{provider_id}")
+async def delete_signature_provider(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
+):
+    """Eliminar un proveedor de firma (solo admin)"""
+    
+    try:
+        signature_service = AsyncSignatureService(db)
+        success = await signature_service.delete_provider(
+            provider_id,
+            current_user.tenant_id,
+            current_user.id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signature provider not found"
+            )
+        
+        return {"message": "Provider deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting signature provider: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting signature provider"
+        )
+
+
+@router.put("/providers/{provider_id}/set-default", response_model=SignatureProvider)
+async def set_default_signature_provider(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
+):
+    """Establecer un proveedor como predeterminado (solo admin)"""
+    
+    try:
+        signature_service = AsyncSignatureService(db)
+        provider = await signature_service.set_default_provider(
+            provider_id,
+            current_user.tenant_id,
+            current_user.id
+        )
+        
+        if not provider:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signature provider not found"
+            )
+        
+        return provider
+        
+    except Exception as e:
+        logger.error(f"Error setting default provider: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error setting default provider"
+        )
+
+
+@router.post("/providers/{provider_id}/test")
+async def test_signature_provider(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
+):
+    """Probar la conexión con un proveedor (solo admin)"""
+    
+    try:
+        signature_service = AsyncSignatureService(db)
+        result = await signature_service.test_provider_connection(
+            provider_id,
+            current_user.tenant_id
+        )
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Connection test completed")
+        }
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error testing provider: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Connection test failed: {str(e)}"
+        }
+
+
+@router.get("/providers/supported")
+async def get_supported_providers(
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Obtener lista de proveedores soportados y sus campos requeridos"""
+    
+    return [
+        {
+            "name": "docusign",
+            "display_name": "DocuSign",
+            "required_fields": ["integration_key", "secret_key", "account_id", "base_url"],
+            "optional_fields": []
+        },
+        {
+            "name": "yousign",
+            "display_name": "YouSign",
+            "required_fields": ["api_key", "environment"],
+            "optional_fields": []
+        },
+        {
+            "name": "signaturit",
+            "display_name": "Signaturit",
+            "required_fields": ["access_token", "environment"],
+            "optional_fields": []
+        }
+    ]
+
+
+# =====================================
+# WEBHOOKS
+# =====================================
+
+@router.post("/webhooks/yousign")
+async def yousign_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Webhook para recibir actualizaciones de YouSign"""
+    try:
+        # Obtener el body como bytes para la verificación
+        body = await request.body()
+        
+        # Verificar la firma del webhook (si YouSign lo proporciona)
+        # headers = request.headers
+        # signature = headers.get("X-YouSign-Signature")
+        
+        # Parsear el body
+        data = await request.json()
+        
+        logger.info(f"YouSign webhook received: {data.get('event_name', 'unknown')}")
+        
+        # Procesar según el tipo de evento
+        event_name = data.get('event_name')
+        if not event_name:
+            return {"status": "ignored", "reason": "no event_name"}
+        
+        signature_service = AsyncSignatureService(db)
+        
+        if event_name == 'signature_request.done':
+            # Solicitud completada
+            signature_request_id = data.get('data', {}).get('id')
+            if signature_request_id:
+                await signature_service.update_request_status_by_external_id(
+                    signature_request_id,
+                    'completed'
+                )
+        
+        elif event_name == 'signature_request.expired':
+            # Solicitud expirada
+            signature_request_id = data.get('data', {}).get('id')
+            if signature_request_id:
+                await signature_service.update_request_status_by_external_id(
+                    signature_request_id,
+                    'expired'
+                )
+        
+        elif event_name == 'signer.done':
+            # Un firmante ha firmado
+            signer_id = data.get('data', {}).get('id')
+            if signer_id:
+                await signature_service.update_signer_status_by_external_id(
+                    signer_id,
+                    'signed',
+                    signed_at=datetime.now()
+                )
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"Error processing YouSign webhook: {str(e)}")
+        # No devolver error para evitar reintentos
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/webhooks/docusign")
+async def docusign_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Webhook para recibir actualizaciones de DocuSign"""
+    try:
+        data = await request.json()
+        logger.info(f"DocuSign webhook received: {data.get('event', 'unknown')}")
+        
+        # TODO: Implementar procesamiento de webhook de DocuSign
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"Error processing DocuSign webhook: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/webhooks/signaturit")
+async def signaturit_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Webhook para recibir actualizaciones de Signaturit"""
+    try:
+        data = await request.json()
+        logger.info(f"Signaturit webhook received: {data.get('event_type', 'unknown')}")
+        
+        # TODO: Implementar procesamiento de webhook de Signaturit
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"Error processing Signaturit webhook: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
 # =====================================
 # SIGNATURE REQUESTS
-# =====================================
+# ====================================
 
 @router.post("/requests", response_model=SignatureRequest)
 async def create_signature_request(

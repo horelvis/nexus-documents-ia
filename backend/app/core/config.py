@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode
@@ -140,6 +141,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = os.getenv("MAIL_SSL_TLS", "False").lower() == "true"
     MAIL_USE_CREDENTIALS: bool = os.getenv("MAIL_USE_CREDENTIALS", "True").lower() == "true"
     MAIL_VALIDATE_CERTS: bool = os.getenv("MAIL_VALIDATE_CERTS", "True").lower() == "true"
+    
+    # Signature Service Configuration
+    SIGNATURE_ENCRYPTION_KEY: Optional[str] = os.getenv("SIGNATURE_ENCRYPTION_KEY")
+    SIGNATURE_WEBHOOK_SECRET: Optional[str] = os.getenv("SIGNATURE_WEBHOOK_SECRET")
     
     model_config = {
         "case_sensitive": True,

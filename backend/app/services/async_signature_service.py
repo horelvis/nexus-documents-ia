@@ -5,18 +5,19 @@ import logging
 import json
 import hmac
 import hashlib
-from abc import ABC, abstractmethod
+import httpx
+import base64
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, func, desc, select
+from sqlalchemy import and_, or_, func, desc, select, update
 from sqlalchemy.orm import selectinload
 from cryptography.fernet import Fernet
 
 from app.db.models import (
     SignatureProvider, SignatureRequest, SignatureRequestSigner, 
-    SignatureEvent, Tenant, User
+    SignatureEvent, SignatureProviderAudit, Tenant, User
 )
 from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate,
@@ -24,146 +25,17 @@ from app.schemas.signature import (
     SignerCreate
 )
 from app.core.config import settings
+from app.services.signature_microservice_client import signature_client
+from app.services.storage_client import storage_client
 
 logger = logging.getLogger(__name__)
 
 
-class SignatureProviderStrategy(ABC):
-    """Estrategia base para proveedores de firma digital"""
-    
-    @abstractmethod
-    async def create_signature_request(
-        self, 
-        credentials: Dict[str, Any], 
-        config: Dict[str, Any], 
-        request_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Crear solicitud de firma en el proveedor"""
-        pass
-    
-    @abstractmethod
-    async def get_signature_status(
-        self, 
-        credentials: Dict[str, Any], 
-        external_id: str
-    ) -> Dict[str, Any]:
-        """Obtener estado de firma del proveedor"""
-        pass
-    
-    @abstractmethod
-    async def cancel_signature_request(
-        self, 
-        credentials: Dict[str, Any], 
-        external_id: str
-    ) -> bool:
-        """Cancelar solicitud de firma"""
-        pass
-    
-    @abstractmethod
-    async def download_signed_document(
-        self, 
-        credentials: Dict[str, Any], 
-        external_id: str
-    ) -> bytes:
-        """Descargar documento firmado"""
-        pass
+# Note: Provider strategies have been moved to the signature microservice
+# The AsyncSignatureService now uses the microservice client for all provider operations
 
 
-class DocuSignStrategy(SignatureProviderStrategy):
-    """Implementación para DocuSign"""
-    
-    async def create_signature_request(self, credentials: Dict[str, Any], config: Dict[str, Any], request_data: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: Implementar integración real con DocuSign API
-        logger.info("Creating DocuSign signature request")
-        
-        # Simulación de respuesta
-        return {
-            "external_id": f"docusign_{datetime.now().timestamp()}",
-            "status": "sent",
-            "signers": [
-                {
-                    "email": signer["email"],
-                    "external_id": f"signer_{i}",
-                    "signing_url": f"https://demo.docusign.net/signing/{i}",
-                    "status": "sent"
-                }
-                for i, signer in enumerate(request_data.get("signers", []))
-            ]
-        }
-    
-    async def get_signature_status(self, credentials: Dict[str, Any], external_id: str) -> Dict[str, Any]:
-        # TODO: Implementar consulta real a DocuSign
-        return {"status": "in_progress", "completion_percentage": 50}
-    
-    async def cancel_signature_request(self, credentials: Dict[str, Any], external_id: str) -> bool:
-        # TODO: Implementar cancelación real
-        return True
-    
-    async def download_signed_document(self, credentials: Dict[str, Any], external_id: str) -> bytes:
-        # TODO: Implementar descarga real
-        return b"PDF content placeholder"
-
-
-class YouSignStrategy(SignatureProviderStrategy):
-    """Implementación para YouSign"""
-    
-    async def create_signature_request(self, credentials: Dict[str, Any], config: Dict[str, Any], request_data: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: Implementar integración real con YouSign API
-        logger.info("Creating YouSign signature request")
-        
-        return {
-            "external_id": f"yousign_{datetime.now().timestamp()}",
-            "status": "sent",
-            "signers": [
-                {
-                    "email": signer["email"],
-                    "external_id": f"yousign_signer_{i}",
-                    "signing_url": f"https://webapp.yousign.com/procedure/{i}",
-                    "status": "sent"
-                }
-                for i, signer in enumerate(request_data.get("signers", []))
-            ]
-        }
-    
-    async def get_signature_status(self, credentials: Dict[str, Any], external_id: str) -> Dict[str, Any]:
-        return {"status": "in_progress", "completion_percentage": 75}
-    
-    async def cancel_signature_request(self, credentials: Dict[str, Any], external_id: str) -> bool:
-        return True
-    
-    async def download_signed_document(self, credentials: Dict[str, Any], external_id: str) -> bytes:
-        return b"PDF content placeholder"
-
-
-class SignaturitStrategy(SignatureProviderStrategy):
-    """Implementación para Signaturit"""
-    
-    async def create_signature_request(self, credentials: Dict[str, Any], config: Dict[str, Any], request_data: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: Implementar integración real con Signaturit API
-        logger.info("Creating Signaturit signature request")
-        
-        return {
-            "external_id": f"signaturit_{datetime.now().timestamp()}",
-            "status": "sent",
-            "signers": [
-                {
-                    "email": signer["email"],
-                    "external_id": f"signaturit_signer_{i}",
-                    "signing_url": f"https://dashboard.signaturit.com/document/{i}",
-                    "status": "sent"
-                }
-                for i, signer in enumerate(request_data.get("signers", []))
-            ]
-        }
-    
-    async def get_signature_status(self, credentials: Dict[str, Any], external_id: str) -> Dict[str, Any]:
-        return {"status": "completed", "completion_percentage": 100}
-    
-    async def cancel_signature_request(self, credentials: Dict[str, Any], external_id: str) -> bool:
-        return True
-    
-    async def download_signed_document(self, credentials: Dict[str, Any], external_id: str) -> bytes:
-        return b"PDF content placeholder"
+# All provider strategy implementations have been moved to the signature microservice
 
 
 class AsyncSignatureService:
@@ -173,13 +45,6 @@ class AsyncSignatureService:
         self.db = db
         self.encryption_key = self._get_encryption_key()
         self.fernet = Fernet(self.encryption_key)
-        
-        # Estrategias disponibles
-        self.strategies = {
-            'docusign': DocuSignStrategy(),
-            'yousign': YouSignStrategy(),
-            'signaturit': SignaturitStrategy()
-        }
     
     def _get_encryption_key(self) -> bytes:
         """Obtener clave de encriptación"""
@@ -208,7 +73,8 @@ class AsyncSignatureService:
     async def create_provider(
         self, 
         provider_data: SignatureProviderCreate, 
-        tenant_id: UUID
+        tenant_id: UUID,
+        created_by: UUID
     ) -> SignatureProvider:
         """Crear un proveedor de firma"""
         try:
@@ -249,6 +115,22 @@ class AsyncSignatureService:
             )
             
             self.db.add(provider)
+            
+            # Crear registro de auditoría
+            audit = SignatureProviderAudit(
+                provider_id=provider.id,
+                tenant_id=tenant_id,
+                action='created',
+                changed_by=created_by,
+                changes={
+                    'provider_name': provider_data.provider_name,
+                    'display_name': provider_data.display_name,
+                    'is_active': provider_data.is_active,
+                    'is_default': is_default
+                }
+            )
+            self.db.add(audit)
+            
             await self.db.commit()
             await self.db.refresh(provider)
             
@@ -394,11 +276,6 @@ class AsyncSignatureService:
             provider = request.provider
             credentials = self._decrypt_credentials(provider.encrypted_credentials)
             
-            # Obtener estrategia
-            strategy = self.strategies.get(provider.provider_name)
-            if not strategy:
-                raise ValueError(f"Unsupported provider: {provider.provider_name}")
-            
             # Preparar datos para el proveedor
             signers_data = [
                 {
@@ -411,25 +288,21 @@ class AsyncSignatureService:
                 for signer in request.signers
             ]
             
-            provider_request_data = {
-                "title": request.title,
-                "message": request.message,
-                "document_name": request.document_name,
-                "document_content": request.document_content,
-                "document_url": request.document_url,
-                "signature_type": request.signature_type,
-                "callback_url": request.callback_url,
-                "success_url": request.success_url,
-                "error_url": request.error_url,
-                "signers": signers_data,
-                "metadata": request.request_metadata
-            }
+            # Construir URL de webhook
+            webhook_url = f"{settings.API_BASE_URL}/api/v1/signatures/webhooks/{provider.provider_name}"
             
-            # Enviar al proveedor
-            result = await strategy.create_signature_request(
-                credentials, 
-                provider.configuration, 
-                provider_request_data
+            # Enviar al microservicio
+            result = await signature_client.create_signature_request(
+                provider_type=provider.provider_name,
+                provider_credentials=credentials,
+                title=request.title,
+                document_content=request.document_content,
+                document_name=request.document_name,
+                signers=signers_data,
+                message=request.message,
+                expires_in_days=30,
+                webhook_url=webhook_url,
+                metadata=request.request_metadata
             )
             
             # Actualizar solicitud con datos del proveedor
@@ -514,12 +387,13 @@ class AsyncSignatureService:
             # Obtener estado del proveedor
             provider = request.provider
             credentials = self._decrypt_credentials(provider.encrypted_credentials)
-            strategy = self.strategies.get(provider.provider_name)
             
-            if not strategy:
-                return request
-            
-            status_data = await strategy.get_signature_status(credentials, request.external_id)
+            # Llamar al microservicio
+            status_data = await signature_client.get_signature_status(
+                provider_type=provider.provider_name,
+                provider_credentials=credentials,
+                external_id=request.external_id
+            )
             
             # Actualizar estado si cambió
             new_status = status_data.get("status")
@@ -688,13 +562,295 @@ class AsyncSignatureService:
             
             provider = request.provider
             credentials = self._decrypt_credentials(provider.encrypted_credentials)
-            strategy = self.strategies.get(provider.provider_name)
             
-            if not strategy:
-                return None
-            
-            return await strategy.download_signed_document(credentials, request.external_id)
+            # Llamar al microservicio
+            return await signature_client.download_signed_document(
+                provider_type=provider.provider_name,
+                provider_credentials=credentials,
+                external_id=request.external_id
+            )
             
         except Exception as e:
             logger.error(f"Error downloading signed document: {str(e)}")
             return None
+    
+    async def update_provider(
+        self,
+        provider_id: UUID,
+        provider_data: SignatureProviderCreate,
+        tenant_id: UUID,
+        updated_by: UUID
+    ) -> Optional[SignatureProvider]:
+        """Actualizar un proveedor de firma"""
+        try:
+            # Obtener el proveedor existente
+            query = select(SignatureProvider).where(
+                SignatureProvider.id == provider_id,
+                SignatureProvider.tenant_id == tenant_id
+            )
+            result = await self.db.execute(query)
+            provider = result.scalar_one_or_none()
+            
+            if not provider:
+                return None
+            
+            # Guardar cambios para auditoría
+            changes = {}
+            if provider.display_name != provider_data.display_name:
+                changes['display_name'] = {'old': provider.display_name, 'new': provider_data.display_name}
+            if provider.is_active != provider_data.is_active:
+                changes['is_active'] = {'old': provider.is_active, 'new': provider_data.is_active}
+            if provider.is_default != provider_data.is_default:
+                changes['is_default'] = {'old': provider.is_default, 'new': provider_data.is_default}
+            if provider_data.credentials:
+                changes['credentials'] = 'updated'
+            
+            # Actualizar campos
+            provider.display_name = provider_data.display_name
+            provider.is_active = provider_data.is_active
+            provider.is_default = provider_data.is_default
+            
+            # Si se proporcionan nuevas credenciales, encriptarlas
+            if provider_data.credentials:
+                provider.encrypted_credentials = self._encrypt_credentials(provider_data.credentials)
+            
+            # Si se está estableciendo como predeterminado, desactivar otros
+            if provider_data.is_default:
+                await self._unset_other_defaults(tenant_id, provider_id)
+            
+            # Crear registro de auditoría
+            if changes:
+                audit = SignatureProviderAudit(
+                    provider_id=provider_id,
+                    tenant_id=tenant_id,
+                    action='updated',
+                    changed_by=updated_by,
+                    changes=changes
+                )
+                self.db.add(audit)
+            
+            await self.db.commit()
+            await self.db.refresh(provider)
+            
+            return provider
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error updating provider: {str(e)}")
+            raise
+    
+    async def delete_provider(
+        self,
+        provider_id: UUID,
+        tenant_id: UUID,
+        deleted_by: UUID
+    ) -> bool:
+        """Eliminar un proveedor de firma"""
+        try:
+            # Verificar que el proveedor existe y pertenece al tenant
+            query = select(SignatureProvider).where(
+                SignatureProvider.id == provider_id,
+                SignatureProvider.tenant_id == tenant_id
+            )
+            result = await self.db.execute(query)
+            provider = result.scalar_one_or_none()
+            
+            if not provider:
+                return False
+            
+            # Verificar que no haya solicitudes activas usando este proveedor
+            active_requests_query = select(SignatureRequest).where(
+                SignatureRequest.provider_id == provider_id,
+                SignatureRequest.status.in_(['pending', 'sent'])
+            )
+            active_result = await self.db.execute(active_requests_query)
+            if active_result.scalar_one_or_none():
+                raise ValueError("Cannot delete provider with active signature requests")
+            
+            # Crear registro de auditoría antes de eliminar
+            audit = SignatureProviderAudit(
+                provider_id=provider_id,
+                tenant_id=tenant_id,
+                action='deleted',
+                changed_by=deleted_by,
+                changes={
+                    'provider_name': provider.provider_name,
+                    'display_name': provider.display_name
+                }
+            )
+            self.db.add(audit)
+            
+            await self.db.delete(provider)
+            await self.db.commit()
+            
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error deleting provider: {str(e)}")
+            raise
+    
+    async def set_default_provider(
+        self,
+        provider_id: UUID,
+        tenant_id: UUID,
+        set_by: UUID
+    ) -> Optional[SignatureProvider]:
+        """Establecer un proveedor como predeterminado"""
+        try:
+            # Obtener el proveedor
+            query = select(SignatureProvider).where(
+                SignatureProvider.id == provider_id,
+                SignatureProvider.tenant_id == tenant_id
+            )
+            result = await self.db.execute(query)
+            provider = result.scalar_one_or_none()
+            
+            if not provider:
+                return None
+            
+            # Desactivar todos los demás como predeterminados
+            await self._unset_other_defaults(tenant_id, provider_id)
+            
+            # Establecer este como predeterminado
+            provider.is_default = True
+            provider.is_active = True  # Asegurar que esté activo
+            
+            # Crear registro de auditoría
+            audit = SignatureProviderAudit(
+                provider_id=provider_id,
+                tenant_id=tenant_id,
+                action='set_default',
+                changed_by=set_by,
+                changes={
+                    'display_name': provider.display_name,
+                    'previous_default': 'unset'  # Se registrará qué proveedor era el anterior
+                }
+            )
+            self.db.add(audit)
+            
+            await self.db.commit()
+            await self.db.refresh(provider)
+            
+            return provider
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error setting default provider: {str(e)}")
+            raise
+    
+    async def _unset_other_defaults(self, tenant_id: UUID, except_provider_id: UUID):
+        """Desactivar otros proveedores como predeterminados"""
+        query = update(SignatureProvider).where(
+            SignatureProvider.tenant_id == tenant_id,
+            SignatureProvider.id != except_provider_id,
+            SignatureProvider.is_default == True
+        ).values(is_default=False)
+        
+        await self.db.execute(query)
+    
+    async def test_provider_connection(
+        self,
+        provider_id: UUID,
+        tenant_id: UUID
+    ) -> Dict[str, Any]:
+        """Probar la conexión con un proveedor"""
+        try:
+            # Obtener el proveedor
+            query = select(SignatureProvider).where(
+                SignatureProvider.id == provider_id,
+                SignatureProvider.tenant_id == tenant_id
+            )
+            result = await self.db.execute(query)
+            provider = result.scalar_one_or_none()
+            
+            if not provider:
+                raise ValueError("Provider not found")
+            
+            # Desencriptar credenciales
+            credentials = self._decrypt_credentials(provider.encrypted_credentials)
+            
+            # Llamar al microservicio para probar la conexión
+            return await signature_client.test_provider_connection(
+                provider_type=provider.provider_name,
+                provider_credentials=credentials
+            )
+                
+        except Exception as e:
+            logger.error(f"Error testing provider connection: {str(e)}")
+            return {"success": False, "message": str(e)}
+    
+    # Provider test connection methods have been moved to the signature microservice
+    
+    
+    
+    async def update_request_status_by_external_id(
+        self,
+        external_id: str,
+        status: str
+    ):
+        """Actualizar estado de solicitud por ID externo"""
+        try:
+            query = select(SignatureRequest).where(
+                SignatureRequest.external_id == external_id
+            )
+            result = await self.db.execute(query)
+            request = result.scalar_one_or_none()
+            
+            if request:
+                request.status = status
+                if status == 'completed':
+                    request.completed_at = datetime.now()
+                
+                await self._create_event(
+                    request.id,
+                    'status_updated',
+                    f'Status updated to {status} via webhook',
+                    {'status': status}
+                )
+                
+                await self.db.commit()
+                
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error updating request status: {str(e)}")
+    
+    async def update_signer_status_by_external_id(
+        self,
+        external_id: str,
+        status: str,
+        signed_at: Optional[datetime] = None
+    ):
+        """Actualizar estado de firmante por ID externo"""
+        try:
+            query = select(SignatureRequestSigner).where(
+                SignatureRequestSigner.external_id == external_id
+            )
+            result = await self.db.execute(query)
+            signer = result.scalar_one_or_none()
+            
+            if signer:
+                signer.status = status
+                if signed_at:
+                    signer.signed_at = signed_at
+                
+                # Crear evento
+                request_query = select(SignatureRequest).where(
+                    SignatureRequest.id == signer.request_id
+                )
+                request_result = await self.db.execute(request_query)
+                request = request_result.scalar_one_or_none()
+                
+                if request:
+                    await self._create_event(
+                        request.id,
+                        'signer_updated',
+                        f'Signer {signer.email} status updated to {status}',
+                        {'signer_id': str(signer.id), 'status': status}
+                    )
+                
+                await self.db.commit()
+                
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error updating signer status: {str(e)}")

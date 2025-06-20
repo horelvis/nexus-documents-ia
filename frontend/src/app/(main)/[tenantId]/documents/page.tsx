@@ -20,7 +20,8 @@ import {
   IconChevronRight,
   IconLayoutGrid,
   IconLayoutList,
-  IconShare2
+  IconShare2,
+  IconSignature
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -44,7 +45,9 @@ import {
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
+import { SignatureRequestDialog } from "@/components/documents/signature-request-dialog"
 import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
+import { signatureService } from "@/lib/services/signature-service"
 
 export default function DocumentsPage() {
   const params = useParams()
@@ -72,6 +75,7 @@ export default function DocumentsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [signatureDialogOpen, setSignatureDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
   const { openUploadDialog, setOnUploadComplete } = useUpload()
@@ -176,6 +180,11 @@ export default function DocumentsPage() {
   const handleShareDocument = (document: ApiDocument) => {
     setSelectedDocument(document)
     setShareDialogOpen(true)
+  }
+
+  const handleRequestSignature = (document: ApiDocument) => {
+    setSelectedDocument(document)
+    setSignatureDialogOpen(true)
   }
 
   const handleFullPagePreview = (document: ApiDocument) => {
@@ -567,6 +576,15 @@ export default function DocumentsPage() {
                           <Button 
                             size="sm" 
                             variant="ghost"
+                            onClick={() => handleRequestSignature(document)}
+                            title="Request Signature"
+                            className="h-7 w-7 p-0"
+                          >
+                            <IconSignature className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
                             onClick={() => handleEditDocument(document)}
                             title="Edit"
                             className="h-7 w-7 p-0"
@@ -614,6 +632,7 @@ export default function DocumentsPage() {
             onPreviewDocument={handlePreviewDocument}
             onFullPagePreview={handleFullPagePreview}
             onShareDocument={handleShareDocument}
+            onRequestSignature={handleRequestSignature}
           />
         )}
 
@@ -757,6 +776,12 @@ export default function DocumentsPage() {
           document={selectedDocument}
           open={shareDialogOpen}
           onOpenChange={setShareDialogOpen}
+        />
+
+        <SignatureRequestDialog
+          document={selectedDocument}
+          open={signatureDialogOpen}
+          onOpenChange={setSignatureDialogOpen}
         />
 
       </div>

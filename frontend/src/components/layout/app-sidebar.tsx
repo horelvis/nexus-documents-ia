@@ -169,6 +169,12 @@ const data = {
       color: "indigo",
     },
     {
+      title: "Signature Providers",
+      url: "/admin/signature-providers",
+      icon: IconSignature,
+      color: "pink",
+    },
+    {
       title: "Billing",
       url: "/billing",
       icon: IconCreditCard,

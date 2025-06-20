@@ -27,7 +27,8 @@ import {
   IconChevronRight,
   IconChevronsLeft,
   IconChevronsRight,
-  IconShare2
+  IconShare2,
+  IconSignature
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -66,6 +67,7 @@ interface DocumentsDataTableProps {
   onPreviewDocument: (document: ApiDocument) => void
   onFullPagePreview: (document: ApiDocument) => void
   onShareDocument: (document: ApiDocument) => void
+  onRequestSignature?: (document: ApiDocument) => void
 }
 
 export function DocumentsDataTable({
@@ -77,6 +79,7 @@ export function DocumentsDataTable({
   onPreviewDocument,
   onFullPagePreview,
   onShareDocument,
+  onRequestSignature,
 }: DocumentsDataTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -268,6 +271,12 @@ export function DocumentsDataTable({
                 <IconShare2 className="mr-2 h-4 w-4" />
                 Share
               </DropdownMenuItem>
+              {onRequestSignature && (
+                <DropdownMenuItem onClick={() => onRequestSignature(document)}>
+                  <IconSignature className="mr-2 h-4 w-4" />
+                  Request Signature
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => onEditDocument(document)}>
                 <IconEdit className="mr-2 h-4 w-4" />
                 Edit
