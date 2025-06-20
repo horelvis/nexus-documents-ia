@@ -86,9 +86,13 @@ export default function SearchPage() {
             description: 'Classic semantic search',
             type: 'search',
             icon: 'search'
-          },
-          ...agentsList
+          }
         ]
+
+        if( agentsList ) {
+          agents.push(agentsList);
+        }
+        
         setAvailableAgents(agents)
         
         // If initial agent is specified and exists, select it

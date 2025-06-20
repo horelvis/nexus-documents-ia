@@ -39,7 +39,7 @@ import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useAuth } from "@clerk/nextjs"
-import { ProviderConfigDialog } from "@/components/admin/signature-providers/provider-config-dialog"
+import { ProviderConfigWizard } from "@/components/admin/provider-config-wizard"
 import { DeleteProviderDialog } from "@/components/admin/signature-providers/delete-provider-dialog"
 
 export default function SignatureProvidersPage() {
@@ -381,11 +381,10 @@ export default function SignatureProvidersPage() {
       </div>
 
       {/* Dialogs */}
-      <ProviderConfigDialog
+      <ProviderConfigWizard
         open={configDialogOpen}
         onOpenChange={setConfigDialogOpen}
-        provider={selectedProvider}
-        isCreating={isCreating}
+        provider={isCreating ? null : selectedProvider}
         onSuccess={loadProviders}
       />
 

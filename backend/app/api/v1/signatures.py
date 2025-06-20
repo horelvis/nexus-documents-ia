@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.api.async_dependencies import get_async_db, get_current_active_user_async, get_current_active_superuser_async
+from app.api.async_dependencies import get_async_db, get_current_active_user_async, get_current_active_superuser_async, get_current_tenant_admin_async
 from app.db.models import User
 from app.services.async_signature_service import AsyncSignatureService
 from app.schemas.signature import (
@@ -31,16 +31,9 @@ router = APIRouter()
 async def create_signature_provider(
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: User = Depends(get_current_tenant_admin_async)
 ):
-    """Crear un proveedor de firma digital (solo administradores)"""
-    
-    # TODO: Verificar que el usuario es administrador del tenant
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can create signature providers"
-        )
+    """Crear un proveedor de firma digital (solo administradores del tenant)"""
     
     try:
         signature_service = AsyncSignatureService(db)
@@ -152,9 +145,9 @@ async def update_signature_provider(
     provider_id: UUID,
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: User = Depends(get_current_tenant_admin_async)
 ):
-    """Actualizar un proveedor de firma (solo admin)"""
+    """Actualizar un proveedor de firma (solo admin del tenant)"""
     
     try:
         signature_service = AsyncSignatureService(db)
@@ -190,9 +183,9 @@ async def update_signature_provider(
 async def delete_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: User = Depends(get_current_tenant_admin_async)
 ):
-    """Eliminar un proveedor de firma (solo admin)"""
+    """Eliminar un proveedor de firma (solo admin del tenant)"""
     
     try:
         signature_service = AsyncSignatureService(db)
@@ -222,7 +215,7 @@ async def delete_signature_provider(
 async def set_default_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: User = Depends(get_current_tenant_admin_async)
 ):
     """Establecer un proveedor como predeterminado (solo admin)"""
     
@@ -254,7 +247,7 @@ async def set_default_signature_provider(
 async def test_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: User = Depends(get_current_tenant_admin_async)
 ):
     """Probar la conexión con un proveedor (solo admin)"""
     
