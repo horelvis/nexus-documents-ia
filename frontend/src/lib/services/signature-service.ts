@@ -77,6 +77,7 @@ export interface CreateSignatureRequestData {
   provider_id: string
   signers: Omit<SignatureRequestSigner, 'status' | 'signed_at'>[]
   expires_in_days?: number
+  metadata?: Record<string, any>
 }
 
 export interface UpdateSignatureRequestData {

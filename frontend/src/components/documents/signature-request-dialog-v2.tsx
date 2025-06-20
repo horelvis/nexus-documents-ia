@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
-import { useForm, useFieldArray } from "react-hook-form"
+import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
 import {
   Dialog,
   DialogContent,
@@ -14,15 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Form,
   FormControl,
@@ -32,81 +24,105 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Slider } from "@/components/ui/slider"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import { 
   IconLoader2, 
   IconPlus, 
   IconTrash, 
   IconAlertCircle,
-  IconRobot,
   IconUser,
   IconMail,
-  IconHash,
-  IconCalendar,
-  IconFileText
+  IconChevronLeft,
+  IconChevronRight,
+  IconCheck,
+  IconFileText,
+  IconSignature
 } from "@tabler/icons-react"
 import { Document as ApiDocument } from "@/lib/types"
 import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
-import { useAgentService } from "@/lib/services/agent.service"
-import { 
-  signatureRequestSchema, 
-  SignatureRequestFormData,
-  SignerFormData 
-} from "@/lib/schemas/signature-request"
+import { SignaturePlacementEditor } from "./signature-placement-editor"
+import { cn } from "@/lib/utils"
+import { useSignatureAI } from "@/lib/services/signature-ai-service"
 
-interface SignatureRequestDialogProps {
+// Zod schemas
+const signerSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  name: z.string().min(1, "Name is required"),
+  color: z.string(),
+})
+
+const signatureRequestSchema = z.object({
+  title: z.string().min(1, "Title is required").max(200, "Title too long"),
+  message: z.string().max(1000, "Message too long").optional(),
+  signers: z.array(signerSchema)
+    .min(1, "At least one signer is required")
+    .max(10, "Maximum 10 signers allowed"),
+  provider_id: z.string().uuid("Please select a valid provider"),
+  expires_in_days: z.number()
+    .min(1, "Minimum 1 day")
+    .max(365, "Maximum 365 days")
+    .default(30),
+  document_id: z.string().uuid(),
+})
+
+type SignatureRequestFormData = z.infer<typeof signatureRequestSchema>
+
+interface SignatureRequestDialogV2Props {
   document: ApiDocument | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
+const STEPS = ['Signers', 'Placement', 'Settings', 'Review']
+const SIGNER_COLORS = [
+  '#3B82F6', // blue
+  '#10B981', // green
+  '#F59E0B', // amber
+  '#EF4444', // red
+  '#8B5CF6', // purple
+  '#EC4899', // pink
+  '#14B8A6', // teal
+  '#F97316', // orange
+]
+
 export function SignatureRequestDialogV2({
   document,
   open,
   onOpenChange,
-}: SignatureRequestDialogProps) {
-  const params = useParams()
-  const tenantId = params.tenantId as string
+}: SignatureRequestDialogV2Props) {
   const { addNotification } = useNotifications()
-  const agentService = useAgentService()
   const signatureService = useSignatureService()
+  const { analyzeDocument, suggestPlacements, learnFromPlacement, isAnalyzing, analysis, signatureAIService } = useSignatureAI()
   
-  // Provider state
+  const [currentStep, setCurrentStep] = useState(0)
   const [providers, setProviders] = useState<SignatureProvider[]>([])
   const [loadingProviders, setLoadingProviders] = useState(true)
-  
-  // AI state
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [aiSuggestions, setAiSuggestions] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState("manual")
-  
-  // Request state
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitAction, setSubmitAction] = useState<"send" | "draft">("send")
-
-  // Initialize React Hook Form with Zod validation
+  const [signatureFields, setSignatureFields] = useState<any[]>([])
+  const [isLoadingAISuggestions, setIsLoadingAISuggestions] = useState(false)
+  
   const form = useForm<SignatureRequestFormData>({
     resolver: zodResolver(signatureRequestSchema),
     defaultValues: {
       title: "",
       message: "",
-      signers: [{ email: "", name: "", role: "signer", order: 1 }],
+      signers: [{ email: "", name: "", color: SIGNER_COLORS[0] }],
       expires_in_days: 30,
       provider_id: "",
       document_id: document?.id || "",
     },
-  })
-
-  // Field array for dynamic signers
-  const { fields, append, remove, update } = useFieldArray({
-    control: form.control,
-    name: "signers",
   })
 
   // Load providers on mount
@@ -117,11 +133,11 @@ export function SignatureRequestDialogV2({
     }
   }, [open])
 
-  // Set default values when document changes
+  // Set default title when document changes
   useEffect(() => {
     if (document && open) {
-      form.setValue("title", `Signature Request for ${document.title || document.filename}`)
-      form.setValue("document_id", document.id)
+      form.setValue('title', `Signature Request for ${document.title || document.filename}`)
+      form.setValue('document_id', document.id)
     }
   }, [document, open])
 
@@ -132,9 +148,10 @@ export function SignatureRequestDialogV2({
       setProviders(providerList)
       
       // Select default provider
-      const defaultProvider = providerList.find(p => p.is_default) || providerList.find(p => p.is_active)
-      if (defaultProvider) {
-        form.setValue("provider_id", defaultProvider.id)
+      const defaultProvider = providerList.find(p => p.is_active && p.is_default)
+      const activeProvider = defaultProvider || providerList.find(p => p.is_active)
+      if (activeProvider) {
+        form.setValue('provider_id', activeProvider.id)
       }
     } catch (error) {
       addNotification({
@@ -149,134 +166,173 @@ export function SignatureRequestDialogV2({
 
   const resetForm = () => {
     form.reset({
-      title: document ? `Signature Request for ${document.title || document.filename}` : "",
+      title: "",
       message: "",
-      signers: [{ email: "", name: "", role: "signer", order: 1 }],
+      signers: [{ email: "", name: "", color: SIGNER_COLORS[0] }],
       expires_in_days: 30,
       provider_id: "",
       document_id: document?.id || "",
     })
-    setActiveTab("manual")
-    setAiSuggestions(null)
+    setCurrentStep(0)
+    setSignatureFields([])
   }
 
-  const analyzeWithAI = async () => {
-    if (!document) return
+  const handleNext = async () => {
+    // Validate current step
+    let fieldsToValidate: (keyof SignatureRequestFormData)[] = []
+    
+    switch (currentStep) {
+      case 0: // Signers
+        fieldsToValidate = ['signers']
+        break
+      case 1: // Placement
+        // Check if signature fields are placed
+        if (signatureFields.length === 0) {
+          addNotification({
+            type: 'error',
+            title: 'No signature fields',
+            message: 'Please place at least one signature field on the document'
+          })
+          return
+        }
+        
+        // Validate that each signer has at least one required field
+        const signers = form.getValues('signers')
+        const signersWithFields = new Set(signatureFields.filter(f => f.required).map(f => f.signer))
+        const signersWithoutFields = signers.filter((_, index) => !signersWithFields.has(`signer-${index}`))
+        
+        if (signersWithoutFields.length > 0) {
+          addNotification({
+            type: 'error',
+            title: 'Missing required fields',
+            message: `The following signers need at least one required field: ${signersWithoutFields.map(s => s.name || s.email).join(', ')}`
+          })
+          return
+        }
+        break
+      case 2: // Settings
+        fieldsToValidate = ['title', 'provider_id', 'expires_in_days']
+        break
+    }
+    
+    if (fieldsToValidate.length > 0) {
+      const isValid = await form.trigger(fieldsToValidate)
+      if (!isValid) return
+    }
+    
+    // Load AI suggestions when moving to placement step
+    if (currentStep === 0 && document) {
+      await loadAISuggestions()
+    }
+    
+    setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))
+  }
 
-    setIsAnalyzing(true)
-    try {
-      // Call the digital signature agent to analyze the document
-      const agent = await agentService.getAgentByType('digital_signature')
-      if (!agent) {
-        throw new Error('Digital signature agent not available')
-      }
+  const handleBack = () => {
+    setCurrentStep(prev => Math.max(0, prev - 1))
+  }
 
-      const response = await agentService.executeAgent(agent.id, {
-        action: 'analyze_for_signature',
-        document_id: document.id,
-        document_title: document.title || document.filename,
-        document_content: 'Document content analysis requested'
+  const handleAddSigner = () => {
+    const currentSigners = form.getValues('signers')
+    if (currentSigners.length >= 10) {
+      addNotification({
+        type: 'error',
+        title: 'Maximum signers reached',
+        message: 'You can add up to 10 signers'
       })
+      return
+    }
+    
+    const nextColor = SIGNER_COLORS[currentSigners.length % SIGNER_COLORS.length]
+    form.setValue('signers', [...currentSigners, { email: "", name: "", color: nextColor }])
+  }
 
-      // Parse AI suggestions
-      if (response.result) {
-        const suggestions = {
-          message: response.result.suggested_message || generateDefaultMessage(),
-          signers: response.result.suggested_signers || [],
-          expires_in_days: response.result.suggested_expiry || 30,
-          requirements: response.result.requirements || []
-        }
-        
-        setAiSuggestions(suggestions)
-        
-        // Apply suggestions to form
-        if (suggestions.message) {
-          form.setValue("message", suggestions.message)
-        }
-        if (suggestions.signers.length > 0) {
-          // Replace all signers with AI suggestions
-          form.setValue("signers", suggestions.signers.map((s: any, i: number) => ({
-            email: s.email || "",
-            name: s.name || "",
-            role: s.role || "signer",
-            order: i + 1
-          })))
-        }
-        if (suggestions.expires_in_days) {
-          form.setValue("expires_in_days", suggestions.expires_in_days)
-        }
-        
-        setActiveTab("ai")
-        
+  const handleRemoveSigner = (index: number) => {
+    const currentSigners = form.getValues('signers')
+    form.setValue('signers', currentSigners.filter((_, i) => i !== index))
+  }
+
+  const loadAISuggestions = async () => {
+    if (!document || signatureFields.length > 0) return // Don't override existing fields
+    
+    setIsLoadingAISuggestions(true)
+    try {
+      // Analyze document if not already done
+      let documentAnalysis = analysis
+      if (!documentAnalysis) {
+        documentAnalysis = await analyzeDocument(document.id, {
+          filename: document.filename,
+          category: document.category
+        })
+      }
+      
+      // Get signers with formatted data
+      const signers = form.getValues('signers').map((s, i) => ({
+        id: `signer-${i}`,
+        email: s.email,
+        name: s.name,
+        role: `party_${i + 1}`
+      }))
+      
+      // Get AI suggestions
+      const suggestions = await suggestPlacements(document.id, signers, documentAnalysis)
+      
+      // Convert suggestions to placement editor format
+      const aiFields = signatureAIService.convertSuggestionsToFields(
+        suggestions.suggested_fields,
+        signers.map((s, i) => ({
+          ...s,
+          color: form.getValues('signers')[i].color
+        }))
+      )
+      
+      setSignatureFields(aiFields)
+      
+      // Notify user about AI suggestions
+      if (aiFields.length > 0) {
         addNotification({
           type: 'success',
-          title: 'AI Analysis Complete',
-          message: 'Document analyzed successfully'
+          title: 'AI Suggestions Ready',
+          message: `Placed ${aiFields.length} suggested signature fields. You can adjust them as needed.`
         })
       }
     } catch (error) {
-      // Fallback to local analysis
-      const fallbackMessage = generateDefaultMessage()
-      form.setValue("message", fallbackMessage)
-      
-      setAiSuggestions({
-        message: fallbackMessage,
-        signers: [{ email: "", name: "", role: "signer", order: 1 }],
-        expires_in_days: 30,
-        requirements: ["Please review and sign the attached document"]
-      })
-      
-      addNotification({
-        type: 'warning',
-        title: 'AI Analysis Unavailable',
-        message: 'Using default suggestions'
-      })
+      console.error('Failed to load AI suggestions:', error)
+      // Don't show error to user - AI suggestions are optional
     } finally {
-      setIsAnalyzing(false)
+      setIsLoadingAISuggestions(false)
     }
-  }
-
-  const generateDefaultMessage = () => {
-    if (!document) return ""
-    
-    return `Dear [Signer Name],
-
-Please review and sign the attached document: "${document.title || document.filename}".
-
-This document requires your signature for completion. Please take a moment to review the content carefully before signing.
-
-If you have any questions or concerns, please don't hesitate to reach out.
-
-Best regards,
-[Your Name]`
   }
 
   const onSubmit = async (data: SignatureRequestFormData) => {
     if (!document) return
 
     setIsSubmitting(true)
-
     try {
-      // Create signature request
+      // Create signature request with field placements
       const request = await signatureService.createRequest({
         ...data,
-        document_id: document.id,
+        document_name: document.filename,
+        metadata: {
+          signature_fields: signatureFields
+        }
       })
 
-      if (submitAction === "send") {
-        // Send the request immediately
-        await signatureService.sendRequest(request.id)
-        
-        addNotification({
-          type: 'success',
-          title: 'Signature Request Sent',
-          message: `Request sent to ${data.signers.length} signer(s)`
-        })
-      } else {
-        addNotification({
-          type: 'success',
-          title: 'Draft Saved',
-          message: 'Signature request saved as draft'
+      // Send immediately
+      await signatureService.sendRequest(request.id)
+
+      addNotification({
+        type: 'success',
+        title: 'Signature Request Sent',
+        message: `Request sent to ${data.signers.length} signer(s)`
+      })
+
+      // Submit placement data for AI learning (async, don't wait)
+      if (signatureFields.length > 0 && analysis) {
+        learnFromPlacement({
+          document_id: document.id,
+          document_type: analysis.document_type,
+          placed_fields: signatureFields
         })
       }
 
@@ -284,7 +340,7 @@ Best regards,
     } catch (error: any) {
       addNotification({
         type: 'error',
-        title: submitAction === "send" ? 'Failed to send request' : 'Failed to save draft',
+        title: 'Failed to send request',
         message: error.message || 'An error occurred'
       })
     } finally {
@@ -292,401 +348,413 @@ Best regards,
     }
   }
 
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 0: // Signers
+        return (
+          <div className="space-y-4">
+            <FormField
+              control={form.control}
+              name="signers"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Signers</FormLabel>
+                  <FormDescription>
+                    Add the people who need to sign this document
+                  </FormDescription>
+                  <div className="space-y-3">
+                    {field.value.map((signer, index) => (
+                      <Card key={index}>
+                        <CardContent className="pt-4">
+                          <div className="flex items-start gap-3">
+                            <div 
+                              className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
+                              style={{ backgroundColor: signer.color }}
+                            >
+                              {index + 1}
+                            </div>
+                            <div className="flex-1 space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Input
+                                    placeholder="Name"
+                                    value={signer.name}
+                                    onChange={(e) => {
+                                      const updated = [...field.value]
+                                      updated[index].name = e.target.value
+                                      field.onChange(updated)
+                                    }}
+                                  />
+                                  {form.formState.errors.signers?.[index]?.name && (
+                                    <p className="text-xs text-destructive mt-1">
+                                      {form.formState.errors.signers[index].name?.message}
+                                    </p>
+                                  )}
+                                </div>
+                                <div>
+                                  <Input
+                                    type="email"
+                                    placeholder="Email"
+                                    value={signer.email}
+                                    onChange={(e) => {
+                                      const updated = [...field.value]
+                                      updated[index].email = e.target.value
+                                      field.onChange(updated)
+                                    }}
+                                  />
+                                  {form.formState.errors.signers?.[index]?.email && (
+                                    <p className="text-xs text-destructive mt-1">
+                                      {form.formState.errors.signers[index].email?.message}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {field.value.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemoveSigner(index)}
+                              >
+                                <IconTrash className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddSigner}
+                    className="w-full"
+                  >
+                    <IconPlus className="h-4 w-4 mr-2" />
+                    Add Signer
+                  </Button>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )
+        
+      case 1: // Placement
+        const signers = form.getValues('signers').map((s, i) => ({
+          id: `signer-${i}`,
+          ...s
+        }))
+        
+        return (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-medium mb-2">Place Signature Fields</h3>
+              <p className="text-sm text-muted-foreground">
+                Drag and drop fields onto the document where signers need to sign
+              </p>
+              {isLoadingAISuggestions && (
+                <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                  Loading AI suggestions...
+                </div>
+              )}
+              {signatureFields.some(f => f.aiSuggested) && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Badge variant="secondary" className="text-xs">
+                    AI Suggested
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    Fields have been placed based on document analysis. You can adjust as needed.
+                  </span>
+                </div>
+              )}
+            </div>
+            <SignaturePlacementEditor
+              documentUrl={`/api/v1/documents/${document?.id}/preview`}
+              signers={signers}
+              onFieldsChange={setSignatureFields}
+              initialFields={signatureFields}
+            />
+          </div>
+        )
+        
+      case 2: // Settings
+        return (
+          <div className="space-y-4">
+            <FormField
+              control={form.control}
+              name="title"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Request Title</FormLabel>
+                  <FormControl>
+                    <Input {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="message"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Message to Signers (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea 
+                      {...field} 
+                      rows={4}
+                      placeholder="Add a personal message to your signers..."
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="provider_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Signature Provider</FormLabel>
+                  {loadingProviders ? (
+                    <div className="flex items-center justify-center p-4">
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                    </div>
+                  ) : providers.length === 0 ? (
+                    <Alert>
+                      <IconAlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        No signature providers configured. Please contact your administrator.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a provider" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {providers
+                          .sort((a, b) => {
+                            if (a.is_default && !b.is_default) return -1
+                            if (!a.is_default && b.is_default) return 1
+                            return a.display_name.localeCompare(b.display_name)
+                          })
+                          .map((provider) => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <span>{provider.display_name}</span>
+                                <div className="flex items-center gap-1">
+                                  {provider.is_default && (
+                                    <Badge variant="default" className="text-xs">
+                                      Default
+                                    </Badge>
+                                  )}
+                                  <Badge variant="outline" className="text-xs">
+                                    {provider.provider_name}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="expires_in_days"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Expires In (Days)</FormLabel>
+                  <FormControl>
+                    <Input 
+                      type="number" 
+                      {...field} 
+                      onChange={e => field.onChange(parseInt(e.target.value))}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    How many days until this signature request expires
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )
+        
+      case 3: // Review
+        const formData = form.getValues()
+        return (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Request Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Document</p>
+                  <p className="font-medium">{document?.title || document?.filename}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Title</p>
+                  <p className="font-medium">{formData.title}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Signers ({formData.signers.length})</p>
+                  <div className="space-y-2">
+                    {formData.signers.map((signer, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <div 
+                          className="w-6 h-6 rounded-full"
+                          style={{ backgroundColor: signer.color }}
+                        />
+                        <span className="text-sm">{signer.name} ({signer.email})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Signature Fields</p>
+                  <p className="font-medium">{signatureFields.length} fields placed</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Provider</p>
+                  <p className="font-medium">
+                    {providers.find(p => p.id === formData.provider_id)?.display_name}
+                  </p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Expires In</p>
+                  <p className="font-medium">{formData.expires_in_days} days</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )
+    }
+  }
+
   if (!document) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Create Signature Request</DialogTitle>
+          <DialogTitle>Request Signature</DialogTitle>
           <DialogDescription>
-            Request signatures for "{document.title || document.filename}"
+            Configure and send a signature request for "{document.title || document.filename}"
           </DialogDescription>
         </DialogHeader>
 
+        {/* Progress */}
+        <div className="py-4">
+          <div className="flex items-center justify-between mb-2">
+            {STEPS.map((step, index) => (
+              <div
+                key={step}
+                className={cn(
+                  "flex items-center",
+                  index < STEPS.length - 1 && "flex-1"
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
+                    index <= currentStep
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {index < currentStep ? (
+                    <IconCheck className="h-4 w-4" />
+                  ) : (
+                    index + 1
+                  )}
+                </div>
+                <span className="ml-2 text-sm font-medium">{step}</span>
+                {index < STEPS.length - 1 && (
+                  <div
+                    className={cn(
+                      "flex-1 h-0.5 mx-4",
+                      index < currentStep ? "bg-primary" : "bg-muted"
+                    )}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="manual" className="flex items-center gap-2">
-                  <IconUser className="h-4 w-4" />
-                  Manual Setup
-                </TabsTrigger>
-                <TabsTrigger value="ai" className="flex items-center gap-2">
-                  <IconRobot className="h-4 w-4" />
-                  AI Assistant
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="manual" className="space-y-4">
-                {/* Basic Information */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Request Details</CardTitle>
-                    <CardDescription>Basic information about the signature request</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <FormField
-                      control={form.control}
-                      name="title"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Title</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="Enter request title" 
-                              {...field} 
-                              icon={<IconFileText className="h-4 w-4" />}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="message"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Message (Optional)</FormLabel>
-                          <FormControl>
-                            <Textarea
-                              placeholder="Add a message for the signers..."
-                              className="min-h-[120px]"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription>
-                            This message will be included in the signature request email
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <FormField
-                        control={form.control}
-                        name="provider_id"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Signature Provider</FormLabel>
-                            <Select 
-                              onValueChange={field.onChange} 
-                              value={field.value}
-                              disabled={loadingProviders}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select a provider" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {providers.map((provider) => (
-                                  <SelectItem key={provider.id} value={provider.id}>
-                                    <div className="flex items-center justify-between w-full">
-                                      <span>{provider.display_name}</span>
-                                      {provider.is_default && (
-                                        <Badge variant="secondary" className="ml-2">
-                                          Default
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="expires_in_days"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Expires In (Days)</FormLabel>
-                            <FormControl>
-                              <div className="space-y-2">
-                                <div className="flex items-center space-x-2">
-                                  <Slider
-                                    min={1}
-                                    max={365}
-                                    step={1}
-                                    value={[field.value]}
-                                    onValueChange={(value) => field.onChange(value[0])}
-                                    className="flex-1"
-                                  />
-                                  <Input
-                                    type="number"
-                                    {...field}
-                                    className="w-20"
-                                    onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-                                  />
-                                </div>
-                              </div>
-                            </FormControl>
-                            <FormDescription>
-                              Request will expire after {field.value} days
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Signers */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Signers</CardTitle>
-                    <CardDescription>Add people who need to sign this document</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {fields.map((field, index) => (
-                      <div key={field.id} className="space-y-4 p-4 border rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <Badge variant="outline">
-                            Signer {index + 1}
-                          </Badge>
-                          {fields.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => remove(index)}
-                            >
-                              <IconTrash className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormField
-                            control={form.control}
-                            name={`signers.${index}.name`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Name</FormLabel>
-                                <FormControl>
-                                  <Input 
-                                    placeholder="John Doe" 
-                                    {...field}
-                                    icon={<IconUser className="h-4 w-4" />}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={form.control}
-                            name={`signers.${index}.email`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Email</FormLabel>
-                                <FormControl>
-                                  <Input 
-                                    type="email"
-                                    placeholder="john@example.com" 
-                                    {...field}
-                                    icon={<IconMail className="h-4 w-4" />}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormField
-                            control={form.control}
-                            name={`signers.${index}.role`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Role</FormLabel>
-                                <Select onValueChange={field.onChange} value={field.value}>
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    <SelectItem value="signer">Signer</SelectItem>
-                                    <SelectItem value="approver">Approver</SelectItem>
-                                    <SelectItem value="viewer">Viewer</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={form.control}
-                            name={`signers.${index}.phone`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Phone (Optional)</FormLabel>
-                                <FormControl>
-                                  <Input 
-                                    placeholder="+1234567890" 
-                                    {...field}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-                      </div>
-                    ))}
-
-                    {fields.length < 10 && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => append({ 
-                          email: "", 
-                          name: "", 
-                          role: "signer", 
-                          order: fields.length + 1 
-                        })}
-                        className="w-full"
-                      >
-                        <IconPlus className="h-4 w-4 mr-2" />
-                        Add Signer
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="ai" className="space-y-4">
-                {!aiSuggestions ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-8">
-                      <IconRobot className="h-12 w-12 text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground mb-4">
-                        Let AI analyze your document and suggest signers
-                      </p>
-                      <Button
-                        type="button"
-                        onClick={analyzeWithAI}
-                        disabled={isAnalyzing}
-                      >
-                        {isAnalyzing ? (
-                          <>
-                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Analyzing Document...
-                          </>
-                        ) : (
-                          <>
-                            <IconRobot className="mr-2 h-4 w-4" />
-                            Analyze with AI
-                          </>
-                        )}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <>
-                    <Alert>
-                      <IconAlertCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        AI has analyzed your document and provided suggestions below. 
-                        You can edit them before sending the request.
-                      </AlertDescription>
-                    </Alert>
-
-                    {aiSuggestions.requirements && aiSuggestions.requirements.length > 0 && (
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Document Requirements</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <ul className="list-disc list-inside space-y-1">
-                            {aiSuggestions.requirements.map((req: string, i: number) => (
-                              <li key={i} className="text-sm text-muted-foreground">
-                                {req}
-                              </li>
-                            ))}
-                          </ul>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={analyzeWithAI}
-                      disabled={isAnalyzing}
-                      className="w-full"
-                    >
-                      <IconRobot className="mr-2 h-4 w-4" />
-                      Re-analyze Document
-                    </Button>
-                  </>
-                )}
-              </TabsContent>
-            </Tabs>
-
-            {/* Form errors summary */}
-            {Object.keys(form.formState.errors).length > 0 && (
-              <Alert variant="destructive">
-                <IconAlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Please fix the errors above before submitting
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <DialogFooter className="gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isSubmitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="outline"
-                disabled={isSubmitting}
-                onClick={() => setSubmitAction("draft")}
-              >
-                {isSubmitting && submitAction === "draft" ? (
-                  <>
-                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save as Draft"
-                )}
-              </Button>
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                onClick={() => setSubmitAction("send")}
-              >
-                {isSubmitting && submitAction === "send" ? (
-                  <>
-                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  "Create & Send"
-                )}
-              </Button>
-            </DialogFooter>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex-1 overflow-y-auto">
+            <div className="px-1">
+              {renderStepContent()}
+            </div>
           </form>
         </Form>
+
+        <DialogFooter className="gap-2 mt-4">
+          {currentStep > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleBack}
+              disabled={isSubmitting}
+            >
+              <IconChevronLeft className="mr-2 h-4 w-4" />
+              Back
+            </Button>
+          )}
+          
+          {currentStep < STEPS.length - 1 ? (
+            <Button
+              type="button"
+              onClick={handleNext}
+              disabled={isSubmitting}
+              className="ml-auto"
+            >
+              Next
+              <IconChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              onClick={form.handleSubmit(onSubmit)}
+              className="ml-auto"
+            >
+              {isSubmitting ? (
+                <>
+                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <IconSignature className="mr-2 h-4 w-4" />
+                  Send for Signature
+                </>
+              )}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

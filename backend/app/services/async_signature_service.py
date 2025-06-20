@@ -210,7 +210,7 @@ class AsyncSignatureService:
                 callback_url=request_data.callback_url,
                 success_url=request_data.success_url,
                 error_url=request_data.error_url,
-                request_metadata=request_data.metadata,
+                request_metadata=request_data.request_metadata,
                 status='draft'
             )
             
@@ -240,7 +240,15 @@ class AsyncSignatureService:
             )
             
             await self.db.commit()
-            await self.db.refresh(signature_request)
+            
+            # Reload with relationships
+            stmt = select(SignatureRequest).options(
+                selectinload(SignatureRequest.signers)
+            ).filter(
+                SignatureRequest.id == signature_request.id
+            )
+            result = await self.db.execute(stmt)
+            signature_request = result.scalar_one()
             
             logger.info(f"Created signature request {signature_request.id}")
             return signature_request

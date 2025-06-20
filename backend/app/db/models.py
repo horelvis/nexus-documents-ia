@@ -726,3 +726,96 @@ class SignatureProviderAudit(Base):
         Index('idx_provider_audits_provider_action', 'provider_id', 'action'),
         Index('idx_provider_audits_tenant_created', 'tenant_id', 'created_at'),
     )
+
+
+# =====================================
+# SIGNATURE AI MODELS
+# =====================================
+
+class SignatureFieldPlacement(Base):
+    """Records actual signature field placements for learning"""
+    __tablename__ = "signature_field_placements"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    field_type = Column(String(50), nullable=False)  # signature, date, text, etc.
+    signer_identifier = Column(String(100))  # Role or identifier for the signer
+    
+    # Position data
+    x_position = Column(Float, nullable=False)
+    y_position = Column(Float, nullable=False)
+    width = Column(Float, nullable=False)
+    height = Column(Float, nullable=False)
+    page_number = Column(Integer, nullable=False)
+    
+    # Additional properties
+    is_required = Column(Boolean, default=True)
+    label = Column(String(200))
+    metadata = Column(JSONB, default={})
+    
+    # Tracking
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    document = relationship("Document", backref="signature_placements")
+    tenant = relationship("Tenant")
+    user = relationship("User")
+
+
+class DocumentTypeClassification(Base):
+    """Document type classifications for AI"""
+    __tablename__ = "document_type_classifications"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    name = Column(String(100), nullable=False)  # contract, agreement, form, etc.
+    display_name = Column(String(200))
+    description = Column(Text)
+    
+    # Classification rules
+    keywords = Column(JSONB, default=[])  # Keywords that identify this type
+    patterns = Column(JSONB, default=[])  # Regex patterns
+    
+    # Default signature configuration
+    default_signer_count = Column(Integer, default=1)
+    default_field_config = Column(JSONB, default={})
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'name', name='uq_document_type_tenant_name'),
+    )
+
+
+class SignaturePlacementPattern(Base):
+    """Learned patterns for signature placement"""
+    __tablename__ = "signature_placement_patterns"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    document_type = Column(String(100), nullable=False)
+    
+    # Pattern configuration
+    field_configurations = Column(JSONB, nullable=False)  # Array of field positions
+    confidence = Column(Float, default=0.5)  # Pattern confidence score
+    usage_count = Column(Integer, default=0)  # How many times this pattern was used
+    
+    # Metadata
+    source = Column(String(50))  # manual, learned, imported
+    metadata = Column(JSONB, default={})
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    tenant = relationship("Tenant")

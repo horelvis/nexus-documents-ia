@@ -82,7 +82,7 @@ class SignatureRequestBase(BaseModel):
     callback_url: Optional[str] = None
     success_url: Optional[str] = None
     error_url: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    request_metadata: Dict[str, Any] = Field(default_factory=dict, alias="metadata")
 
 class SignatureRequestCreate(SignatureRequestBase):
     """Schema for creating signature requests"""
@@ -95,20 +95,21 @@ class SignatureRequestUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     message: Optional[str] = None
     status: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    request_metadata: Optional[Dict[str, Any]] = Field(None, alias="metadata")
 
 class SignatureRequest(SignatureRequestBase):
     """Schema for signature request responses"""
     id: UUID
-    document_id: UUID
     provider_id: UUID
     tenant_id: UUID
     created_by: UUID
     external_id: Optional[str] = None
     status: str
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
+    sent_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
     created_at: datetime
-    updated_at: datetime
     signers: List[Signer] = []
     
     model_config = ConfigDict(from_attributes=True, json_encoders={UUID: str})

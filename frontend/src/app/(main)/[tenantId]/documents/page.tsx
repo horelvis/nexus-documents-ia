@@ -45,7 +45,7 @@ import {
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { SignatureRequestDialog } from "@/components/documents/signature-request-dialog"
+import { SignatureRequestDialogV2 } from "@/components/documents/signature-request-dialog-v2"
 import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
@@ -777,7 +777,7 @@ export default function DocumentsPage() {
           onOpenChange={setShareDialogOpen}
         />
 
-        <SignatureRequestDialog
+        <SignatureRequestDialogV2
           document={selectedDocument}
           open={signatureDialogOpen}
           onOpenChange={setSignatureDialogOpen}
