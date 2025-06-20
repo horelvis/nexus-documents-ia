@@ -14,8 +14,8 @@ import asyncio
 
 from app.db.models import Document, SignatureFieldPlacement, DocumentTypeClassification, SignaturePlacementPattern
 from app.core.config import settings
-from app.services.ml.document_classifier import DocumentClassifier
-from app.services.ml.poi_detector import POIDetector
+from app.services.signature_ai_client import signature_ai_client
+# Local ML modules (simplified versions for pattern storage)
 from app.services.ml.pattern_learner import PatternLearner
 
 logger = logging.getLogger(__name__)
@@ -28,9 +28,8 @@ class SignatureAIService:
     
     def __init__(self, tenant_id: UUID):
         self.tenant_id = tenant_id
-        self.document_classifier = DocumentClassifier()
-        self.poi_detector = POIDetector()
         self.pattern_learner = PatternLearner()
+        self.ai_client = signature_ai_client
         
     async def analyze_document(
         self, 
@@ -71,17 +70,25 @@ class SignatureAIService:
             }
         """
         try:
-            # Step 1: Classify document type
-            doc_type_result = await self.document_classifier.classify(
-                document_content, 
+            # Step 1: Analyze document using LangChain service
+            text_content = document_content.decode('utf-8', errors='ignore')
+            analysis_result = await self.ai_client.analyze_document_content(
+                text_content,
                 metadata
             )
             
-            # Step 2: Detect POIs (Points of Interest)
-            poi_results = await self.poi_detector.detect_signature_zones(
-                document_content,
+            doc_type_result = {
+                "document_type": analysis_result.get("document_type", "unknown"),
+                "confidence": analysis_result.get("confidence", 0.0)
+            }
+            
+            # Step 2: Detect POIs using LangChain service
+            zones = await self.ai_client.detect_signature_zones(
+                text_content,
                 doc_type_result["document_type"]
             )
+            
+            poi_results = {"zones": zones}
             
             # Step 3: Get learned patterns for this document type
             patterns = await self._get_patterns_for_type(

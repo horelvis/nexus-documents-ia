@@ -6,9 +6,10 @@ import logging
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import numpy as np
-from sklearn.cluster import DBSCAN
-import joblib
+# ML dependencies (optional for now)
+# import numpy as np
+# from sklearn.cluster import DBSCAN
+# import joblib
 import os
 
 logger = logging.getLogger(__name__)
@@ -83,16 +84,15 @@ class PatternLearner:
                 # Transform document features to match training format
                 feature_vector = self._document_to_features(document_features)
                 
-                # Find nearest cluster
+                # Find nearest cluster (simplified without numpy)
                 distances = []
                 for cluster_features in self.patterns_by_type[document_type]["features"]:
-                    dist = np.linalg.norm(
-                        np.array(feature_vector) - np.array(cluster_features)
-                    )
+                    # Calculate Euclidean distance manually
+                    dist = sum((a - b) ** 2 for a, b in zip(feature_vector, cluster_features)) ** 0.5
                     distances.append(dist)
                 
                 # Get placements from nearest patterns
-                nearest_idx = np.argmin(distances)
+                nearest_idx = distances.index(min(distances)) if distances else 0
                 nearest_placement = self.patterns_by_type[document_type]["placements"][nearest_idx]
                 
                 return self._adapt_placement_to_document(
@@ -157,14 +157,16 @@ class PatternLearner:
         
         # Spatial features
         if placed_fields:
-            # Average position
-            avg_x = np.mean([f.get("x", 0) for f in placed_fields])
-            avg_y = np.mean([f.get("y", 0) for f in placed_fields])
+            # Average position (simple calculation without numpy)
+            x_values = [f.get("x", 0) for f in placed_fields]
+            y_values = [f.get("y", 0) for f in placed_fields]
+            avg_x = sum(x_values) / len(x_values) if x_values else 0
+            avg_y = sum(y_values) / len(y_values) if y_values else 0
             features.extend([avg_x, avg_y])
             
-            # Position variance
-            var_x = np.var([f.get("x", 0) for f in placed_fields])
-            var_y = np.var([f.get("y", 0) for f in placed_fields])
+            # Position variance (simplified)
+            var_x = sum((x - avg_x) ** 2 for x in x_values) / len(x_values) if x_values else 0
+            var_y = sum((y - avg_y) ** 2 for y in y_values) / len(y_values) if y_values else 0
             features.extend([var_x, var_y])
             
             # Page distribution
@@ -262,18 +264,21 @@ class PatternLearner:
     async def _retrain_clustering(self, document_type: str):
         """Retrain clustering model for document type"""
         try:
-            features = np.array(self.patterns_by_type[document_type]["features"])
+            # Simplified clustering without sklearn for now
+            # In production, this would use DBSCAN or similar
+            features = self.patterns_by_type[document_type]["features"]
             
-            # Use DBSCAN for clustering similar placements
-            clustering = DBSCAN(eps=0.3, min_samples=3)
-            clustering.fit(features)
+            # Store a simple model placeholder
+            self.clustering_models[document_type] = {
+                "type": "simple",
+                "features": features,
+                "samples": len(features)
+            }
             
-            self.clustering_models[document_type] = clustering
-            
-            logger.info(f"Retrained clustering for {document_type} with {len(features)} samples")
+            logger.info(f"Updated patterns for {document_type} with {len(features)} samples")
             
         except Exception as e:
-            logger.error(f"Error retraining clustering: {str(e)}")
+            logger.error(f"Error updating patterns: {str(e)}")
     
     def _save_models(self):
         """Save models to disk"""
@@ -292,10 +297,11 @@ class PatternLearner:
                     }
                 json.dump(patterns_data, f)
             
-            # Save clustering models
+            # Save clustering models as JSON (simplified without joblib)
             for doc_type, model in self.clustering_models.items():
-                model_file = os.path.join(self.model_path, f"clustering_{doc_type}.pkl")
-                joblib.dump(model, model_file)
+                model_file = os.path.join(self.model_path, f"clustering_{doc_type}.json")
+                with open(model_file, 'w') as f:
+                    json.dump(model, f)
                 
         except Exception as e:
             logger.error(f"Error saving models: {str(e)}")
@@ -316,13 +322,14 @@ class PatternLearner:
                         "last_updated": datetime.fromisoformat(data["last_updated"]) if data["last_updated"] else None
                     }
             
-            # Load clustering models
+            # Load clustering models (simplified JSON format)
             if os.path.exists(self.model_path):
                 for file in os.listdir(self.model_path):
-                    if file.startswith("clustering_") and file.endswith(".pkl"):
-                        doc_type = file.replace("clustering_", "").replace(".pkl", "")
+                    if file.startswith("clustering_") and file.endswith(".json"):
+                        doc_type = file.replace("clustering_", "").replace(".json", "")
                         model_file = os.path.join(self.model_path, file)
-                        self.clustering_models[doc_type] = joblib.load(model_file)
+                        with open(model_file, 'r') as f:
+                            self.clustering_models[doc_type] = json.load(f)
                         
         except Exception as e:
             logger.error(f"Error loading models: {str(e)}")

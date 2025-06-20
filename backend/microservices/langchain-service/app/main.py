@@ -11,6 +11,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.llm_service import LLMService
 from app.api.recommendations import router as recommendations_router
+from app.api.signature_analysis import router as signature_router
 from app.core.security import validate_service_access
 
 # Configure logging
@@ -34,6 +35,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(recommendations_router)
+app.include_router(signature_router, prefix="/api/v1", tags=["signature-analysis"])
 
 # Pydantic models for API
 class EmbeddingRequest(BaseModel):

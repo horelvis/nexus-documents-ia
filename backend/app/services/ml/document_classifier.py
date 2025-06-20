@@ -5,8 +5,6 @@ import logging
 import re
 from typing import Dict, Any, Optional, List
 import asyncio
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document as LangchainDocument
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +16,6 @@ class DocumentClassifier:
     """
     
     def __init__(self):
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-        
         # Keywords and patterns for each document type
         self.document_patterns = {
             "contract": {
