@@ -12,7 +12,7 @@ import uuid
 
 # revision identifiers
 revision = 'add_signature_ai_001'
-down_revision = None
+down_revision = 'rename_metadata_column'
 branch_labels = None
 depends_on = None
 
