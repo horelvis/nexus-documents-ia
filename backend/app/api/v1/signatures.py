@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.api.async_dependencies import get_async_db, get_current_active_user_async
+from app.api.async_dependencies import get_async_db, get_current_active_user_async, get_current_active_superuser_async
 from app.db.models import User
 from app.services.async_signature_service import AsyncSignatureService
 from app.schemas.signature import (
