@@ -118,6 +118,8 @@ class Document(DocumentBase):
     filename: str
     file_type: str
     file_size: int
+    mime_type: Optional[str] = None
+    category: Optional[str] = None
     tenant_id: UUID
     created_by: UUID
     indexed: int

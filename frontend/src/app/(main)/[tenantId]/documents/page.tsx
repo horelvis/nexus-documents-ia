@@ -45,7 +45,6 @@ import {
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { SignatureRequestDialogV2 } from "@/components/documents/signature-request-dialog-v2"
 import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
 
 export default function DocumentsPage() {
@@ -74,7 +73,6 @@ export default function DocumentsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
-  const [signatureDialogOpen, setSignatureDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
   const { openUploadDialog, setOnUploadComplete } = useUpload()
@@ -182,8 +180,7 @@ export default function DocumentsPage() {
   }
 
   const handleRequestSignature = (document: ApiDocument) => {
-    setSelectedDocument(document)
-    setSignatureDialogOpen(true)
+    router.push(`/${tenantId}/documents/${document.id}/signature-request`)
   }
 
   const handleFullPagePreview = (document: ApiDocument) => {
@@ -775,12 +772,6 @@ export default function DocumentsPage() {
           document={selectedDocument}
           open={shareDialogOpen}
           onOpenChange={setShareDialogOpen}
-        />
-
-        <SignatureRequestDialogV2
-          document={selectedDocument}
-          open={signatureDialogOpen}
-          onOpenChange={setSignatureDialogOpen}
         />
 
       </div>

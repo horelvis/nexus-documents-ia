@@ -39,6 +39,7 @@ interface SignatureField {
   height: number
   page: number
   label?: string
+  aiSuggested?: boolean
 }
 
 interface Signer {
@@ -83,26 +84,39 @@ export function SignaturePlacementEditor({
 
   // Load PDF and render current page
   useEffect(() => {
-    loadPdfPage()
+    if (documentUrl) {
+      loadPdfPage()
+    }
   }, [documentUrl, currentPage, scale])
 
   const loadPdfPage = async () => {
     // This is a simplified version - in production you'd use PDF.js
-    // For now, we'll simulate with an image
+    // For now, we'll use the document as an image
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || !documentUrl) return
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Simulate loading a PDF page
-    const img = new Image()
-    img.onload = () => {
-      canvas.width = img.width * scale
-      canvas.height = img.height * scale
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    }
-    img.src = documentUrl // This would be a rendered PDF page
+    // For now, display a placeholder
+    // TODO: Integrate PDF.js for actual PDF rendering
+    canvas.width = 816 // Letter size at 96 DPI
+    canvas.height = 1056
+    
+    ctx.fillStyle = '#f5f5f5'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    ctx.strokeStyle = '#ddd'
+    ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40)
+    
+    ctx.fillStyle = '#666'
+    ctx.font = '16px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('Document Preview', canvas.width / 2, 50)
+    ctx.fillText('(Drag signature fields here)', canvas.width / 2, canvas.height / 2)
+    
+    // Set pages for demo
+    setTotalPages(1)
   }
 
   const handleDragStart = (e: React.DragEvent, fieldType: string) => {
@@ -450,6 +464,14 @@ export function SignaturePlacementEditor({
                   <span className="text-xs font-medium" style={{ color: signer?.color }}>
                     {field.label}
                   </span>
+                  {field.aiSuggested && (
+                    <Badge 
+                      variant="secondary" 
+                      className="absolute -top-2 -right-2 text-xs px-1 py-0 h-5"
+                    >
+                      AI
+                    </Badge>
+                  )}
                   
                   {/* Resize handle */}
                   {selectedField === field.id && (

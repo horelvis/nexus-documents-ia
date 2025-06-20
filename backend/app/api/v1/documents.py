@@ -113,16 +113,12 @@ async def get_document(
         file_type=doc.file_type,
         file_size=doc.file_size,
         mime_type=doc.mime_type,
+        tenant_id=doc.tenant_id,  # Add tenant_id
+        created_by=doc.created_by,  # Use the UUID directly
+        indexed=doc.indexed,  # Add indexed status
         created_at=doc.created_at,
         updated_at=doc.updated_at,
-        tags=[{"id": str(tag.id), "name": tag.name} for tag in doc.tags] if hasattr(doc, 'tags') else [],
-        created_by={
-            "id": str(doc.creator.id),
-            "email": doc.creator.email,
-            "full_name": doc.creator.full_name
-        } if doc.creator else None,
-        category=doc.category if hasattr(doc, 'category') else None,
-        indexed=doc.indexed
+        tags=[Tag(id=tag.id, name=tag.name, tenant_id=tag.tenant_id, created_at=tag.created_at) for tag in doc.tags] if hasattr(doc, 'tags') else []
     )
 
 
