@@ -754,7 +754,7 @@ class SignatureFieldPlacement(Base):
     # Additional properties
     is_required = Column(Boolean, default=True)
     label = Column(String(200))
-    metadata = Column(JSONB, default={})
+    field_metadata = Column(JSONB, default={})
     
     # Tracking
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -811,7 +811,7 @@ class SignaturePlacementPattern(Base):
     
     # Metadata
     source = Column(String(50))  # manual, learned, imported
-    metadata = Column(JSONB, default={})
+    pattern_metadata = Column(JSONB, default={})
     
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

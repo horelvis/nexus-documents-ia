@@ -156,7 +156,7 @@ class SignatureAIService:
                     height=field["height"],
                     page_number=field["page"],
                     is_required=field.get("required", True),
-                    metadata=field.get("metadata", {})
+                    field_metadata=field.get("metadata", {})
                 )
                 db.add(placement)
             
@@ -353,7 +353,7 @@ class SignatureAIService:
             confidence=0.7,  # Initial confidence
             usage_count=1,
             is_active=True,
-            metadata={
+            pattern_metadata={
                 "created_from": "user_placement",
                 "timestamp": datetime.utcnow().isoformat()
             }
