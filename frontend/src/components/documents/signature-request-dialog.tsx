@@ -103,8 +103,9 @@ export function SignatureRequestDialog({
       const providerList = await signatureService.getProviders()
       setProviders(providerList)
       
-      // Select first active provider
-      const activeProvider = providerList.find(p => p.is_active)
+      // Select default provider first, then any active provider
+      const defaultProvider = providerList.find(p => p.is_active && p.is_default)
+      const activeProvider = defaultProvider || providerList.find(p => p.is_active)
       if (activeProvider) {
         setSelectedProviderId(activeProvider.id)
       }
@@ -281,6 +282,7 @@ Best regards,
         title,
         message,
         document_id: document.id,
+        document_name: document.filename,
         provider_id: selectedProviderId,
         signers: validSigners,
         expires_in_days: expiresInDays
@@ -322,6 +324,7 @@ Best regards,
         title,
         message,
         document_id: document.id,
+        document_name: document.filename,
         provider_id: selectedProviderId,
         signers: validSigners,
         expires_in_days: expiresInDays
@@ -390,16 +393,30 @@ Best regards,
                     <SelectValue placeholder="Select a provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{provider.name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {provider.type}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {providers
+                      .sort((a, b) => {
+                        // Sort by default status first, then by name
+                        if (a.is_default && !b.is_default) return -1
+                        if (!a.is_default && b.is_default) return 1
+                        return a.display_name.localeCompare(b.display_name)
+                      })
+                      .map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          <div className="flex items-center justify-between gap-2 w-full">
+                            <span>{provider.display_name}</span>
+                            <div className="flex items-center gap-1">
+                              {provider.is_default && (
+                                <Badge variant="default" className="text-xs">
+                                  Default
+                                </Badge>
+                              )}
+                              <Badge variant="outline" className="text-xs">
+                                {provider.provider_name}
+                              </Badge>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               )}

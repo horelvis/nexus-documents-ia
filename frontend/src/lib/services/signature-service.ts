@@ -73,6 +73,7 @@ export interface CreateSignatureRequestData {
   title: string
   message?: string
   document_id: string
+  document_name: string
   provider_id: string
   signers: Omit<SignatureRequestSigner, 'status' | 'signed_at'>[]
   expires_in_days?: number
