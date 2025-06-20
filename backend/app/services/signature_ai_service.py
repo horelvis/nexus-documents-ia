@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import asyncio
 
-from app.db.models import Document, SignatureFieldPlacement, DocumentType, SignaturePlacementPattern
+from app.db.models import Document, SignatureFieldPlacement, DocumentTypeClassification, SignaturePlacementPattern
 from app.core.config import settings
 from app.services.ml.document_classifier import DocumentClassifier
 from app.services.ml.poi_detector import POIDetector
