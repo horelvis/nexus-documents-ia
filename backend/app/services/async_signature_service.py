@@ -26,7 +26,6 @@ from app.schemas.signature import (
 )
 from app.core.config import settings
 from app.services.signature_microservice_client import signature_client
-from app.services.storage_client import storage_client
 
 logger = logging.getLogger(__name__)
 
