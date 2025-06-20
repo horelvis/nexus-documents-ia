@@ -42,7 +42,8 @@ import {
   IconShieldCheck,
   IconChevronRight,
   IconChevronLeft,
-  IconCircleCheck
+  IconCircleCheck,
+  IconAlertCircle
 } from "@tabler/icons-react"
 import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
@@ -95,6 +96,7 @@ export function ProviderConfigWizard({
   const signatureService = useSignatureService()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
   
   const isEditing = !!provider
   const totalSteps = isEditing ? 3 : 4
@@ -122,6 +124,7 @@ export function ProviderConfigWizard({
         credentials: {},
       })
       setCurrentStep(1)
+      setSubmissionError(null)
     } else {
       form.reset({
         providerName: "yousign",
@@ -131,6 +134,7 @@ export function ProviderConfigWizard({
         credentials: {},
       })
       setCurrentStep(1)
+      setSubmissionError(null)
     }
   }, [provider, open])
 
@@ -156,6 +160,7 @@ export function ProviderConfigWizard({
 
   const onSubmit = async (data: SignatureProviderFormData) => {
     setIsSubmitting(true)
+    setSubmissionError(null)
 
     try {
       if (provider) {
@@ -190,12 +195,30 @@ export function ProviderConfigWizard({
 
       onSuccess?.()
       onOpenChange(false)
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Provider operation failed:', error)
+      
+      // Extract error message from different error formats
+      let errorMessage = 'An error occurred'
+      
+      if (error?.message) {
+        errorMessage = error.message
+      } else if (error?.response?.data?.detail) {
+        errorMessage = typeof error.response.data.detail === 'string' 
+          ? error.response.data.detail 
+          : error.response.data.detail.message || 'An error occurred'
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message
+      }
+      
       addNotification({
         type: 'error',
         title: provider ? 'Update Failed' : 'Creation Failed',
-        message: error instanceof Error ? error.message : 'An error occurred'
+        message: errorMessage
       })
+      
+      // Also set the error state to show in the dialog
+      setSubmissionError(errorMessage)
     } finally {
       setIsSubmitting(false)
     }
@@ -580,6 +603,13 @@ export function ProviderConfigWizard({
             <div className="min-h-[350px]">
               {renderStepContent()}
             </div>
+            
+            {submissionError && (
+              <Alert variant="destructive" className="mt-4">
+                <IconAlertCircle className="h-4 w-4" />
+                <AlertDescription>{submissionError}</AlertDescription>
+              </Alert>
+            )}
 
             <DialogFooter className="mt-6 gap-2">
               {currentStep > 1 && (

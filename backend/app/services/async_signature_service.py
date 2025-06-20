@@ -114,6 +114,7 @@ class AsyncSignatureService:
             )
             
             self.db.add(provider)
+            await self.db.flush()  # Flush to get the provider ID
             
             # Crear registro de auditoría
             audit = SignatureProviderAudit(
