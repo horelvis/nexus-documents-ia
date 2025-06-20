@@ -539,3 +539,119 @@ class AsyncDocumentService:
             return "INDEXING_ERROR"
         else:  # NOT_INDEXED or unknown
             return "NOT_INDEXED"
+    
+    async def generate_summary(self, db: AsyncSession, doc_id: str) -> Dict[str, str]:
+        """Generate document summary using LLM"""
+        try:
+            # Get document
+            document = await self.get_document(db, doc_id)
+            if not document:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Check if document has text content
+            if not document.text_content:
+                raise HTTPException(status_code=400, detail="Document has no text content to summarize")
+            
+            # TODO: Implement actual LLM summary generation
+            # For now, return a simple summary
+            text_preview = document.text_content[:500] if document.text_content else ""
+            word_count = len(document.text_content.split()) if document.text_content else 0
+            
+            return {
+                "summary": f"This document contains {word_count} words. Preview: {text_preview}...",
+                "status": "generated"
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating summary for document {doc_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error generating summary")
+    
+    async def add_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
+        """Add a tag to a document"""
+        try:
+            # Get document
+            stmt = select(Document).filter(
+                Document.id == doc_id,
+                Document.tenant_id == self.tenant_id
+            ).options(selectinload(Document.tags))
+            
+            result = await db.execute(stmt)
+            document = result.scalar_one_or_none()
+            
+            if not document:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Check if tag already exists
+            tag_stmt = select(Tag).filter(
+                Tag.name == tag_name,
+                Tag.tenant_id == self.tenant_id
+            )
+            tag_result = await db.execute(tag_stmt)
+            tag = tag_result.scalar_one_or_none()
+            
+            if not tag:
+                # Create new tag
+                tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                db.add(tag)
+                await db.flush()
+            
+            # Add tag to document if not already added
+            if tag not in document.tags:
+                document.tags.append(tag)
+                await db.commit()
+            
+            return {
+                "message": f"Tag '{tag_name}' added successfully",
+                "document_id": str(document.id),
+                "tags": [t.name for t in document.tags]
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Error adding tag to document {doc_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error adding tag")
+    
+    async def remove_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
+        """Remove a tag from a document"""
+        try:
+            # Get document
+            stmt = select(Document).filter(
+                Document.id == doc_id,
+                Document.tenant_id == self.tenant_id
+            ).options(selectinload(Document.tags))
+            
+            result = await db.execute(stmt)
+            document = result.scalar_one_or_none()
+            
+            if not document:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Find and remove the tag
+            tag_to_remove = None
+            for tag in document.tags:
+                if tag.name == tag_name:
+                    tag_to_remove = tag
+                    break
+            
+            if tag_to_remove:
+                document.tags.remove(tag_to_remove)
+                await db.commit()
+                
+                return {
+                    "message": f"Tag '{tag_name}' removed successfully",
+                    "document_id": str(document.id),
+                    "tags": [t.name for t in document.tags]
+                }
+            else:
+                raise HTTPException(status_code=404, detail=f"Tag '{tag_name}' not found on document")
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Error removing tag from document {doc_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error removing tag")

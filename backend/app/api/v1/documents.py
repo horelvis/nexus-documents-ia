@@ -276,12 +276,13 @@ async def serve_converted_pdf(
     from fastapi.responses import StreamingResponse
     from fastapi import HTTPException
     from app.services.document_preview_service import DocumentPreviewService
+    from app.services.async_document_service import AsyncDocumentService
     
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
     
     # Obtener información del documento
-    document = document_service.get_document(db=db, doc_id=doc_id)
+    document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -358,9 +359,8 @@ async def get_document_summary(
     """
     Genera un resumen del documento utilizando LLM.
     """
-    # TODO: Implement async version of generate_summary
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.generate_summary(db=db,doc_id=doc_id)
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    return await document_service.generate_summary(db=db, doc_id=doc_id)
 
 
 @router.post("/{doc_id}/tag", response_model=dict)
@@ -374,8 +374,8 @@ async def add_document_tag(
     """
     Añade una etiqueta a un documento.
     """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Pass db
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    return await document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Pass db
 
 
 @router.delete("/{doc_id}/tag/{tag_name}", response_model=dict)
@@ -389,8 +389,8 @@ async def remove_document_tag(
     """
     Elimina una etiqueta de un documento.
     """
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    return document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    return await document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db
 
 
 @router.get("/{doc_id}/preview", response_model=dict)
@@ -406,13 +406,14 @@ async def get_document_preview(
     Soporta conversión de documentos Office, texto, markdown y más a PDF.
     """
     from app.services.document_preview_service import DocumentPreviewService
+    from app.services.async_document_service import AsyncDocumentService
     
-    document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
     
     try:
         # Obtener información del documento
-        document = document_service.get_document(db=db, doc_id=doc_id)
+        document = await document_service.get_document(db=db, doc_id=doc_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -525,15 +526,15 @@ async def get_document_agents(
     """
     try:
         # Get document details
-        document_service = DocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-        document = document_service.get_document(db, doc_id, include_content=False)
+        document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+        document = await document_service.get_document(db, doc_id)
         
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Determine document type and tags
-        doc_tags = document.get("tags", [])
-        doc_type = document.get("category", "general")
+        doc_tags = [tag.name for tag in document.tags] if document.tags else []
+        doc_type = document.category or "general"
         
         # Map document characteristics to agent types
         assigned_agents = []

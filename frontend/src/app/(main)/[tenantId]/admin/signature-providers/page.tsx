@@ -35,7 +35,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { signatureService, SignatureProvider } from "@/lib/services/signature-service"
+import { SignatureProvider } from "@/lib/services/signature-service"
+import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useAuth } from "@clerk/nextjs"
 import { ProviderConfigDialog } from "@/components/admin/signature-providers/provider-config-dialog"
@@ -47,6 +48,7 @@ export default function SignatureProvidersPage() {
   const tenantId = params.tenantId as string
   const { addNotification } = useNotifications()
   const { userId } = useAuth()
+  const signatureService = useSignatureService()
   
   const [providers, setProviders] = useState<SignatureProvider[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -184,7 +186,7 @@ export default function SignatureProvidersPage() {
   }
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="container mx-auto p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Signature Providers</h1>
         <p className="text-muted-foreground">

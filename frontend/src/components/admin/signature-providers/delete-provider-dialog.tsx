@@ -16,7 +16,8 @@ import {
   IconAlertTriangle,
   IconTrash
 } from "@tabler/icons-react"
-import { signatureService, SignatureProvider } from "@/lib/services/signature-service"
+import { SignatureProvider } from "@/lib/services/signature-service"
+import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
 
 interface DeleteProviderDialogProps {
@@ -33,6 +34,7 @@ export function DeleteProviderDialog({
   onSuccess,
 }: DeleteProviderDialogProps) {
   const { addNotification } = useNotifications()
+  const signatureService = useSignatureService()
   const [isDeleting, setIsDeleting] = useState(false)
 
   const handleDelete = async () => {

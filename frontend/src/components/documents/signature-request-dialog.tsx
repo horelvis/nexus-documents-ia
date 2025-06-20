@@ -38,7 +38,8 @@ import {
   IconFileText
 } from "@tabler/icons-react"
 import { Document as ApiDocument } from "@/lib/types"
-import { signatureService, SignatureProvider, SignatureRequestSigner } from "@/lib/services/signature-service"
+import { SignatureProvider, SignatureRequestSigner } from "@/lib/services/signature-service"
+import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
 import { useAgentService } from "@/lib/services/agent.service"
 
@@ -57,6 +58,7 @@ export function SignatureRequestDialog({
   const tenantId = params.tenantId as string
   const { addNotification } = useNotifications()
   const agentService = useAgentService()
+  const signatureService = useSignatureService()
   
   // Form state
   const [title, setTitle] = useState("")

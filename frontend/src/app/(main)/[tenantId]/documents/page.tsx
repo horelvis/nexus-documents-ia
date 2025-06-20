@@ -47,7 +47,6 @@ import {
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
 import { SignatureRequestDialog } from "@/components/documents/signature-request-dialog"
 import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
-import { signatureService } from "@/lib/services/signature-service"
 
 export default function DocumentsPage() {
   const params = useParams()
@@ -319,7 +318,7 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+    <div className="flex flex-col gap-4 p-6 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">

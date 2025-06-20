@@ -32,7 +32,6 @@ import {
   IconTestPipe
 } from "@tabler/icons-react"
 import { 
-  signatureService, 
   SignatureProvider, 
   CreateProviderData,
   DocuSignCredentials,
@@ -40,6 +39,7 @@ import {
   SignaturitCredentials,
   SupportedProvider
 } from "@/lib/services/signature-service"
+import { useSignatureService } from "@/lib/services/signature-service.hooks"
 import { useNotifications } from "@/contexts/notifications-context"
 
 interface ProviderConfigDialogProps {
@@ -58,6 +58,7 @@ export function ProviderConfigDialog({
   onSuccess,
 }: ProviderConfigDialogProps) {
   const { addNotification } = useNotifications()
+  const signatureService = useSignatureService()
   
   // Form state
   const [providerName, setProviderName] = useState<'docusign' | 'yousign' | 'signaturit'>('docusign')
