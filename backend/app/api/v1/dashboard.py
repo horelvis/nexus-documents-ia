@@ -42,10 +42,15 @@ async def get_dashboard_stats(
             func.sum(case((Document.processing_status == 'completed', 1), else_=0)).label('processed'),
             func.sum(case((Document.processing_status == 'processing', 1), else_=0)).label('processing'),
             func.sum(case((Document.processing_status == 'error', 1), else_=0)).label('error'),
-            func.sum(Document.file_size).label('total_size')
+            func.coalesce(func.sum(Document.file_size), 0).label('total_size')
         ).where(Document.tenant_id == tenant_uuid)
     )
     doc_result = doc_stats.one()
+    
+    # Log for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Document stats for tenant {tenant_id}: total_size={doc_result.total_size}, total={doc_result.total}")
     
     # Get active users (users who accessed documents in last 30 days)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
@@ -97,7 +102,7 @@ async def get_dashboard_stats(
     
     # Storage trend (compare total size growth)
     storage_week_ago = await db.execute(
-        select(func.sum(Document.file_size))
+        select(func.coalesce(func.sum(Document.file_size), 0))
         .where(
             and_(
                 Document.tenant_id == tenant_uuid,
@@ -308,7 +313,7 @@ async def get_analytics_trends(
     storage_by_date = await db.execute(
         select(
             func.date(Document.created_at).label('date'),
-            func.sum(Document.file_size).label('size')
+            func.coalesce(func.sum(Document.file_size), 0).label('size')
         )
         .where(
             and_(
@@ -323,7 +328,7 @@ async def get_analytics_trends(
     # Format results
     uploads_data = {str(row.date): row.count for row in uploads_by_date}
     views_data = {str(row.date): row.count for row in views_by_date}
-    storage_data = {str(row.date): row.size for row in storage_by_date}
+    storage_data = {str(row.date): row.size or 0 for row in storage_by_date}
     
     # Get most accessed documents
     top_documents = await db.execute(
