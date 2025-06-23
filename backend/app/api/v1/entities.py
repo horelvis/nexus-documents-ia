@@ -9,7 +9,7 @@ from uuid import UUID
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
-from app.db.models import User, Document, Agent, DocumentView, DocumentShare
+from app.db.models import User, Document, DocumentView, DocumentShare
 from app.schemas.entity import Entity, EntitySearchResponse
 
 router = APIRouter()
@@ -55,29 +55,9 @@ async def search_entities(
                 "role": user.role if hasattr(user, 'role') else None
             })
     
-    # Search agents
-    if not types or 'agent' in types:
-        agent_query = select(Agent).where(
-            and_(
-                Agent.tenant_id == UUID(tenant_id),
-                or_(
-                    func.lower(Agent.name).like(search_pattern),
-                    func.lower(Agent.description).like(search_pattern)
-                )
-            )
-        ).limit(limit)
-        
-        result = await db.execute(agent_query)
-        agents = result.scalars().all()
-        
-        for agent in agents:
-            entities.append({
-                "id": str(agent.id),
-                "name": agent.name,
-                "email": f"{agent.name.lower().replace(' ', '.')}@agent.ai",
-                "type": "agent",
-                "role": agent.agent_type
-            })
+    # TODO: Search agents from microservice
+    # Agents are managed in a separate microservice, not in the main database
+    # For now, we'll skip agent search
     
     # If document_id is provided, prioritize entities associated with the document
     if document_id:
