@@ -407,7 +407,6 @@ async def get_ai_insights(
             and_(
                 Document.tenant_id == tenant_uuid,
                 Document.mime_type == 'application/pdf',
-                Document.file_extension.in_(['.pdf', '.PDF']),
                 or_(Document.summary == None, Document.summary == '')
             )
         )
