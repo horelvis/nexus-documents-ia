@@ -11,7 +11,12 @@ import {
   IconGripVertical,
   IconResize,
   IconTrash,
-  IconCheck
+  IconCheck,
+  IconLoader2,
+  IconChevronLeft,
+  IconChevronRight,
+  IconZoomIn,
+  IconZoomOut
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -27,10 +32,17 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
+import { useDocumentService } from "@/lib/services/document.service"
+import { Document, Page, pdfjs } from 'react-pdf'
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+
+// Configure PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
 interface SignatureField {
   id: string
-  type: 'signature' | 'date' | 'text' | 'name' | 'email'
+  type: 'signature'
   signer: string
   required: boolean
   x: number
@@ -50,22 +62,18 @@ interface Signer {
 }
 
 interface SignaturePlacementEditorProps {
-  documentUrl: string
+  documentId: string
   signers: Signer[]
   onFieldsChange: (fields: SignatureField[]) => void
   initialFields?: SignatureField[]
 }
 
 const FIELD_TYPES = [
-  { value: 'signature', label: 'Signature', icon: IconSignature },
-  { value: 'date', label: 'Date', icon: IconCalendar },
-  { value: 'name', label: 'Name', icon: IconUser },
-  { value: 'email', label: 'Email', icon: IconMail },
-  { value: 'text', label: 'Text Field', icon: IconFileText },
+  { value: 'signature', label: 'Signature', icon: IconSignature }
 ]
 
 export function SignaturePlacementEditor({
-  documentUrl,
+  documentId,
   signers,
   onFieldsChange,
   initialFields = []
@@ -74,49 +82,53 @@ export function SignaturePlacementEditor({
   const [selectedField, setSelectedField] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [scale, setScale] = useState(1)
+  const [scale, setScale] = useState(0.8)
   const [isDragging, setIsDragging] = useState(false)
   const [draggedFieldType, setDraggedFieldType] = useState<string | null>(null)
+  const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 })
   const [selectedSigner, setSelectedSigner] = useState<string>(signers[0]?.id || '')
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [isLoadingPdf, setIsLoadingPdf] = useState(true)
   
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const documentService = useDocumentService()
 
-  // Load PDF and render current page
+  // Load PDF document
   useEffect(() => {
-    if (documentUrl) {
-      loadPdfPage()
+    if (documentId) {
+      loadPdf()
     }
-  }, [documentUrl, currentPage, scale])
+    
+    return () => {
+      // Cleanup blob URL
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl)
+      }
+    }
+  }, [documentId])
 
-  const loadPdfPage = async () => {
-    // This is a simplified version - in production you'd use PDF.js
-    // For now, we'll use the document as an image
-    const canvas = canvasRef.current
-    if (!canvas || !documentUrl) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    // For now, display a placeholder
-    // TODO: Integrate PDF.js for actual PDF rendering
-    canvas.width = 816 // Letter size at 96 DPI
-    canvas.height = 1056
-    
-    ctx.fillStyle = '#f5f5f5'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    
-    ctx.strokeStyle = '#ddd'
-    ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40)
-    
-    ctx.fillStyle = '#666'
-    ctx.font = '16px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('Document Preview', canvas.width / 2, 50)
-    ctx.fillText('(Drag signature fields here)', canvas.width / 2, canvas.height / 2)
-    
-    // Set pages for demo
-    setTotalPages(1)
+  const loadPdf = async () => {
+    setIsLoadingPdf(true)
+    try {
+      // Download the document to get a blob URL for the PDF viewer
+      const result = await documentService.downloadDocument(documentId)
+      
+      if ('error' in result) {
+        console.error('Failed to load document:', result.error)
+        return
+      }
+      
+      // Create blob URL for PDF viewer
+      const url = URL.createObjectURL(result.blob)
+      setPdfUrl(url)
+    } catch (error) {
+      console.error('Failed to load PDF:', error)
+    } finally {
+      setIsLoadingPdf(false)
+    }
   }
 
   const handleDragStart = (e: React.DragEvent, fieldType: string) => {
@@ -136,13 +148,17 @@ export function SignaturePlacementEditor({
 
     if (!draggedFieldType || !containerRef.current) return
 
-    const rect = containerRef.current.getBoundingClientRect()
-    const x = (e.clientX - rect.left) / scale
-    const y = (e.clientY - rect.top) / scale
+    // Find the PDF page element
+    const pdfPage = containerRef.current.querySelector('.react-pdf__Page') as HTMLElement
+    if (!pdfPage) return
+
+    const rect = pdfPage.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
 
     const newField: SignatureField = {
       id: `field-${Date.now()}`,
-      type: draggedFieldType as any,
+      type: 'signature',
       signer: selectedSigner,
       required: true,
       x,
@@ -150,7 +166,7 @@ export function SignaturePlacementEditor({
       width: 200,
       height: 50,
       page: currentPage,
-      label: `${draggedFieldType} field`
+      label: 'Signature'
     }
 
     const updatedFields = [...fields, newField]
@@ -167,6 +183,94 @@ export function SignaturePlacementEditor({
   const handleFieldClick = (fieldId: string) => {
     setSelectedField(fieldId)
   }
+  
+  const handleFieldMouseDown = (e: React.MouseEvent, field: SignatureField) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    setDraggedFieldId(field.id)
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    })
+  }
+  
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!draggedFieldId) return
+    
+    const pdfPage = containerRef.current?.querySelector('.react-pdf__Page') as HTMLElement
+    if (!pdfPage) return
+    
+    const rect = pdfPage.getBoundingClientRect()
+    const x = e.clientX - rect.left - dragOffset.x
+    const y = e.clientY - rect.top - dragOffset.y
+    
+    // Update field position
+    const updatedFields = fields.map(field => 
+      field.id === draggedFieldId 
+        ? { ...field, x: Math.max(0, x), y: Math.max(0, y) }
+        : field
+    )
+    
+    setFields(updatedFields)
+    onFieldsChange(updatedFields)
+  }
+  
+  const handleMouseUp = () => {
+    setDraggedFieldId(null)
+    setDragOffset({ x: 0, y: 0 })
+    setIsResizing(false)
+    setResizeStart({ x: 0, y: 0, width: 0, height: 0 })
+  }
+  
+  const handleResizeMouseDown = (e: React.MouseEvent, field: SignatureField) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    setSelectedField(field.id)
+    setIsResizing(true)
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: field.width,
+      height: field.height
+    })
+  }
+  
+  const handleResizeMove = (e: MouseEvent) => {
+    if (!isResizing || !selectedField) return
+    
+    const deltaX = e.clientX - resizeStart.x
+    const deltaY = e.clientY - resizeStart.y
+    
+    const updatedFields = fields.map(field => 
+      field.id === selectedField 
+        ? { 
+            ...field, 
+            width: Math.max(100, resizeStart.width + deltaX),
+            height: Math.max(30, resizeStart.height + deltaY)
+          }
+        : field
+    )
+    
+    setFields(updatedFields)
+    onFieldsChange(updatedFields)
+  }
+  
+  // Add mouse event listeners
+  useEffect(() => {
+    if (draggedFieldId || isResizing) {
+      const moveHandler = isResizing ? handleResizeMove : handleMouseMove
+      document.addEventListener('mousemove', moveHandler)
+      document.addEventListener('mouseup', handleMouseUp)
+      
+      return () => {
+        document.removeEventListener('mousemove', moveHandler)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [draggedFieldId, isResizing, dragOffset, resizeStart])
 
   const handleFieldDelete = (fieldId: string) => {
     const updatedFields = fields.filter(f => f.id !== fieldId)
@@ -238,30 +342,24 @@ export function SignaturePlacementEditor({
 
         <Separator className="mb-4" />
 
-        {/* Field Types */}
+        {/* Signature Field */}
         <div className="space-y-2 mb-4">
-          <Label>Drag fields to document</Label>
-          {FIELD_TYPES.map(fieldType => {
-            const Icon = fieldType.icon
-            return (
-              <div
-                key={fieldType.value}
-                draggable
-                onDragStart={(e) => handleDragStart(e, fieldType.value)}
-                onDragEnd={handleDragEnd}
-                className={cn(
-                  "flex items-center gap-2 p-3 border rounded-md cursor-move",
-                  "hover:bg-accent hover:border-accent-foreground/20",
-                  "transition-colors",
-                  isDragging && draggedFieldType === fieldType.value && "opacity-50"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="text-sm">{fieldType.label}</span>
-                <IconGripVertical className="h-4 w-4 ml-auto text-muted-foreground" />
-              </div>
-            )
-          })}
+          <Label>Drag to add signature field</Label>
+          <div
+            draggable
+            onDragStart={(e) => handleDragStart(e, 'signature')}
+            onDragEnd={handleDragEnd}
+            className={cn(
+              "flex items-center gap-2 p-3 border rounded-md cursor-move",
+              "hover:bg-accent hover:border-accent-foreground/20",
+              "transition-colors",
+              isDragging && "opacity-50"
+            )}
+          >
+            <IconSignature className="h-4 w-4" />
+            <span className="text-sm">Signature Field</span>
+            <IconGripVertical className="h-4 w-4 ml-auto text-muted-foreground" />
+          </div>
         </div>
 
         <Separator className="mb-4" />
@@ -425,69 +523,105 @@ export function SignaturePlacementEditor({
 
         <div 
           ref={containerRef}
-          className="relative overflow-auto flex-1 bg-gray-100"
+          className="relative overflow-auto flex-1 bg-gray-100 p-4"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
-          <div className="relative inline-block">
-            <canvas 
-              ref={canvasRef}
-              className="bg-white shadow-lg"
-            />
-            
-            {/* Render fields */}
-            {fields.filter(f => f.page === currentPage).map(field => {
-              const signer = signers.find(s => s.id === field.signer)
-              const Icon = getFieldIcon(field.type)
-              
-              return (
-                <div
-                  key={field.id}
-                  onClick={() => handleFieldClick(field.id)}
-                  style={{
-                    position: 'absolute',
-                    left: field.x * scale,
-                    top: field.y * scale,
-                    width: field.width * scale,
-                    height: field.height * scale,
-                    border: `2px solid ${signer?.color || '#666'}`,
-                    backgroundColor: `${signer?.color}20` || '#66666620',
-                    cursor: 'move'
-                  }}
-                  className={cn(
-                    "flex items-center justify-center gap-2 rounded",
-                    "hover:ring-2 hover:ring-offset-1",
-                    selectedField === field.id && "ring-2 ring-primary"
-                  )}
-                >
-                  <Icon className="h-4 w-4" style={{ color: signer?.color }} />
-                  <span className="text-xs font-medium" style={{ color: signer?.color }}>
-                    {field.label}
-                  </span>
-                  {field.aiSuggested && (
-                    <Badge 
-                      variant="secondary" 
-                      className="absolute -top-2 -right-2 text-xs px-1 py-0 h-5"
-                    >
-                      AI
-                    </Badge>
-                  )}
+          {isLoadingPdf ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <IconLoader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                <p className="text-muted-foreground">Loading document...</p>
+              </div>
+            </div>
+          ) : pdfUrl ? (
+            <div className="relative inline-block">
+              {/* PDF Document */}
+              <Document
+                file={pdfUrl}
+                onLoadSuccess={(pdf) => setTotalPages(pdf.numPages)}
+                loading={
+                  <div className="flex items-center justify-center p-8">
+                    <IconLoader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                }
+                error={
+                  <div className="text-center p-8">
+                    <p className="text-destructive">Failed to load PDF</p>
+                  </div>
+                }
+              >
+                <div className="relative bg-white shadow-lg">
+                  <Page
+                    pageNumber={currentPage}
+                    scale={scale}
+                    renderTextLayer={false}
+                    renderAnnotationLayer={false}
+                  />
                   
-                  {/* Resize handle */}
-                  {selectedField === field.id && (
-                    <div
-                      className="absolute bottom-0 right-0 w-4 h-4 bg-primary cursor-se-resize"
-                      onMouseDown={(e) => {
-                        e.stopPropagation()
-                        // Handle resize
-                      }}
-                    >
-                      <IconResize className="h-3 w-3 text-white" />
-                    </div>
-                  )}
+                  {/* Overlay for signature fields */}
+                  <div className="absolute inset-0">
+                  {/* Render fields */}
+                  {fields.filter(f => f.page === currentPage).map(field => {
+                    const signer = signers.find(s => s.id === field.signer)
+                    const Icon = getFieldIcon(field.type)
+                    
+                    return (
+                      <div
+                        key={field.id}
+                        onClick={() => handleFieldClick(field.id)}
+                        onMouseDown={(e) => handleFieldMouseDown(e, field)}
+                        style={{
+                          position: 'absolute',
+                          left: field.x,
+                          top: field.y,
+                          width: field.width,
+                          height: field.height,
+                          border: `2px solid ${signer?.color || '#666'}`,
+                          backgroundColor: `${signer?.color}20` || '#66666620',
+                          cursor: draggedFieldId === field.id ? 'grabbing' : 'grab',
+                          pointerEvents: 'auto',
+                          userSelect: 'none'
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded transition-shadow",
+                          "hover:ring-2 hover:ring-offset-1",
+                          selectedField === field.id && "ring-2 ring-primary",
+                          draggedFieldId === field.id && "opacity-80 shadow-lg"
+                        )}
+                      >
+                        <Icon className="h-4 w-4" style={{ color: signer?.color }} />
+                        <span className="text-xs font-medium" style={{ color: signer?.color }}>
+                          {field.label}
+                        </span>
+                        {field.aiSuggested && (
+                          <Badge 
+                            variant="secondary" 
+                            className="absolute -top-2 -right-2 text-xs px-1 py-0 h-5"
+                          >
+                            AI
+                          </Badge>
+                        )}
+                        
+                        {/* Resize handle */}
+                        {selectedField === field.id && (
+                          <div
+                            className="absolute bottom-0 right-0 w-4 h-4 bg-primary cursor-se-resize rounded-tl"
+                            onMouseDown={(e) => handleResizeMouseDown(e, field)}
+                          >
+                            <IconResize className="h-3 w-3 text-white" />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  </div>
                 </div>
-              )
-            })}
+              </Document>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">Failed to load document</p>
             </div>
           )}
         </div>

@@ -37,6 +37,9 @@ export const API_CONFIG = {
     
     // Digital Signatures
     SIGNATURES: '/signatures',
+    
+    // Dashboard
+    DASHBOARD: '/dashboard',
   }
 } as const
 

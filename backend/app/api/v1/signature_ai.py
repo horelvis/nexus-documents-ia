@@ -337,3 +337,46 @@ async def get_document_types(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve document types: {str(e)}")
+
+
+@router.post("/generate-message")
+async def generate_signature_message(
+    request: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: UUID = Depends(get_current_tenant_id_async)
+):
+    """
+    Generate AI-powered message for signature request
+    """
+    try:
+        document_title = request.get("document_title", "document")
+        signer_count = request.get("signer_count", 1)
+        document_type = request.get("document_type", "general")
+        
+        ai_service = SignatureAIService(tenant_id)
+        message = ai_service.generate_signature_message(
+            document_title=document_title,
+            signer_count=signer_count,
+            document_type=document_type
+        )
+        
+        return {
+            "message": message,
+            "generated": True
+        }
+        
+    except Exception as e:
+        # Return fallback message on error
+        signer_text = "signature" if signer_count == 1 else "signatures"
+        fallback_message = f"""Hello,
+
+I'm requesting your signature on \"{document_title}\". Please review the document and sign where indicated.
+
+This document requires {signer_count} {signer_text}. You'll receive a confirmation once all parties have signed.
+
+Thank you for your prompt attention to this matter."""
+        
+        return {
+            "message": fallback_message,
+            "generated": False
+        }

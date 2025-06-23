@@ -142,6 +142,31 @@ class SignatureAIService {
     })
   }
 
+  async generateSignatureMessage(documentTitle: string, signerCount: number, documentType?: string): Promise<string> {
+    try {
+      const response = await apiClient.post('/signatures/ai/generate-message', {
+        document_title: documentTitle,
+        signer_count: signerCount,
+        document_type: documentType
+      })
+      
+      if (response.data?.message) {
+        return response.data.message
+      }
+      
+      // Fallback message if API fails
+      return this.generateFallbackMessage(documentTitle, signerCount)
+    } catch (error) {
+      console.error('Failed to generate AI message:', error)
+      return this.generateFallbackMessage(documentTitle, signerCount)
+    }
+  }
+  
+  private generateFallbackMessage(documentTitle: string, signerCount: number): string {
+    const signerText = signerCount === 1 ? 'signature' : 'signatures'
+    return `Hello,\n\nI'm requesting your signature on "${documentTitle}". Please review the document and sign where indicated.\n\nThis document requires ${signerCount} ${signerText}. You'll receive a confirmation once all parties have signed.\n\nThank you for your prompt attention to this matter.`
+  }
+  
   private getFieldLabel(type: string, signerName: string): string {
     const labels = {
       signature: `${signerName} Signature`,
@@ -218,11 +243,25 @@ export function useSignatureAI() {
       console.error('Failed to submit learning data:', err)
     }
   }
+  
+  const generateMessage = async (documentTitle: string, signerCount: number, documentType?: string) => {
+    try {
+      const token = await getToken()
+      if (!token) throw new Error('Not authenticated')
+      
+      return await signatureAIService.generateSignatureMessage(documentTitle, signerCount, documentType)
+    } catch (err) {
+      console.error('Failed to generate AI message:', err)
+      // Return fallback message
+      return signatureAIService['generateFallbackMessage'](documentTitle, signerCount)
+    }
+  }
 
   return {
     analyzeDocument,
     suggestPlacements,
     learnFromPlacement,
+    generateMessage,
     isAnalyzing,
     analysis,
     error,

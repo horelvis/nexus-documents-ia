@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -50,6 +50,7 @@ import { useNotifications } from "@/contexts/notifications-context"
 import { SignaturePlacementEditor } from "@/components/documents/signature-placement-editor"
 import { cn } from "@/lib/utils"
 import { useSignatureAI } from "@/lib/services/signature-ai-service"
+import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
 
 // Zod schemas
 const signerSchema = z.object({
@@ -95,7 +96,7 @@ export default function SignatureRequestPage() {
   const { addNotification } = useNotifications()
   const signatureService = useSignatureService()
   const documentService = useDocumentService()
-  const { analyzeDocument, suggestPlacements, learnFromPlacement, isAnalyzing, analysis, signatureAIService } = useSignatureAI()
+  const { analyzeDocument, suggestPlacements, learnFromPlacement, generateMessage, isAnalyzing, analysis, signatureAIService } = useSignatureAI()
   
   const [document, setDocument] = useState<ApiDocument | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
@@ -105,6 +106,10 @@ export default function SignatureRequestPage() {
   const [signatureFields, setSignatureFields] = useState<any[]>([])
   const [isLoadingAISuggestions, setIsLoadingAISuggestions] = useState(false)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
+  const [entitySearchOpen, setEntitySearchOpen] = useState(false)
+  const [entitySearchIndex, setEntitySearchIndex] = useState<number | null>(null)
+  const [entitySearchQuery, setEntitySearchQuery] = useState('')
+  const nameInputRefs = useRef<(HTMLInputElement | null)[]>([])
   
   const form = useForm<SignatureRequestFormData>({
     resolver: zodResolver(signatureRequestSchema),
@@ -276,6 +281,42 @@ export default function SignatureRequestPage() {
     form.setValue('signers', currentSigners.filter((_, i) => i !== index))
   }
 
+  const handleEntitySelect = (entity: any, index: number) => {
+    const currentSigners = form.getValues('signers')
+    // Replace the @mention with the entity name
+    const currentName = currentSigners[index].name
+    const atIndex = currentName.lastIndexOf('@')
+    if (atIndex !== -1) {
+      currentSigners[index].name = currentName.substring(0, atIndex) + entity.name
+    } else {
+      currentSigners[index].name = entity.name
+    }
+    currentSigners[index].email = entity.email
+    form.setValue('signers', currentSigners)
+    setEntitySearchOpen(false)
+    setEntitySearchIndex(null)
+    setEntitySearchQuery('')
+  }
+
+  const handleNameInputChange = (value: string, index: number) => {
+    const updated = [...form.getValues('signers')]
+    updated[index].name = value
+    form.setValue('signers', updated)
+    
+    // Check for @ symbol
+    if (value.includes('@')) {
+      const atIndex = value.lastIndexOf('@')
+      const query = value.substring(atIndex + 1)
+      setEntitySearchQuery(query)
+      setEntitySearchIndex(index)
+      setEntitySearchOpen(true)
+    } else {
+      setEntitySearchOpen(false)
+      setEntitySearchIndex(null)
+      setEntitySearchQuery('')
+    }
+  }
+
   const loadAISuggestions = async () => {
     if (!document || signatureFields.length > 0) return // Don't override existing fields
     
@@ -403,14 +444,18 @@ export default function SignatureRequestPage() {
                               </div>
                               <div className="flex-1 space-y-3">
                                 <div className="grid grid-cols-2 gap-3">
-                                  <div>
+                                  <div className="relative">
                                     <Input
-                                      placeholder="Name"
+                                      ref={(el) => nameInputRefs.current[index] = el}
+                                      placeholder="Name (type @ to search entities)"
                                       value={signer.name}
-                                      onChange={(e) => {
-                                        const updated = [...field.value]
-                                        updated[index].name = e.target.value
-                                        field.onChange(updated)
+                                      onChange={(e) => handleNameInputChange(e.target.value, index)}
+                                      onKeyDown={(e) => {
+                                        if (entitySearchOpen && e.key === 'Escape') {
+                                          setEntitySearchOpen(false)
+                                          setEntitySearchIndex(null)
+                                          setEntitySearchQuery('')
+                                        }
                                       }}
                                     />
                                     {form.formState.errors.signers?.[index]?.name && (
@@ -467,6 +512,22 @@ export default function SignatureRequestPage() {
                   </FormItem>
                 )}
               />
+              
+              {/* Entity Search Menu */}
+              {entitySearchOpen && entitySearchIndex !== null && (
+                <EntitySearchMenu
+                  open={entitySearchOpen}
+                  onSelect={(entity) => handleEntitySelect(entity, entitySearchIndex)}
+                  onClose={() => {
+                    setEntitySearchOpen(false)
+                    setEntitySearchIndex(null)
+                    setEntitySearchQuery('')
+                  }}
+                  searchQuery={entitySearchQuery}
+                  anchorRef={nameInputRefs.current[entitySearchIndex]}
+                  documentId={document?.id || ''}
+                />
+              )}
             </CardContent>
           </Card>
         )
@@ -482,7 +543,7 @@ export default function SignatureRequestPage() {
             <CardHeader>
               <CardTitle>Place Signature Fields</CardTitle>
               <CardDescription>
-                Drag and drop fields onto the document where signers need to sign
+                Drag and drop signature fields onto the document where each signer needs to sign
               </CardDescription>
               {isLoadingAISuggestions && (
                 <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
@@ -503,7 +564,7 @@ export default function SignatureRequestPage() {
             </CardHeader>
             <CardContent className="h-[calc(100%-120px)]">
               <SignaturePlacementEditor
-                documentUrl={document ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/documents/${document.id}/preview` : ''}
+                documentId={document?.id || ''}
                 signers={signers}
                 onFieldsChange={setSignatureFields}
                 initialFields={signatureFields}
@@ -541,7 +602,28 @@ export default function SignatureRequestPage() {
                 name="message"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Message to Signers (Optional)</FormLabel>
+                    <FormLabel className="flex items-center justify-between">
+                      <span>Message to Signers (Optional)</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          const title = form.getValues('title')
+                          const signerCount = form.getValues('signers').length
+                          const message = await generateMessage(
+                            document?.title || document?.filename || 'this document',
+                            signerCount,
+                            analysis?.document_type
+                          )
+                          form.setValue('message', message)
+                        }}
+                        className="text-xs"
+                      >
+                        <IconSignature className="h-3 w-3 mr-1" />
+                        Generate with AI
+                      </Button>
+                    </FormLabel>
                     <FormControl>
                       <Textarea 
                         {...field} 

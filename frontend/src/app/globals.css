@@ -120,3 +120,112 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Clerk Dark Mode Styles */
+.dark .cl-card,
+.dark .cl-formButtonPrimary,
+.dark .cl-headerTitle,
+.dark .cl-headerSubtitle,
+.dark .cl-socialButtonsBlockButton,
+.dark .cl-dividerLine,
+.dark .cl-dividerText,
+.dark .cl-formFieldLabel,
+.dark .cl-formFieldInput,
+.dark .cl-formFieldInputShowPasswordButton,
+.dark .cl-footerActionText,
+.dark .cl-footerActionLink,
+.dark .cl-otpCodeFieldInput,
+.dark .cl-formResendCodeLink,
+.dark .cl-selectSearchInput,
+.dark .cl-selectOption,
+.dark .cl-modalCloseButton,
+.dark .cl-navbarButton,
+.dark .cl-breadcrumbsItem,
+.dark .cl-breadcrumbsItemDivider,
+.dark .cl-profileSectionTitle,
+.dark .cl-accordionTriggerButton,
+.dark .cl-userButtonPopoverCard,
+.dark .cl-userButtonPopoverFooter,
+.dark .cl-userPreviewMainIdentifier,
+.dark .cl-userPreviewSecondaryIdentifier {
+  color-scheme: dark;
+}
+
+.dark .cl-card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+}
+
+.dark .cl-headerTitle {
+  color: var(--foreground);
+}
+
+.dark .cl-headerSubtitle {
+  color: var(--muted-foreground);
+}
+
+.dark .cl-formFieldLabel {
+  color: var(--foreground);
+}
+
+.dark .cl-formFieldInput {
+  background-color: var(--background);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.dark .cl-formFieldInput:focus {
+  border-color: var(--ring);
+}
+
+.dark .cl-formButtonPrimary {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.dark .cl-formButtonPrimary:hover {
+  background-color: var(--primary);
+  opacity: 0.9;
+}
+
+.dark .cl-socialButtonsBlockButton {
+  background-color: var(--secondary);
+  border-color: var(--border);
+  color: var(--secondary-foreground);
+}
+
+.dark .cl-socialButtonsBlockButton:hover {
+  background-color: var(--secondary);
+  opacity: 0.8;
+}
+
+.dark .cl-dividerLine {
+  background-color: var(--border);
+}
+
+.dark .cl-dividerText {
+  color: var(--muted-foreground);
+}
+
+.dark .cl-footerActionText,
+.dark .cl-footerActionLink {
+  color: var(--muted-foreground);
+}
+
+.dark .cl-footerActionLink:hover {
+  color: var(--foreground);
+}
+
+.dark .cl-otpCodeFieldInput {
+  background-color: var(--background);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.dark .cl-formFieldInputShowPasswordButton {
+  color: var(--muted-foreground);
+}
+
+.dark .cl-formFieldInputShowPasswordButton:hover {
+  color: var(--foreground);
+}
