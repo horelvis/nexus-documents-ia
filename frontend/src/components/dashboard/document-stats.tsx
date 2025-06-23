@@ -44,7 +44,7 @@ export function DocumentStats() {
       
       if (response.error) {
         setError(response.error)
-      } else {
+      } else if (response.data) {
         setStats(response.data)
       }
     } catch (err) {

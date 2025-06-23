@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func
 from uuid import UUID
 
-from app.api.deps import get_async_db, get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.db.async_database import get_async_db
 from app.db.models import User, Document, Agent, DocumentView, DocumentShare
 from app.schemas.entity import Entity, EntitySearchResponse
 
