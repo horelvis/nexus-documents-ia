@@ -4,8 +4,9 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, or_, func, desc, select
 
 from app.db.models import (
     Document, DocumentShare, DocumentShareAccessLog, 
@@ -39,7 +40,7 @@ class DocumentShareService:
     
     async def create_share(
         self,
-        db: Session,
+        db: AsyncSession,
         document_id: UUID,
         share_type: str = "view",
         expires_at: Optional[datetime] = None,
@@ -54,12 +55,15 @@ class DocumentShareService:
         """Create a new document share"""
         try:
             # Verify document exists and belongs to tenant
-            document = db.query(Document).filter(
-                and_(
-                    Document.id == document_id,
-                    Document.tenant_id == self.tenant_id
+            result = await db.execute(
+                select(Document).filter(
+                    and_(
+                        Document.id == document_id,
+                        Document.tenant_id == self.tenant_id
+                    )
                 )
-            ).first()
+            )
+            document = result.scalar_one_or_none()
             
             if not document:
                 raise ValueError("Document not found or access denied")
@@ -89,7 +93,7 @@ class DocumentShareService:
             )
             
             db.add(share)
-            db.flush()  # Get the share ID
+            await db.flush()  # Get the share ID
             
             # Create recipient records if provided
             if recipients:
@@ -123,8 +127,8 @@ class DocumentShareService:
                 )
                 db.add(metrics)
             
-            db.commit()
-            db.refresh(share)
+            await db.commit()
+            await db.refresh(share)
             
             # Send email notification if recipient email provided
             if recipient_email:
@@ -163,13 +167,13 @@ class DocumentShareService:
             return response
             
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Error creating share: {str(e)}")
             raise
     
     async def create_bulk_shares(
         self,
-        db: Session,
+        db: AsyncSession,
         document_id: UUID,
         recipients: List[str],
         **kwargs
@@ -203,14 +207,14 @@ class DocumentShareService:
     
     async def list_shares(
         self,
-        db: Session,
+        db: AsyncSession,
         document_id: Optional[UUID] = None,
         is_active: Optional[bool] = None,
         page: int = 1,
         per_page: int = 20
     ) -> Tuple[List[DocumentShareResponse], int]:
         """List document shares with filters"""
-        query = db.query(DocumentShare).options(
+        query = select(DocumentShare).options(
             joinedload(DocumentShare.document)
         ).filter(
             DocumentShare.tenant_id == self.tenant_id
@@ -223,13 +227,25 @@ class DocumentShareService:
             query = query.filter(DocumentShare.is_active == is_active)
         
         # Get total count
-        total = query.count()
+        count_query = select(func.count()).select_from(DocumentShare).filter(
+            DocumentShare.tenant_id == self.tenant_id
+        )
+        if document_id:
+            count_query = count_query.filter(DocumentShare.document_id == document_id)
+        if is_active is not None:
+            count_query = count_query.filter(DocumentShare.is_active == is_active)
+        
+        total_result = await db.execute(count_query)
+        total = total_result.scalar()
         
         # Apply pagination
         offset = (page - 1) * per_page
-        shares = query.order_by(
-            desc(DocumentShare.created_at)
-        ).offset(offset).limit(per_page).all()
+        result = await db.execute(
+            query.order_by(
+                desc(DocumentShare.created_at)
+            ).offset(offset).limit(per_page)
+        )
+        shares = result.scalars().all()
         
         # Convert to response models
         share_responses = []
@@ -265,18 +281,21 @@ class DocumentShareService:
     
     async def get_share(
         self,
-        db: Session,
+        db: AsyncSession,
         share_id: UUID
     ) -> Optional[DocumentShareResponse]:
         """Get a specific share by ID"""
-        share = db.query(DocumentShare).options(
-            joinedload(DocumentShare.document)
-        ).filter(
-            and_(
-                DocumentShare.id == share_id,
-                DocumentShare.tenant_id == self.tenant_id
+        result = await db.execute(
+            select(DocumentShare).options(
+                joinedload(DocumentShare.document)
+            ).filter(
+                and_(
+                    DocumentShare.id == share_id,
+                    DocumentShare.tenant_id == self.tenant_id
+                )
             )
-        ).first()
+        )
+        share = result.scalar_one_or_none()
         
         if not share:
             return None
@@ -309,17 +328,20 @@ class DocumentShareService:
     
     async def update_share(
         self,
-        db: Session,
+        db: AsyncSession,
         share_id: UUID,
         update_data: Dict[str, Any]
     ) -> Optional[DocumentShareResponse]:
         """Update share settings"""
-        share = db.query(DocumentShare).filter(
-            and_(
-                DocumentShare.id == share_id,
-                DocumentShare.tenant_id == self.tenant_id
+        result = await db.execute(
+            select(DocumentShare).filter(
+                and_(
+                    DocumentShare.id == share_id,
+                    DocumentShare.tenant_id == self.tenant_id
+                )
             )
-        ).first()
+        )
+        share = result.scalar_one_or_none()
         
         if not share:
             return None
@@ -330,24 +352,27 @@ class DocumentShareService:
         
         share.updated_at = datetime.now(timezone.utc)
         
-        db.commit()
-        db.refresh(share)
+        await db.commit()
+        await db.refresh(share)
         
         return await self.get_share(db, share_id)
     
     async def revoke_share(
         self,
-        db: Session,
+        db: AsyncSession,
         share_id: UUID,
         revoked_by: UUID
     ) -> bool:
         """Revoke a share link"""
-        share = db.query(DocumentShare).filter(
-            and_(
-                DocumentShare.id == share_id,
-                DocumentShare.tenant_id == self.tenant_id
+        result = await db.execute(
+            select(DocumentShare).filter(
+                and_(
+                    DocumentShare.id == share_id,
+                    DocumentShare.tenant_id == self.tenant_id
+                )
             )
-        ).first()
+        )
+        share = result.scalar_one_or_none()
         
         if not share:
             return False
@@ -356,27 +381,35 @@ class DocumentShareService:
         share.revoked_at = datetime.now(timezone.utc)
         share.revoked_by = revoked_by
         
-        db.commit()
+        await db.commit()
         return True
     
     async def get_access_logs(
         self,
-        db: Session,
+        db: AsyncSession,
         share_id: UUID,
         page: int = 1,
         per_page: int = 20
     ) -> Tuple[List[ShareAccessLogResponse], int]:
         """Get access logs for a share"""
-        query = db.query(DocumentShareAccessLog).filter(
-            DocumentShareAccessLog.share_id == share_id
+        # Get total count
+        count_result = await db.execute(
+            select(func.count()).select_from(DocumentShareAccessLog).filter(
+                DocumentShareAccessLog.share_id == share_id
+            )
         )
+        total = count_result.scalar() or 0
         
-        total = query.count()
-        
+        # Get logs with pagination
         offset = (page - 1) * per_page
-        logs = query.order_by(
-            desc(DocumentShareAccessLog.accessed_at)
-        ).offset(offset).limit(per_page).all()
+        logs_result = await db.execute(
+            select(DocumentShareAccessLog).filter(
+                DocumentShareAccessLog.share_id == share_id
+            ).order_by(
+                desc(DocumentShareAccessLog.accessed_at)
+            ).offset(offset).limit(per_page)
+        )
+        logs = logs_result.scalars().all()
         
         log_responses = []
         for log in logs:
@@ -403,59 +436,79 @@ class DocumentShareService:
     
     async def get_statistics(
         self,
-        db: Session,
+        db: AsyncSession,
         document_id: Optional[UUID] = None
     ) -> ShareStatistics:
         """Get sharing statistics"""
-        query = db.query(DocumentShare).filter(
-            DocumentShare.tenant_id == self.tenant_id
-        )
-        
+        base_filters = [DocumentShare.tenant_id == self.tenant_id]
         if document_id:
-            query = query.filter(DocumentShare.document_id == document_id)
+            base_filters.append(DocumentShare.document_id == document_id)
         
         # Get counts
-        total_shares = query.count()
-        active_shares = query.filter(DocumentShare.is_active == True).count()
-        expired_shares = query.filter(
-            and_(
+        total_result = await db.execute(
+            select(func.count()).select_from(DocumentShare).filter(*base_filters)
+        )
+        total_shares = total_result.scalar() or 0
+        
+        active_result = await db.execute(
+            select(func.count()).select_from(DocumentShare).filter(
+                *base_filters,
+                DocumentShare.is_active == True
+            )
+        )
+        active_shares = active_result.scalar() or 0
+        
+        expired_result = await db.execute(
+            select(func.count()).select_from(DocumentShare).filter(
+                *base_filters,
                 DocumentShare.expires_at != None,
                 DocumentShare.expires_at < datetime.now(timezone.utc)
             )
-        ).count()
-        revoked_shares = query.filter(DocumentShare.revoked_at != None).count()
+        )
+        expired_shares = expired_result.scalar() or 0
+        
+        revoked_result = await db.execute(
+            select(func.count()).select_from(DocumentShare).filter(
+                *base_filters,
+                DocumentShare.revoked_at != None
+            )
+        )
+        revoked_shares = revoked_result.scalar() or 0
         
         # Get total access count
-        total_access_count = db.query(
-            func.sum(DocumentShare.current_access_count)
-        ).filter(
-            DocumentShare.tenant_id == self.tenant_id
-        ).scalar() or 0
+        access_result = await db.execute(
+            select(func.sum(DocumentShare.current_access_count)).filter(
+                *base_filters
+            )
+        )
+        total_access_count = access_result.scalar() or 0
         
         # Get unique recipients
-        unique_recipients = db.query(
-            func.count(func.distinct(DocumentShare.recipient_email))
-        ).filter(
-            and_(
+        recipients_result = await db.execute(
+            select(func.count(func.distinct(DocumentShare.recipient_email))).filter(
                 DocumentShare.tenant_id == self.tenant_id,
                 DocumentShare.recipient_email != None
             )
-        ).scalar() or 0
+        )
+        unique_recipients = recipients_result.scalar() or 0
         
         # Get most accessed documents
-        most_accessed = db.query(
-            Document.id,
-            Document.title,
-            func.sum(DocumentShare.current_access_count).label('total_accesses')
-        ).join(
-            DocumentShare, Document.id == DocumentShare.document_id
-        ).filter(
-            DocumentShare.tenant_id == self.tenant_id
-        ).group_by(
-            Document.id, Document.title
-        ).order_by(
-            desc('total_accesses')
-        ).limit(10).all()
+        most_accessed_result = await db.execute(
+            select(
+                Document.id,
+                Document.title,
+                func.sum(DocumentShare.current_access_count).label('total_accesses')
+            ).join(
+                DocumentShare, Document.id == DocumentShare.document_id
+            ).filter(
+                DocumentShare.tenant_id == self.tenant_id
+            ).group_by(
+                Document.id, Document.title
+            ).order_by(
+                desc('total_accesses')
+            ).limit(10)
+        )
+        most_accessed = most_accessed_result.all()
         
         most_accessed_documents = [
             {
@@ -467,29 +520,34 @@ class DocumentShareService:
         ]
         
         # Get recent shares
-        recent_shares_query = query.order_by(
+        recent_query = select(DocumentShare).filter(*base_filters).order_by(
             desc(DocumentShare.created_at)
-        ).limit(10).all()
+        ).limit(10)
+        recent_result = await db.execute(recent_query)
+        recent_shares_list = recent_result.scalars().all()
         
         recent_shares = []
-        for share in recent_shares_query:
+        for share in recent_shares_list:
             recent_shares.append(await self.get_share(db, share.id))
         
         # Get access by date (last 30 days)
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-        access_by_date_query = db.query(
-            func.date(DocumentShareAccessLog.accessed_at).label('date'),
-            func.count(DocumentShareAccessLog.id).label('count')
-        ).join(
-            DocumentShare, DocumentShareAccessLog.share_id == DocumentShare.id
-        ).filter(
-            and_(
-                DocumentShare.tenant_id == self.tenant_id,
-                DocumentShareAccessLog.accessed_at >= thirty_days_ago
+        access_by_date_result = await db.execute(
+            select(
+                func.date(DocumentShareAccessLog.accessed_at).label('date'),
+                func.count(DocumentShareAccessLog.id).label('count')
+            ).join(
+                DocumentShare, DocumentShareAccessLog.share_id == DocumentShare.id
+            ).filter(
+                and_(
+                    DocumentShare.tenant_id == self.tenant_id,
+                    DocumentShareAccessLog.accessed_at >= thirty_days_ago
+                )
+            ).group_by(
+                func.date(DocumentShareAccessLog.accessed_at)
             )
-        ).group_by(
-            func.date(DocumentShareAccessLog.accessed_at)
-        ).all()
+        )
+        access_by_date_query = access_by_date_result.all()
         
         access_by_date = {
             str(row.date): row.count
@@ -497,16 +555,19 @@ class DocumentShareService:
         }
         
         # Get access by hour
-        access_by_hour_query = db.query(
-            func.extract('hour', DocumentShareAccessLog.accessed_at).label('hour'),
-            func.count(DocumentShareAccessLog.id).label('count')
-        ).join(
-            DocumentShare, DocumentShareAccessLog.share_id == DocumentShare.id
-        ).filter(
-            DocumentShare.tenant_id == self.tenant_id
-        ).group_by(
-            func.extract('hour', DocumentShareAccessLog.accessed_at)
-        ).all()
+        access_by_hour_result = await db.execute(
+            select(
+                func.extract('hour', DocumentShareAccessLog.accessed_at).label('hour'),
+                func.count(DocumentShareAccessLog.id).label('count')
+            ).join(
+                DocumentShare, DocumentShareAccessLog.share_id == DocumentShare.id
+            ).filter(
+                DocumentShare.tenant_id == self.tenant_id
+            ).group_by(
+                func.extract('hour', DocumentShareAccessLog.accessed_at)
+            )
+        )
+        access_by_hour_query = access_by_hour_result.all()
         
         access_by_hour = {
             int(row.hour): row.count
