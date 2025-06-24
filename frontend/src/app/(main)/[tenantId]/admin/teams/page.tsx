@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
+import { useBackendUser } from '@/contexts/user-context'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -106,7 +107,9 @@ type UpdateTeamFormData = z.infer<typeof updateTeamSchema>
 
 export default function TeamsPage() {
   const params = useParams()
+  const router = useRouter()
   const { user } = useUser()
+  const { backendUser, userLoading } = useBackendUser()
   const { toast } = useToast()
   const apiClient = useApiClient()
 
@@ -161,7 +164,9 @@ export default function TeamsPage() {
     try {
       // Load invitations (only for admins)
       const invitationsResponse = await apiClient.get<TeamInvitation[]>('/teams/invitations')
+      console.log('Invitations response:', invitationsResponse)
       if (!invitationsResponse.error && invitationsResponse.data) {
+        console.log('Setting invitations:', invitationsResponse.data)
         setInvitations(invitationsResponse.data)
       } else if (invitationsResponse.error) {
         // Silently ignore 403 errors for non-admins
@@ -194,7 +199,11 @@ export default function TeamsPage() {
         
         // Check if current user is admin
         const currentMember = membersResponse.data.find(m => m.email === user?.emailAddresses?.[0]?.emailAddress)
-        setIsAdmin(currentMember?.role === 'Admin' || !currentMember?.is_team_member)
+        const adminStatus = currentMember?.role === 'Admin' || !currentMember?.is_team_member
+        console.log('Current user:', user?.emailAddresses?.[0]?.emailAddress)
+        console.log('Current member:', currentMember)
+        console.log('Is admin:', adminStatus)
+        setIsAdmin(adminStatus)
       }
 
       // Load invitations using the separate function
@@ -661,7 +670,7 @@ export default function TeamsPage() {
       </Card>
 
       {/* Invitations Table */}
-      {isAdmin && invitations.length > 0 && (
+      {isAdmin && (
         <Card>
           <CardHeader>
             <CardTitle>Pending Invitations</CardTitle>
@@ -670,18 +679,19 @@ export default function TeamsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invitations.map((invitation) => (
+            {invitations.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Expires</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invitations.map((invitation) => (
                   <TableRow key={invitation.id}>
                     <TableCell>
                       {invitation.email || 'Open invitation'}
@@ -770,8 +780,13 @@ export default function TeamsPage() {
                     </TableCell>
                   </TableRow>
                 ))}
-              </TableBody>
-            </Table>
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No pending invitations
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -204,8 +204,12 @@ async def get_checkout_session(
         )
 
 
+class CustomerPortalRequest(BaseModel):
+    return_url: Optional[str] = None
+
 @router.post("/create-customer-portal")
 async def create_customer_portal(
+    request: CustomerPortalRequest,
     current_user: User = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ) -> Dict[str, str]:
@@ -226,10 +230,18 @@ async def create_customer_portal(
                 detail="Usuario no tiene cuenta de cliente en Stripe"
             )
 
+        # Usar return_url proporcionada o default basada en tenant
+        if request.return_url:
+            return_url = request.return_url
+        else:
+            # Default: incluir tenant_id en la URL
+            tenant_id = current_user.tenant_id
+            return_url = f"{settings.FRONTEND_URL}/{tenant_id}/dashboard"
+        
         # Crear sesión del Customer Portal
         session = stripe.billing_portal.Session.create(
             customer=current_user.stripe_customer_id,
-            return_url=f"{settings.FRONTEND_URL}/dashboard/settings/billing",
+            return_url=return_url,
         )
 
         logger.info(

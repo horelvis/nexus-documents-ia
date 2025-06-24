@@ -27,6 +27,7 @@ import { NavDocuments } from "@/components/navigation/nav-documents"
 import { NavMain } from "@/components/navigation/nav-main"
 import { NavSecondary } from "@/components/navigation/nav-secondary"
 import { NavUser } from "@/components/navigation/nav-user"
+import { NavAdmin } from "@/components/navigation/nav-admin"
 import {
   Sidebar,
   SidebarContent,
@@ -36,6 +37,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { useBackendUser } from "@/contexts/user-context"
 
 const data = {
   user: {
@@ -149,24 +151,18 @@ const data = {
       color: "purple",
     },
   ],
-  navSecondary: [
-    {
-      title: "Tenant Settings",
-      url: "/settings/tenant",
-      icon: IconSettings,
-      color: "gray",
-    },
-    {
-      title: "User Management",
-      url: "/admin/users",
-      icon: IconUsers,
-      color: "blue",
-    },
+  adminActions: [
     {
       title: "Team Management",
       url: "/admin/teams",
       icon: IconUsers,
       color: "indigo",
+    },
+    {
+      title: "Tenant Settings",
+      url: "/settings/tenant",
+      icon: IconSettings,
+      color: "gray",
     },
     {
       title: "Signature Providers",
@@ -180,6 +176,8 @@ const data = {
       icon: IconCreditCard,
       color: "green",
     },
+  ],
+  navSecondary: [
     {
       title: "Storage",
       url: "/storage",
@@ -213,6 +211,17 @@ const data = {
 }
 
 export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
+  const { backendUser } = useBackendUser()
+  
+  // Check if user is a tenant admin (not a team member)
+  const isTenantAdmin = backendUser && !backendUser.is_team_member
+  
+  // Debug log
+  React.useEffect(() => {
+    console.log('Sidebar - Backend user:', backendUser)
+    console.log('Sidebar - Is tenant admin:', isTenantAdmin)
+  }, [backendUser, isTenantAdmin])
+  
   // Generate tenant-aware navigation data
   const getNavData = () => {
     const basePath = tenantId ? `/${tenantId}` : '';
@@ -228,6 +237,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
           url: `${basePath}${subItem.url}`
         }))
       })),
+      quickActions: data.quickActions,
+      adminActions: isTenantAdmin ? data.adminActions.map(item => ({
+        ...item,
+        url: `${basePath}${item.url}`,
+        color: item.color
+      })) : [],
       navSecondary: data.navSecondary.map(item => ({
         ...item,
         url: `${basePath}${item.url}`,
@@ -258,6 +273,7 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       <SidebarContent>
         <NavMain items={navData.navMain} />
         <NavDocuments items={navData.quickActions} />
+        <NavAdmin items={navData.adminActions} />
         <NavSecondary items={navData.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>

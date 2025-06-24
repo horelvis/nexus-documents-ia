@@ -133,6 +133,7 @@ export interface BackendUser {
   full_name?: string
   is_active: boolean
   is_superuser: boolean
+  is_team_member?: boolean
   onboarding_completed: boolean
   tenant_id: string
   clerk_user_id?: string
