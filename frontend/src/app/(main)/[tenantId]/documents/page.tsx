@@ -15,13 +15,13 @@ import {
   IconTrash,
   IconEdit,
   IconLoader2,
-  IconPhoto,
   IconChevronLeft,
   IconChevronRight,
   IconLayoutGrid,
   IconLayoutList,
   IconShare2,
-  IconSignature
+  IconSignature,
+  IconDotsVertical
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,7 +31,8 @@ import {
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
-  DropdownMenuTrigger 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
 import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/notifications-context"
@@ -54,7 +55,6 @@ export default function DocumentsPage() {
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedFilter, setSelectedFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
@@ -64,8 +64,34 @@ export default function DocumentsPage() {
   const [totalDocuments, setTotalDocuments] = useState(0)
   const [perPage] = useState(10)
   
-  // View state
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
+  // Load user preferences from localStorage
+  const getStoredPreference = (key: string, defaultValue: any) => {
+    if (typeof window === 'undefined') return defaultValue
+    try {
+      const stored = localStorage.getItem(`documents_${tenantId}_${key}`)
+      return stored ? JSON.parse(stored) : defaultValue
+    } catch {
+      return defaultValue
+    }
+  }
+  
+  // Store user preference
+  const storePreference = (key: string, value: any) => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(`documents_${tenantId}_${key}`, JSON.stringify(value))
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+  
+  // Initialize states with stored preferences
+  const [selectedFilter, setSelectedFilter] = useState(() => 
+    getStoredPreference('filter', 'all')
+  )
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => 
+    getStoredPreference('viewMode', 'grid')
+  )
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
@@ -419,16 +445,28 @@ export default function DocumentsPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => setSelectedFilter('all')}>
+                    <DropdownMenuItem onClick={() => {
+                      setSelectedFilter('all')
+                      storePreference('filter', 'all')
+                    }}>
                       All Documents
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedFilter('INDEXED')}>
+                    <DropdownMenuItem onClick={() => {
+                      setSelectedFilter('INDEXED')
+                      storePreference('filter', 'INDEXED')
+                    }}>
                       Indexed
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedFilter('PROCESSING')}>
+                    <DropdownMenuItem onClick={() => {
+                      setSelectedFilter('PROCESSING')
+                      storePreference('filter', 'PROCESSING')
+                    }}>
                       Processing
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedFilter('INDEXING_ERROR')}>
+                    <DropdownMenuItem onClick={() => {
+                      setSelectedFilter('INDEXING_ERROR')
+                      storePreference('filter', 'INDEXING_ERROR')
+                    }}>
                       Error
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -439,7 +477,10 @@ export default function DocumentsPage() {
                   <Button
                     variant={viewMode === 'grid' ? 'default' : 'ghost'}
                     size="sm"
-                    onClick={() => setViewMode('grid')}
+                    onClick={() => {
+                      setViewMode('grid')
+                      storePreference('viewMode', 'grid')
+                    }}
                     className="rounded-r-none"
                   >
                     <IconLayoutGrid className="h-4 w-4" />
@@ -447,7 +488,10 @@ export default function DocumentsPage() {
                   <Button
                     variant={viewMode === 'table' ? 'default' : 'ghost'}
                     size="sm"
-                    onClick={() => setViewMode('table')}
+                    onClick={() => {
+                      setViewMode('table')
+                      storePreference('viewMode', 'table')
+                    }}
                     className="rounded-l-none"
                   >
                     <IconLayoutList className="h-4 w-4" />
@@ -520,28 +564,7 @@ export default function DocumentsPage() {
                         
                         {/* Actions */}
                         <div className="flex gap-0.5 flex-shrink-0">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button 
-                                size="sm" 
-                                variant="ghost"
-                                title="Preview options"
-                                className="h-7 w-7 p-0"
-                              >
-                                <IconPhoto className="h-3.5 w-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handlePreviewDocument(document)}>
-                                <IconPhoto className="mr-2 h-4 w-4" />
-                                Quick Preview
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
-                                <IconEye className="mr-2 h-4 w-4" />
-                                Full Page Preview
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          {/* 3 Main Actions */}
                           <Button 
                             size="sm" 
                             variant="ghost"
@@ -569,33 +592,44 @@ export default function DocumentsPage() {
                           >
                             <IconShare2 className="h-3.5 w-3.5" />
                           </Button>
-                          <Button 
-                            size="sm" 
-                            variant="ghost"
-                            onClick={() => handleRequestSignature(document)}
-                            title="Request Signature"
-                            className="h-7 w-7 p-0"
-                          >
-                            <IconSignature className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            variant="ghost"
-                            onClick={() => handleEditDocument(document)}
-                            title="Edit"
-                            className="h-7 w-7 p-0"
-                          >
-                            <IconEdit className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            variant="ghost" 
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0"
-                            onClick={() => handleDeleteDocument(document)}
-                            title="Delete"
-                          >
-                            <IconTrash className="h-3.5 w-3.5" />
-                          </Button>
+                          
+                          {/* More Actions Dropdown */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button 
+                                size="sm" 
+                                variant="ghost"
+                                title="More actions"
+                                className="h-7 w-7 p-0"
+                              >
+                                <IconDotsVertical className="h-3.5 w-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
+                                <IconEye className="mr-2 h-4 w-4" />
+                                Full Page Preview
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleRequestSignature(document)}>
+                                <IconSignature className="mr-2 h-4 w-4" />
+                                Request Signature
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleEditDocument(document)}>
+                                <IconEdit className="mr-2 h-4 w-4" />
+                                Edit
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuSeparator />
+                              
+                              <DropdownMenuItem 
+                                onClick={() => handleDeleteDocument(document)}
+                                className="text-red-600 focus:text-red-600"
+                              >
+                                <IconTrash className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                       

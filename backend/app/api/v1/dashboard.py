@@ -405,14 +405,19 @@ async def get_ai_insights(
         ))
     
     # Check for documents that could benefit from AI analysis
-    # (PDFs without summaries)
+    # (PDFs without descriptions or content extraction)
     contract_eligible = await db.execute(
         select(func.count(Document.id))
         .where(
             and_(
                 Document.tenant_id == tenant_uuid,
                 Document.mime_type == 'application/pdf',
-                or_(Document.summary == None, Document.summary == '')
+                or_(
+                    Document.description == None, 
+                    Document.description == '',
+                    Document.content == None,
+                    Document.content == ''
+                )
             )
         )
     )
@@ -436,7 +441,7 @@ async def get_ai_insights(
             and_(
                 Document.tenant_id == tenant_uuid,
                 Document.file_size > 1024 * 1024,  # Files larger than 1MB
-                Document.summary == None
+                or_(Document.description == None, Document.description == '')
             )
         )
     )

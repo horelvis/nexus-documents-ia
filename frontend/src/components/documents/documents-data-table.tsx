@@ -81,14 +81,45 @@ export function DocumentsDataTable({
   onShareDocument,
   onRequestSignature,
 }: DocumentsDataTableProps) {
+  // Get tenant ID from URL for localStorage keys
+  const tenantId = React.useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const paths = window.location.pathname.split('/')
+      return paths[1] // Assuming URL pattern is /[tenantId]/documents
+    }
+    return ''
+  }, [])
+
+  // Helper functions for localStorage
+  const getStoredPreference = (key: string, defaultValue: any) => {
+    if (typeof window === 'undefined') return defaultValue
+    try {
+      const stored = localStorage.getItem(`documents_table_${tenantId}_${key}`)
+      return stored ? JSON.parse(stored) : defaultValue
+    } catch {
+      return defaultValue
+    }
+  }
+
+  const storePreference = (key: string, value: any) => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(`documents_table_${tenantId}_${key}`, JSON.stringify(value))
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(() =>
+    getStoredPreference('columnVisibility', {})
+  )
   const [rowSelection, setRowSelection] = React.useState({})
-  const [pagination, setPagination] = React.useState({
+  const [pagination, setPagination] = React.useState(() => ({
     pageIndex: 0,
-    pageSize: 10,
-  })
+    pageSize: getStoredPreference('pageSize', 10),
+  }))
 
   const columns: ColumnDef<ApiDocument>[] = [
     {
@@ -233,66 +264,79 @@ export function DocumentsDataTable({
         const document = row.original
 
         return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-              >
-                <IconDotsVertical className="h-4 w-4" />
-                <span className="sr-only">Open menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => onViewDocument(document)}>
-                <IconEye className="mr-2 h-4 w-4" />
-                View Details
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem onClick={() => onPreviewDocument(document)}>
-                <IconPhoto className="mr-2 h-4 w-4" />
-                Quick Preview
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onFullPagePreview(document)}>
-                <IconEye className="mr-2 h-4 w-4" />
-                Full Page Preview
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem onClick={() => onDownloadDocument(document)}>
-                <IconDownload className="mr-2 h-4 w-4" />
-                Download
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onShareDocument(document)}>
-                <IconShare2 className="mr-2 h-4 w-4" />
-                Share
-              </DropdownMenuItem>
-              {onRequestSignature && (
-                <DropdownMenuItem onClick={() => onRequestSignature(document)}>
-                  <IconSignature className="mr-2 h-4 w-4" />
-                  Request Signature
+          <div className="flex items-center gap-1">
+            {/* 3 Main Actions */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => onViewDocument(document)}
+              title="View Details"
+            >
+              <IconEye className="h-4 w-4" />
+              <span className="sr-only">View Details</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => onDownloadDocument(document)}
+              title="Download"
+            >
+              <IconDownload className="h-4 w-4" />
+              <span className="sr-only">Download</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => onShareDocument(document)}
+              title="Share"
+            >
+              <IconShare2 className="h-4 w-4" />
+              <span className="sr-only">Share</span>
+            </Button>
+            
+            {/* More Actions Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                >
+                  <IconDotsVertical className="h-4 w-4" />
+                  <span className="sr-only">More actions</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => onFullPagePreview(document)}>
+                  <IconEye className="mr-2 h-4 w-4" />
+                  Full Page Preview
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => onEditDocument(document)}>
-                <IconEdit className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem 
-                onClick={() => onDeleteDocument(document)}
-                className="text-red-600 focus:text-red-600"
-              >
-                <IconTrash className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {onRequestSignature && (
+                  <DropdownMenuItem onClick={() => onRequestSignature(document)}>
+                    <IconSignature className="mr-2 h-4 w-4" />
+                    Request Signature
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => onEditDocument(document)}>
+                  <IconEdit className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator />
+                
+                <DropdownMenuItem 
+                  onClick={() => onDeleteDocument(document)}
+                  className="text-red-600 focus:text-red-600"
+                >
+                  <IconTrash className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )
       },
     },
@@ -307,7 +351,13 @@ export function DocumentsDataTable({
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    onColumnVisibilityChange: setColumnVisibility,
+    onColumnVisibilityChange: (updater) => {
+      const newVisibility = typeof updater === 'function' 
+        ? updater(columnVisibility)
+        : updater
+      setColumnVisibility(newVisibility)
+      storePreference('columnVisibility', newVisibility)
+    },
     onRowSelectionChange: setRowSelection,
     onPaginationChange: setPagination,
     state: {
@@ -384,7 +434,9 @@ export function DocumentsDataTable({
             <Select
               value={`${table.getState().pagination.pageSize}`}
               onValueChange={(value) => {
-                table.setPageSize(Number(value))
+                const pageSize = Number(value)
+                table.setPageSize(pageSize)
+                storePreference('pageSize', pageSize)
               }}
             >
               <SelectTrigger className="h-8 w-[70px]">
