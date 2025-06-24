@@ -45,9 +45,10 @@ export interface SupportedProvider {
 }
 
 export interface SignatureRequestSigner {
+  id?: string
   email: string
   name: string
-  role: 'signer' | 'viewer' | 'approver'
+  role?: 'signer' | 'viewer' | 'approver'
   order: number
   status?: 'pending' | 'sent' | 'viewed' | 'signed' | 'declined'
   signed_at?: string
@@ -58,6 +59,7 @@ export interface SignatureRequest {
   title: string
   message?: string
   document_id: string
+  document_name: string
   provider_id: string
   status: 'draft' | 'pending' | 'sent' | 'completed' | 'declined' | 'expired'
   signers: SignatureRequestSigner[]

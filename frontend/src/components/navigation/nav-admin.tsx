@@ -43,6 +43,8 @@ export function NavAdmin({
 
   const handleBillingClick = async (e: React.MouseEvent) => {
     e.preventDefault()
+    setLoadingBilling(true)
+    
     try {
       // Use current URL as return URL
       const returnUrl = window.location.href
@@ -50,7 +52,10 @@ export function NavAdmin({
         return_url: returnUrl
       })
       if (!response.error && response.data?.portal_url) {
-        window.location.href = response.data.portal_url
+        // Small delay to show loading state
+        setTimeout(() => {
+          window.location.href = response.data.portal_url
+        }, 300)
       } else {
         // Check if it's a configuration error
         if (response.error?.includes('No configuration provided')) {
@@ -62,8 +67,10 @@ export function NavAdmin({
         } else {
           throw new Error(response.error || 'Failed to open billing portal')
         }
+        setLoadingBilling(false)
       }
     } catch (error) {
+      setLoadingBilling(false)
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to open billing portal',
@@ -84,11 +91,15 @@ export function NavAdmin({
         {items.map((item) => (
           <SidebarMenuItem key={item.title}>
             {item.title === "Billing" ? (
-              <SidebarMenuButton onClick={handleBillingClick}>
-                <item.icon className={cn(
-                  item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
-                )} />
-                <span>{item.title}</span>
+              <SidebarMenuButton onClick={handleBillingClick} disabled={loadingBilling}>
+                {loadingBilling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <item.icon className={cn(
+                    item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
+                  )} />
+                )}
+                <span>{loadingBilling ? "Loading..." : item.title}</span>
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton asChild>

@@ -348,7 +348,10 @@ class AsyncSignatureService:
         tenant_id: UUID
     ) -> Optional[SignatureRequest]:
         """Obtener solicitud de firma"""
-        stmt = select(SignatureRequest).filter(
+        stmt = select(SignatureRequest).options(
+            selectinload(SignatureRequest.signers),
+            selectinload(SignatureRequest.provider)
+        ).filter(
             and_(
                 SignatureRequest.id == request_id,
                 SignatureRequest.tenant_id == tenant_id
@@ -366,7 +369,10 @@ class AsyncSignatureService:
         offset: int = 0
     ) -> List[SignatureRequest]:
         """Obtener solicitudes de firma"""
-        stmt = select(SignatureRequest).filter(
+        stmt = select(SignatureRequest).options(
+            selectinload(SignatureRequest.signers),
+            selectinload(SignatureRequest.provider)
+        ).filter(
             SignatureRequest.tenant_id == tenant_id
         )
         

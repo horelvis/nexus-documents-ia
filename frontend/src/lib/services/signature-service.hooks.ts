@@ -93,17 +93,17 @@ export function useSignatureService() {
       return response.data
     },
 
-    async sendRequest(requestId: string): Promise<SignatureRequest> {
-      const response = await apiClient.post(`/signatures/requests/${requestId}/send`)
-      return response.data
+    async sendRequest(requestId: string): Promise<void> {
+      await apiClient.post(`/signatures/requests/${requestId}/send`)
     },
 
-    async cancelRequest(requestId: string): Promise<void> {
-      await apiClient.post(`/signatures/requests/${requestId}/cancel`)
-    },
+    // TODO: Implement cancel request when backend endpoint is available
+    // async cancelRequest(requestId: string): Promise<void> {
+    //   await apiClient.post(`/signatures/requests/${requestId}/cancel`)
+    // },
 
     async updateStatus(requestId: string): Promise<SignatureRequest> {
-      const response = await apiClient.post(`/signatures/requests/${requestId}/update-status`)
+      const response = await apiClient.post(`/signatures/requests/${requestId}/refresh-status`)
       return response.data
     },
 
@@ -113,7 +113,9 @@ export function useSignatureService() {
     },
 
     async downloadSignedDocument(requestId: string): Promise<Blob> {
-      const response = await apiClient.get(`/signatures/requests/${requestId}/download`)
+      const response = await apiClient.get(`/signatures/requests/${requestId}/download`, {
+        responseType: 'blob'
+      })
       return response.data
     },
 
