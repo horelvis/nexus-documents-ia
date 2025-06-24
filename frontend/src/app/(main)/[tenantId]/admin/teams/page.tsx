@@ -79,6 +79,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
+import { ToastAction } from '@/components/ui/toast'
 import { useApiClient } from '@/lib/api-client'
 import type {
   TeamInfo,
@@ -156,6 +157,23 @@ export default function TeamsPage() {
     loadData()
   }, [])
 
+  const loadInvitations = async () => {
+    try {
+      // Load invitations (only for admins)
+      const invitationsResponse = await apiClient.get<TeamInvitation[]>('/teams/invitations')
+      if (!invitationsResponse.error && invitationsResponse.data) {
+        setInvitations(invitationsResponse.data)
+      } else if (invitationsResponse.error) {
+        // Silently ignore 403 errors for non-admins
+        if (!invitationsResponse.error.includes('403')) {
+          console.error('Error loading invitations:', invitationsResponse.error)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading invitations:', error)
+    }
+  }
+
   const loadData = async () => {
     setIsLoading(true)
     try {
@@ -179,16 +197,8 @@ export default function TeamsPage() {
         setIsAdmin(currentMember?.role === 'Admin' || !currentMember?.is_team_member)
       }
 
-      // Load invitations (only for admins)
-      const invitationsResponse = await apiClient.get<TeamInvitation[]>('/teams/invitations')
-      if (!invitationsResponse.error && invitationsResponse.data) {
-        setInvitations(invitationsResponse.data)
-      } else if (invitationsResponse.error) {
-        // Silently ignore 403 errors for non-admins
-        if (!invitationsResponse.error.includes('403')) {
-          console.error('Error loading invitations:', invitationsResponse.error)
-        }
-      }
+      // Load invitations using the separate function
+      await loadInvitations()
     } catch (error) {
       console.error('Error loading data:', error)
       toast({
@@ -242,21 +252,39 @@ export default function TeamsPage() {
           })
         } else if (response.data.invitation_link) {
           // Show invitation link if email failed
+          const invitationLink = response.data.invitation_link
           toast({
             title: 'Invitation Created',
             description: (
               <div className="space-y-2">
                 <p>Email service is unavailable. Share this link with {data.email}:</p>
                 <code className="block text-xs bg-muted p-2 rounded">
-                  {response.data.invitation_link}
+                  {invitationLink}
                 </code>
               </div>
             ) as any,
+            action: (
+              <ToastAction 
+                altText="Copy link"
+                onClick={() => {
+                  navigator.clipboard.writeText(invitationLink)
+                  toast({
+                    title: 'Copied!',
+                    description: 'Invitation link copied to clipboard',
+                    duration: 2000
+                  })
+                }}
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                Copy
+              </ToastAction>
+            ),
             duration: 10000 // Show for 10 seconds
           })
         }
         
-        loadData() // Reload to update members list
+        // Only reload invitations, not all data
+        loadInvitations()
       } else {
         throw new Error(response.error || 'Failed to send invitation')
       }
@@ -278,7 +306,8 @@ export default function TeamsPage() {
       if (!response.error && response.data) {
         setSelectedInvitation(response.data)
         setShowQRDialog(true)
-        loadData() // Reload invitations
+        // Only reload invitations, not all data
+        loadInvitations()
       } else {
         throw new Error(response.error || 'Failed to create invitation')
       }
@@ -293,17 +322,20 @@ export default function TeamsPage() {
     }
   }
 
-  const handleRemoveMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to remove this member?')) return
+  const handleRemoveMember = async () => {
+    if (!deletingItemId) return
 
     try {
-      const response = await apiClient.delete<{ message: string }>(`/teams/members/${memberId}`)
+      const response = await apiClient.delete<{ message: string }>(`/teams/members/${deletingItemId}`)
       if (!response.error) {
         toast({
           title: 'Success',
           description: 'Member removed successfully'
         })
         loadData()
+        setShowDeleteConfirm(false)
+        setDeletingItemId(null)
+        setDeletingItemType(null)
       } else {
         throw new Error(response.error || 'Failed to remove member')
       }
@@ -316,18 +348,22 @@ export default function TeamsPage() {
     }
   }
 
-  const handleRevokeInvitation = async (invitationId: string) => {
-    if (!confirm('Are you sure you want to revoke this invitation?')) return
+  const handleRevokeInvitation = async () => {
+    if (!deletingItemId) return
 
-    setRevokingInvitationId(invitationId)
+    setRevokingInvitationId(deletingItemId)
     try {
-      const response = await apiClient.delete<{ message: string }>(`/teams/invitations/${invitationId}`)
+      const response = await apiClient.delete<{ message: string }>(`/teams/invitations/${deletingItemId}`)
       if (!response.error) {
         toast({
           title: 'Success',
           description: 'Invitation revoked successfully'
         })
-        loadData()
+        // Only reload invitations, not all data
+        loadInvitations()
+        setShowDeleteConfirm(false)
+        setDeletingItemId(null)
+        setDeletingItemType(null)
       } else {
         throw new Error(response.error || 'Failed to revoke invitation')
       }
@@ -359,20 +395,37 @@ export default function TeamsPage() {
           })
         } else if (response.data.invitation_url) {
           // Show invitation link if email failed
+          const invitationUrl = response.data.invitation_url
           toast({
             title: 'Email Service Unavailable',
             description: (
               <div className="space-y-2">
                 <p>Email service is unavailable. Copy and share this link:</p>
                 <code className="block text-xs bg-muted p-2 rounded">
-                  {response.data.invitation_url}
+                  {invitationUrl}
                 </code>
               </div>
             ) as any,
+            action: (
+              <ToastAction 
+                altText="Copy link"
+                onClick={() => {
+                  navigator.clipboard.writeText(invitationUrl)
+                  toast({
+                    title: 'Copied!',
+                    description: 'Invitation link copied to clipboard',
+                    duration: 2000
+                  })
+                }}
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                Copy
+              </ToastAction>
+            ),
             duration: 10000 // Show for 10 seconds
           })
         }
-        loadData() // Reload to refresh data
+        // No need to reload anything for resending
       } else {
         throw new Error(response.error || 'Failed to resend invitation')
       }
@@ -585,7 +638,11 @@ export default function TeamsPage() {
                         <DropdownMenuSeparator />
                         {isAdmin && (
                           <DropdownMenuItem 
-                            onClick={() => handleRemoveMember(member.id)}
+                            onClick={() => {
+                              setDeletingItemId(member.id)
+                              setDeletingItemType('member')
+                              setShowDeleteConfirm(true)
+                            }}
                             className="text-destructive"
                             disabled={member.role === 'Admin'}
                           >
@@ -688,7 +745,11 @@ export default function TeamsPage() {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  onClick={() => handleRevokeInvitation(invitation.id)}
+                                  onClick={() => {
+                                    setDeletingItemId(invitation.id)
+                                    setDeletingItemType('invitation')
+                                    setShowDeleteConfirm(true)
+                                  }}
                                   className="text-destructive hover:text-destructive"
                                   disabled={revokingInvitationId === invitation.id}
                                 >
@@ -943,6 +1004,38 @@ export default function TeamsPage() {
           <DialogFooter>
             <Button onClick={() => setShowQRDialog(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>
+              {deletingItemType === 'member' 
+                ? 'Are you sure you want to remove this team member? This action cannot be undone.'
+                : 'Are you sure you want to revoke this invitation? This will prevent the invitation link from being used.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowDeleteConfirm(false)
+                setDeletingItemId(null)
+                setDeletingItemType(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive"
+              onClick={deletingItemType === 'member' ? handleRemoveMember : handleRevokeInvitation}
+            >
+              {deletingItemType === 'member' ? 'Remove Member' : 'Revoke Invitation'}
             </Button>
           </DialogFooter>
         </DialogContent>

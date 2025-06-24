@@ -6,7 +6,7 @@ import secrets
 import qrcode
 import io
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
 from uuid import UUID
 
@@ -36,6 +36,10 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+def utc_now():
+    """Get current UTC time with timezone info"""
+    return datetime.now(timezone.utc)
 
 # ===========================
 # TEAM (TENANT) ENDPOINTS
@@ -120,7 +124,7 @@ async def update_team_info(
         if team_update.description is not None:
             tenant.description = team_update.description
         
-        tenant.updated_at = datetime.utcnow()
+        tenant.updated_at = utc_now()
         
         await db.commit()
         await db.refresh(tenant)
@@ -264,7 +268,7 @@ async def invite_team_member(
                     TeamInvitation.tenant_id == current_user.tenant_id,
                     TeamInvitation.email == member_data.email,
                     TeamInvitation.used == False,
-                    TeamInvitation.expires_at > datetime.utcnow()
+                    TeamInvitation.expires_at > utc_now()
                 )
             )
         )
@@ -272,7 +276,7 @@ async def invite_team_member(
         
         if existing_invitation:
             # Calculate time until expiration
-            time_until_expiry = existing_invitation.expires_at - datetime.utcnow()
+            time_until_expiry = existing_invitation.expires_at - utc_now()
             days_remaining = time_until_expiry.days
             
             raise HTTPException(
@@ -415,7 +419,7 @@ async def create_team_invitation(
                         TeamInvitation.tenant_id == current_user.tenant_id,
                         TeamInvitation.email == invitation.email,
                         TeamInvitation.used == False,
-                        TeamInvitation.expires_at > datetime.utcnow()
+                        TeamInvitation.expires_at > utc_now()
                     )
                 )
             )
@@ -436,7 +440,7 @@ async def create_team_invitation(
             invited_by=current_user.id,
             invitation_code=invitation_code,
             email=invitation.email,
-            expires_at=datetime.utcnow() + timedelta(days=invitation.expires_in_days or 7)
+            expires_at=utc_now() + timedelta(days=invitation.expires_in_days or 7)
         )
         
         db.add(db_invitation)
@@ -635,7 +639,7 @@ async def resend_team_invitation(
             )
         
         # Check if invitation is expired
-        if invitation.expires_at < datetime.utcnow():
+        if invitation.expires_at < utc_now():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot resend an expired invitation. Please create a new one."
@@ -760,7 +764,7 @@ async def accept_team_invitation(
             )
         
         # Check if invitation is expired
-        if invitation.expires_at < datetime.utcnow():
+        if invitation.expires_at < utc_now():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invitation has expired"
@@ -795,7 +799,7 @@ async def accept_team_invitation(
         
         # Mark invitation as used
         invitation.used = True
-        invitation.used_at = datetime.utcnow()
+        invitation.used_at = utc_now()
         
         await db.commit()
         

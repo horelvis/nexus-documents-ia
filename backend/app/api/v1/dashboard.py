@@ -204,7 +204,7 @@ async def get_recent_activity(
     recent_views = await db.execute(
         select(DocumentView, Document, User)
         .join(Document, DocumentView.document_id == Document.id)
-        .join(User, DocumentView.viewer_id == User.id)
+        .join(User, DocumentView.user_id == User.id)
         .where(DocumentView.tenant_id == tenant_uuid)
         .order_by(DocumentView.viewed_at.desc())
         .limit(limit // 3)
