@@ -60,10 +60,13 @@ class SignerCreate(SignerBase):
 class Signer(SignerBase):
     """Schema for signer responses"""
     id: UUID
-    signature_request_id: UUID
+    request_id: UUID  # Changed from signature_request_id to match DB model
     status: str
     signed_at: Optional[datetime] = None
-    created_at: datetime
+    external_id: Optional[str] = None
+    signing_url: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True, json_encoders={UUID: str})
 
@@ -82,7 +85,7 @@ class SignatureRequestBase(BaseModel):
     callback_url: Optional[str] = None
     success_url: Optional[str] = None
     error_url: Optional[str] = None
-    request_metadata: Dict[str, Any] = Field(default_factory=dict, alias="metadata")
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class SignatureRequestCreate(SignatureRequestBase):
     """Schema for creating signature requests"""
@@ -105,7 +108,6 @@ class SignatureRequest(SignatureRequestBase):
     created_by: UUID
     external_id: Optional[str] = None
     status: str
-    request_metadata: Dict[str, Any] = Field(default_factory=dict)
     sent_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
