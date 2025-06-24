@@ -15,7 +15,7 @@ import {
   Star
 } from 'lucide-react'
 import { useUserContext } from '@/contexts/user-context'
-import { useNotifications } from '@/contexts/notifications-context'
+import { useNotifications } from '@/contexts/app-state-context'
 
 const PLANS = [
   {

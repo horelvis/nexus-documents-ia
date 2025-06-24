@@ -81,6 +81,21 @@ class ApiClient {
     } catch (error: any) {
       console.log('API request failed:', error)
       
+      // Check if it's a network/connection error
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        // This is a connection error
+        const connectionError = new Error('Unable to connect to the server. Please check if the backend is running.')
+        connectionError.name = 'ConnectionError'
+        throw connectionError
+      }
+      
+      // Check for other network errors
+      if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.code === 'ERR_INTERNET_DISCONNECTED') {
+        const connectionError = new Error('Connection refused. The server may be down or unreachable.')
+        connectionError.name = 'ConnectionError'
+        throw connectionError
+      }
+      
       // If the error has response data (from our throw above), preserve it
       if (error?.response) {
         throw error

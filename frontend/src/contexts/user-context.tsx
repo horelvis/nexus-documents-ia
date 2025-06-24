@@ -146,18 +146,37 @@ export function UserProvider({ children }: UserProviderProps) {
         router.push(getOnboardingPath(userData))
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error checking user status:', error)
       
-      // On error, just log it - don't assume anything about onboarding
-      setBackendUser(null)
-      setOnboarding({
-        needsOnboarding: false,
-        isNewUser: false,
-        hasCompletedSync: false,
-        loading: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      })
+      // Check if it's a connection error
+      const isConnectionError = 
+        error?.name === 'ConnectionError' ||
+        error?.message?.includes('Unable to connect') ||
+        error?.message?.includes('Failed to fetch')
+      
+      // For connection errors, silently fail without setting error state
+      // The ConnectionProvider will handle showing the error page
+      if (isConnectionError) {
+        setBackendUser(null)
+        setOnboarding({
+          needsOnboarding: false,
+          isNewUser: false,
+          hasCompletedSync: false,
+          loading: false,
+          error: null // Don't set error for connection issues
+        })
+      } else {
+        // For other errors, set the error state
+        setBackendUser(null)
+        setOnboarding({
+          needsOnboarding: false,
+          isNewUser: false,
+          hasCompletedSync: false,
+          loading: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+      }
     } finally {
       setUserLoading(false)
     }

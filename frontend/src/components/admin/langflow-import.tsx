@@ -18,7 +18,7 @@ import {
   IconRobot,
   IconSparkles
 } from "@tabler/icons-react"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 
 interface LangflowImportProps {
   onImportSuccess?: (agent: any) => void

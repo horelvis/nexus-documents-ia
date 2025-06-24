@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { 
   IconBell, 
   IconBellRinging,

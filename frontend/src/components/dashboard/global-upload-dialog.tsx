@@ -2,7 +2,7 @@
 
 import { UploadDialog } from "@/components/dashboard/upload-dialog"
 import { useUpload } from "@/contexts/upload-context"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 
 export function GlobalUploadDialog() {
   const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete } = useUpload()

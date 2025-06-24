@@ -5,21 +5,14 @@ import { useParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
 import { 
   Users, 
-  UserPlus, 
   Search, 
   MoreVertical, 
-  Shield, 
   Mail, 
-  Calendar,
   Check,
   X,
-  Edit,
   Trash,
-  Key,
-  Activity,
   Settings,
   QrCode,
-  Link,
   Clock,
   Copy
 } from 'lucide-react'
@@ -46,7 +39,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
@@ -67,47 +60,13 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { useApiClient } from '@/lib/api-client'
-
-interface TeamInfo {
-  id: string
-  name: string
-  description: string | null
-  created_at: string
-  updated_at: string
-  members_count: number
-  storage_quota: number
-  is_active: boolean
-}
-
-interface TeamMember {
-  id: string
-  email: string
-  full_name: string | null
-  is_team_member: boolean
-  is_active: boolean
-  created_at: string
-  role: string
-  subscription_plan: string
-  invited_at: string | null
-}
-
-interface InviteMemberData {
-  email: string
-  role: string
-}
-
-interface TeamInvitation {
-  id: string
-  invitation_code: string
-  invitation_url: string
-  qr_code: string
-  email: string | null
-  expires_at: string
-  created_at: string
-  tenant_name: string
-  used: boolean
-  used_at: string | null
-}
+import type {
+  TeamInfo,
+  TeamMember,
+  TeamInvitation,
+  InviteMemberData,
+  UpdateTeamData} from '@/lib/types/teams'
+import Image from 'next/image'
 
 export default function TeamsPage() {
   const params = useParams()
@@ -128,7 +87,7 @@ export default function TeamsPage() {
   const [selectedInvitation, setSelectedInvitation] = useState<TeamInvitation | null>(null)
   
   // Form data
-  const [editTeamData, setEditTeamData] = useState({ name: '', description: '' })
+  const [editTeamData, setEditTeamData] = useState<UpdateTeamData>({ name: '', description: '' })
   const [inviteData, setInviteData] = useState<InviteMemberData>({ email: '', role: 'member' })
   const [invitationExpiry, setInvitationExpiry] = useState(7)
 
@@ -141,8 +100,8 @@ export default function TeamsPage() {
     setIsLoading(true)
     try {
       // Load team info
-      const teamResponse = await apiClient.get('/teams/')
-      if (!teamResponse.error) {
+      const teamResponse = await apiClient.get<TeamInfo>('/teams/')
+      if (!teamResponse.error && teamResponse.data) {
         setTeamInfo(teamResponse.data)
         setEditTeamData({
           name: teamResponse.data.name,
@@ -151,14 +110,14 @@ export default function TeamsPage() {
       }
 
       // Load team members
-      const membersResponse = await apiClient.get('/teams/members')
-      if (!membersResponse.error) {
+      const membersResponse = await apiClient.get<TeamMember[]>('/teams/members')
+      if (!membersResponse.error && membersResponse.data) {
         setMembers(membersResponse.data)
       }
 
       // Load invitations
-      const invitationsResponse = await apiClient.get('/teams/invitations')
-      if (!invitationsResponse.error) {
+      const invitationsResponse = await apiClient.get<TeamInvitation[]>('/teams/invitations')
+      if (!invitationsResponse.error && invitationsResponse.data) {
         setInvitations(invitationsResponse.data)
       }
     } catch (error) {
@@ -175,8 +134,8 @@ export default function TeamsPage() {
 
   const handleUpdateTeam = async () => {
     try {
-      const response = await apiClient.put('/teams/', editTeamData)
-      if (!response.error) {
+      const response = await apiClient.put<TeamInfo>('/teams/', editTeamData)
+      if (!response.error && response.data) {
         setTeamInfo(response.data)
         setShowEditTeam(false)
         toast({
@@ -184,12 +143,12 @@ export default function TeamsPage() {
           description: 'Team information updated successfully'
         })
       } else {
-        throw new Error(response.error)
+        throw new Error(response.error || 'Failed to update team')
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to update team information',
+        description: error instanceof Error ? error.message : 'Failed to update team information',
         variant: 'destructive'
       })
     }
@@ -197,7 +156,7 @@ export default function TeamsPage() {
 
   const handleInviteMember = async () => {
     try {
-      const response = await apiClient.post('/teams/members/invite', inviteData)
+      const response = await apiClient.post<{ message: string }>('/teams/members/invite', inviteData)
       if (!response.error) {
         setShowInviteDialog(false)
         setInviteData({ email: '', role: 'member' })
@@ -207,12 +166,12 @@ export default function TeamsPage() {
         })
         loadData() // Reload to update members list
       } else {
-        throw new Error(response.error)
+        throw new Error(response.error || 'Failed to send invitation')
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to send invitation',
+        description: error instanceof Error ? error.message : 'Failed to send invitation',
         variant: 'destructive'
       })
     }
@@ -220,20 +179,20 @@ export default function TeamsPage() {
 
   const handleCreateInvitationLink = async () => {
     try {
-      const response = await apiClient.post('/teams/invitations', {
+      const response = await apiClient.post<TeamInvitation>('/teams/invitations', {
         expires_in_days: invitationExpiry
       })
-      if (!response.error) {
+      if (!response.error && response.data) {
         setSelectedInvitation(response.data)
         setShowQRDialog(true)
         loadData() // Reload invitations
       } else {
-        throw new Error(response.error)
+        throw new Error(response.error || 'Failed to create invitation')
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to create invitation link',
+        description: error instanceof Error ? error.message : 'Failed to create invitation link',
         variant: 'destructive'
       })
     }
@@ -243,7 +202,7 @@ export default function TeamsPage() {
     if (!confirm('Are you sure you want to remove this member?')) return
 
     try {
-      const response = await apiClient.delete(`/teams/members/${memberId}`)
+      const response = await apiClient.delete<{ message: string }>(`/teams/members/${memberId}`)
       if (!response.error) {
         toast({
           title: 'Success',
@@ -251,12 +210,12 @@ export default function TeamsPage() {
         })
         loadData()
       } else {
-        throw new Error(response.error)
+        throw new Error(response.error || 'Failed to remove member')
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to remove member',
+        description: error instanceof Error ? error.message : 'Failed to remove member',
         variant: 'destructive'
       })
     }
@@ -537,7 +496,7 @@ export default function TeamsPage() {
           {selectedInvitation && (
             <div className="space-y-4">
               <div className="flex justify-center">
-                <img 
+                <Image 
                   src={selectedInvitation.qr_code} 
                   alt="QR Code" 
                   className="w-64 h-64"

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select"
 import { Document as ApiDocument } from "@/lib/types"
 import { useSharedDocumentsService } from "@/lib/services/shared-documents.service"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { IconLoader2, IconCopy, IconCheck } from "@tabler/icons-react"
 
 interface ShareDocumentDialogProps {

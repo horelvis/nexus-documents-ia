@@ -47,7 +47,7 @@ import {
 } from "@tabler/icons-react"
 import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { 
   signatureProviderSchema, 
   SignatureProviderFormData,

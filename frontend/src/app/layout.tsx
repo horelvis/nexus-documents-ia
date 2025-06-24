@@ -3,10 +3,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from '@clerk/nextjs'
 import { ThemeProvider } from "@/components/providers/theme-provider";
-import { UserProvider } from "@/contexts/user-context";
 import { PageLoaderProvider } from "@/components/providers/page-loader";
 import { TopLoader } from "@/components/providers/top-loader";
 import { Toaster } from "@/components/ui/toaster";
+import { AppProviders } from "@/components/providers/app-providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -58,13 +58,13 @@ export default function RootLayout({
             enableSystem
             storageKey="nexus-theme"
           >
-            <PageLoaderProvider>
-              <TopLoader />
-              <UserProvider>
+            <AppProviders>
+              <PageLoaderProvider>
+                <TopLoader />
                 {children}
                 <Toaster />
-              </UserProvider>
-            </PageLoaderProvider>
+              </PageLoaderProvider>
+            </AppProviders>
           </ThemeProvider>
         </body>
         

@@ -40,7 +40,7 @@ import {
 import { Document as ApiDocument } from "@/lib/types"
 import { SignatureProvider, SignatureRequestSigner } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useAgentService } from "@/lib/services/agent.service"
 
 interface SignatureRequestDialogProps {

@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
 import { useUpload } from "@/contexts/upload-context"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentService } from "@/lib/services/document.service"
 import { Document as ApiDocument } from "@/lib/types"
 import { 

@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
 import { Agent, useAgentsService } from "@/lib/services/agents.service"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useParams, useSearchParams } from "next/navigation"
 import { useNavigation } from "@/hooks/use-navigation"
 

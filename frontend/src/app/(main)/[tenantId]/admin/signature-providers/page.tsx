@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useAuth } from "@clerk/nextjs"
 import { ProviderConfigWizard } from "@/components/admin/provider-config-wizard"
 import { DeleteProviderDialog } from "@/components/admin/signature-providers/delete-provider-dialog"

@@ -61,12 +61,15 @@ async def get_team_info(
             )
         
         # Count team members
-        members_count = db.query(func.count(User.id)).filter(
-            and_(
-                User.tenant_id == tenant.id,
-                User.is_active == True
+        result = await db.execute(
+            select(func.count(User.id)).filter(
+                and_(
+                    User.tenant_id == tenant.id,
+                    User.is_active == True
+                )
             )
-        ).scalar() or 0
+        )
+        members_count = result.scalar() or 0
         
         # Convert storage from MB to GB for display
         storage_quota_gb = (tenant.max_storage_mb or 5120) // 1024  # Default 5GB if not set
@@ -102,7 +105,8 @@ async def update_team_info(
     """
     try:
         # Get tenant
-        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
         
         if not tenant:
             raise HTTPException(
@@ -118,16 +122,19 @@ async def update_team_info(
         
         tenant.updated_at = datetime.utcnow()
         
-        db.commit()
-        db.refresh(tenant)
+        await db.commit()
+        await db.refresh(tenant)
         
         # Count team members
-        members_count = db.query(func.count(User.id)).filter(
-            and_(
-                User.tenant_id == tenant.id,
-                User.is_active == True
+        result = await db.execute(
+            select(func.count(User.id)).filter(
+                and_(
+                    User.tenant_id == tenant.id,
+                    User.is_active == True
+                )
             )
-        ).scalar() or 0
+        )
+        members_count = result.scalar() or 0
         
         logger.info(f"Team {tenant.name} updated by {current_user.email}")
         
@@ -149,7 +156,7 @@ async def update_team_info(
         raise
     except Exception as e:
         logger.error(f"Error updating team: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update team"
@@ -168,7 +175,7 @@ async def get_team_members(
     """
     try:
         # Base query for users in the same tenant
-        query = db.query(User).filter(
+        query = select(User).filter(
             and_(
                 User.tenant_id == current_user.tenant_id,
                 User.is_active == True
@@ -186,7 +193,10 @@ async def get_team_members(
             )
         
         # Execute query
-        members = query.offset(skip).limit(limit).order_by(User.created_at.desc()).all()
+        result = await db.execute(
+            query.offset(skip).limit(limit).order_by(User.created_at.desc())
+        )
+        members = result.scalars().all()
         
         # Get the admin user to inherit subscription plan
         admin_user = next((u for u in members if not u.is_team_member), None)
@@ -222,12 +232,15 @@ async def invite_team_member(
     """
     try:
         # Check if user already exists
-        existing_user = db.query(User).filter(
-            and_(
-                User.email == member_data.email,
-                User.tenant_id == current_user.tenant_id
+        result = await db.execute(
+            select(User).filter(
+                and_(
+                    User.email == member_data.email,
+                    User.tenant_id == current_user.tenant_id
+                )
             )
-        ).first()
+        )
+        existing_user = result.scalar_one_or_none()
         
         if existing_user:
             raise HTTPException(
@@ -236,7 +249,8 @@ async def invite_team_member(
             )
         
         # Check if any user with this email exists
-        any_user = db.query(User).filter(User.email == member_data.email).first()
+        result = await db.execute(select(User).filter(User.email == member_data.email))
+        any_user = result.scalar_one_or_none()
         if any_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -244,7 +258,8 @@ async def invite_team_member(
             )
         
         # Get tenant info
-        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
         tenant_name = tenant.name if tenant else "Organization"
         
         # Generate invitation link
@@ -296,12 +311,15 @@ async def remove_team_member(
     """
     try:
         # Find member
-        member = db.query(User).filter(
-            and_(
-                User.id == member_id,
-                User.tenant_id == current_user.tenant_id
+        result = await db.execute(
+            select(User).filter(
+                and_(
+                    User.id == member_id,
+                    User.tenant_id == current_user.tenant_id
+                )
             )
-        ).first()
+        )
+        member = result.scalar_one_or_none()
         
         if not member:
             raise HTTPException(
@@ -318,13 +336,16 @@ async def remove_team_member(
         
         # Check if this is the last admin
         if not member.is_team_member:  # If member is an admin
-            admin_count = db.query(func.count(User.id)).filter(
-                and_(
-                    User.tenant_id == current_user.tenant_id,
-                    User.is_team_member == False,
-                    User.is_active == True
+            result = await db.execute(
+                select(func.count(User.id)).filter(
+                    and_(
+                        User.tenant_id == current_user.tenant_id,
+                        User.is_team_member == False,
+                        User.is_active == True
+                    )
                 )
-            ).scalar() or 0
+            )
+            admin_count = result.scalar() or 0
             
             if admin_count <= 1:
                 raise HTTPException(
@@ -334,7 +355,7 @@ async def remove_team_member(
         
         # Deactivate user
         member.is_active = False
-        db.commit()
+        await db.commit()
         
         logger.info(f"Team member {member.email} removed by {current_user.email}")
         
@@ -344,7 +365,7 @@ async def remove_team_member(
         raise
     except Exception as e:
         logger.error(f"Error removing team member: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove team member"
@@ -377,8 +398,8 @@ async def create_team_invitation(
         )
         
         db.add(db_invitation)
-        db.commit()
-        db.refresh(db_invitation)
+        await db.commit()
+        await db.refresh(db_invitation)
         
         # Generate invitation URL
         invitation_url = f"{settings.FRONTEND_URL}/join-team/{invitation_code}"
@@ -396,7 +417,8 @@ async def create_team_invitation(
         logger.info(f"Created team invitation for tenant {current_user.tenant_id}")
         
         # Get tenant name
-        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
         
         # Send email if specified
         if invitation.email:
@@ -428,7 +450,7 @@ async def create_team_invitation(
         
     except Exception as e:
         logger.error(f"Error creating team invitation: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create invitation"
@@ -443,12 +465,16 @@ async def get_team_invitations(
     Get all invitations for the current team (admin only)
     """
     try:
-        invitations = db.query(TeamInvitation).filter(
-            TeamInvitation.tenant_id == current_user.tenant_id
-        ).order_by(TeamInvitation.created_at.desc()).all()
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                TeamInvitation.tenant_id == current_user.tenant_id
+            ).order_by(TeamInvitation.created_at.desc())
+        )
+        invitations = result.scalars().all()
         
         # Get tenant name
-        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
         tenant_name = tenant.name if tenant else "Organization"
         
         result = []
@@ -497,9 +523,12 @@ async def accept_team_invitation(
     """
     try:
         # Find invitation
-        invitation = db.query(TeamInvitation).filter(
-            TeamInvitation.invitation_code == invitation_code
-        ).first()
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                TeamInvitation.invitation_code == invitation_code
+            )
+        )
+        invitation = result.scalar_one_or_none()
         
         if not invitation:
             raise HTTPException(
@@ -529,7 +558,8 @@ async def accept_team_invitation(
             )
         
         # Check if user already exists
-        existing_user = db.query(User).filter(User.email == accept_data.email).first()
+        result = await db.execute(select(User).filter(User.email == accept_data.email))
+        existing_user = result.scalar_one_or_none()
         
         if existing_user:
             raise HTTPException(
@@ -544,10 +574,11 @@ async def accept_team_invitation(
         invitation.used = True
         invitation.used_at = datetime.utcnow()
         
-        db.commit()
+        await db.commit()
         
         # Get tenant name
-        tenant = db.query(Tenant).filter(Tenant.id == invitation.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == invitation.tenant_id))
+        tenant = result.scalar_one_or_none()
         
         logger.info(f"Team invitation {invitation_code} accepted by {accept_data.email}")
         
@@ -562,7 +593,7 @@ async def accept_team_invitation(
         raise
     except Exception as e:
         logger.error(f"Error accepting team invitation: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to accept invitation"

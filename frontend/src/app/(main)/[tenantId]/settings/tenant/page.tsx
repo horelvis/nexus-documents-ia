@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useUser } from "@/contexts/user-context"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useTenantService } from "@/lib/services/tenant.service"
 import { formatBytes } from "@/lib/utils"
 

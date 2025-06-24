@@ -23,7 +23,7 @@ import {
   IconSignature,
   IconInfoCircle
 } from "@tabler/icons-react"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useSearchService } from "@/lib/services/search.service"
 import { useAgentsService } from "@/lib/services/agents.service"
 import { DocumentCard } from "@/components/documents/document-card"

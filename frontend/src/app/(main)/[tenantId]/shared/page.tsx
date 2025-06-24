@@ -21,7 +21,7 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useSharedDocumentsService, SharedDocument } from "@/lib/services/shared-documents.service"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SharedDocumentsDataTable } from "@/components/shared/shared-documents-data-table"

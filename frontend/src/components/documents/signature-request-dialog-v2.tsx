@@ -51,7 +51,7 @@ import {
 import { Document as ApiDocument } from "@/lib/types"
 import { SignatureProvider } from "@/lib/services/signature-service"
 import { useSignatureService } from "@/lib/services/signature-service.hooks"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { SignaturePlacementEditor } from "./signature-placement-editor"
 import { cn } from "@/lib/utils"
 import { useSignatureAI } from "@/lib/services/signature-ai-service"

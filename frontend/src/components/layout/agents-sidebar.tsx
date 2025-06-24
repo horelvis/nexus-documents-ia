@@ -30,7 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Agent, useAgentsService } from "@/lib/services/agents.service"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 import { useParams } from "next/navigation"
 
 interface AgentsSidebarProps {

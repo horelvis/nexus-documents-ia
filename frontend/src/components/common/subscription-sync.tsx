@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@clerk/nextjs'
-import { useNotifications } from '@/contexts/notifications-context'
+import { useNotifications } from '@/contexts/app-state-context'
 import { useUserContext } from '@/contexts/user-context'
 import { Loader2 } from 'lucide-react'
 
