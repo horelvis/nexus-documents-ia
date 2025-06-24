@@ -266,17 +266,12 @@ async def invite_team_member(
         invitation_link = f"{settings.FRONTEND_URL}/auth/sign-up?tenant={current_user.tenant_id}&role={member_data.role}"
         
         # Send invitation email
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        email_sent = loop.run_until_complete(
-            email_service.send_user_invitation(
-                email=member_data.email,
-                inviter_name=current_user.full_name or current_user.email,
-                tenant_name=tenant_name,
-                invitation_link=invitation_link,
-                role="admin" if member_data.role == "admin" else "team member"
-            )
+        email_sent = await email_service.send_user_invitation(
+            email=member_data.email,
+            inviter_name=current_user.full_name or current_user.email,
+            tenant_name=tenant_name,
+            invitation_link=invitation_link,
+            role="admin" if member_data.role == "admin" else "team member"
         )
         
         if not email_sent:
@@ -422,17 +417,12 @@ async def create_team_invitation(
         
         # Send email if specified
         if invitation.email:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            loop.run_until_complete(
-                email_service.send_team_invitation(
-                    email=invitation.email,
-                    team_name=tenant.name if tenant else "Team",
-                    inviter_name=current_user.full_name or current_user.email,
-                    invitation_link=invitation_url,
-                    expires_at=db_invitation.expires_at
-                )
+            await email_service.send_team_invitation(
+                email=invitation.email,
+                team_name=tenant.name if tenant else "Team",
+                inviter_name=current_user.full_name or current_user.email,
+                invitation_link=invitation_url,
+                expires_at=db_invitation.expires_at
             )
         
         return TeamInvitationResponse(
