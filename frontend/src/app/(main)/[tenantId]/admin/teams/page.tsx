@@ -18,13 +18,20 @@ import {
   QrCode,
   Clock,
   Copy,
-  Loader2
+  Loader2,
+  Send
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Form,
   FormControl,
@@ -114,6 +121,9 @@ export default function TeamsPage() {
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showQRDialog, setShowQRDialog] = useState(false)
   const [selectedInvitation, setSelectedInvitation] = useState<TeamInvitation | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  const [deletingItemType, setDeletingItemType] = useState<'member' | 'invitation' | null>(null)
   
   // Form data
   const [invitationExpiry, setInvitationExpiry] = useState(7)
@@ -138,6 +148,8 @@ export default function TeamsPage() {
   
   // Loading states
   const [isGeneratingQR, setIsGeneratingQR] = useState(false)
+  const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
+  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null)
 
   // Load team info and members
   useEffect(() => {
@@ -212,17 +224,38 @@ export default function TeamsPage() {
   }
 
   const handleInviteMember = async (data: InviteMemberFormData) => {
-    console.log('Form data being sent:', { email: data.email, role: data.role })
-    console.log('Current user email:', user?.emailAddresses?.[0]?.emailAddress)
     try {
-      const response = await apiClient.post<{ message: string }>('/teams/members/invite', data)
-      if (!response.error) {
+      const response = await apiClient.post<{ 
+        message: string
+        email_sent: boolean
+        invitation_link?: string 
+      }>('/teams/members/invite', data)
+      
+      if (!response.error && response.data) {
         setShowInviteDialog(false)
         inviteForm.reset()
-        toast({
-          title: 'Success',
-          description: `Invitation sent to ${data.email}`
-        })
+        
+        if (response.data.email_sent) {
+          toast({
+            title: 'Success',
+            description: `Invitation sent to ${data.email}`
+          })
+        } else if (response.data.invitation_link) {
+          // Show invitation link if email failed
+          toast({
+            title: 'Invitation Created',
+            description: (
+              <div className="space-y-2">
+                <p>Email service is unavailable. Share this link with {data.email}:</p>
+                <code className="block text-xs bg-muted p-2 rounded">
+                  {response.data.invitation_link}
+                </code>
+              </div>
+            ) as any,
+            duration: 10000 // Show for 10 seconds
+          })
+        }
+        
         loadData() // Reload to update members list
       } else {
         throw new Error(response.error || 'Failed to send invitation')
@@ -280,6 +313,77 @@ export default function TeamsPage() {
         description: error instanceof Error ? error.message : 'Failed to remove member',
         variant: 'destructive'
       })
+    }
+  }
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    if (!confirm('Are you sure you want to revoke this invitation?')) return
+
+    setRevokingInvitationId(invitationId)
+    try {
+      const response = await apiClient.delete<{ message: string }>(`/teams/invitations/${invitationId}`)
+      if (!response.error) {
+        toast({
+          title: 'Success',
+          description: 'Invitation revoked successfully'
+        })
+        loadData()
+      } else {
+        throw new Error(response.error || 'Failed to revoke invitation')
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to revoke invitation',
+        variant: 'destructive'
+      })
+    } finally {
+      setRevokingInvitationId(null)
+    }
+  }
+
+  const handleResendInvitation = async (invitationId: string) => {
+    setResendingInvitationId(invitationId)
+    try {
+      const response = await apiClient.post<{
+        message: string
+        email_sent: boolean
+        invitation_url?: string
+      }>(`/teams/invitations/${invitationId}/resend`, {})
+      
+      if (!response.error && response.data) {
+        if (response.data.email_sent) {
+          toast({
+            title: 'Success',
+            description: response.data.message
+          })
+        } else if (response.data.invitation_url) {
+          // Show invitation link if email failed
+          toast({
+            title: 'Email Service Unavailable',
+            description: (
+              <div className="space-y-2">
+                <p>Email service is unavailable. Copy and share this link:</p>
+                <code className="block text-xs bg-muted p-2 rounded">
+                  {response.data.invitation_url}
+                </code>
+              </div>
+            ) as any,
+            duration: 10000 // Show for 10 seconds
+          })
+        }
+        loadData() // Reload to refresh data
+      } else {
+        throw new Error(response.error || 'Failed to resend invitation')
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to resend invitation',
+        variant: 'destructive'
+      })
+    } finally {
+      setResendingInvitationId(null)
     }
   }
 
@@ -541,18 +645,67 @@ export default function TeamsPage() {
                       {format(new Date(invitation.created_at), 'PP', { locale: es })}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setSelectedInvitation(invitation)
-                          setShowQRDialog(true)
-                        }}
-                        disabled={invitation.used || new Date(invitation.expires_at) < new Date()}
-                      >
-                        <QrCode className="w-4 h-4 mr-2" />
-                        View QR
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setSelectedInvitation(invitation)
+                            setShowQRDialog(true)
+                          }}
+                          disabled={invitation.used || new Date(invitation.expires_at) < new Date()}
+                        >
+                          <QrCode className="w-4 h-4 mr-2" />
+                          View QR
+                        </Button>
+                        {!invitation.used && new Date(invitation.expires_at) > new Date() && invitation.email && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleResendInvitation(invitation.id)}
+                                  disabled={resendingInvitationId === invitation.id}
+                                >
+                                  {resendingInvitationId === invitation.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Send className="w-4 h-4" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Resend invitation email</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                        {!invitation.used && new Date(invitation.expires_at) > new Date() && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleRevokeInvitation(invitation.id)}
+                                  className="text-destructive hover:text-destructive"
+                                  disabled={revokingInvitationId === invitation.id}
+                                >
+                                  {revokingInvitationId === invitation.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <X className="w-4 h-4" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Revoke invitation</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

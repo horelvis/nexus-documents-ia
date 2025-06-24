@@ -257,6 +257,29 @@ async def invite_team_member(
                 detail="User with this email already exists in another team"
             )
         
+        # Check for existing active invitations for this email
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                and_(
+                    TeamInvitation.tenant_id == current_user.tenant_id,
+                    TeamInvitation.email == member_data.email,
+                    TeamInvitation.used == False,
+                    TeamInvitation.expires_at > datetime.utcnow()
+                )
+            )
+        )
+        existing_invitation = result.scalar_one_or_none()
+        
+        if existing_invitation:
+            # Calculate time until expiration
+            time_until_expiry = existing_invitation.expires_at - datetime.utcnow()
+            days_remaining = time_until_expiry.days
+            
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"An active invitation already exists for {member_data.email}. It will expire in {days_remaining} days."
+            )
+        
         # Get tenant info
         result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
         tenant = result.scalar_one_or_none()
@@ -278,14 +301,16 @@ async def invite_team_member(
         
         if not email_sent:
             logger.warning(f"Failed to send invitation email to {member_data.email}")
+            logger.info("Note: Email service is not configured. User can still sign up using the invitation link.")
         
-        logger.info(f"Team member invitation sent to {member_data.email} by {current_user.email}")
+        logger.info(f"Team member invitation created for {member_data.email} by {current_user.email}")
         
         return {
-            "message": f"Invitation sent to {member_data.email}",
+            "message": f"Invitation created for {member_data.email}. {'Email notification sent.' if email_sent else 'Email service unavailable - share the signup link manually.'}",
             "email": member_data.email,
             "role": member_data.role,
-            "email_sent": email_sent
+            "email_sent": email_sent,
+            "invitation_link": invitation_link
         }
         
     except HTTPException:
@@ -382,6 +407,26 @@ async def create_team_invitation(
     Create a new team invitation with QR code (admin only)
     """
     try:
+        # Check for existing active invitations for this email
+        if invitation.email:
+            result = await db.execute(
+                select(TeamInvitation).filter(
+                    and_(
+                        TeamInvitation.tenant_id == current_user.tenant_id,
+                        TeamInvitation.email == invitation.email,
+                        TeamInvitation.used == False,
+                        TeamInvitation.expires_at > datetime.utcnow()
+                    )
+                )
+            )
+            existing_invitation = result.scalar_one_or_none()
+            
+            if existing_invitation:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"An active invitation already exists for {invitation.email}"
+                )
+        
         # Generate unique invitation code
         invitation_code = secrets.token_urlsafe(32)
         
@@ -502,6 +547,148 @@ async def get_team_invitations(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get invitations"
+        )
+
+@router.delete("/invitations/{invitation_id}")
+async def revoke_invitation(
+    invitation_id: UUID,
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Revoke/cancel an invitation (admin only)
+    """
+    try:
+        # Find invitation
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                and_(
+                    TeamInvitation.id == invitation_id,
+                    TeamInvitation.tenant_id == current_user.tenant_id
+                )
+            )
+        )
+        invitation = result.scalar_one_or_none()
+        
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invitation not found"
+            )
+        
+        if invitation.used:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot revoke an already used invitation"
+            )
+        
+        # Delete the invitation
+        await db.delete(invitation)
+        await db.commit()
+        
+        logger.info(f"Invitation {invitation_id} revoked by {current_user.email}")
+        
+        return {"message": "Invitation revoked successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error revoking invitation: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to revoke invitation"
+        )
+
+@router.post("/invitations/{invitation_id}/resend")
+async def resend_team_invitation(
+    invitation_id: UUID,
+    current_user: User = Depends(get_current_tenant_admin_async),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Resend an invitation email (admin only)
+    """
+    try:
+        # Find invitation
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                and_(
+                    TeamInvitation.id == invitation_id,
+                    TeamInvitation.tenant_id == current_user.tenant_id
+                )
+            )
+        )
+        invitation = result.scalar_one_or_none()
+        
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invitation not found"
+            )
+        
+        # Check if invitation is already used
+        if invitation.used:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot resend an already used invitation"
+            )
+        
+        # Check if invitation is expired
+        if invitation.expires_at < datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot resend an expired invitation. Please create a new one."
+            )
+        
+        # Check if invitation has an email
+        if not invitation.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot resend invitation - no email address specified"
+            )
+        
+        # Get tenant info
+        result = await db.execute(select(Tenant).filter(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
+        tenant_name = tenant.name if tenant else "Organization"
+        
+        # Generate invitation URL
+        invitation_url = f"{settings.FRONTEND_URL}/join-team/{invitation.invitation_code}"
+        
+        # Send invitation email
+        logger.info(f"Resending invitation email to: {invitation.email}")
+        email_sent = await email_service.send_team_invitation(
+            email=invitation.email,
+            team_name=tenant_name,
+            inviter_name=current_user.full_name or current_user.email,
+            invitation_link=invitation_url,
+            expires_at=invitation.expires_at
+        )
+        
+        if not email_sent:
+            logger.warning(f"Failed to resend invitation email to {invitation.email}")
+            return {
+                "message": "Email service is currently unavailable",
+                "email_sent": False,
+                "invitation_url": invitation_url
+            }
+        
+        logger.info(f"Invitation resent to {invitation.email} by {current_user.email}")
+        
+        return {
+            "message": f"Invitation resent to {invitation.email}",
+            "email_sent": True,
+            "invitation_url": invitation_url
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resending invitation: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resend invitation"
         )
 
 @router.get("/invitations/{invitation_code}/info")
