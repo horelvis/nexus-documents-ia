@@ -248,7 +248,8 @@ class AsyncAuthService:
         clerk_user_id: str,
         email: str,
         full_name: str,
-        stripe_customer_id: Optional[str] = None
+        stripe_customer_id: Optional[str] = None,
+        metadata: Optional[dict] = None
     ) -> User:
         """Sincroniza un usuario desde Clerk. Crea si no existe, actualiza si existe."""
         # Buscar usuario existente por clerk_user_id
@@ -292,17 +293,55 @@ class AsyncAuthService:
         # Usuario no existe, crear uno nuevo
         logger.info(f"👤 Creating new user from Clerk: {clerk_user_id}")
         
-        # TODO: Verificar si hay una invitación pendiente para este email
-        # Por ahora, crear nuevo tenant para cada usuario (su propia organización)
-        user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
-        tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
+        # Check for invitation code in metadata
+        invitation_code = metadata.get('invitation_code') if metadata else None
+        invitation_tenant_id = metadata.get('tenant_id') if metadata else None
         
-        logger.info(f"🏢 Creating new organization for user: {tenant_name}")
-        user_tenant = await AsyncAuthService.create_tenant(
-            db=db,
-            name=tenant_name,
-            description=f"Organization for {full_name or email}"
-        )
+        if invitation_code and invitation_tenant_id:
+            # User is joining an existing team via invitation
+            logger.info(f"🎫 Processing invitation code: {invitation_code}")
+            
+            # Import here to avoid circular dependency
+            from app.db.models import TeamInvitation
+            
+            # Find and validate invitation
+            result = await db.execute(
+                select(TeamInvitation).where(
+                    TeamInvitation.invitation_code == invitation_code,
+                    TeamInvitation.tenant_id == invitation_tenant_id
+                )
+            )
+            invitation = result.scalar_one_or_none()
+            
+            if invitation and not invitation.used and invitation.expires_at > datetime.utcnow():
+                # Valid invitation - use the existing tenant
+                user_tenant_id = invitation.tenant_id
+                is_team_member = True
+                
+                # Mark invitation as used
+                invitation.used = True
+                invitation.used_at = datetime.utcnow()
+                
+                logger.info(f"✅ Valid invitation found, joining tenant: {user_tenant_id}")
+            else:
+                logger.warning(f"⚠️ Invalid or expired invitation: {invitation_code}")
+                # Fall back to creating new tenant
+                invitation_code = None
+                invitation_tenant_id = None
+        
+        if not invitation_code:
+            # No valid invitation - create new tenant for user
+            user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
+            tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
+            
+            logger.info(f"🏢 Creating new organization for user: {tenant_name}")
+            user_tenant = await AsyncAuthService.create_tenant(
+                db=db,
+                name=tenant_name,
+                description=f"Organization for {full_name or email}"
+            )
+            user_tenant_id = user_tenant.id
+            is_team_member = False
         
         # Crear usuario con password temporal (no se usará con Clerk)
         new_user = User(
@@ -311,10 +350,12 @@ class AsyncAuthService:
             hashed_password=AsyncAuthService.get_password_hash("temp_password_from_clerk"),
             full_name=full_name,
             is_superuser=False,
-            tenant_id=user_tenant.id,
+            tenant_id=user_tenant_id,
             clerk_user_id=clerk_user_id,
             stripe_customer_id=stripe_customer_id,
-            is_active=True
+            is_active=True,
+            is_team_member=is_team_member,
+            invited_at=datetime.utcnow() if is_team_member else None
         )
         
         db.add(new_user)

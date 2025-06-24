@@ -14,12 +14,11 @@ from app.api.async_dependencies import (
     require_document_upload_permission_async
 )
 from app.db.async_database import get_async_db
-from app.db.models import User
+from app.db.models import User, Document as DBDocument, Tag
 from app.schemas.document import (
     Document, DocumentDetail,
     UploadRequest
 )
-from app.services.document_service import DocumentService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -671,17 +670,17 @@ async def recategorize_all_documents(
     from sqlalchemy import or_
     
     # Get documents to recategorize
-    query = select(Document.id).filter(
-        Document.tenant_id == tenant_id,
-        Document.content.isnot(None)  # Only documents with content
+    query = select(DBDocument.id).filter(
+        DBDocument.tenant_id == tenant_id,
+        DBDocument.content.isnot(None)  # Only documents with content
     )
     
     if only_uncategorized:
         query = query.filter(
             or_(
-                Document.category.is_(None),
-                Document.category == "",
-                Document.category == "general"
+                DBDocument.category.is_(None),
+                DBDocument.category == "",
+                DBDocument.category == "general"
             )
         )
     

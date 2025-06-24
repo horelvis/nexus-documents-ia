@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.async_database import get_async_db
 from app.db.models import User
-from app.services.auth_service import AuthService
+from app.services.async_auth_service import AsyncAuthService
 from app.schemas.user import UserSync
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -110,20 +110,25 @@ async def handle_user_created(db: AsyncSession, user_data: Dict[str, Any]) -> Di
         logger.info(f"📝 Creating user from Clerk webhook: {primary_email}")
         
         # Check if user already exists
-        existing_user = db.query(User).filter(
-            User.clerk_user_id == clerk_user_id
-        ).first()
+        result = await db.execute(
+            select(User).filter(User.clerk_user_id == clerk_user_id)
+        )
+        existing_user = result.scalar_one_or_none()
         
         if existing_user:
             logger.info(f"User {clerk_user_id} already exists, updating...")
             return await handle_user_updated(db, user_data)
         
+        # Extract metadata for invitation handling
+        unsafe_metadata = user_data.get('unsafe_metadata', {})
+        
         # Create new user via sync_user_from_clerk
-        user = AuthService.sync_user_from_clerk(
+        user = await AsyncAuthService.sync_user_from_clerk(
             db=db,
             clerk_user_id=clerk_user_id,
             email=primary_email,
-            full_name=full_name
+            full_name=full_name,
+            metadata=unsafe_metadata
         )
         
         logger.info(f"✅ User created successfully: {user.id}")
@@ -156,9 +161,10 @@ async def handle_user_updated(db: AsyncSession, user_data: Dict[str, Any]) -> Di
             )
         
         # Find existing user
-        existing_user = db.query(User).filter(
-            User.clerk_user_id == clerk_user_id
-        ).first()
+        result = await db.execute(
+            select(User).filter(User.clerk_user_id == clerk_user_id)
+        )
+        existing_user = result.scalar_one_or_none()
         
         if not existing_user:
             logger.info(f"User {clerk_user_id} not found, creating...")
@@ -221,9 +227,10 @@ async def handle_user_deleted(db: AsyncSession, user_data: Dict[str, Any]) -> Di
             )
         
         # Find existing user
-        existing_user = db.query(User).filter(
-            User.clerk_user_id == clerk_user_id
-        ).first()
+        result = await db.execute(
+            select(User).filter(User.clerk_user_id == clerk_user_id)
+        )
+        existing_user = result.scalar_one_or_none()
         
         if not existing_user:
             logger.warning(f"User {clerk_user_id} not found for deletion")

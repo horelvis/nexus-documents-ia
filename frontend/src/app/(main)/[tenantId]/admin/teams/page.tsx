@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
 import { 
   Users, 
   Search, 
@@ -14,13 +17,23 @@ import {
   Settings,
   QrCode,
   Clock,
-  Copy
+  Copy,
+  Loader2
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
 import {
   Table,
   TableBody,
@@ -66,7 +79,22 @@ import type {
   TeamInvitation,
   InviteMemberData,
   UpdateTeamData} from '@/lib/types/teams'
-import Image from 'next/image'
+
+// Form validation schemas
+const inviteMemberSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  role: z.enum(['member', 'admin'], {
+    required_error: 'Please select a role',
+  }),
+})
+
+const updateTeamSchema = z.object({
+  name: z.string().min(1, 'Team name is required').max(100, 'Team name is too long'),
+  description: z.string().max(500, 'Description is too long').optional(),
+})
+
+type InviteMemberFormData = z.infer<typeof inviteMemberSchema>
+type UpdateTeamFormData = z.infer<typeof updateTeamSchema>
 
 export default function TeamsPage() {
   const params = useParams()
@@ -79,6 +107,7 @@ export default function TeamsPage() {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [invitations, setInvitations] = useState<TeamInvitation[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
   
   // Dialog states
   const [showEditTeam, setShowEditTeam] = useState(false)
@@ -87,9 +116,28 @@ export default function TeamsPage() {
   const [selectedInvitation, setSelectedInvitation] = useState<TeamInvitation | null>(null)
   
   // Form data
-  const [editTeamData, setEditTeamData] = useState<UpdateTeamData>({ name: '', description: '' })
-  const [inviteData, setInviteData] = useState<InviteMemberData>({ email: '', role: 'member' })
   const [invitationExpiry, setInvitationExpiry] = useState(7)
+  
+  // React Hook Form for invite member
+  const inviteForm = useForm<InviteMemberFormData>({
+    resolver: zodResolver(inviteMemberSchema),
+    defaultValues: {
+      email: '',
+      role: 'member',
+    },
+  })
+  
+  // React Hook Form for update team
+  const updateTeamForm = useForm<UpdateTeamFormData>({
+    resolver: zodResolver(updateTeamSchema),
+    defaultValues: {
+      name: '',
+      description: '',
+    },
+  })
+  
+  // Loading states
+  const [isGeneratingQR, setIsGeneratingQR] = useState(false)
 
   // Load team info and members
   useEffect(() => {
@@ -103,7 +151,7 @@ export default function TeamsPage() {
       const teamResponse = await apiClient.get<TeamInfo>('/teams/')
       if (!teamResponse.error && teamResponse.data) {
         setTeamInfo(teamResponse.data)
-        setEditTeamData({
+        updateTeamForm.reset({
           name: teamResponse.data.name,
           description: teamResponse.data.description || ''
         })
@@ -113,12 +161,21 @@ export default function TeamsPage() {
       const membersResponse = await apiClient.get<TeamMember[]>('/teams/members')
       if (!membersResponse.error && membersResponse.data) {
         setMembers(membersResponse.data)
+        
+        // Check if current user is admin
+        const currentMember = membersResponse.data.find(m => m.email === user?.emailAddresses?.[0]?.emailAddress)
+        setIsAdmin(currentMember?.role === 'Admin' || !currentMember?.is_team_member)
       }
 
-      // Load invitations
+      // Load invitations (only for admins)
       const invitationsResponse = await apiClient.get<TeamInvitation[]>('/teams/invitations')
       if (!invitationsResponse.error && invitationsResponse.data) {
         setInvitations(invitationsResponse.data)
+      } else if (invitationsResponse.error) {
+        // Silently ignore 403 errors for non-admins
+        if (!invitationsResponse.error.includes('403')) {
+          console.error('Error loading invitations:', invitationsResponse.error)
+        }
       }
     } catch (error) {
       console.error('Error loading data:', error)
@@ -132,9 +189,9 @@ export default function TeamsPage() {
     }
   }
 
-  const handleUpdateTeam = async () => {
+  const handleUpdateTeam = async (data: UpdateTeamFormData) => {
     try {
-      const response = await apiClient.put<TeamInfo>('/teams/', editTeamData)
+      const response = await apiClient.put<TeamInfo>('/teams/', data)
       if (!response.error && response.data) {
         setTeamInfo(response.data)
         setShowEditTeam(false)
@@ -154,15 +211,17 @@ export default function TeamsPage() {
     }
   }
 
-  const handleInviteMember = async () => {
+  const handleInviteMember = async (data: InviteMemberFormData) => {
+    console.log('Form data being sent:', { email: data.email, role: data.role })
+    console.log('Current user email:', user?.emailAddresses?.[0]?.emailAddress)
     try {
-      const response = await apiClient.post<{ message: string }>('/teams/members/invite', inviteData)
+      const response = await apiClient.post<{ message: string }>('/teams/members/invite', data)
       if (!response.error) {
         setShowInviteDialog(false)
-        setInviteData({ email: '', role: 'member' })
+        inviteForm.reset()
         toast({
           title: 'Success',
-          description: `Invitation sent to ${inviteData.email}`
+          description: `Invitation sent to ${data.email}`
         })
         loadData() // Reload to update members list
       } else {
@@ -178,6 +237,7 @@ export default function TeamsPage() {
   }
 
   const handleCreateInvitationLink = async () => {
+    setIsGeneratingQR(true)
     try {
       const response = await apiClient.post<TeamInvitation>('/teams/invitations', {
         expires_in_days: invitationExpiry
@@ -195,6 +255,8 @@ export default function TeamsPage() {
         description: error instanceof Error ? error.message : 'Failed to create invitation link',
         variant: 'destructive'
       })
+    } finally {
+      setIsGeneratingQR(false)
     }
   }
 
@@ -278,10 +340,12 @@ export default function TeamsPage() {
               {teamInfo?.description || 'Manage your team members and settings'}
             </CardDescription>
           </div>
-          <Button onClick={() => setShowEditTeam(true)} size="sm" variant="outline">
-            <Settings className="w-4 h-4 mr-2" />
-            Edit Team
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => setShowEditTeam(true)} size="sm" variant="outline">
+              <Settings className="w-4 h-4 mr-2" />
+              Edit Team
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -308,16 +372,50 @@ export default function TeamsPage() {
       </Card>
 
       {/* Actions */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <Button onClick={() => setShowInviteDialog(true)}>
-          <Mail className="w-4 h-4 mr-2" />
-          Invite by Email
-        </Button>
-        <Button onClick={handleCreateInvitationLink} variant="outline">
-          <QrCode className="w-4 h-4 mr-2" />
-          Generate QR Code
-        </Button>
-      </div>
+      {isAdmin && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Button onClick={() => setShowInviteDialog(true)}>
+              <Mail className="w-4 h-4 mr-2" />
+              Invite by Email
+            </Button>
+            <Button 
+              onClick={handleCreateInvitationLink} 
+              variant="outline"
+              disabled={isGeneratingQR}
+            >
+              {isGeneratingQR ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <QrCode className="w-4 h-4 mr-2" />
+                  Generate QR Code
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {/* Invitation Summary */}
+          {invitations.length > 0 && (
+            <div className="flex gap-4 text-sm text-muted-foreground">
+              <span>
+                Active invitations: {invitations.filter(inv => !inv.used && new Date(inv.expires_at) > new Date()).length}
+              </span>
+              <span>•</span>
+              <span>
+                Used: {invitations.filter(inv => inv.used).length}
+              </span>
+              <span>•</span>
+              <span>
+                Expired: {invitations.filter(inv => !inv.used && new Date(inv.expires_at) <= new Date()).length}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Members Table */}
       <Card>
@@ -381,14 +479,16 @@ export default function TeamsPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={() => handleRemoveMember(member.id)}
-                          className="text-destructive"
-                          disabled={member.role === 'Admin'}
-                        >
-                          <Trash className="w-4 h-4 mr-2" />
-                          Remove Member
-                        </DropdownMenuItem>
+                        {isAdmin && (
+                          <DropdownMenuItem 
+                            onClick={() => handleRemoveMember(member.id)}
+                            className="text-destructive"
+                            disabled={member.role === 'Admin'}
+                          >
+                            <Trash className="w-4 h-4 mr-2" />
+                            Remove Member
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -399,8 +499,78 @@ export default function TeamsPage() {
         </CardContent>
       </Card>
 
+      {/* Invitations Table */}
+      {isAdmin && invitations.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Invitations</CardTitle>
+            <CardDescription>
+              Active invitation links for your team
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invitations.map((invitation) => (
+                  <TableRow key={invitation.id}>
+                    <TableCell>
+                      {invitation.email || 'Open invitation'}
+                    </TableCell>
+                    <TableCell>
+                      {invitation.used ? (
+                        <Badge variant="secondary">Used</Badge>
+                      ) : new Date(invitation.expires_at) < new Date() ? (
+                        <Badge variant="destructive">Expired</Badge>
+                      ) : (
+                        <Badge variant="default">Active</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {format(new Date(invitation.expires_at), 'PP', { locale: es })}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {format(new Date(invitation.created_at), 'PP', { locale: es })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedInvitation(invitation)
+                          setShowQRDialog(true)
+                        }}
+                        disabled={invitation.used || new Date(invitation.expires_at) < new Date()}
+                      >
+                        <QrCode className="w-4 h-4 mr-2" />
+                        View QR
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Edit Team Dialog */}
-      <Dialog open={showEditTeam} onOpenChange={setShowEditTeam}>
+      <Dialog 
+        open={showEditTeam} 
+        onOpenChange={(open) => {
+          if (!updateTeamForm.formState.isSubmitting) {
+            setShowEditTeam(open)
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Team Information</DialogTitle>
@@ -408,38 +578,86 @@ export default function TeamsPage() {
               Update your team name and description
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Team Name</Label>
-              <Input
-                value={editTeamData.name}
-                onChange={(e) => setEditTeamData({ ...editTeamData, name: e.target.value })}
-                placeholder="Enter team name"
+          <Form {...updateTeamForm}>
+            <form onSubmit={updateTeamForm.handleSubmit(handleUpdateTeam)} className="space-y-4">
+              <FormField
+                control={updateTeamForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Team Name</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Enter team name"
+                        {...field}
+                        disabled={updateTeamForm.formState.isSubmitting}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={editTeamData.description}
-                onChange={(e) => setEditTeamData({ ...editTeamData, description: e.target.value })}
-                placeholder="Enter team description"
-                rows={3}
+              <FormField
+                control={updateTeamForm.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Enter team description"
+                        rows={3}
+                        {...field}
+                        disabled={updateTeamForm.formState.isSubmitting}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      A brief description of your team
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditTeam(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateTeam}>
-              Save Changes
-            </Button>
-          </DialogFooter>
+              <DialogFooter>
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={() => setShowEditTeam(false)}
+                  disabled={updateTeamForm.formState.isSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit"
+                  disabled={updateTeamForm.formState.isSubmitting}
+                >
+                  {updateTeamForm.formState.isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 
       {/* Invite Member Dialog */}
-      <Dialog open={showInviteDialog} onOpenChange={setShowInviteDialog}>
+      <Dialog 
+        open={showInviteDialog} 
+        onOpenChange={(open) => {
+          if (!inviteForm.formState.isSubmitting) {
+            setShowInviteDialog(open)
+            if (!open) {
+              inviteForm.reset()
+            }
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Invite Team Member</DialogTitle>
@@ -447,40 +665,82 @@ export default function TeamsPage() {
               Send an email invitation to join your team
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Email Address</Label>
-              <Input
-                type="email"
-                value={inviteData.email}
-                onChange={(e) => setInviteData({ ...inviteData, email: e.target.value })}
-                placeholder="member@example.com"
+          <Form {...inviteForm}>
+            <form onSubmit={inviteForm.handleSubmit(handleInviteMember)} className="space-y-4">
+              <FormField
+                control={inviteForm.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        placeholder="member@example.com"
+                        {...field}
+                        disabled={inviteForm.formState.isSubmitting}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      The email address of the person you want to invite
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-            <div>
-              <Label>Role</Label>
-              <Select
-                value={inviteData.role}
-                onValueChange={(value) => setInviteData({ ...inviteData, role: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">Team Member</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowInviteDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleInviteMember}>
-              Send Invitation
-            </Button>
-          </DialogFooter>
+              <FormField
+                control={inviteForm.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Role</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      disabled={inviteForm.formState.isSubmitting}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a role" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="member">Team Member</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose the role for this team member
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={() => setShowInviteDialog(false)}
+                  disabled={inviteForm.formState.isSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit"
+                  disabled={inviteForm.formState.isSubmitting}
+                >
+                  {inviteForm.formState.isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send Invitation'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 
@@ -496,9 +756,11 @@ export default function TeamsPage() {
           {selectedInvitation && (
             <div className="space-y-4">
               <div className="flex justify-center">
-                <Image 
+                <img 
                   src={selectedInvitation.qr_code} 
-                  alt="QR Code" 
+                  alt="QR Code"
+                  width={256}
+                  height={256}  
                   className="w-64 h-64"
                 />
               </div>

@@ -73,11 +73,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Show connection error when backend is unavailable
-  if (showError) {
-    return <ConnectionError error={lastError} onRetry={handleRetry} />
-  }
-
   // Notification functions
   const addNotification = (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
     const newNotification: Notification = {
@@ -149,6 +144,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     removeNotification,
     clearAllNotifications,
     unreadCount
+  }
+
+  // Render connection error as an overlay if needed
+  if (showError) {
+    return (
+      <AppStateContext.Provider value={contextValue}>
+        <ConnectionError error={lastError} onRetry={handleRetry} />
+      </AppStateContext.Provider>
+    )
   }
 
   return (

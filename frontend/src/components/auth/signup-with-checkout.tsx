@@ -24,6 +24,8 @@ export function SignUpWithCheckout() {
   const sessionId = searchParams.get('session_id')
   const email = searchParams.get('email')
   const plan = searchParams.get('plan')
+  const invitation = searchParams.get('invitation')
+  const tenantId = searchParams.get('tenant')
 
   const [checkoutData, setCheckoutData] = useState<CheckoutSession | null>(null)
   const [isLoading, setIsLoading] = useState(!!sessionId)
@@ -112,10 +114,14 @@ export function SignUpWithCheckout() {
           <div className="space-y-6">
             <div className="text-center lg:text-left">
               <h1 className="text-3xl font-bold text-foreground mb-2">
-                Completa tu registro
+                {invitation ? 'Join Your Team' : 'Completa tu registro'}
               </h1>
               <p className="text-muted-foreground">
-                Ya procesamos tu pago. Solo necesitamos algunos datos más para configurar tu cuenta.
+                {invitation 
+                  ? 'Create your account to join the team and start collaborating.'
+                  : checkoutData 
+                    ? 'Ya procesamos tu pago. Solo necesitamos algunos datos más para configurar tu cuenta.'
+                    : 'Create your account to get started with Nexus.'}
               </p>
             </div>
 
@@ -149,8 +155,25 @@ export function SignUpWithCheckout() {
               </Card>
             )}
 
+            {/* Team invitation info */}
+            {invitation && tenantId && (
+              <Card className="bg-card text-card-foreground border shadow-sm">
+                <CardHeader>
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                    <CardTitle className="text-lg">Team Invitation</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    You're joining an existing team. After registration, you'll have access to all team resources.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Free plan info */}
-            {plan === 'free' && (
+            {plan === 'free' && !invitation && (
               <Card className="bg-card text-card-foreground border shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-lg">Plan Gratuito</CardTitle>
@@ -202,13 +225,17 @@ export function SignUpWithCheckout() {
           <div className="flex justify-center">
             <div className="w-full max-w-md">
               <SignUp 
-                redirectUrl="/onboarding"
-                afterSignUpUrl="/onboarding"
+                redirectUrl={invitation && tenantId ? `/${tenantId}/dashboard` : "/onboarding"}
+                afterSignUpUrl={invitation && tenantId ? `/${tenantId}/dashboard` : "/onboarding"}
                 initialValues={
                   checkoutData?.customer_email || email 
                     ? { emailAddress: checkoutData?.customer_email || email || '' }
                     : undefined
                 }
+                unsafeMetadata={{
+                  invitation_code: invitation || undefined,
+                  tenant_id: tenantId || undefined
+                }}
               />
             </div>
           </div>

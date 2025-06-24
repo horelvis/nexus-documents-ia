@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Configurar Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
-logger.info(f"Stripe configured with API key: {stripe.api_key[:7]}..." if stripe.api_key else "NO API KEY")
+logger.debug(f"Stripe configured with API key: {stripe.api_key[:7]}..." if stripe.api_key else "NO API KEY")
 
 class SubscriptionServiceV2:
     """
@@ -85,12 +85,12 @@ class SubscriptionServiceV2:
         cached_data = cache.get_json(cache_key)
         
         if cached_data:
-            logger.info(f"✨ Using cached subscription data for user {user.id}")
+            logger.debug(f"✨ Using cached subscription data for user {user.id}")
             return cached_data
         
         try:
             # Consultar Stripe
-            logger.info(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
+            logger.debug(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
             
             # Verificar que tenemos API key
             if not stripe.api_key:
@@ -98,14 +98,14 @@ class SubscriptionServiceV2:
                 raise Exception("Stripe API key not configured")
             
             # Listar todas las suscripciones del cliente
-            logger.info(f"Fetching subscriptions for customer: {user.stripe_customer_id}")
+            logger.debug(f"Fetching subscriptions for customer: {user.stripe_customer_id}")
             try:
                 subscriptions = stripe.Subscription.list(
                     customer=user.stripe_customer_id,
                     limit=10,
                     expand=['data.default_payment_method']
                 )
-                logger.info(f"Subscriptions result type: {type(subscriptions)}")
+                logger.debug(f"Subscriptions result type: {type(subscriptions)}")
             except Exception as e:
                 logger.error(f"Error calling stripe.Subscription.list: {type(e).__name__}: {e}")
                 raise
@@ -123,7 +123,7 @@ class SubscriptionServiceV2:
             # Si hay múltiples suscripciones activas, tomar la más reciente
             if active_subscriptions:
                 active_subscription = max(active_subscriptions, key=lambda x: x.created)
-                logger.info(f"Found {len(active_subscriptions)} active subscriptions for user {user.id}, using most recent: {active_subscription.id}")
+                logger.debug(f"Found {len(active_subscriptions)} active subscriptions for user {user.id}, using most recent: {active_subscription.id}")
             
             if not active_subscription:
                 # No hay suscripción activa - usuario gratuito
@@ -237,7 +237,7 @@ class SubscriptionServiceV2:
         """Limpia el cache de suscripción para un usuario"""
         cache_key = user_cache_key(user_id, "subscription")
         cache.delete(cache_key)
-        logger.info(f"🧹 Cleared subscription cache for user {user_id}")
+        logger.debug(f"🧹 Cleared subscription cache for user {user_id}")
     
     @staticmethod
     def verify_on_login(db: Session, user: User) -> Dict[str, Any]:
@@ -245,12 +245,12 @@ class SubscriptionServiceV2:
         Verifica el estado de suscripción en cada login
         Actualiza el stripe_customer_id si es necesario
         """
-        logger.info(f"🔐 Verifying subscription on login for user {user.id}")
+        logger.debug(f"🔐 Verifying subscription on login for user {user.id}")
         
         # Si no tiene stripe_customer_id, intentar buscarlo por email
         if not user.stripe_customer_id:
             try:
-                logger.info(f"Searching Stripe customer for email: {user.email}")
+                logger.debug(f"Searching Stripe customer for email: {user.email}")
                 
                 # Verificar que stripe está configurado
                 if not stripe.api_key:
@@ -260,14 +260,14 @@ class SubscriptionServiceV2:
                 # Intentar listar clientes
                 try:
                     customers = stripe.Customer.list(email=user.email, limit=1)
-                    logger.info(f"Customer search result type: {type(customers)}, hasattr data: {hasattr(customers, 'data')}")
+                    logger.debug(f"Customer search result type: {type(customers)}, hasattr data: {hasattr(customers, 'data')}")
                     
                     if hasattr(customers, 'data') and customers.data:
                         user.stripe_customer_id = customers.data[0].id
                         db.commit()
                         logger.info(f"✅ Updated stripe_customer_id for user {user.id}")
                     else:
-                        logger.info(f"No Stripe customer found for email {user.email}")
+                        logger.debug(f"No Stripe customer found for email {user.email}")
                 except AttributeError as ae:
                     logger.error(f"AttributeError calling stripe.Customer.list: {ae}")
                     logger.error(f"stripe.Customer type: {type(stripe.Customer)}")

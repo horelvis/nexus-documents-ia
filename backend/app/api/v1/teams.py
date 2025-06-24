@@ -266,6 +266,8 @@ async def invite_team_member(
         invitation_link = f"{settings.FRONTEND_URL}/auth/sign-up?tenant={current_user.tenant_id}&role={member_data.role}"
         
         # Send invitation email
+        logger.info(f"Sending invitation email to: {member_data.email}")
+        logger.info(f"Inviter: {current_user.full_name or current_user.email}")
         email_sent = await email_service.send_user_invitation(
             email=member_data.email,
             inviter_name=current_user.full_name or current_user.email,
@@ -500,6 +502,50 @@ async def get_team_invitations(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get invitations"
+        )
+
+@router.get("/invitations/{invitation_code}/info")
+async def get_invitation_info(
+    invitation_code: str,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get invitation information (public endpoint)
+    """
+    try:
+        # Find invitation
+        result = await db.execute(
+            select(TeamInvitation).filter(
+                TeamInvitation.invitation_code == invitation_code
+            )
+        )
+        invitation = result.scalar_one_or_none()
+        
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid invitation code"
+            )
+        
+        # Get tenant info
+        result = await db.execute(select(Tenant).filter(Tenant.id == invitation.tenant_id))
+        tenant = result.scalar_one_or_none()
+        
+        return {
+            "tenant_id": invitation.tenant_id,
+            "tenant_name": tenant.name if tenant else "Organization",
+            "expires_at": invitation.expires_at.isoformat(),
+            "used": invitation.used,
+            "email": invitation.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting invitation info: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get invitation info"
         )
 
 @router.post("/invitations/{invitation_code}/accept")
