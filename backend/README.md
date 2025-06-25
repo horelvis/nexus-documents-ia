@@ -1,29 +1,90 @@
-# Sistema de Gestión Documental con Búsqueda Semántica
+# Nexus Document Management System
 
-Este proyecto implementa una API REST para un sistema de gestión documental con búsqueda semántica basada en embeddings, permitiendo la carga, procesamiento, indexación y consulta inteligente de documentos.
+A comprehensive multi-tenant intelligent document management system with advanced AI capabilities, built on a microservices architecture for scalability and reliability.
 
-## Características
+## Table of Contents
 
-- **Autenticación y autorización** con JWT
-- **Multi-tenant**: Aislamiento de datos por organización
-- **Procesamiento de documentos**: PDF, DOCX, TXT, CSV, Excel, Markdown
-- **Búsqueda semántica**: Encuentra documentos relacionados semánticamente
-- **Integración LLM**: Resúmenes, sugerencia de etiquetas, respuestas a preguntas
-- **Almacenamiento en la nube**: Google Cloud Storage
-- **Base de datos vectorial**: Qdrant para embeddings
-- **Arquitectura modular**: Servicios independientes y adaptables
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Development](#development)
+- [API Documentation](#api-documentation)
+- [Microservices](#microservices)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 
-## Tecnologías
+## Overview
 
-- **Backend**: FastAPI (Python)
-- **Base de datos relacional**: PostgreSQL
-- **Cache**: Redis
-- **Base de datos vectorial**: Qdrant
-- **Almacenamiento**: Google Cloud Storage
-- **Modelos de lenguaje**: Ollama
-- **Docker**: Contenedores para todos los componentes
+Nexus Document Management System is an enterprise-grade solution for intelligent document processing, storage, and retrieval. It combines traditional document management capabilities with cutting-edge AI features including semantic search, intelligent agents, and automated document processing pipelines.
 
-## Arquitectura del Sistema
+### Core Capabilities
+
+- **Multi-tenant Architecture**: Complete data isolation for organizations with shared infrastructure
+- **AI-Powered Processing**: Automatic document analysis, summarization, and intelligent tagging
+- **Semantic Search**: Vector-based search for finding contextually relevant documents
+- **Intelligent Agents**: AI agents for document analysis, contract review, and digital signatures
+- **Scalable Storage**: Cloud-based storage with automatic organization and versioning
+- **Real-time Collaboration**: Document sharing, commenting, and workflow management
+
+## Key Features
+
+### 1. **Multi-Tenant Architecture**
+- Complete tenant isolation at database and storage levels
+- Per-tenant configuration and quotas
+- Automatic bucket creation for new organizations
+- User invitation system for collaborative workspaces
+
+### 2. **Document Processing Pipeline**
+- Support for multiple formats: PDF, DOCX, TXT, CSV, Excel, Markdown, Images
+- Automatic text extraction and OCR for scanned documents
+- Intelligent chunking for large documents
+- Metadata extraction and enrichment
+- Thumbnail generation for visual preview
+
+### 3. **AI and Machine Learning**
+- **Semantic Search**: Find documents by meaning, not just keywords
+- **Document Summarization**: AI-generated summaries for quick insights
+- **Smart Tagging**: Automatic tag suggestions based on content
+- **Question Answering**: Ask questions about your documents
+- **Content Classification**: Automatic categorization of documents
+
+### 4. **Agent System**
+- **Digital Signature Agent**: Automated signature workflow management
+- **Document Analyzer**: Deep analysis of document content and structure
+- **RAG Assistant**: Retrieval-Augmented Generation for accurate answers
+- **Contract Analysis**: Legal document review and risk assessment
+- **Financial Analysis**: Extract and analyze financial data
+- **Custom Agents**: Extensible framework for domain-specific agents
+
+### 5. **Subscription and Billing (v2)**
+- **Stripe Integration**: Secure payment processing
+- **Flexible Plans**: Starter, Professional, Enterprise tiers
+- **Usage Tracking**: Monitor storage, API calls, and AI usage
+- **Automatic Billing**: Subscription management and invoicing
+- **Feature Gates**: Plan-based feature access control
+
+### 6. **Security and Compliance**
+- **JWT-based Authentication**: Secure token-based auth
+- **Role-Based Access Control**: Fine-grained permissions
+- **Audit Trails**: Complete activity logging
+- **Data Encryption**: At-rest and in-transit encryption
+- **GDPR Compliance**: Data privacy and right to deletion
+
+### 7. **Developer Experience**
+- **RESTful API**: Clean, consistent API design
+- **OpenAPI Documentation**: Interactive API documentation
+- **Docker Development**: One-command development setup
+- **Hot Reload**: Live code updates in development
+- **Comprehensive Testing**: Unit, integration, and E2E tests
+
+## Architecture
+
+### System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -31,288 +92,788 @@ Este proyecto implementa una API REST para un sistema de gestión documental con
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         FASTAPI REST API LAYER                      │
-├─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┤
-│  Auth   │Documents│ Search  │ Agents  │  Chat   │Signature│ Admin   │
-│         │         │         │         │         │         │         │
-│ Tenants │ Stripe  │Storage  │         │         │         │         │
-└─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
+│                         CLIENT APPLICATIONS                         │
+├─────────────────┬─────────────────┬─────────────────┬──────────────┤
+│   Next.js Web   │  Mobile Apps    │  Admin Portal   │  API Clients │
+└─────────────────┴─────────────────┴─────────────────┴──────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    FASTAPI REST API GATEWAY                         │
+├─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬────────┤
+│  Auth   │Documents│ Search  │ Agents  │  Chat   │Signature│ Admin  │
+│ Tenants │Subscrip │Storage  │Analytics│Workflows│  Audit  │Reports │
+└─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴────────┘
               │                           │
               ▼                           ▼
 ┌──────────────────────────┐    ┌─────────────────────────────────────┐
-│    CORE CONFIGURATION    │    │      BUSINESS LOGIC SERVICES       │
-├─────────┬────────┬───────┤    ├────────────┬────────────┬───────────┤
-│ Config  │Security│Logging│    │Auth Service│Doc Service │Agent Serv │
-└─────────┴────────┴───────┘    ├────────────┼────────────┼───────────┤
-                                │Search Serv │Signature S │Storage S  │
-                                ├────────────┼────────────┼───────────┤
-                                │LLM Service │Vector Serv │Embedding S│
-                                └────────────┴────────────┴───────────┘
+│    CORE SERVICES         │    │      BUSINESS LOGIC SERVICES       │
+├─────────┬────────┬───────┤    ├────────────┬────────────┬──────────┤
+│Security │Config  │Logging│    │Auth Service│Doc Service │Agent Srv │
+│RBAC     │Cache   │Metrics│    ├────────────┼────────────┼──────────┤
+└─────────┴────────┴───────┘    │Search Serv │Signature S │Storage S │
+                                ├────────────┼────────────┼──────────┤
+                                │Subscription│Vector Serv │Embedding │
+                                └────────────┴────────────┴──────────┘
                                               │           │
-                      ┌───────────────────────┼───────────┼───────────────┐
-                      ▼                       ▼           ▼               ▼
-            ┌─────────────────────┐  ┌──────────────────────┐  ┌─────────────────────┐
-            │     DATA LAYER      │  │    MICROSERVICES     │  │   EXTERNAL SERVICES │
-            ├──────────┬──────────┤  ├──────────┬───────────┤  ├──────────┬──────────┤
-            │PostgreSQL│Redis     │  │LangChain │Vector     │  │Google    │Ollama    │
-            │          │Cache     │  │Service   │Service    │  │Cloud     │LLM       │
-            ├──────────┼──────────┤  ├──────────┼───────────┤  │Storage   ├──────────┤
-            │Qdrant    │          │  │LLM       │           │  │          │Stripe    │
-            │Vector DB │          │  │Service   │           │  │          │API       │
-            └──────────┴──────────┘  └──────────┴───────────┘  └──────────┴──────────┘
-                                              │
-                                              ▼
-                                    ┌─────────────────────┐
-                                    │    AI & STORAGE     │
-                                    ├──────────┬──────────┤
-                                    │Document  │Digital   │
-                                    │Recommend │Signature │
-                                    │          │Agent     │
-                                    ├──────────┼──────────┤
-                                    │Cloud     │          │
-                                    │Storage   │          │
-                                    └──────────┴──────────┘
+                      ┌───────────────────────┼───────────┼────────────┐
+                      ▼                       ▼           ▼            ▼
+┌─────────────────────────┐  ┌──────────────────────────────┐  ┌──────────────────┐
+│     DATA LAYER          │  │      MICROSERVICES          │  │ EXTERNAL SERVICES│
+├──────────┬──────────────┤  ├───────────┬────────────────┤  ├─────────┬────────┤
+│PostgreSQL│Redis Cache    │  │LangChain  │LangGraph       │  │Google   │Stripe  │
+│          │Session Store  │  │Service    │Service         │  │Cloud    │Payment │
+├──────────┼──────────────┤  ├───────────┼────────────────┤  │Storage  │API     │
+│Qdrant    │Alembic       │  │Storage    │Ollama          │  ├─────────┼────────┤
+│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │SendGrid│
+│          │              │  ├───────────┼────────────────┤  │Auth     │Email   │
+│          │              │  │Gotenberg  │                │  └─────────┴────────┘
+│          │              │  │Service    │                │
+└──────────┴──────────────┘  └───────────┴────────────────┘
 
-CARACTERÍSTICAS PRINCIPALES:
+MICROSERVICES ARCHITECTURE:
 ╔══════════════════════════════════════════════════════════════════════╗
-║ • Multi-tenant con aislamiento de datos por organización            ║
-║ • Arquitectura de microservicios para operaciones AI/ML             ║
-║ • Base de datos vectorial para búsqueda semántica                   ║
-║ • Almacenamiento en la nube escalable                               ║
-║ • Sistema de firmas digitales con soporte de agentes AI             ║
-║ • API RESTful con cobertura completa de endpoints                   ║
-║ • Integración LangChain para procesamiento avanzado de documentos   ║
+║ • LangChain Service (8001): Document processing, embeddings, RAG     ║
+║ • LangGraph Service (8002): Advanced AI agents, multi-agent systems  ║
+║ • Storage Service (8003): Async GCS operations, signed URLs          ║
+║ • Ollama Service (8004): Local LLM hosting and inference            ║
+║ • Gotenberg Service (8005): PDF generation, document conversion     ║
+║ • Main API (8000): Business logic, authentication, orchestration    ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+KEY ARCHITECTURAL PATTERNS:
+╔══════════════════════════════════════════════════════════════════════╗
+║ • Event-driven processing with async/await throughout               ║
+║ • Microservices communicate via REST with unified API key auth     ║
+║ • Database-per-service pattern for microservice independence        ║
+║ • CQRS for read/write optimization in document operations          ║
+║ • Circuit breakers for external service resilience                 ║
+║ • Distributed caching with Redis for performance                   ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
-## Estructura del Proyecto
+### Multi-Tenant Data Flow
 
 ```
-backend/
-│
-├── app/                    # Código fuente principal
-│   ├── api/                # Endpoints de la API
-│   │   ├── dependencies.py # Dependencias compartidas
-│   │   └── v1/             # Endpoints versión 1
-│   │       ├── auth.py           # Autenticación y autorización
-│   │       ├── documents.py      # Gestión de documentos
-│   │       ├── search.py         # Búsqueda semántica
-│   │       ├── agents.py         # Sistema de agentes AI
-│   │       ├── chat.py           # Chat con documentos
-│   │       ├── signatures.py     # Firmas digitales
-│   │       ├── admin.py          # Administración
-│   │       ├── tenants.py        # Multi-tenancy
-│   │       └── stripe.py         # Facturación
-│   │
-│   ├── core/               # Configuración central
-│   │   ├── config.py       # Configuración de la aplicación
-│   │   ├── security.py     # Funcionalidades de seguridad
-│   │   └── logging.py      # Configuración de logs
-│   │
-│   ├── db/                 # Capa de base de datos
-│   │   ├── database.py     # Configuración de la base de datos
-│   │   └── models.py       # Modelos SQLAlchemy
-│   │
-│   ├── schemas/            # Modelos Pydantic
-│   │   ├── auth.py         # Esquemas de autenticación
-│   │   ├── document.py     # Esquemas de documentos
-│   │   ├── agent.py        # Esquemas de agentes
-│   │   ├── tenant.py       # Esquemas multi-tenant
-│   │   └── user.py         # Esquemas de usuarios
-│   │
-│   ├── services/           # Lógica de negocio
-│   │   ├── auth_service.py         # Servicio de autenticación
-│   │   ├── document_service.py     # Servicio de documentos
-│   │   ├── agent_service.py        # Servicio de agentes AI
-│   │   ├── embedding_service.py    # Servicio de embeddings
-│   │   ├── llm_service.py          # Servicio de LLM
-│   │   ├── search_service.py       # Servicio de búsqueda
-│   │   ├── signature_service.py    # Servicio de firmas digitales
-│   │   ├── storage_service.py      # Servicio de almacenamiento
-│   │   └── vector_service.py       # Servicio de base vectorial
-│   │
-│   ├── ml/                 # Machine Learning
-│   │   └── document_recommender.py # Recomendador de documentos
-│   │
-│   └── main.py            # Punto de entrada de la aplicación
-│
-├── microservices/         # Microservicios independientes
-│   └── langchain-service/ # Servicio LangChain
-│       ├── app/
-│       │   ├── services/        # Servicios especializados
-│       │   └── core/           # Configuración del microservicio
-│       └── requirements.txt
-│
-├── docker/                # Configuración de Docker
-│   ├── Dockerfile         # Configuración para la imagen
-│   └── docker-compose.yml # Configuración de servicios
-│
-├── scripts/               # Scripts de utilidad
-│   ├── init_db.py         # Inicialización de la base de datos
-│   ├── init_agents.py     # Inicialización de agentes
-│   └── seed_data.py       # Datos de prueba
-│
-├── tests/                 # Tests automatizados
-│   ├── conftest.py        # Configuración de pruebas
-│   ├── test_api/          # Pruebas de la API
-│   └── test_services/     # Pruebas de servicios
-│
-├── .env.example           # Ejemplo de variables de entorno
-└── requirements.txt       # Dependencias del proyecto
+User Request → Clerk Auth → Tenant Resolution → Data Isolation → Response
+
+1. User authenticated via Clerk
+2. Tenant ID extracted from user profile
+3. All queries filtered by tenant_id
+4. Storage buckets isolated per tenant
+5. Vector collections namespaced by tenant
 ```
 
-## Requisitos
+## Technology Stack
 
-- Python 3.9+
-- Docker y Docker Compose
-- Cuenta de Google Cloud (para GCS en producción)
+### Backend Technologies
+- **FastAPI** (Python 3.9+): High-performance async web framework
+- **SQLAlchemy 2.0**: Modern ORM with async support
+- **Alembic**: Database migration management
+- **Pydantic**: Data validation and serialization
+- **asyncio**: Async/await patterns throughout
 
-## Configuración
+### Data Storage
+- **PostgreSQL**: Primary relational database
+- **Redis**: Caching and session management
+- **Qdrant**: Vector database for embeddings
+- **Google Cloud Storage**: Document storage
 
-1. Clona el repositorio:
+### AI/ML Stack
+- **LangChain**: Document processing and LLM orchestration
+- **LangGraph**: Agent workflow management
+- **Ollama**: Local LLM hosting
+- **OpenAI/Anthropic**: Cloud LLM providers
+- **Sentence Transformers**: Document embeddings
+
+### Infrastructure
+- **Docker**: Container orchestration
+- **Docker Compose**: Multi-service development
+- **Nginx**: Reverse proxy and load balancing
+- **Prometheus**: Metrics collection
+- **Grafana**: Monitoring dashboards
+
+### External Services
+- **Clerk**: Authentication and user management
+- **Stripe**: Payment processing
+- **SendGrid**: Email notifications
+- **Sentry**: Error tracking
+
+## Project Structure
+
+```
+nexus-document-backend/
+│
+├── backend/
+│   ├── app/                       # Main application code
+│   │   ├── api/v1/               # REST API endpoints
+│   │   │   ├── agents.py         # AI agent endpoints
+│   │   │   ├── auth.py           # Authentication
+│   │   │   ├── documents.py      # Document operations
+│   │   │   ├── search.py         # Search functionality
+│   │   │   ├── signatures.py     # Digital signatures
+│   │   │   ├── subscriptions_v2.py # Stripe subscriptions
+│   │   │   └── tenants.py        # Multi-tenancy
+│   │   │
+│   │   ├── core/                 # Core utilities
+│   │   │   ├── config.py         # Configuration management
+│   │   │   ├── security.py       # Security utilities
+│   │   │   └── logging.py        # Structured logging
+│   │   │
+│   │   ├── db/                   # Database layer
+│   │   │   ├── database.py       # Database configuration
+│   │   │   ├── models.py         # SQLAlchemy models
+│   │   │   └── session.py        # Session management
+│   │   │
+│   │   ├── schemas/              # Pydantic models
+│   │   │   ├── agent.py          # Agent schemas
+│   │   │   ├── document.py       # Document schemas
+│   │   │   ├── subscription.py   # Subscription schemas
+│   │   │   └── tenant.py         # Tenant schemas
+│   │   │
+│   │   ├── services/             # Business logic
+│   │   │   ├── agent_service.py  # Agent operations
+│   │   │   ├── async_storage_service.py # Async GCS
+│   │   │   ├── document_service.py # Document processing
+│   │   │   ├── subscription_service_v2.py # Stripe billing
+│   │   │   └── vector_service.py # Vector operations
+│   │   │
+│   │   └── main.py              # FastAPI application
+│   │
+│   ├── microservices/           # Microservice applications
+│   │   ├── langchain-service/   # Document processing
+│   │   ├── langroid-service/    # AI agents
+│   │   ├── storage-service/     # Storage operations
+│   │   ├── ollama-service/      # LLM inference
+│   │   └── shared/              # Shared utilities
+│   │
+│   ├── docker/                  # Docker configuration
+│   │   ├── docker-compose.yml   # Development setup
+│   │   ├── docker-compose.prod.yml # Production setup
+│   │   ├── docker-compose.test.yml # Test environment
+│   │   ├── start-dev.sh         # Dev startup script
+│   │   └── start-prod.sh        # Prod startup script
+│   │
+│   ├── alembic/                 # Database migrations
+│   │   └── versions/            # Migration files
+│   │
+│   ├── scripts/                 # Utility scripts
+│   │   ├── init_db.py          # Database initialization
+│   │   ├── create_migration.py  # Safe migration creation
+│   │   └── alembic_utils.py    # Migration utilities
+│   │
+│   └── tests/                   # Test suite
+│       ├── test_api/            # API tests
+│       ├── test_services/       # Service tests
+│       └── run_tests.sh         # Test runner
+│
+├── frontend/                    # Next.js frontend
+│   ├── src/
+│   │   ├── app/                # App router pages
+│   │   ├── components/         # React components
+│   │   └── lib/               # Utilities and services
+│   │
+│   └── package.json           # Dependencies
+│
+└── docs/                      # Documentation
+    ├── api/                   # API documentation
+    ├── architecture/          # Architecture diagrams
+    └── deployment/            # Deployment guides
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Python 3.9+ (for local development)
+- Node.js 18+ (for frontend development)
+- Google Cloud account (for storage)
+- Stripe account (for payments)
+- Clerk account (for authentication)
+
+### Quick Start with Docker
+
+1. **Clone the repository**
    ```bash
-   git clone https://github.com/tu-usuario/doc-management-system.git
-   cd doc-management-system/backend
+   git clone https://github.com/your-org/nexus-document-backend.git
+   cd nexus-document-backend
    ```
 
-2. Copia el archivo de ejemplo de variables de entorno:
+2. **Set up environment variables**
    ```bash
+   cd backend
    cp .env.example .env
+   # Edit .env with your configuration
    ```
 
-3. Edita el archivo `.env` con tu configuración:
-   ```
-   # API
-   API_V1_STR=/api/v1
-   SECRET_KEY=super-secret-key-change-this-in-production
-   ACCESS_TOKEN_EXPIRE_MINUTES=10080  # 7 días
-   SERVER_NAME=Document Management API
-   SERVER_HOST=http://localhost:8000
-   BACKEND_CORS_ORIGINS=["http://localhost:3000", "http://localhost:8000", "https://app.example.com"]
-   
-   # PostgreSQL
-   POSTGRES_SERVER=db
-   POSTGRES_USER=postgres
-   POSTGRES_PASSWORD=password
-   POSTGRES_DB=doc_management
-   
-   # Resto de configuraciones...
-   ```
-
-## Uso con Docker
-
-1. Inicia los servicios con Docker Compose:
+3. **Configure Google Cloud Storage**
    ```bash
-   docker-compose -f docker/docker-compose.yml up -d
+   # Place your GCS service account JSON in:
+   mkdir -p backend/credentials
+   cp path/to/your-service-account.json backend/credentials/
    ```
 
-2. Inicializa la base de datos:
+4. **Start the development environment**
    ```bash
-   docker-compose -f docker/docker-compose.yml exec api python -m scripts.init_db
+   cd backend/docker
+   ./start-dev.sh
    ```
 
-3. La API estará disponible en: `http://localhost:8000`
-   - Documentación OpenAPI: `http://localhost:8000/docs`
+   This will start:
+   - PostgreSQL database
+   - Redis cache
+   - Qdrant vector database
+   - All microservices with hot reload
+   - Main API on http://localhost:8000
 
-## Desarrollo Local
-
-1. Crea y activa un entorno virtual:
+5. **Initialize the database**
    ```bash
+   cd backend
+   docker compose exec api python -m scripts.init_db
+   ```
+
+6. **Access the application**
+   - API Documentation: http://localhost:8000/docs
+   - Main API: http://localhost:8000
+   - LangChain Service: http://localhost:8001
+   - Storage Service: http://localhost:8003
+
+### Manual Setup (Without Docker)
+
+1. **Create Python virtual environment**
+   ```bash
+   cd backend
    python -m venv venv
-   source venv/bin/activate  # En Windows: venv\Scripts\activate
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-2. Instala dependencias:
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Inicializa la base de datos:
+3. **Set up services locally**
+   - Install and run PostgreSQL
+   - Install and run Redis
+   - Install and run Qdrant
+
+4. **Run database migrations**
    ```bash
-   python -m scripts.init_db
+   alembic upgrade head
    ```
 
-4. Ejecuta el servidor de desarrollo:
+5. **Start the API server**
    ```bash
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-## Tests
+## Development
 
-Ejecuta los tests con pytest:
+### Development Workflow
+
+#### 1. **Backend Development**
+
+**Start development environment:**
 ```bash
-chmod +x tests/run_tests.sh  # Asegura permisos de ejecución
-./tests/run_tests.sh
+cd backend/docker
+./start-dev.sh  # Includes all services with hot reload
 ```
 
-## Endpoints Principales
+**Key features of dev mode:**
+- Live code reloading (no rebuilds needed)
+- Volume mounting for instant updates
+- Debug logging enabled
+- Development database with sample data
 
-### Autenticación
-
-- **POST** `/api/v1/auth/login/access-token` - Obtener token JWT
-- **POST** `/api/v1/auth/register` - Registrar nuevo usuario
-- **GET** `/api/v1/auth/me` - Obtener usuario actual
-
-### Documentos
-
-- **GET** `/api/v1/documents/` - Listar documentos
-- **POST** `/api/v1/documents/` - Subir nuevo documento
-- **GET** `/api/v1/documents/{doc_id}` - Obtener documento
-- **DELETE** `/api/v1/documents/{doc_id}` - Eliminar documento
-- **GET** `/api/v1/documents/{doc_id}/summary` - Generar resumen
-- **GET** `/api/v1/documents/{doc_id}/download-url` - Obtener URL de descarga
-
-### Búsqueda
-
-- **GET** `/api/v1/search/` - Búsqueda semántica
-- **POST** `/api/v1/search/ask` - Responder preguntas sobre documentos
-
-### Administración
-
-- **GET** `/api/v1/admin/users` - Listar usuarios
-- **POST** `/api/v1/admin/users` - Crear usuario
-- **GET** `/api/v1/admin/stats` - Estadísticas del sistema
-- **POST** `/api/v1/admin/init-ollama-model` - Inicializar modelo LLM
-
-### Tenants
-
-- **GET** `/api/v1/tenants/` - Listar tenants (admin)
-- **POST** `/api/v1/tenants/` - Crear tenant (admin)
-- **GET** `/api/v1/tenants/current` - Obtener tenant actual
-
-## Implementación en Producción
-
-Para implementar en producción, utiliza el archivo `docker-compose.prod.yml`:
-
+**Common development tasks:**
 ```bash
-docker-compose -f docker/docker-compose.prod.yml up -d
+# Create a new API endpoint
+# 1. Add schema in app/schemas/
+# 2. Add endpoint in app/api/v1/
+# 3. Add service logic in app/services/
+# 4. Add tests in tests/
+
+# Run specific microservice
+docker compose up langchain-service
+
+# View logs
+docker compose logs -f api
+docker compose logs -f langchain-service
+
+# Access database
+docker compose exec db psql -U postgres -d nexus_docs
 ```
 
-Este archivo incluye:
-- Replicación de servicios
-- Configuración de red segura
-- Proxy Nginx para HTTPS
+#### 2. **Database Development**
 
-## Escalabilidad
+**Create a new migration:**
+```bash
+cd backend
+# Safe migration creation (prevents conflicts)
+python scripts/create_migration.py -m "add new feature"
 
-El sistema está diseñado para escalar horizontalmente:
+# With model changes auto-detection
+python scripts/create_migration.py -m "add new feature" --autogenerate
+```
 
-1. Los servicios no mantienen estado (stateless)
-2. El almacenamiento en GCS permite escala ilimitada
-3. Qdrant puede escalar en cluster
-4. La arquitectura multi-tenant permite segmentar datos
+**Check migration health:**
+```bash
+python scripts/alembic_utils.py check
+python scripts/alembic_utils.py visualize
+```
 
-## Contribuciones
+**Apply migrations:**
+```bash
+alembic upgrade head
+```
 
-Las contribuciones son bienvenidas. Por favor, sigue estos pasos:
+#### 3. **Frontend Development**
 
-1. Fork el repositorio
-2. Crea una rama para tu característica (`git checkout -b feature/caracteristica-increible`)
-3. Realiza tus cambios y ejecuta pruebas
-4. Haz commit de tus cambios (`git commit -m 'Añade característica increíble'`)
-5. Push a la rama (`git push origin feature/caracteristica-increible`)
-6. Abre un Pull Request
+```bash
+cd frontend
+nvm use 18  # Ensure correct Node version
+npm install
+npm run dev  # Starts on http://localhost:3000
+```
 
-## Licencia
+### Code Style and Standards
 
-Este proyecto está licenciado bajo la licencia MIT - consulta el archivo `LICENSE` para más detalles.
+- **Python**: Follow PEP 8, use Black formatter
+- **TypeScript**: Use ESLint and Prettier
+- **Async First**: Use async/await patterns
+- **Type Safety**: Full type annotations
+- **Error Handling**: Comprehensive try/catch blocks
+- **Logging**: Structured JSON logging
+
+### Environment Variables
+
+Key environment variables to configure:
+
+```env
+# API Configuration
+API_V1_STR=/api/v1
+SECRET_KEY=your-secret-key
+BACKEND_CORS_ORIGINS=["http://localhost:3000"]
+
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost/nexus_docs
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# Vector Database
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+
+# Google Cloud Storage
+GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/service-account.json
+GCS_BUCKET_PREFIX=nexus-docs
+
+# Microservices
+MICROSERVICE_API_KEY=your-unified-api-key
+LANGCHAIN_SERVICE_URL=http://langchain-service:8001
+STORAGE_SERVICE_URL=http://storage-service:8003
+
+# External Services
+CLERK_SECRET_KEY=your-clerk-secret
+STRIPE_SECRET_KEY=your-stripe-secret
+STRIPE_WEBHOOK_SECRET=your-webhook-secret
+
+# AI/ML
+OPENAI_API_KEY=your-openai-key
+OLLAMA_BASE_URL=http://ollama-service:11434
+```
+
+## API Documentation
+
+### RESTful Endpoints
+
+The API follows RESTful conventions with versioning:
+
+#### Authentication (`/api/v1/auth`)
+- `POST /login` - User login
+- `POST /register` - User registration
+- `GET /me` - Get current user
+- `POST /logout` - User logout
+
+#### Documents (`/api/v1/documents`)
+- `GET /` - List documents (paginated)
+- `POST /` - Upload document
+- `GET /{id}` - Get document details
+- `PUT /{id}` - Update document
+- `DELETE /{id}` - Delete document
+- `GET /{id}/download` - Get download URL
+- `POST /{id}/share` - Share document
+- `GET /{id}/summary` - Get AI summary
+
+#### Search (`/api/v1/search`)
+- `GET /` - Semantic search
+- `POST /ask` - Ask questions about documents
+- `GET /similar/{id}` - Find similar documents
+
+#### Agents (`/api/v1/agents`)
+- `GET /` - List available agents
+- `POST /{agent_id}/execute` - Execute agent
+- `GET /conversations` - List conversations
+- `GET /conversations/{id}` - Get conversation
+
+#### Subscriptions (`/api/v1/subscriptions`)
+- `GET /plans` - List available plans
+- `POST /subscribe` - Create subscription
+- `GET /current` - Get current subscription
+- `POST /cancel` - Cancel subscription
+- `GET /usage` - Get usage statistics
+
+### API Authentication
+
+All API requests require authentication via JWT tokens:
+
+```bash
+# Get token
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password"}'
+
+# Use token
+curl http://localhost:8000/api/v1/documents \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Rate Limiting
+
+API rate limits by subscription tier:
+- **Starter**: 100 requests/minute
+- **Professional**: 1000 requests/minute
+- **Enterprise**: Unlimited
+
+## Microservices
+
+### 1. LangChain Service (Port 8001)
+
+Handles document processing and basic LLM operations:
+
+- **Document Processing**: Text extraction, chunking, embedding
+- **Summarization**: AI-powered document summaries
+- **Q&A**: Question answering over documents
+- **Classification**: Document categorization
+
+**Key endpoints:**
+- `POST /process` - Process uploaded document
+- `POST /embed` - Generate embeddings
+- `POST /summarize` - Generate summary
+- `POST /qa` - Answer questions
+
+### 2. LangGraph Service (Port 8002)
+
+Advanced AI agent orchestration:
+
+- **Multi-Agent Systems**: Coordinate multiple AI agents
+- **Workflow Management**: Complex document workflows
+- **State Machines**: Stateful agent conversations
+- **Tool Integration**: External API integration
+
+**Key endpoints:**
+- `POST /agents/create` - Create agent workflow
+- `POST /agents/{id}/execute` - Execute agent
+- `GET /agents/{id}/state` - Get execution state
+
+### 3. Storage Service (Port 8003)
+
+Async storage operations with GCS:
+
+- **File Upload**: Streaming uploads with progress
+- **Signed URLs**: Secure, time-limited access
+- **Batch Operations**: Bulk file operations
+- **Metadata Management**: File tagging and search
+
+**Key endpoints:**
+- `POST /upload` - Upload file
+- `GET /download/{file_id}` - Get signed URL
+- `DELETE /files/{file_id}` - Delete file
+- `POST /batch` - Batch operations
+
+### 4. Ollama Service (Port 8004)
+
+Local LLM hosting and inference:
+
+- **Model Management**: Download and manage models
+- **Inference**: Run LLM inference locally
+- **Streaming**: Real-time response streaming
+- **Custom Models**: Support for fine-tuned models
+
+**Key endpoints:**
+- `GET /models` - List available models
+- `POST /generate` - Generate text
+- `POST /embed` - Generate embeddings
+- `GET /models/{name}` - Get model info
+
+### 5. Gotenberg Service (Port 8005)
+
+Document conversion and generation:
+
+- **PDF Generation**: HTML to PDF conversion
+- **Format Conversion**: Between document formats
+- **Thumbnail Generation**: Document previews
+- **Merge Operations**: Combine PDFs
+
+**Key endpoints:**
+- `POST /convert/html` - HTML to PDF
+- `POST /convert/office` - Office to PDF
+- `POST /merge` - Merge PDFs
+- `POST /thumbnail` - Generate thumbnail
+
+### Microservice Communication
+
+All microservices use unified API key authentication:
+
+```python
+# Example: Calling storage service from main API
+headers = {"X-API-Key": settings.MICROSERVICE_API_KEY}
+response = await client.post(
+    f"{STORAGE_SERVICE_URL}/upload",
+    headers=headers,
+    files={"file": file}
+)
+```
+
+## Testing
+
+### Running Tests
+
+**Full test suite with real services:**
+```bash
+cd backend/docker
+docker compose -f docker-compose.test.yml up
+```
+
+**Quick unit tests:**
+```bash
+cd backend/tests
+./run_tests.sh
+```
+
+**Test specific module:**
+```bash
+pytest tests/test_api/test_documents.py -v
+```
+
+### Test Coverage
+
+Generate coverage report:
+```bash
+cd backend/tests
+./run_tests.sh --coverage
+# Report available at: coverage_report/index.html
+```
+
+### Test Categories
+
+1. **Unit Tests**: Service and utility functions
+2. **Integration Tests**: API endpoints with database
+3. **E2E Tests**: Full workflow testing
+4. **Performance Tests**: Load and stress testing
+
+## Deployment
+
+### Production Deployment with Docker
+
+1. **Build production images:**
+   ```bash
+   cd backend/docker
+   ./build-prod.sh
+   ```
+
+2. **Deploy with Docker Compose:**
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d
+   ```
+
+3. **Configure reverse proxy (nginx):**
+   ```nginx
+   server {
+       listen 80;
+       server_name api.yourdomain.com;
+       
+       location / {
+           proxy_pass http://api:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+       }
+   }
+   ```
+
+### Kubernetes Deployment
+
+Helm charts available in `/deploy/kubernetes/`:
+
+```bash
+helm install nexus-docs ./deploy/kubernetes/nexus-docs \
+  --values ./deploy/kubernetes/values.prod.yaml
+```
+
+### Environment-Specific Configuration
+
+- **Development**: Hot reload, debug logging, local services
+- **Staging**: Production-like with test data
+- **Production**: Optimized builds, monitoring, backups
+
+### Monitoring and Observability
+
+1. **Metrics**: Prometheus + Grafana
+2. **Logging**: Structured JSON logs to stdout
+3. **Tracing**: OpenTelemetry integration
+4. **Error Tracking**: Sentry integration
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. **Docker Issues**
+
+**Permission denied:**
+```bash
+sudo usermod -aG docker $USER
+# Log out and back in
+```
+
+**Port already in use:**
+```bash
+# Find process using port
+lsof -i :8000
+# Or change port in docker-compose.yml
+```
+
+**Out of disk space:**
+```bash
+docker system prune -a --volumes
+```
+
+#### 2. **Database Issues**
+
+**Migration conflicts:**
+```bash
+cd backend
+python scripts/create_migration.py --fix-heads
+python scripts/alembic_safe_migrate.py --check
+```
+
+**Connection errors:**
+```bash
+# Check PostgreSQL is running
+docker compose ps db
+# Check connection string
+echo $DATABASE_URL
+```
+
+#### 3. **Storage Issues**
+
+**GCS authentication:**
+```bash
+# Verify credentials file exists
+ls -la backend/credentials/
+# Check environment variable
+echo $GOOGLE_APPLICATION_CREDENTIALS
+```
+
+**Bucket creation fails:**
+- Check GCS permissions
+- Verify project ID in credentials
+- Check bucket naming (lowercase, unique)
+
+#### 4. **Microservice Issues**
+
+**Service not responding:**
+```bash
+# Check service health
+curl http://localhost:8001/health
+# View logs
+docker compose logs langchain-service
+# Restart service
+docker compose restart langchain-service
+```
+
+### Debug Mode
+
+Enable debug logging:
+```python
+# In .env
+LOG_LEVEL=DEBUG
+DEBUG=True
+```
+
+View detailed logs:
+```bash
+docker compose logs -f api | jq '.'
+```
+
+### Performance Optimization
+
+1. **Database**: Add indexes for frequent queries
+2. **Caching**: Use Redis for repeated operations
+3. **Async Operations**: Ensure all I/O is async
+4. **Connection Pooling**: Configure pool sizes
+5. **CDN**: Use for static document serving
+
+## Contributing
+
+We welcome contributions! Please follow these guidelines:
+
+### Development Process
+
+1. **Fork the repository**
+2. **Create feature branch:**
+   ```bash
+   git checkout -b feature/amazing-feature
+   ```
+3. **Make changes with tests**
+4. **Run test suite:**
+   ```bash
+   ./tests/run_tests.sh
+   ```
+5. **Commit changes:**
+   ```bash
+   git commit -m "Add amazing feature"
+   ```
+6. **Push branch:**
+   ```bash
+   git push origin feature/amazing-feature
+   ```
+7. **Open Pull Request**
+
+### Code Standards
+
+- Write comprehensive tests
+- Update documentation
+- Follow existing patterns
+- Add type hints
+- Use meaningful commit messages
+
+### Pull Request Process
+
+1. Update README.md with details of changes
+2. Update API documentation if needed
+3. Ensure all tests pass
+4. Request review from maintainers
+5. Merge after approval
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+- **Documentation**: See `/docs` directory
+- **Issues**: GitHub Issues
+- **Discussions**: GitHub Discussions
+- **Email**: support@nexusdocs.com
+
+## Acknowledgments
+
+- FastAPI for the excellent framework
+- The Python async community
+- All our contributors and users
+
+---
+
+Built with ❤️ by the Nexus Team
