@@ -6,6 +6,7 @@ Para agentes avanzados, usar LangroidClient en su lugar.
 import asyncio
 import logging
 import httpx
+import uuid
 from typing import List, Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from app.core.config import settings
@@ -65,14 +66,13 @@ class LangChainClient:
         
         try:
             payload = {
-                "texts": texts,
-                "tenant_id": tenant_id or settings.DEFAULT_TENANT
+                "texts": texts
             }
             
             headers = self._get_auth_headers(tenant_id)
             
             response = await self.http_client.post(
-                f"{self.base_url}/embeddings/generate",
+                f"{self.base_url}/embeddings",
                 json=payload,
                 headers=headers
             )
@@ -120,8 +120,9 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                f"{self.base_url}/chat/generate",
-                json=payload
+                f"{self.base_url}/llm/generate",
+                json=payload,
+                headers=self._get_auth_headers(tenant_id)
             )
             
             response.raise_for_status()
@@ -287,13 +288,15 @@ class LangChainClient:
 
         try:
             payload = {
+                "tenant_id": tenant_id or settings.DEFAULT_TENANT,
+                "doc_id": str(uuid.uuid4()),  # Generate a doc_id for batch
                 "texts": texts,
-                "metadatas": metadatas,
-                "tenant_id": tenant_id or settings.DEFAULT_TENANT
+                "metadatas": metadatas
             }
             response = await self.http_client.post(
-                f"{self.base_url}/documents/add_batch", # Assuming this endpoint
-                json=payload
+                f"{self.base_url}/documents/add",
+                json=payload,
+                headers=self._get_auth_headers(tenant_id)
             )
             response.raise_for_status()
             # Assuming success is True if no error, or based on response content
