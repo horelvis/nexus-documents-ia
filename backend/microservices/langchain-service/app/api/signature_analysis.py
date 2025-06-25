@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import logging
 
 from app.services.llm_service import LLMService
-from app.core.langchain_config import get_llm
+from app.core.langchain_config import LangChainManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
