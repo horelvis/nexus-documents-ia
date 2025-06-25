@@ -369,7 +369,8 @@ async def add_document_tag(
     """
     Añade una etiqueta a un documento.
     """
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Pass db
 
 
@@ -384,7 +385,8 @@ async def remove_document_tag(
     """
     Elimina una etiqueta de un documento.
     """
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db
 
 

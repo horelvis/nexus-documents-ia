@@ -277,7 +277,16 @@ class AsyncDocumentService:
                     doc.tags.append(tag)
             
             await db.commit()
-            await db.refresh(doc)
+            
+            # Reload the document with proper eager loading for tags
+            stmt = select(Document).filter(
+                Document.id == doc.id
+            ).options(
+                selectinload(Document.tags),
+                selectinload(Document.creator)
+            )
+            result = await db.execute(stmt)
+            doc = result.scalar_one()
             
             # Extract text and index asynchronously
             asyncio.create_task(self._process_document_async(str(doc.id), contents, file_ext))
