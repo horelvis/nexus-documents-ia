@@ -53,3 +53,5 @@ coverage/
 # Archivos temporales
 *.tmp
 *.swp
+
+videos/
