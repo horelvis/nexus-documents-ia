@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Agent, useAgentsService } from '@/lib/services/agents.service'
-import { useNotifications } from '@/contexts/notifications-context'
+import { useNotifications } from '@/contexts/app-state-context'
 import { useAgentSelection } from '@/hooks/use-agent-selection'
 
 interface AgentsLayoutProps {
@@ -25,7 +25,7 @@ export default function AgentsLayout({ children }: AgentsLayoutProps) {
   const { selectedAgent, selectAgent, clearSelection } = useAgentSelection(agents)
   
   // Filter agents based on search term
-  const filteredAgents = agents.filter(agent => 
+  const filteredAgents = (agents || []).filter(agent => 
     agent.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     getAgentDisplayName(agent.type).toLowerCase().includes(searchTerm.toLowerCase()) ||
     agent.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -125,9 +125,9 @@ export default function AgentsLayout({ children }: AgentsLayoutProps) {
                 <CardTitle className="flex items-center gap-2">
                   <Bot className="h-5 w-5" />
                   AI Agents
-                  {agents.length > 0 && (
+                  {(agents || []).length > 0 && (
                     <Badge variant="secondary" className="text-xs">
-                      {agents.length}
+                      {(agents || []).length}
                     </Badge>
                   )}
                 </CardTitle>
@@ -176,16 +176,16 @@ export default function AgentsLayout({ children }: AgentsLayoutProps) {
                       <Bot className="h-12 w-12 mx-auto text-muted-foreground" />
                       <div>
                         <h3 className="font-medium">
-                          {agents.length === 0 ? 'No hay agentes' : 'No se encontraron agentes'}
+                          {(agents || []).length === 0 ? 'No hay agentes' : 'No se encontraron agentes'}
                         </h3>
                         <p className="text-sm text-muted-foreground">
-                          {agents.length === 0 
+                          {(agents || []).length === 0 
                             ? 'Crea tu primer agente de IA'
                             : 'Intenta con otros términos de búsqueda'
                           }
                         </p>
                       </div>
-                      {agents.length === 0 && (
+                      {(agents || []).length === 0 && (
                         <Button onClick={handleCreateAgent} size="sm">
                           <Plus className="h-3 w-3 mr-1" />
                           Crear Agente
@@ -232,14 +232,14 @@ export default function AgentsLayout({ children }: AgentsLayoutProps) {
               </div>
               
               {/* Footer */}
-              {agents.length > 0 && (
+              {(agents || []).length > 0 && (
                 <div className="mt-auto">
                   <Separator />
                   <div className="p-4">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Total:</span>
                       <Badge variant="outline" className="text-xs">
-                        {filteredAgents.length} de {agents.length}
+                        {filteredAgents.length} de {(agents || []).length}
                       </Badge>
                     </div>
                   </div>

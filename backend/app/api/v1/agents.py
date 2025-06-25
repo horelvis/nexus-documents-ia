@@ -75,14 +75,26 @@ async def check_langgraph_health():
 
 @router.get("/status")
 async def get_service_status():
-    """Get detailed service status from LangGraph"""
+    """Get service health status from LangGraph"""
     try:
         headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/status", headers=headers)
+            # Use the health endpoint instead of non-existent status endpoint
+            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             
-        return response.json()
+            health_data = response.json()
+            
+            # Also get available graph types
+            types_response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
+            types_data = types_response.json() if types_response.status_code == 200 else []
+        
+        return {
+            "service": "agents",
+            "langgraph_health": health_data,
+            "available_types": types_data,
+            "status": "operational" if health_data.get("status") == "healthy" else "degraded"
+        }
     except Exception as e:
         logger.error(f"Error getting service status: {str(e)}")
         raise HTTPException(

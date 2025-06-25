@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react"
 import { useForm, UseFormProps, UseFormReturn, FieldValues } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { useNotifications } from "@/contexts/notifications-context"
+import { useNotifications } from "@/contexts/app-state-context"
 
 interface UseFormWithValidationOptions<TFieldValues extends FieldValues = FieldValues> 
   extends Omit<UseFormProps<TFieldValues>, 'resolver'> {
