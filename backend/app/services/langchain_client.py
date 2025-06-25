@@ -35,8 +35,8 @@ class LangChainClient:
     def _get_auth_headers(self, tenant_id: str = None, user_id: str = None) -> dict:
         """Get authentication headers for microservice requests"""
         headers = {
-            "X-API-Key": getattr(settings, 'API_KEY', 'your-secret-api-key-here'),
-            "X-Tenant-ID": tenant_id or self.tenant_id or getattr(settings, 'DEFAULT_TENANT', 'default')
+            "X-API-Key": settings.MICROSERVICES_API_KEY,
+            "X-Tenant-ID": tenant_id or self.tenant_id or settings.DEFAULT_TENANT
         }
         
         user_id_to_use = user_id or self.user_id

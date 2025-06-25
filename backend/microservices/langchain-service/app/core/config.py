@@ -6,8 +6,8 @@ from typing import Optional
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # Security configuration
-    API_KEY: str = "unified-microservices-key-12345"
+    # Security configuration - Match environment variable name
+    MICROSERVICES_API_KEY: str = "unified-microservices-key-12345"
     
     # LangChain/Ollama configuration
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     
     # Default tenant
     DEFAULT_TENANT: str = "default"
+    
+    # Property for backward compatibility
+    @property
+    def API_KEY(self) -> str:
+        return self.MICROSERVICES_API_KEY
     
     class Config:
         env_file = ".env"
