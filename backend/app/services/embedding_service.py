@@ -63,6 +63,22 @@ class EmbeddingService:
             logger.error(f"Error generating embedding: {str(e)}")
             raise
     
+    async def generate_embeddings(self, text: str) -> List[List[float]]:
+        """
+        Genera embeddings para un texto.
+        Alias for get_embeddings to maintain compatibility.
+        
+        Args:
+            text: Texto para generar embeddings
+            
+        Returns:
+            Lista de vectores de embeddings
+        """
+        # Split text into chunks if it's too long
+        chunks = await self.chunk_text(text)
+        texts = [chunk["text"] for chunk in chunks] if chunks else [text]
+        return await self.get_embeddings(texts)
+    
     async def chunk_text(self, text: str) -> List[Dict[str, Any]]:
         """
         Divide texto en chunks usando el microservicio LangChain.

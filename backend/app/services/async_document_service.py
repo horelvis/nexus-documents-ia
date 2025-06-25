@@ -337,7 +337,7 @@ class AsyncDocumentService:
                 doc = result.scalar_one_or_none()
                 
                 if doc:
-                    doc.indexed = IndexingStatus.FAILED
+                    doc.indexed = IndexingStatus.INDEXING_ERROR
                     doc.indexing_error = str(e)
                     await db.commit()
     
