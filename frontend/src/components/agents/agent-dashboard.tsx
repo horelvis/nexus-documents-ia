@@ -113,6 +113,9 @@ export function AgentDashboard({ className }: { className?: string }) {
     setIsLoading(true)
     setError(null)
     
+    // Declare agentMetrics at the top of the function
+    let agentMetrics: AgentMetrics[] = []
+    
     try {
       // Fetch agents and service status in parallel
       const [agentsResponse, statusResponse] = await Promise.all([
@@ -125,17 +128,26 @@ export function AgentDashboard({ className }: { className?: string }) {
       }
       
       if (agentsResponse.data) {
-        // Transform agents to AgentMetrics
-        const agentMetrics: AgentMetrics[] = agentsResponse.data.map(agent => ({
-          ...agent,
-          icon: getAgentIcon(agent.agent_type),
-          color: getAgentColor(agent.agent_type),
+        // Handle the response structure from /list endpoint
+        const agentTypes = agentsResponse.data.available_types || agentsResponse.data
+        
+        // Transform agent types to AgentMetrics
+        agentMetrics = Object.entries(agentTypes).map(([key, value]: [string, any]) => ({
+          id: key,
+          name: value.name || key,
+          description: value.description || '',
+          agent_type: key,
+          type: key,
+          status: 'active', // Default status since types don't have runtime status
+          icon: getAgentIcon(key),
+          color: getAgentColor(key),
           // TODO: Connect to real agent statistics from API
           tasksCompleted: 0, // Placeholder - needs API endpoint for agent stats
           avgResponseTime: 0, // Placeholder - needs API endpoint for agent metrics
           successRate: 0, // Placeholder - needs API endpoint for agent performance
-          currentLoad: agent.status === 'busy' ? 75 : 
-                      agent.status === 'active' ? 25 : 0
+          currentLoad: 0,
+          last_activity: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         }))
         setAgents(agentMetrics)
         
@@ -154,16 +166,16 @@ export function AgentDashboard({ className }: { className?: string }) {
         setServiceStatus(statusResponse.data)
         
         // TODO: Connect to real agent activity endpoint
-        // Currently using agent list data as placeholder
-        const activities: AgentActivity[] = agentsResponse.data?.slice(0, 5).map((agent, index) => ({
-          id: agent.id,
+        // Currently using agent metrics data as placeholder
+        const activities: AgentActivity[] = agentMetrics.slice(0, 5).map((agent, index) => ({
+          id: `activity-${index}`,
           agentId: agent.id,
           agentName: agent.name,
-          action: agent.last_activity ? 'Task completed' : 'Agent initialized',
+          action: 'Agent initialized',
           timestamp: agent.last_activity || agent.updated_at,
-          status: agent.status === 'error' ? 'error' : 'success' as const,
+          status: 'success' as const,
           duration: 0 // Placeholder - needs real execution time from API
-        })) || []
+        }))
         setActivities(activities)
       }
     } catch (err) {

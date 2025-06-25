@@ -50,12 +50,26 @@ export default function AgentsLayout({ children }: AgentsLayoutProps) {
           message: response.error
         })
       } else {
-        // La respuesta puede ser { agents: [...], total: ... } o directamente un array
-        const agentsData = response.data?.agents || response.data || []
-        console.log('✅ Loaded agents:', agentsData)
-        setAgents(agentsData)
+        // Handle the response structure from /list endpoint
+        const agentTypes = response.data?.available_types || response.data || {}
         
-        if (agentsData.length === 0) {
+        // Transform agent types object to array
+        const agentsArray = Object.entries(agentTypes).map(([key, value]: [string, any]) => ({
+          id: key,
+          name: value.name || key,
+          type: key,
+          description: value.description || '',
+          capabilities: value.capabilities || [],
+          source: value.source || 'built-in',
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }))
+        
+        console.log('✅ Loaded agents:', agentsArray)
+        setAgents(agentsArray)
+        
+        if (agentsArray.length === 0) {
           console.log('ℹ️ No agents found for tenant')
         }
       }

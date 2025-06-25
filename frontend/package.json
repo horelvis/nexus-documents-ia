@@ -6,7 +6,11 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "cypress:open": "cypress open",
+    "cypress:run": "cypress run",
+    "test:e2e": "cypress run --headless",
+    "test:e2e:ui": "cypress open"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.20.2",
@@ -61,9 +65,11 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/cypress": "^10.0.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cypress": "^14.5.0",
     "eslint": "^9",
     "eslint-config-next": "15.3.3",
     "tailwindcss": "^4",

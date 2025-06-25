@@ -1,0 +1,22 @@
+{
+  "documents": [
+    {
+      "name": "test-contract.pdf",
+      "type": "application/pdf",
+      "tags": ["contract", "legal"],
+      "description": "Test contract document"
+    },
+    {
+      "name": "project-requirements.docx",
+      "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "tags": ["project", "requirements"],
+      "description": "Project requirements document"
+    },
+    {
+      "name": "meeting-notes.txt",
+      "type": "text/plain",
+      "tags": ["meeting", "notes"],
+      "description": "Meeting notes from yesterday"
+    }
+  ]
+}
