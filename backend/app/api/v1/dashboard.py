@@ -39,9 +39,9 @@ async def get_dashboard_stats(
     doc_stats = await db.execute(
         select(
             func.count(Document.id).label('total'),
-            func.sum(case((Document.processing_status == 'completed', 1), else_=0)).label('processed'),
-            func.sum(case((Document.processing_status == 'processing', 1), else_=0)).label('processing'),
-            func.sum(case((Document.processing_status == 'error', 1), else_=0)).label('error'),
+            func.sum(case([(Document.processing_status == 'completed', 1)], else_=0)).label('processed'),
+            func.sum(case([(Document.processing_status == 'processing', 1)], else_=0)).label('processing'),
+            func.sum(case([(Document.processing_status == 'error', 1)], else_=0)).label('error'),
             func.coalesce(func.sum(Document.file_size), 0).label('total_size')
         ).where(Document.tenant_id == tenant_uuid)
     )

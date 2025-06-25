@@ -84,9 +84,8 @@ async def get_current_user_info(
         SubscriptionServiceV2.clear_cache(str(current_user.id))
         
         # Get subscription status from Stripe
-        # Note: SubscriptionServiceV2 would need async versions of these methods
-        # For now, we'll use the sync version
-        subscription_info = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+        # Now using async version of SubscriptionServiceV2 methods
+        subscription_info = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         logger.info(f"📋 [AUTH_ENDPOINT] User subscription status: {subscription_info}")
         
         # Update user record with latest subscription info

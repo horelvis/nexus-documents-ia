@@ -47,9 +47,11 @@ export function NavSecondary({
               <SidebarMenuButton 
                 asChild
                 isActive={isActive(item.url)}
+                tooltip={item.title}
               >
                 <NavLink href={item.url}>
                   <item.icon className={cn(
+                    "transition-colors",
                     item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
                   )} />
                   <span>{item.title}</span>

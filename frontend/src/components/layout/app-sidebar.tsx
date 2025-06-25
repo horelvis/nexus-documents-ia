@@ -28,6 +28,7 @@ import { NavMain } from "@/components/navigation/nav-main"
 import { NavSecondary } from "@/components/navigation/nav-secondary"
 import { NavUser } from "@/components/navigation/nav-user"
 import { NavAdmin } from "@/components/navigation/nav-admin"
+import { NavLink } from "@/components/ui/nav-link"
 import {
   Sidebar,
   SidebarContent,
@@ -36,6 +37,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
 import { useBackendUser } from "@/contexts/user-context"
 
@@ -74,7 +76,7 @@ const data = {
     },
     {
       title: "Search & AI",
-      url: "#",
+      url: "/search",
       icon: IconBrain,
       color: "purple",
       items: [
@@ -94,7 +96,7 @@ const data = {
     },
     {
       title: "AI Agents",
-      url: "#",
+      url: "/agents",
       icon: IconRobot,
       color: "indigo",
       items: [
@@ -110,7 +112,7 @@ const data = {
     },
     {
       title: "Digital Signatures",
-      url: "#",
+      url: "/signatures/requests",
       icon: IconSignature,
       color: "pink",
       items: [
@@ -254,18 +256,19 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
   const navData = getNavData();
 
   return (
-    <Sidebar collapsible="offcanvas" {...props}>
+    <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
               className="data-[slot=sidebar-menu-button]:!p-1.5"
+              tooltip="Nexus Document"
             >
-              <a href="#">
+              <NavLink href={`/${tenantId}/dashboard`}>
                 <IconInnerShadowTop className="!size-5" />
                 <span className="text-base font-semibold">Nexus Document</span>
-              </a>
+              </NavLink>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -279,6 +282,7 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       <SidebarFooter>
         <NavUser user={navData.user} />
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

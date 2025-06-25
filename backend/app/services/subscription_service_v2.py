@@ -1,347 +1,658 @@
 # app/services/subscription_service_v2.py
 """
-Servicio simplificado de suscripciones que usa Stripe como fuente de verdad
+Production-ready subscription service using Stripe as the single source of truth.
+
+This service handles all subscription-related operations including:
+- Fetching subscription status from Stripe
+- Caching subscription data for performance
+- Checking permissions based on subscription plan
+- Managing team member inheritance
 """
+
 import stripe
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from app.db.models import User
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from app.db.models import User, Document
 from app.core.config import settings
-import json
 from app.core.cache import cache, user_cache_key
+from enum import Enum
+import asyncio
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-# Configurar Stripe
+# Configure Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
-logger.debug(f"Stripe configured with API key: {stripe.api_key[:7]}..." if stripe.api_key else "NO API KEY")
+if not stripe.api_key:
+    logger.warning("⚠️ Stripe API key not configured. Subscription features will be limited.")
+
+
+class SubscriptionPlan(str, Enum):
+    """Subscription plan types"""
+    FREE = "free"
+    PRO = "pro"
+    ENTERPRISE = "enterprise"
+
+
+class SubscriptionStatus(str, Enum):
+    """Subscription status types"""
+    ACTIVE = "active"
+    TRIAL = "trial"
+    PAST_DUE = "past_due"
+    CANCELED = "canceled"
+    INCOMPLETE = "incomplete"
+    EXPIRED = "expired"
+    ERROR = "error"
+    UNKNOWN = "unknown"
+
+
+class PlanLimits:
+    """Plan limits configuration"""
+    LIMITS = {
+        SubscriptionPlan.FREE: {
+            "documents": 10,
+            "storage_mb": 100,
+            "agents_per_month": 0,
+            "team_members": 0,
+            "api_calls_per_day": 100
+        },
+        SubscriptionPlan.PRO: {
+            "documents": 1000,
+            "storage_mb": 10000,
+            "agents_per_month": 100,
+            "team_members": 5,
+            "api_calls_per_day": 5000
+        },
+        SubscriptionPlan.ENTERPRISE: {
+            "documents": -1,  # Unlimited
+            "storage_mb": -1,  # Unlimited
+            "agents_per_month": -1,  # Unlimited
+            "team_members": -1,  # Unlimited
+            "api_calls_per_day": -1  # Unlimited
+        }
+    }
+
+    @classmethod
+    def get_limits(cls, plan: str) -> Dict[str, int]:
+        """Get limits for a specific plan"""
+        return cls.LIMITS.get(SubscriptionPlan(plan), cls.LIMITS[SubscriptionPlan.FREE])
+
+
+class PermissionManager:
+    """Manages permissions based on subscription plans"""
+    
+    PERMISSIONS = {
+        SubscriptionPlan.FREE: {
+            'view_documents',
+            'basic_search',
+            'upload_documents'
+        },
+        SubscriptionPlan.PRO: {
+            'view_documents',
+            'basic_search',
+            'upload_documents',
+            'advanced_search',
+            'use_agents',
+            'can_use_agents',
+            'export_documents',
+            'api_access',
+            'invite_team_members',
+            'create_shared_links'
+        },
+        SubscriptionPlan.ENTERPRISE: {
+            'view_documents',
+            'basic_search',
+            'upload_documents',
+            'advanced_search',
+            'use_agents',
+            'can_use_agents',
+            'export_documents',
+            'api_access',
+            'invite_team_members',
+            'create_shared_links',
+            'admin_features',
+            'custom_integrations',
+            'advanced_analytics',
+            'priority_support'
+        }
+    }
+
+    @classmethod
+    def has_permission(cls, plan: str, permission: str) -> bool:
+        """Check if a plan has a specific permission"""
+        try:
+            plan_enum = SubscriptionPlan(plan)
+            return permission in cls.PERMISSIONS.get(plan_enum, set())
+        except ValueError:
+            return permission in cls.PERMISSIONS[SubscriptionPlan.FREE]
+
+
+def handle_stripe_errors(func):
+    """Decorator to handle Stripe errors gracefully"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except stripe.error.RateLimitError as e:
+            logger.error(f"🚫 Stripe rate limit error: {e}")
+            raise Exception("Too many requests to payment service. Please try again later.")
+        except stripe.error.InvalidRequestError as e:
+            logger.error(f"❌ Invalid Stripe request: {e}")
+            raise Exception("Invalid request to payment service.")
+        except stripe.error.AuthenticationError as e:
+            logger.error(f"🔐 Stripe authentication error: {e}")
+            raise Exception("Payment service authentication failed.")
+        except stripe.error.APIConnectionError as e:
+            logger.error(f"🌐 Stripe API connection error: {e}")
+            raise Exception("Cannot connect to payment service.")
+        except stripe.error.StripeError as e:
+            logger.error(f"💳 General Stripe error: {e}")
+            raise Exception("Payment service error occurred.")
+        except Exception as e:
+            logger.error(f"🔥 Unexpected error in {func.__name__}: {e}")
+            raise
+    return wrapper
+
 
 class SubscriptionServiceV2:
     """
-    Servicio simplificado que consulta Stripe directamente
+    Production-ready subscription service with caching and error handling
     """
     
-    # Cache duration for subscription data (5 minutes)
-    CACHE_TTL = 300
+    # Cache configuration
+    CACHE_TTL = 300  # 5 minutes
+    CACHE_TTL_ERROR = 60  # 1 minute for error states
     
     @staticmethod
-    def get_user_subscription_status(db: Session, user: User) -> Dict[str, Any]:
+    @handle_stripe_errors
+    async def get_user_subscription_status(
+        db: AsyncSession,
+        user: User,
+        force_refresh: bool = False
+    ) -> Dict[str, Any]:
         """
-        Obtiene el estado de suscripción consultando Stripe directamente
-        con cache para evitar demasiadas llamadas
-        """
-        # Si es team member, hereda la suscripción del admin
-        if user.is_team_member:
-            # Buscar el admin del tenant (primer usuario no team member)
-            from app.db.models import User as UserModel
-            admin_user = db.query(UserModel).filter(
-                UserModel.tenant_id == user.tenant_id,
-                UserModel.is_team_member == False,
-                UserModel.is_active == True
-            ).first()
+        Get subscription status for a user with caching and team member support.
+        
+        Args:
+            db: Database session
+            user: User object
+            force_refresh: Force refresh from Stripe
             
-            if admin_user:
-                # Obtener la suscripción del admin
-                admin_status = SubscriptionServiceV2.get_user_subscription_status(db, admin_user)
-                # Marcar como team member para el frontend
-                admin_status["is_team_member"] = True
-                admin_status["inherited_from"] = admin_user.email
-                return admin_status
-            else:
-                # Si no hay admin, usar plan gratuito
-                return {
-                    "plan": "free",
-                    "status": "active",
-                    "can_use_agents": False,
-                    "can_use_advanced_features": False,
-                    "message": "Plan gratuito (Team member sin admin)",
-                    "is_team_member": True,
-                    "limits": {
-                        "documents": 10,
-                        "storage_mb": 100,
-                        "agents_per_month": 0
-                    }
-                }
+        Returns:
+            Dictionary containing subscription status and permissions
+        """
+        # Handle team members
+        if user.is_team_member:
+            return await SubscriptionServiceV2._get_team_member_status(db, user)
         
-        # Si no tiene stripe_customer_id, es usuario gratuito
-        if not user.stripe_customer_id:
-            return {
-                "plan": "free",
-                "status": "active",
-                "can_use_agents": False,
-                "can_use_advanced_features": False,
-                "message": "Plan gratuito",
-                "limits": {
-                    "documents": 10,
-                    "storage_mb": 100,
-                    "agents_per_month": 0
-                }
-            }
+        # Check cache first (unless force refresh)
+        if not force_refresh:
+            cached_status = SubscriptionServiceV2._get_cached_status(user)
+            if cached_status:
+                return cached_status
         
-        # Intentar obtener del cache primero
+        # Get status from Stripe
+        status = await SubscriptionServiceV2._fetch_stripe_status(user)
+        
+        # Cache the result
+        SubscriptionServiceV2._cache_status(user, status)
+        
+        return status
+    
+    @staticmethod
+    async def _get_team_member_status(db: AsyncSession, user: User) -> Dict[str, Any]:
+        """Get subscription status for team members"""
+        # Find the tenant admin
+        result = await db.execute(
+            select(User).where(
+                User.tenant_id == user.tenant_id,
+                User.is_team_member == False,
+                User.is_active == True
+            ).order_by(User.created_at)  # Get the oldest user (likely the admin)
+        )
+        admin_user = result.scalars().first()
+        
+        if admin_user:
+            # Get admin's subscription status
+            admin_status = await SubscriptionServiceV2.get_user_subscription_status(db, admin_user)
+            
+            # Check if admin's plan allows team members
+            plan_limits = PlanLimits.get_limits(admin_status['plan'])
+            if plan_limits['team_members'] == 0:
+                return SubscriptionServiceV2._get_free_plan_status(
+                    message="Team members not allowed on admin's plan"
+                )
+            
+            # Inherit admin's status
+            admin_status.update({
+                "is_team_member": True,
+                "inherited_from": admin_user.email,
+                "inherited_from_id": str(admin_user.id)
+            })
+            return admin_status
+        
+        # No admin found
+        return SubscriptionServiceV2._get_free_plan_status(
+            message="Team member without admin"
+        )
+    
+    @staticmethod
+    def _get_cached_status(user: User) -> Optional[Dict[str, Any]]:
+        """Get cached subscription status"""
         cache_key = user_cache_key(str(user.id), "subscription")
         cached_data = cache.get_json(cache_key)
         
         if cached_data:
             logger.debug(f"✨ Using cached subscription data for user {user.id}")
-            return cached_data
+            # Add timestamp for frontend
+            cached_data['cached_at'] = datetime.utcnow().isoformat()
+        
+        return cached_data
+    
+    @staticmethod
+    def _cache_status(user: User, status: Dict[str, Any], ttl: Optional[int] = None):
+        """Cache subscription status"""
+        cache_key = user_cache_key(str(user.id), "subscription")
+        ttl = ttl or (
+            SubscriptionServiceV2.CACHE_TTL_ERROR 
+            if status['status'] == SubscriptionStatus.ERROR 
+            else SubscriptionServiceV2.CACHE_TTL
+        )
+        cache.set_json(cache_key, status, ttl=ttl)
+        logger.debug(f"💾 Cached subscription status for user {user.id} (TTL: {ttl}s)")
+    
+    @staticmethod
+    async def _fetch_stripe_status(user: User) -> Dict[str, Any]:
+        """Fetch subscription status from Stripe"""
+        # Free plan for users without Stripe customer
+        if not user.stripe_customer_id:
+            return SubscriptionServiceV2._get_free_plan_status()
         
         try:
-            # Consultar Stripe
-            logger.debug(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
-            
-            # Verificar que tenemos API key
+            # Verify Stripe is configured
             if not stripe.api_key:
                 logger.error("Stripe API key not configured")
-                raise Exception("Stripe API key not configured")
-            
-            # Listar todas las suscripciones del cliente
-            logger.debug(f"Fetching subscriptions for customer: {user.stripe_customer_id}")
-            try:
-                subscriptions = stripe.Subscription.list(
-                    customer=user.stripe_customer_id,
-                    limit=10,
-                    expand=['data.default_payment_method']
+                return SubscriptionServiceV2._get_error_status(
+                    "Payment service not configured"
                 )
-                logger.debug(f"Subscriptions result type: {type(subscriptions)}")
-            except Exception as e:
-                logger.error(f"Error calling stripe.Subscription.list: {type(e).__name__}: {e}")
-                raise
             
-            # Buscar suscripción activa o en trial
-            # Si hay múltiples suscripciones, tomar la más reciente
-            active_subscription = None
-            active_subscriptions = []
+            # Fetch subscriptions from Stripe
+            logger.debug(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
             
-            if hasattr(subscriptions, 'data'):
-                for sub in subscriptions.data:
-                    if sub.status in ['active', 'trialing', 'past_due']:
-                        active_subscriptions.append(sub)
+            subscriptions = stripe.Subscription.list(
+                customer=user.stripe_customer_id,
+                limit=10,
+                expand=['data.default_payment_method']
+            )
             
-            # Si hay múltiples suscripciones activas, tomar la más reciente
-            if active_subscriptions:
-                active_subscription = max(active_subscriptions, key=lambda x: x.created)
-                logger.debug(f"Found {len(active_subscriptions)} active subscriptions for user {user.id}, using most recent: {active_subscription.id}")
+            # Find active subscription
+            active_subscription = SubscriptionServiceV2._find_active_subscription(subscriptions.data)
             
             if not active_subscription:
-                # No hay suscripción activa - usuario gratuito
-                result = {
-                    "plan": "free",
-                    "status": "active",
-                    "can_use_agents": False,
-                    "can_use_advanced_features": False,
-                    "message": "Sin suscripción activa",
-                    "limits": {
-                        "documents": 10,
-                        "storage_mb": 100,
-                        "agents_per_month": 0
-                    }
-                }
-            else:
-                # Determinar el plan basado en metadata o price_id
-                plan_id = active_subscription.metadata.get('plan_id', 'pro')
-                
-                # Si no hay metadata, intentar deducir del price_id
-                if plan_id == 'pro' and hasattr(active_subscription.items, 'data') and active_subscription.items.data:
-                    price_id = active_subscription.items.data[0].price.id
-                    if price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
-                        plan_id = 'enterprise'
-                
-                # Mapear estado y permisos
-                status_map = {
-                    'active': 'active',
-                    'trialing': 'trial',
-                    'past_due': 'past_due',
-                    'canceled': 'canceled',
-                    'incomplete': 'incomplete',
-                    'incomplete_expired': 'expired'
-                }
-                
-                status = status_map.get(active_subscription.status, 'unknown')
-                
-                # Calcular días restantes si está en trial
-                trial_days_remaining = None
-                if active_subscription.status == 'trialing' and active_subscription.trial_end:
-                    trial_end = datetime.fromtimestamp(active_subscription.trial_end)
-                    trial_days_remaining = (trial_end - datetime.now()).days
-                
-                # Determinar permisos según plan y estado
-                can_use = status in ['active', 'trial']
-                
-                limits = {
-                    'free': {
-                        "documents": 10,
-                        "storage_mb": 100,
-                        "agents_per_month": 0
-                    },
-                    'pro': {
-                        "documents": 1000,
-                        "storage_mb": 10000,
-                        "agents_per_month": 100
-                    },
-                    'enterprise': {
-                        "documents": -1,  # Ilimitado
-                        "storage_mb": -1,  # Ilimitado
-                        "agents_per_month": -1  # Ilimitado
-                    }
-                }
-                
-                result = {
-                    "plan": plan_id,
-                    "status": status,
-                    "can_use_agents": can_use and plan_id in ['pro', 'enterprise'],
-                    "can_use_advanced_features": can_use and plan_id == 'enterprise',
-                    "message": f"Plan {plan_id.title()} - {status}",
-                    "limits": limits.get(plan_id, limits['free']),
-                    "subscription_id": active_subscription.id,
-                    "current_period_end": datetime.fromtimestamp(active_subscription.current_period_end).isoformat(),
-                    "cancel_at_period_end": active_subscription.cancel_at_period_end
-                }
-                
-                if trial_days_remaining is not None:
-                    result["trial_days_remaining"] = trial_days_remaining
-                    result["message"] = f"Periodo de prueba - {trial_days_remaining} días restantes"
-                
-                # Advertencias especiales
-                if status == 'past_due':
-                    result["message"] = "⚠️ Pago pendiente - Actualiza tu método de pago"
-                elif active_subscription.cancel_at_period_end:
-                    result["message"] = "⚠️ Suscripción se cancelará al final del periodo"
+                return SubscriptionServiceV2._get_free_plan_status(
+                    message="No active subscription"
+                )
             
-            # Guardar en cache
-            cache.set_json(cache_key, result, ttl=SubscriptionServiceV2.CACHE_TTL)
+            # Build subscription status
+            return SubscriptionServiceV2._build_subscription_status(active_subscription)
             
-            return result
-            
-        except stripe.error.StripeError as e:
-            logger.error(f"❌ Stripe error for user {user.id}: {e}")
-            # En caso de error, dar acceso básico
-            return {
-                "plan": "free",
-                "status": "error",
-                "can_use_agents": False,
-                "can_use_advanced_features": False,
-                "message": "Error consultando suscripción",
-                "error": str(e),
-                "limits": {
-                    "documents": 10,
-                    "storage_mb": 100,
-                    "agents_per_month": 0
+        except Exception as e:
+            logger.error(f"❌ Error fetching subscription for user {user.id}: {e}")
+            return SubscriptionServiceV2._get_error_status(str(e))
+    
+    @staticmethod
+    def _find_active_subscription(subscriptions: List[Any]) -> Optional[Any]:
+        """Find the most recent active subscription"""
+        active_subs = [
+            sub for sub in subscriptions
+            if sub.status in ['active', 'trialing', 'past_due']
+        ]
+        
+        if not active_subs:
+            return None
+        
+        # Return most recent
+        return max(active_subs, key=lambda x: x.created)
+    
+    @staticmethod
+    def _build_subscription_status(subscription: Any) -> Dict[str, Any]:
+        """Build subscription status dictionary from Stripe subscription"""
+        # Determine plan
+        plan_id = subscription.metadata.get('plan_id', 'pro')
+        
+        # Check for enterprise plan
+        if hasattr(subscription.items, 'data') and subscription.items.data:
+            price_id = subscription.items.data[0].price.id
+            if price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
+                plan_id = 'enterprise'
+        
+        # Map status
+        status_map = {
+            'active': SubscriptionStatus.ACTIVE,
+            'trialing': SubscriptionStatus.TRIAL,
+            'past_due': SubscriptionStatus.PAST_DUE,
+            'canceled': SubscriptionStatus.CANCELED,
+            'incomplete': SubscriptionStatus.INCOMPLETE,
+            'incomplete_expired': SubscriptionStatus.EXPIRED
+        }
+        status = status_map.get(subscription.status, SubscriptionStatus.UNKNOWN)
+        
+        # Calculate trial days
+        trial_days_remaining = None
+        if subscription.status == 'trialing' and subscription.trial_end:
+            trial_end = datetime.fromtimestamp(subscription.trial_end)
+            trial_days_remaining = max(0, (trial_end - datetime.now()).days)
+        
+        # Determine permissions
+        can_use = status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]
+        plan_limits = PlanLimits.get_limits(plan_id)
+        
+        # Build response
+        result = {
+            "plan": plan_id,
+            "status": status.value,
+            "can_use_agents": can_use and PermissionManager.has_permission(plan_id, 'can_use_agents'),
+            "can_use_advanced_features": can_use and plan_id == SubscriptionPlan.ENTERPRISE,
+            "message": SubscriptionServiceV2._get_status_message(plan_id, status, trial_days_remaining),
+            "limits": plan_limits,
+            "subscription_id": subscription.id,
+            "current_period_end": datetime.fromtimestamp(subscription.current_period_end).isoformat(),
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "created_at": datetime.fromtimestamp(subscription.created).isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+        if trial_days_remaining is not None:
+            result["trial_days_remaining"] = trial_days_remaining
+            result["trial_end"] = trial_end.isoformat()
+        
+        # Add payment method info if available
+        if subscription.default_payment_method:
+            pm = subscription.default_payment_method
+            if hasattr(pm, 'card'):
+                result["payment_method"] = {
+                    "brand": pm.card.brand,
+                    "last4": pm.card.last4,
+                    "exp_month": pm.card.exp_month,
+                    "exp_year": pm.card.exp_year
                 }
-            }
+        
+        return result
+    
+    @staticmethod
+    def _get_status_message(plan: str, status: SubscriptionStatus, trial_days: Optional[int]) -> str:
+        """Generate user-friendly status message"""
+        if status == SubscriptionStatus.TRIAL and trial_days is not None:
+            return f"Trial period - {trial_days} days remaining"
+        elif status == SubscriptionStatus.PAST_DUE:
+            return "⚠️ Payment failed - Please update your payment method"
+        elif status == SubscriptionStatus.CANCELED:
+            return "❌ Subscription canceled"
+        elif status == SubscriptionStatus.INCOMPLETE:
+            return "⚠️ Subscription setup incomplete"
+        elif status == SubscriptionStatus.ACTIVE:
+            return f"{plan.title()} Plan - Active"
+        else:
+            return f"{plan.title()} Plan - {status.value}"
+    
+    @staticmethod
+    def _get_free_plan_status(message: str = "Free Plan") -> Dict[str, Any]:
+        """Get free plan status"""
+        return {
+            "plan": SubscriptionPlan.FREE.value,
+            "status": SubscriptionStatus.ACTIVE.value,
+            "can_use_agents": False,
+            "can_use_advanced_features": False,
+            "message": message,
+            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+    
+    @staticmethod
+    def _get_error_status(error: str) -> Dict[str, Any]:
+        """Get error status"""
+        return {
+            "plan": SubscriptionPlan.FREE.value,
+            "status": SubscriptionStatus.ERROR.value,
+            "can_use_agents": False,
+            "can_use_advanced_features": False,
+            "message": "Error checking subscription",
+            "error": error,
+            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "updated_at": datetime.utcnow().isoformat()
+        }
     
     @staticmethod
     def clear_cache(user_id: str):
-        """Limpia el cache de suscripción para un usuario"""
+        """Clear subscription cache for a user"""
         cache_key = user_cache_key(user_id, "subscription")
         cache.delete(cache_key)
-        logger.debug(f"🧹 Cleared subscription cache for user {user_id}")
+        logger.info(f"🧹 Cleared subscription cache for user {user_id}")
     
     @staticmethod
-    def verify_on_login(db: Session, user: User) -> Dict[str, Any]:
+    async def verify_on_login(db: AsyncSession, user: User) -> Dict[str, Any]:
         """
-        Verifica el estado de suscripción en cada login
-        Actualiza el stripe_customer_id si es necesario
+        Verify subscription status on login and update Stripe customer if needed
         """
-        logger.debug(f"🔐 Verifying subscription on login for user {user.id}")
+        logger.info(f"🔐 Verifying subscription on login for user {user.id}")
         
-        # Si no tiene stripe_customer_id, intentar buscarlo por email
-        if not user.stripe_customer_id:
-            try:
-                logger.debug(f"Searching Stripe customer for email: {user.email}")
-                
-                # Verificar que stripe está configurado
-                if not stripe.api_key:
-                    logger.error("Stripe API key not configured for customer search")
-                    return SubscriptionServiceV2.get_user_subscription_status(db, user)
-                
-                # Intentar listar clientes
-                try:
-                    customers = stripe.Customer.list(email=user.email, limit=1)
-                    logger.debug(f"Customer search result type: {type(customers)}, hasattr data: {hasattr(customers, 'data')}")
-                    
-                    if hasattr(customers, 'data') and customers.data:
-                        user.stripe_customer_id = customers.data[0].id
-                        db.commit()
-                        logger.info(f"✅ Updated stripe_customer_id for user {user.id}")
-                    else:
-                        logger.debug(f"No Stripe customer found for email {user.email}")
-                except AttributeError as ae:
-                    logger.error(f"AttributeError calling stripe.Customer.list: {ae}")
-                    logger.error(f"stripe.Customer type: {type(stripe.Customer)}")
-                    logger.error(f"stripe.Customer.list type: {type(stripe.Customer.list) if hasattr(stripe.Customer, 'list') else 'NO LIST ATTR'}")
-                except Exception as e:
-                    logger.error(f"Error calling stripe.Customer.list: {type(e).__name__}: {e}")
-                    raise
-            except Exception as e:
-                logger.error(f"Error searching customer: {type(e).__name__}: {e}")
+        # Try to find/update Stripe customer if missing
+        if not user.stripe_customer_id and stripe.api_key:
+            user.stripe_customer_id = await SubscriptionServiceV2._find_or_create_stripe_customer(
+                db, user
+            )
         
-        # Obtener estado actual
-        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
+        # Get current status (force refresh on login)
+        status = await SubscriptionServiceV2.get_user_subscription_status(
+            db, user, force_refresh=True
+        )
         
-        # Log del resultado
-        logger.info(f"📊 User {user.id} subscription: {status['plan']} - {status['status']}")
+        # Log result
+        logger.info(
+            f"📊 User {user.id} login - Plan: {status['plan']}, "
+            f"Status: {status['status']}, Can use agents: {status['can_use_agents']}"
+        )
         
         return status
     
     @staticmethod
-    def check_document_permission(db: Session, user: User) -> tuple[bool, Optional[str]]:
-        """
-        Verifica si el usuario puede subir más documentos
-        """
-        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
+    async def _find_or_create_stripe_customer(db: AsyncSession, user: User) -> Optional[str]:
+        """Find existing or create new Stripe customer"""
+        try:
+            # Search for existing customer
+            customers = stripe.Customer.list(email=user.email, limit=1)
+            
+            if customers.data:
+                customer_id = customers.data[0].id
+                logger.info(f"✅ Found existing Stripe customer {customer_id} for {user.email}")
+            else:
+                # Create new customer
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.full_name or user.email,
+                    metadata={
+                        "user_id": str(user.id),
+                        "tenant_id": str(user.tenant_id)
+                    }
+                )
+                customer_id = customer.id
+                logger.info(f"✅ Created new Stripe customer {customer_id} for {user.email}")
+            
+            # Update user
+            user.stripe_customer_id = customer_id
+            await db.commit()
+            
+            return customer_id
+            
+        except Exception as e:
+            logger.error(f"❌ Error managing Stripe customer for {user.email}: {e}")
+            return None
+    
+    @staticmethod
+    async def check_document_permission(
+        db: AsyncSession,
+        user: User
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if user can upload more documents"""
+        status = await SubscriptionServiceV2.get_user_subscription_status(db, user)
+        
+        # Check plan status
+        if status['status'] not in [SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIAL.value]:
+            return False, f"Your subscription is {status['status']}. Please update your subscription."
+        
+        # Get limits
         limits = status.get('limits', {})
         max_documents = limits.get('documents', 10)
         
-        # Count current documents for the user's tenant
-        from app.db.models import Document
-        current_count = db.query(Document).filter(
-            Document.tenant_id == user.tenant_id
-        ).count()
+        # Unlimited check
+        if max_documents == -1:
+            return True, None
+        
+        # Count current documents
+        result = await db.execute(
+            select(func.count()).select_from(Document).where(
+                Document.tenant_id == user.tenant_id
+            )
+        )
+        current_count = result.scalar() or 0
         
         if current_count >= max_documents:
-            return False, f"Has alcanzado el límite de {max_documents} documentos para tu plan {status['plan']}"
+            upgrade_message = (
+                "You've reached the document limit for your plan. "
+                f"Upgrade to {'Pro' if status['plan'] == 'free' else 'Enterprise'} "
+                "for more storage."
+            )
+            return False, upgrade_message
+        
+        # Calculate remaining
+        remaining = max_documents - current_count
+        logger.debug(f"📄 User {user.id} has {remaining} documents remaining")
         
         return True, None
     
     @staticmethod
-    def can_user_perform_action(db: Session, user: User, permission: str) -> tuple[bool, Optional[str]]:
-        """
-        Verifica si el usuario puede realizar una acción específica basada en su plan
-        """
-        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
-        plan = status.get('plan', 'free')
+    async def can_user_perform_action(
+        db: AsyncSession,
+        user: User,
+        permission: str
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if user can perform a specific action"""
+        status = await SubscriptionServiceV2.get_user_subscription_status(db, user)
         
-        # Definir permisos por plan
-        permissions_by_plan = {
-            'free': ['view_documents', 'basic_search'],
-            'pro': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'can_use_agents', 'export_documents', 'api_access'],
-            'enterprise': ['view_documents', 'basic_search', 'advanced_search', 'use_agents', 'can_use_agents', 'export_documents', 'api_access', 'admin_features']
-        }
+        # Check subscription is active
+        if status['status'] not in [SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIAL.value]:
+            return False, f"Your subscription is {status['status']}. Please update your subscription."
         
-        allowed_permissions = permissions_by_plan.get(plan, [])
-        
-        if permission in allowed_permissions:
+        # Check permission
+        plan = status.get('plan', SubscriptionPlan.FREE.value)
+        if PermissionManager.has_permission(plan, permission):
             return True, None
+        
+        # Generate helpful upgrade message
+        required_plan = None
+        for p in [SubscriptionPlan.PRO, SubscriptionPlan.ENTERPRISE]:
+            if PermissionManager.has_permission(p.value, permission):
+                required_plan = p.value
+                break
+        
+        if required_plan:
+            return False, f"'{permission}' requires {required_plan.title()} plan or higher."
         else:
-            return False, f"El permiso '{permission}' requiere un plan superior. Tu plan actual es '{plan}'."
+            return False, f"Permission '{permission}' is not available."
     
     @staticmethod
-    def check_agent_permission(db: Session, user: User) -> tuple[bool, Optional[str]]:
-        """
-        Verifica si el usuario puede usar agentes
-        Retorna (puede_usar, mensaje_error)
-        """
-        status = SubscriptionServiceV2.get_user_subscription_status(db, user)
+    async def check_agent_permission(
+        db: AsyncSession,
+        user: User
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if user can use AI agents"""
+        return await SubscriptionServiceV2.can_user_perform_action(
+            db, user, 'can_use_agents'
+        )
+    
+    @staticmethod
+    async def get_usage_stats(db: AsyncSession, user: User) -> Dict[str, Any]:
+        """Get current usage statistics for a user"""
+        # Get subscription status
+        status = await SubscriptionServiceV2.get_user_subscription_status(db, user)
+        limits = status.get('limits', {})
         
-        if not status['can_use_agents']:
-            if status['plan'] == 'free':
-                return False, "Los agentes AI requieren una suscripción Pro o Enterprise"
-            elif status['status'] == 'past_due':
-                return False, "Tu suscripción tiene un pago pendiente. Por favor actualiza tu método de pago."
-            else:
-                return False, f"Tu plan {status['plan']} no incluye acceso a agentes AI"
+        # Count documents
+        doc_result = await db.execute(
+            select(func.count()).select_from(Document).where(
+                Document.tenant_id == user.tenant_id
+            )
+        )
+        document_count = doc_result.scalar() or 0
         
-        return True, None
+        # Calculate storage (simplified - you might want to sum actual file sizes)
+        storage_mb = document_count * 10  # Rough estimate
+        
+        return {
+            "documents": {
+                "used": document_count,
+                "limit": limits.get('documents', 10),
+                "percentage": (
+                    (document_count / limits.get('documents', 10) * 100)
+                    if limits.get('documents', 10) > 0 else 0
+                )
+            },
+            "storage_mb": {
+                "used": storage_mb,
+                "limit": limits.get('storage_mb', 100),
+                "percentage": (
+                    (storage_mb / limits.get('storage_mb', 100) * 100)
+                    if limits.get('storage_mb', 100) > 0 else 0
+                )
+            },
+            "agents_per_month": {
+                "used": 0,  # TODO: Implement agent usage tracking
+                "limit": limits.get('agents_per_month', 0)
+            },
+            "team_members": {
+                "used": 0,  # TODO: Implement team member counting
+                "limit": limits.get('team_members', 0)
+            }
+        }
+    
+    @staticmethod
+    async def handle_webhook_event(event: Dict[str, Any]) -> bool:
+        """
+        Handle Stripe webhook events for subscription changes
+        
+        Returns:
+            bool: True if event was handled successfully
+        """
+        event_type = event.get('type')
+        
+        if event_type in [
+            'customer.subscription.updated',
+            'customer.subscription.deleted',
+            'customer.subscription.created'
+        ]:
+            # Extract customer ID
+            subscription = event['data']['object']
+            customer_id = subscription.get('customer')
+            
+            if customer_id:
+                # Find user by customer ID
+                from app.db.database import get_async_db
+                async with get_async_db() as db:
+                    result = await db.execute(
+                        select(User).where(User.stripe_customer_id == customer_id)
+                    )
+                    user = result.scalars().first()
+                    
+                    if user:
+                        # Clear cache to force refresh
+                        SubscriptionServiceV2.clear_cache(str(user.id))
+                        logger.info(
+                            f"🔄 Handled {event_type} for user {user.id}, "
+                            f"cleared cache"
+                        )
+                        return True
+        
+        return False

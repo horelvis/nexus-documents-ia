@@ -85,26 +85,35 @@ export function NavAdmin({
   }
 
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+    <SidebarGroup>
       <SidebarGroupLabel>Admin Actions</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.title}>
             {item.title === "Billing" ? (
-              <SidebarMenuButton onClick={handleBillingClick} disabled={loadingBilling}>
+              <SidebarMenuButton 
+                onClick={handleBillingClick} 
+                disabled={loadingBilling}
+                tooltip={item.title}
+              >
                 {loadingBilling ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <item.icon className={cn(
+                    "transition-colors",
                     item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
                   )} />
                 )}
                 <span>{loadingBilling ? "Loading..." : item.title}</span>
               </SidebarMenuButton>
             ) : (
-              <SidebarMenuButton asChild>
+              <SidebarMenuButton 
+                asChild
+                tooltip={item.title}
+              >
                 <NavLink href={item.url}>
                   <item.icon className={cn(
+                    "transition-colors",
                     item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
                   )} />
                   <span>{item.title}</span>

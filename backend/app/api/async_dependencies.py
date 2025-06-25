@@ -194,12 +194,11 @@ async def require_document_upload_permission_async(
     """
     from app.services.subscription_service_v2 import SubscriptionServiceV2
     
-    # Note: SubscriptionServiceV2 would also need async methods
-    # For now, we'll use sync version in async context
-    can_upload, error_message = SubscriptionServiceV2.check_document_permission(db, current_user)
+    # Now using async version of SubscriptionServiceV2 methods
+    can_upload, error_message = await SubscriptionServiceV2.check_document_permission(db, current_user)
     
     if not can_upload:
-        subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
@@ -223,10 +222,10 @@ async def require_agent_permission_async(
     """
     from app.services.subscription_service_v2 import SubscriptionServiceV2
     
-    can_use_agents, error_message = SubscriptionServiceV2.check_agent_permission(db, current_user)
+    can_use_agents, error_message = await SubscriptionServiceV2.check_agent_permission(db, current_user)
     
     if not can_use_agents:
-        subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
         
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
@@ -251,12 +250,12 @@ def require_subscription_permission_async(permission: str):
     ) -> User:
         from app.services.subscription_service_v2 import SubscriptionServiceV2
         
-        can_perform, error_message = SubscriptionServiceV2.can_user_perform_action(
+        can_perform, error_message = await SubscriptionServiceV2.can_user_perform_action(
             db, current_user, permission
         )
         
         if not can_perform:
-            subscription_status = SubscriptionServiceV2.get_user_subscription_status(db, current_user)
+            subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
             
             if subscription_status["plan"] == "free":
                 raise HTTPException(

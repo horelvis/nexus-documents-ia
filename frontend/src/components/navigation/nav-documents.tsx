@@ -42,22 +42,30 @@ export function NavDocuments({
   }
 
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+    <SidebarGroup>
       <SidebarGroupLabel>Quick Actions</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.name}>
             {item.name === "Upload Document" ? (
-              <SidebarMenuButton onClick={handleUploadClick}>
+              <SidebarMenuButton 
+                onClick={handleUploadClick}
+                tooltip={item.name}
+              >
                 <item.icon className={cn(
+                  "transition-colors",
                   item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
                 )} />
                 <span>{item.name}</span>
               </SidebarMenuButton>
             ) : (
-              <SidebarMenuButton asChild>
+              <SidebarMenuButton 
+                asChild
+                tooltip={item.name}
+              >
                 <NavLink href={item.url}>
                   <item.icon className={cn(
+                    "transition-colors",
                     item.color && iconColorClasses[item.color as keyof typeof iconColorClasses]
                   )} />
                   <span>{item.name}</span>
