@@ -242,13 +242,13 @@ class AsyncDocumentService:
             )
             
             # Upload to storage
-            upload_result = await self.storage_service.upload_file(
-                file_data=io.BytesIO(contents),
-                file_name=stored_filename,
-                content_type=file.content_type
+            upload_success = await self.storage_service.upload_file(
+                file=io.BytesIO(contents),
+                object_name=stored_filename,
+                metadata={"content_type": file.content_type}
             )
             
-            if not upload_result["success"]:
+            if not upload_success:
                 raise HTTPException(status_code=500, detail="Error uploading file")
             
             # Add to database

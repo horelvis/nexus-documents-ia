@@ -54,17 +54,17 @@ class AsyncStorageServiceFactory:
             if tenant and tenant.bucket_name:
                 bucket_name = tenant.bucket_name
         
-        # Use storage service (microservice)
+        # Use async storage service (microservice)
         try:
-            from app.services.storage_service import StorageService
+            from app.services.async_storage_service import AsyncStorageService
             
             # Quick connectivity test
             if not testing_mode or credentials_available:
-                storage = StorageService(tenant_id, user_id, bucket_name)
-                health = storage.health_check()
+                storage = AsyncStorageService(tenant_id, user_id, bucket_name)
+                health = await storage.health_check()
                 
                 if health.get("status") == "healthy":
-                    logger.info("Using StorageService (microservice)")
+                    logger.info("Using AsyncStorageService (microservice)")
                     return storage
                 else:
                     logger.warning("Storage microservice unhealthy")
