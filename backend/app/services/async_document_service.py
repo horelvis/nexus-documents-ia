@@ -238,7 +238,8 @@ class AsyncDocumentService:
                 mime_type=file.content_type,
                 category=category,
                 tenant_id=self.tenant_id,
-                created_by=self.user_id
+                created_by=self.user_id,
+                indexed=IndexingStatus.PROCESSING  # Set initial status
             )
             
             # Upload to storage
@@ -289,7 +290,9 @@ class AsyncDocumentService:
             doc = result.scalar_one()
             
             # Extract text and index asynchronously
-            asyncio.create_task(self._process_document_async(str(doc.id), contents, file_ext))
+            task = asyncio.create_task(self._process_document_async(str(doc.id), contents, file_ext))
+            # Add error handler for the background task
+            task.add_done_callback(lambda t: logger.error(f"Background processing failed: {t.exception()}") if t.exception() else None)
             
             return doc
             
@@ -309,12 +312,14 @@ class AsyncDocumentService:
                 embeddings = await self.embedding_service.generate_embeddings(text)
                 
                 # Store in vector DB
-                await self.vector_service.add_document(
-                    document_id=doc_id,
-                    content=text,
-                    embeddings=embeddings,
+                success = await self.vector_service.add_document(
+                    doc_id=doc_id,
+                    text=text,
                     metadata={"file_type": file_ext}
                 )
+                
+                if not success:
+                    raise Exception("Failed to store document in vector database")
                 
                 # Update document status
                 async with AsyncSessionLocal() as db:
