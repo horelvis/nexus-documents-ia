@@ -134,10 +134,6 @@ export default function DocumentsPage() {
     }
   }
 
-  // Load on mount
-  useEffect(() => {
-    loadDocuments()
-  }, [])
 
   // Reload when filters, pagination or view mode changes
   useEffect(() => {
@@ -215,6 +211,12 @@ export default function DocumentsPage() {
 
   const handleDownloadDocument = async (document: ApiDocument) => {
     try {
+      addNotification({
+        type: 'info',
+        title: 'Downloading',
+        message: `Downloading ${document.filename}...`
+      })
+      
       const result = await documentService.downloadDocument(document.id)
       
       if ('error' in result) {
@@ -226,24 +228,38 @@ export default function DocumentsPage() {
         return
       }
 
+      // Verify we have a blob
+      if (!result.blob || !(result.blob instanceof Blob)) {
+        addNotification({
+          type: 'error',
+          title: 'Download Failed',
+          message: 'Invalid file data received'
+        })
+        return
+      }
+
       // Create download link
       const url = URL.createObjectURL(result.blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = result.filename
-      document.body.appendChild(link)
-      link.click()
+      const a = window.document.createElement('a')
+      a.href = url
+      a.download = result.filename || document.filename || 'document'
+      a.style.display = 'none'
+      window.document.body.appendChild(a)
+      a.click()
       
       // Cleanup
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
+      setTimeout(() => {
+        window.document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 100)
 
       addNotification({
         type: 'success',
-        title: 'Download Started',
-        message: `${result.filename} is being downloaded`
+        title: 'Download Complete',
+        message: `${document.filename} downloaded successfully`
       })
     } catch (error) {
+      console.error('Download exception:', error)
       addNotification({
         type: 'error',
         title: 'Download Failed',
@@ -609,6 +625,10 @@ export default function DocumentsPage() {
                               <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
                                 <IconEye className="mr-2 h-4 w-4" />
                                 Full Page Preview
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleDownloadDocument(document)}>
+                                <IconDownload className="mr-2 h-4 w-4" />
+                                Download
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleRequestSignature(document)}>
                                 <IconSignature className="mr-2 h-4 w-4" />

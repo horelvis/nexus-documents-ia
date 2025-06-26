@@ -32,7 +32,7 @@ interface DocumentViewerDialogProps {
   onOpenChange: (open: boolean) => void
   onGetContent: (id: string) => Promise<{ content?: string; error?: string }>
   onGetSummary: (id: string) => Promise<{ summary?: string; error?: string }>
-  onDownload: (document: Document) => Promise<void>
+  onDownload: (document: Document) => Promise<void> | void
 }
 
 export function DocumentViewerDialog({ 
@@ -253,7 +253,9 @@ export function DocumentViewerDialog({
                     <span className="font-medium">Created by:</span>
                   </div>
                   <p className="text-sm text-muted-foreground pl-6">
-                    {document.created_by}
+                    {typeof document.created_by === 'object' && document.created_by !== null
+                      ? document.created_by.full_name || document.created_by.email
+                      : document.created_by}
                   </p>
                 </div>
               </div>

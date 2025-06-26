@@ -219,6 +219,9 @@ class AsyncDocumentService:
     ) -> Document:
         """Upload a new document"""
         try:
+            # Ensure service is initialized
+            if not self._initialized:
+                await self._initialize()
             # Validate file
             file_ext, contents, file_size = await self._validate_file(file, file.filename)
             
@@ -304,22 +307,37 @@ class AsyncDocumentService:
     async def _process_document_async(self, doc_id: str, contents: bytes, file_ext: str):
         """Process document in background"""
         try:
+            logger.info(f"Starting async processing for document {doc_id}, file type: {file_ext}")
+            
             # Extract text
             text = await self._extract_text_async(contents, file_ext)
+            logger.info(f"Text extraction completed for {doc_id}, text length: {len(text) if text else 0}")
             
             if text:
-                # Generate embeddings
-                embeddings = await self.embedding_service.generate_embeddings(text)
+                try:
+                    # Generate embeddings
+                    logger.info(f"Generating embeddings for document {doc_id}")
+                    embeddings = await self.embedding_service.generate_embeddings(text)
+                    logger.info(f"Generated {len(embeddings)} embeddings for document {doc_id}")
+                except Exception as e:
+                    logger.error(f"Failed to generate embeddings for {doc_id}: {e}")
+                    raise Exception(f"Embedding generation failed: {str(e)}")
                 
-                # Store in vector DB
-                success = await self.vector_service.add_document(
-                    doc_id=doc_id,
-                    text=text,
-                    metadata={"file_type": file_ext}
-                )
-                
-                if not success:
-                    raise Exception("Failed to store document in vector database")
+                try:
+                    # Store in vector DB
+                    logger.info(f"Storing document {doc_id} in vector database")
+                    success = await self.vector_service.add_document(
+                        doc_id=doc_id,
+                        text=text,
+                        metadata={"file_type": file_ext, "tenant_id": self.tenant_id}
+                    )
+                    
+                    if not success:
+                        raise Exception("Failed to store document in vector database")
+                    logger.info(f"Successfully stored document {doc_id} in vector database")
+                except Exception as e:
+                    logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
+                    raise Exception(f"Vector storage failed: {str(e)}")
                 
                 # Update document status
                 async with AsyncSessionLocal() as db:
@@ -331,19 +349,27 @@ class AsyncDocumentService:
                         doc.indexed = IndexingStatus.INDEXED
                         doc.content = text[:1000]  # Store first 1000 chars
                         await db.commit()
+                        logger.info(f"Document {doc_id} marked as INDEXED")
                 
                 # Queue document for auto-categorization
-                from app.services.queue_service import queue_service
-                await queue_service.enqueue_document_categorization(
-                    document_id=doc_id,
-                    tenant_id=self.tenant_id,
-                    user_id=self.user_id,
-                    priority="default"
-                )
-                logger.info(f"Document {doc_id} queued for categorization")
+                try:
+                    from app.services.queue_service import queue_service
+                    await queue_service.enqueue_document_categorization(
+                        document_id=doc_id,
+                        tenant_id=self.tenant_id,
+                        user_id=self.user_id,
+                        priority="default"
+                    )
+                    logger.info(f"Document {doc_id} queued for categorization")
+                except Exception as e:
+                    logger.warning(f"Failed to queue categorization for {doc_id}: {e}")
+                    # Don't fail the whole process if categorization queueing fails
+            else:
+                logger.warning(f"No text extracted from document {doc_id}")
+                raise Exception("No text could be extracted from the document")
             
         except Exception as e:
-            logger.error(f"Error processing document {doc_id}: {e}")
+            logger.error(f"Error processing document {doc_id}: {e}", exc_info=True)
             # Update error status
             async with AsyncSessionLocal() as db:
                 stmt = select(Document).filter(Document.id == doc_id)
@@ -354,6 +380,7 @@ class AsyncDocumentService:
                     doc.indexed = IndexingStatus.INDEXING_ERROR
                     doc.indexing_error = str(e)
                     await db.commit()
+                    logger.info(f"Document {doc_id} marked as INDEXING_ERROR: {str(e)}")
     
     async def _extract_text_async(self, contents: bytes, file_ext: str) -> Optional[str]:
         """Extract text from document asynchronously"""

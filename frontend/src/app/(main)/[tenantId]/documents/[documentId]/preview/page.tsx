@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
 import { useDocumentService } from '@/lib/services/document.service'
 import PDFViewer from '@/components/documents/pdf-viewer'
+import { ShareDocumentDialog } from '@/components/documents/share-document-dialog'
 
 export default function DocumentPreviewPage() {
   const params = useParams()
@@ -27,6 +28,7 @@ export default function DocumentPreviewPage() {
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
 
   const documentService = useDocumentService()
 
@@ -109,38 +111,59 @@ export default function DocumentPreviewPage() {
   }
 
   const handleDownload = async () => {
-    if (!document) return
+    if (!document) {
+      toast.error('No document selected')
+      return
+    }
     
     try {
+      toast.info('Downloading document...')
+      console.log('Downloading document:', document.id, document.filename)
+      
       const result = await documentService.downloadDocument(document.id)
+      console.log('Download result:', result)
       
       if ('error' in result) {
+        console.error('Download error:', result.error)
         toast.error('Download failed', { description: result.error })
         return
       }
 
+      // Verify we have a blob
+      if (!result.blob || !(result.blob instanceof Blob)) {
+        console.error('Invalid blob received:', result)
+        toast.error('Download failed', { description: 'Invalid file data received' })
+        return
+      }
+
+      console.log('Creating download link for:', result.filename, 'size:', result.blob.size)
+      
       // Create download link
       const url = URL.createObjectURL(result.blob)
-      const a = document.createElement('a')
+      const a = window.document.createElement('a')
       a.href = url
-      a.download = result.filename
-      document.body.appendChild(a)
+      a.download = result.filename || document.filename || 'document'
+      a.style.display = 'none'
+      window.document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      
+      // Cleanup
+      setTimeout(() => {
+        window.document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 100)
       
       toast.success('Document downloaded successfully')
     } catch (error) {
+      console.error('Download exception:', error)
       toast.error('Download failed', {
         description: error instanceof Error ? error.message : 'Unknown error'
       })
     }
   }
 
-  const copyPreviewLink = () => {
-    const url = window.location.href
-    navigator.clipboard.writeText(url)
-    toast.success('Preview link copied to clipboard')
+  const handleShare = () => {
+    setShareDialogOpen(true)
   }
 
   const formatFileSize = (bytes: number) => {
@@ -222,7 +245,7 @@ export default function DocumentPreviewPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={copyPreviewLink}>
+          <Button variant="outline" size="sm" onClick={handleShare}>
             <Share2 className="h-4 w-4 mr-2" />
             Share
           </Button>
@@ -526,6 +549,16 @@ export default function DocumentPreviewPage() {
             </Card>
           </div>
         </div>
+      )}
+
+      {/* Share Dialog */}
+      {document && (
+        <ShareDocumentDialog
+          documentId={document.id}
+          documentTitle={document.title || document.filename}
+          open={shareDialogOpen}
+          onOpenChange={setShareDialogOpen}
+        />
       )}
     </div>
   )

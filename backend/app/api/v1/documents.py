@@ -329,6 +329,41 @@ async def serve_converted_pdf(
         raise HTTPException(status_code=500, detail="Error serving converted PDF")
 
 
+@router.put("/{doc_id}", response_model=Document)
+async def update_document(
+    doc_id: str,
+    update_data: dict,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Actualiza los metadatos de un documento (título, descripción, tags, categoría).
+    """
+    from app.services.async_document_service import AsyncDocumentService
+    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
+    
+    # Obtener el documento existente
+    document = await document_service.get_document(db=db, doc_id=doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Actualizar solo los campos permitidos
+    allowed_fields = ['title', 'description', 'tags', 'category']
+    for field in allowed_fields:
+        if field in update_data:
+            setattr(document, field, update_data[field])
+    
+    # Guardar cambios
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
+    
+    # Convertir a schema
+    from app.schemas.document import Document as DocumentSchema
+    return DocumentSchema.model_validate(document)
+
+
 @router.delete("/{doc_id}", response_model=dict)
 async def delete_document(
     doc_id: str,

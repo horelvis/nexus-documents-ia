@@ -158,29 +158,46 @@ export class DocumentService {
     try {
       // Use new streaming endpoint with Redis cache and proxy
       const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_STREAM(id)
+      console.log('Downloading from endpoint:', endpoint)
+      
       const response = await this.apiClient.fetchRaw(endpoint)
+      console.log('Download response status:', response.status, response.statusText)
       
       if (!response.ok) {
-        return { error: `Download failed: ${response.statusText}` }
+        const errorText = await response.text()
+        console.error('Download failed:', errorText)
+        return { error: `Download failed: ${response.status} ${response.statusText}` }
       }
 
       const blob = await response.blob()
+      console.log('Blob received, size:', blob.size, 'type:', blob.type)
       
       // Try to get filename from headers or fall back to document info
       let filename = 'document'
       const disposition = response.headers.get('content-disposition')
-      if (disposition && disposition.includes('filename=')) {
-        filename = disposition.split('filename=')[1].replace(/"/g, '')
-      } else {
-        // Get document info to get the filename
+      console.log('Content-Disposition header:', disposition)
+      
+      if (disposition) {
+        // Parse filename from content-disposition header
+        const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '')
+        }
+      }
+      
+      // If no filename from header, get from document data
+      if (filename === 'document') {
+        console.log('No filename in header, fetching document info...')
         const docResponse = await this.getDocument(id)
         if (docResponse.data?.filename) {
           filename = docResponse.data.filename
         }
       }
 
+      console.log('Final filename:', filename)
       return { blob, filename }
     } catch (error) {
+      console.error('Download exception:', error)
       return { error: error instanceof Error ? error.message : 'Download failed' }
     }
   }
