@@ -21,12 +21,15 @@ import {
   IconLayoutList,
   IconShare2,
   IconSignature,
-  IconDotsVertical
+  IconDotsVertical,
+  IconBrain
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -37,6 +40,7 @@ import {
 import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentService } from "@/lib/services/document.service"
+import { useSearchService } from "@/lib/services/search.service"
 import { Document as ApiDocument } from "@/lib/types"
 import { 
   EditDocumentDialog, 
@@ -92,6 +96,9 @@ export default function DocumentsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => 
     getStoredPreference('viewMode', 'grid')
   )
+  const [useDeepSearch, setUseDeepSearch] = useState(() => 
+    getStoredPreference('deepSearch', false)
+  )
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
@@ -104,6 +111,7 @@ export default function DocumentsPage() {
   const { openUploadDialog, setOnUploadComplete } = useUpload()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
+  const searchService = useSearchService()
 
   // Load documents from API - simple pattern
   const loadDocuments = async () => {
@@ -111,14 +119,57 @@ export default function DocumentsPage() {
     setError(null)
     
     try {
-      // For table view, load all documents to handle pagination client-side
-      const itemsPerPage = viewMode === 'table' ? 100 : perPage
-      const response = await documentService.getDocuments({
-        search: searchQuery || undefined,
-        status: selectedFilter !== 'all' ? selectedFilter : undefined,
-        per_page: itemsPerPage,
-        page: viewMode === 'table' ? 1 : currentPage
-      })
+      let response;
+      
+      // Use deep search if enabled and there's a search query
+      if (useDeepSearch && searchQuery && searchQuery.trim()) {
+        // Use semantic search for content
+        const searchResults = await searchService.searchDocuments({
+          query: searchQuery,
+          limit: viewMode === 'table' ? 100 : perPage
+        })
+        
+        if (searchResults.error) {
+          setError(searchResults.error)
+          return
+        }
+        
+        // Transform search results to match document format
+        const documents = searchResults.data?.map(result => ({
+          ...result.document,
+          status: 'active' as const,
+          created_by: {},
+          tenant_id: tenantId,
+          indexing_status: result.document.indexed as any,
+          file_hash: '',
+          version: 1,
+          category: '',
+          document_metadata: {},
+          content: '',
+          extracted_entities: null,
+          ocr_status: null,
+          ocr_completed_at: null,
+          signature_fields: null
+        })) || []
+        response = {
+          data: {
+            items: documents,
+            total: documents.length,
+            page: 1,
+            per_page: documents.length,
+            pages: 1
+          }
+        }
+      } else {
+        // Use regular document listing
+        const itemsPerPage = viewMode === 'table' ? 100 : perPage
+        response = await documentService.getDocuments({
+          search: searchQuery || undefined,
+          status: selectedFilter !== 'all' ? selectedFilter : undefined,
+          per_page: itemsPerPage,
+          page: viewMode === 'table' ? 1 : currentPage
+        })
+      }
       
       if (response.error) {
         setError(response.error)
@@ -135,10 +186,10 @@ export default function DocumentsPage() {
   }
 
 
-  // Reload when filters, pagination or view mode changes
+  // Reload when filters, pagination, view mode or search type changes
   useEffect(() => {
     loadDocuments()
-  }, [selectedFilter, currentPage, viewMode])
+  }, [selectedFilter, currentPage, viewMode, useDeepSearch])
   
   // Reset to page 1 when filter or view mode changes
   useEffect(() => {
@@ -436,20 +487,39 @@ export default function DocumentsPage() {
         <Card className="mb-6">
           <CardContent className="p-6">
             <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 flex gap-2">
-                <div className="flex-1 relative">
-                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                  <Input
-                    placeholder="Search documents..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
-                    className="pl-10"
-                  />
+              <div className="flex-1 flex flex-col gap-3">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                    <Input
+                      placeholder="Search documents..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
+                      className="pl-10"
+                    />
+                  </div>
+                  <Button onClick={loadDocuments} variant="outline">
+                    Search
+                  </Button>
                 </div>
-                <Button onClick={loadDocuments} variant="outline">
-                  Search
-                </Button>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="deep-search"
+                    checked={useDeepSearch}
+                    onCheckedChange={(checked) => {
+                      setUseDeepSearch(checked)
+                      storePreference('deepSearch', checked)
+                    }}
+                  />
+                  <Label 
+                    htmlFor="deep-search" 
+                    className="text-sm cursor-pointer flex items-center gap-2"
+                  >
+                    <IconBrain className="h-4 w-4" />
+                    Deep Search (search in document content)
+                  </Label>
+                </div>
               </div>
               
               <div className="flex items-center gap-2">

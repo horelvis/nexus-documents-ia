@@ -138,7 +138,8 @@ class AsyncDocumentService:
                 query = query.filter(
                     or_(
                         Document.title.ilike(f"%{search}%"),
-                        Document.description.ilike(f"%{search}%")
+                        Document.description.ilike(f"%{search}%"),
+                        Document.content.ilike(f"%{search}%")
                     )
                 )
             
