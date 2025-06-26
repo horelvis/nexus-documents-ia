@@ -33,6 +33,26 @@ docker compose up -d
 echo "👷 Starting unified background worker..."
 docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
 
+# Wait a bit for Ollama to be ready
+echo "⏳ Waiting for Ollama service to be ready..."
+sleep 5
+
+# Initialize Ollama models if needed
+echo "🤖 Checking Ollama models..."
+if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
+    echo "📥 Downloading embedding model (nomic-embed-text)..."
+    docker compose exec -T ollama-service ollama pull nomic-embed-text || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
+else
+    echo "✅ Embedding model already present"
+fi
+
+if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "llama3.2"; then
+    echo "📥 Downloading LLM model (llama3.2)..."
+    docker compose exec -T ollama-service ollama pull llama3.2 || echo "⚠️  Failed to download LLM model. You may need to pull it manually."
+else
+    echo "✅ LLM model already present"
+fi
+
 # Show status
 echo ""
 echo "✅ Development environment started!"
