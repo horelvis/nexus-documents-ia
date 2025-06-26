@@ -30,7 +30,8 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retryCount = 0
   ): Promise<ApiResponse<T>> {
     try {
       const token = await this.getAuthToken()
@@ -63,6 +64,16 @@ class ApiClient {
       }
 
       if (!response.ok) {
+        // Handle 401 Unauthorized specifically for token refresh
+        if (response.status === 401 && retryCount === 0) {
+          console.log('Token expired, attempting to refresh...')
+          // Wait a bit for Clerk to refresh the token
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          // Try the request again with retry count incremented
+          return this.request<T>(endpoint, options, retryCount + 1)
+        }
+        
         // Create an error object that includes the full response data
         const errorObj = {
           response: {
@@ -264,7 +275,16 @@ export function useApiClient() {
   // Configurar el cliente para usar el token de Clerk
   client.setAuthTokenGetter(async () => {
     try {
-      const token = await getToken()
+      // First try to get token normally
+      let token = await getToken()
+      
+      // If no token or if we're retrying, try to force refresh
+      if (!token) {
+        console.log('No token available, attempting to get fresh token...')
+        // Try with template option which sometimes helps
+        token = await getToken({ template: 'nexus' })
+      }
+      
       if (token) {
         console.log('✅ Got Clerk token, length:', token.length)
       } else {

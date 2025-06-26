@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, func
+from sqlalchemy import select, or_, and_, func, desc
 from uuid import UUID
 import hashlib
 

@@ -196,6 +196,50 @@ class AsyncSignatureService:
             if not provider or not provider.is_active:
                 raise ValueError("Invalid or inactive signature provider")
             
+            # Load document content if document_id is provided
+            document_content = None
+            document_name = request_data.document_name
+            
+            if request_data.document_id:
+                # Import here to avoid circular imports
+                from app.db.models import Document
+                
+                # Load document
+                stmt = select(Document).filter(
+                    and_(
+                        Document.id == request_data.document_id,
+                        Document.tenant_id == tenant_id
+                    )
+                )
+                result = await self.db.execute(stmt)
+                document = result.scalar_one_or_none()
+                
+                if not document:
+                    raise ValueError("Document not found")
+                
+                # Get document content from storage if not in database
+                if document.file_path:
+                    # Import storage service
+                    from app.services.async_storage_service import AsyncStorageService
+                    
+                    try:
+                        # Create storage service instance
+                        storage_service = AsyncStorageService(self.db)
+                        
+                        # Download document from storage
+                        content = await storage_service.download_file(
+                            file_path=document.file_path,
+                            tenant_id=tenant_id
+                        )
+                        document_content = content  # This should be bytes
+                        document_name = document.filename
+                        logger.info(f"Loaded document content from storage: {len(content)} bytes")
+                    except Exception as e:
+                        logger.error(f"Failed to load document from storage: {e}")
+                        raise ValueError(f"Failed to load document content: {e}")
+                else:
+                    raise ValueError("Document has no file path")
+            
             # Crear solicitud en base de datos
             signature_request = SignatureRequest(
                 tenant_id=tenant_id,
@@ -203,8 +247,8 @@ class AsyncSignatureService:
                 created_by=user_id,
                 title=request_data.title,
                 message=request_data.message,
-                document_name=request_data.document_name,
-                document_content=request_data.document_content,
+                document_name=document_name,
+                document_content=document_content,  # Now properly loaded
                 document_url=request_data.document_url,
                 signature_type=request_data.signature_type,
                 callback_url=request_data.callback_url,
