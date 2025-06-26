@@ -114,4 +114,7 @@ class SignatureRequest(SignatureRequestBase):
     created_at: datetime
     signers: List[Signer] = []
     
+    # Override document_content to exclude from response
+    document_content: None = Field(default=None, exclude=True)
+    
     model_config = ConfigDict(from_attributes=True, json_encoders={UUID: str})
