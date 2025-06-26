@@ -223,14 +223,20 @@ class AsyncSignatureService:
                     from app.services.async_storage_service import AsyncStorageService
                     
                     try:
-                        # Create storage service instance
-                        storage_service = AsyncStorageService(self.db)
+                        # Create storage service instance with proper parameters
+                        storage_service = AsyncStorageService(
+                            tenant_id=str(tenant_id),
+                            user_id=str(user_id)
+                        )
                         
                         # Download document from storage
                         content = await storage_service.download_file(
-                            file_path=document.file_path,
-                            tenant_id=tenant_id
+                            object_name=document.file_path
                         )
+                        
+                        if content is None:
+                            raise ValueError(f"Could not download document from storage: {document.file_path}")
+                        
                         document_content = content  # This should be bytes
                         document_name = document.filename
                         logger.info(f"Loaded document content from storage: {len(content)} bytes for document {document.id}")

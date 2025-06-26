@@ -70,13 +70,19 @@ async def fix_signature_document_content(request_id: str):
         
         # Load content from storage
         try:
-            storage_service = AsyncStorageService(session)
+            storage_service = AsyncStorageService(
+                tenant_id=str(request.tenant_id),
+                user_id=str(request.created_by)
+            )
             print(f"⏳ Loading document from storage: {document.file_path}")
             
             content = await storage_service.download_file(
-                file_path=document.file_path,
-                tenant_id=request.tenant_id
+                object_name=document.file_path
             )
+            
+            if content is None:
+                print(f"❌ Could not download document from storage")
+                return
             
             print(f"✅ Loaded {len(content)} bytes from storage")
             
