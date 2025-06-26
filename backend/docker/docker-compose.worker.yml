@@ -35,6 +35,10 @@ services:
       - ./credentials:/app/credentials:ro
     restart: unless-stopped
 
+networks:
+  backend-network:
+    driver: bridge
+
   # Optional: Separate workers for scaling specific job types
   # Uncomment if you need dedicated workers for specific tasks
   
