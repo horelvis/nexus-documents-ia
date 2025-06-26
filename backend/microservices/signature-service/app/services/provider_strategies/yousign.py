@@ -34,7 +34,7 @@ class YouSignStrategy(SignatureProviderStrategy):
         credentials: Dict[str, Any], 
         request_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Create a signature request in YouSign"""
+        """Create a signature request in YouSign following the correct v3 flow"""
         try:
             api_key = credentials.get('api_key')
             environment = credentials.get('environment', 'sandbox')
@@ -44,150 +44,162 @@ class YouSignStrategy(SignatureProviderStrategy):
             document_content = base64.b64decode(request_data.get('document_content'))
             
             async with httpx.AsyncClient() as client:
-                # 1. Upload document
-                document_id = await self._upload_document(
-                    client, base_url, api_key, 
+                # Step 1: Create the signature request (initiate)
+                logger.info(f"Step 1: Creating YouSign signature request")
+                signature_request_payload = {
+                    "name": request_data.get('title', 'Signature Request'),
+                    "delivery_mode": "email",
+                    "timezone": "Europe/Paris"
+                }
+                
+                response = await client.post(
+                    f"{base_url}/signature_requests",
+                    headers=self._get_headers(api_key),
+                    json=signature_request_payload
+                )
+                
+                if response.status_code not in [200, 201]:
+                    logger.error(f"Failed to create signature request: {response.status_code} - {response.text}")
+                    raise Exception(f"Failed to create signature request: {response.text}")
+                
+                signature_request = response.json()
+                signature_request_id = signature_request['id']
+                logger.info(f"Created signature request with ID: {signature_request_id}")
+                
+                # Step 2: Upload document to the signature request
+                logger.info(f"Step 2: Uploading document to signature request")
+                document_id = await self._upload_document_to_request(
+                    client, base_url, api_key,
+                    signature_request_id,
                     document_content,
                     request_data.get('document_name', 'document.pdf')
                 )
                 
-                # 2. Create signature request
-                signature_request_data = {
-                    "name": request_data.get('title', 'Signature Request'),
-                    "delivery_mode": "email",
-                    "timezone": "Europe/Paris",
-                    "documents": [document_id],
-                    "signers": []
-                }
-                
-                # Add custom message if provided
-                if request_data.get('message'):
-                    signature_request_data["custom_experience"] = {
-                        "custom_thank_you_message": request_data['message']
-                    }
-                
-                # Add signers
+                # Step 3: Add signers one by one
+                created_signers = []
                 for i, signer in enumerate(request_data.get('signers', [])):
-                    signer_data = {
+                    logger.info(f"Step 3.{i+1}: Adding signer {signer.get('email')}")
+                    
+                    # Parse name
+                    name_parts = signer.get('name', '').split() if signer.get('name') else []
+                    first_name = name_parts[0] if name_parts else 'Signer'
+                    last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else f'{i+1}'
+                    
+                    signer_payload = {
                         "info": {
-                            "first_name": signer.get('name', '').split()[0] if signer.get('name') else 'Signer',
-                            "last_name": ' '.join(signer.get('name', '').split()[1:]) if signer.get('name') and len(signer.get('name', '').split()) > 1 else f'{i+1}',
+                            "first_name": first_name,
+                            "last_name": last_name,
                             "email": signer['email'],
                             "phone_number": signer.get('phone', ''),
-                            "locale": "en"
+                            "locale": "fr"
                         },
                         "signature_level": "electronic_signature",
                         "signature_authentication_mode": "no_otp",
                         "fields": [
                             {
-                                "type": "signature",
                                 "document_id": document_id,
+                                "type": "signature",
                                 "page": 1,
-                                "x": 100 + (i * 200),
-                                "y": 400,
-                                "width": 150,
-                                "height": 75
+                                "x": 77,  # Default position
+                                "y": 581
                             }
                         ]
                     }
                     
-                    # Add name field if approver
-                    if signer.get('role') == 'approver':
-                        signer_data["fields"].append({
-                            "type": "text",
-                            "document_id": document_id,
-                            "page": 1,
-                            "x": 100 + (i * 200),
-                            "y": 350,
-                            "width": 150,
-                            "height": 30,
-                            "question": "Name"
-                        })
+                    signer_response = await client.post(
+                        f"{base_url}/signature_requests/{signature_request_id}/signers",
+                        headers=self._get_headers(api_key),
+                        json=signer_payload
+                    )
                     
-                    signature_request_data["signers"].append(signer_data)
+                    if signer_response.status_code not in [200, 201]:
+                        logger.error(f"Failed to add signer: {signer_response.status_code} - {signer_response.text}")
+                        continue
+                    
+                    signer_result = signer_response.json()
+                    created_signers.append({
+                        "email": signer['email'],
+                        "name": signer.get('name', ''),
+                        "external_id": signer_result['id'],
+                        "status": "pending"
+                    })
                 
-                # Add webhook URL if provided
-                if request_data.get('webhook_url'):
-                    signature_request_data["webhooks"] = [{
-                        "url": request_data['webhook_url'],
-                        "event_types": [
-                            "signature_request.done",
-                            "signature_request.expired",
-                            "signer.done"
-                        ]
-                    }]
-                
-                # Create the request
-                response = await client.post(
-                    f"{base_url}/signature_requests",
-                    headers=self._get_headers(api_key),
-                    json=signature_request_data
-                )
-                
-                if response.status_code not in [200, 201]:
-                    logger.error(f"YouSign API error: {response.status_code} - {response.text}")
-                    raise Exception(f"Failed to create signature request: {response.text}")
-                
-                result = response.json()
-                signature_request_id = result['id']
-                
-                # 3. Activate (send) the request
+                # Step 4: Activate the signature request
+                logger.info(f"Step 4: Activating signature request")
                 activate_response = await client.post(
                     f"{base_url}/signature_requests/{signature_request_id}/activate",
                     headers=self._get_headers(api_key)
                 )
                 
-                if activate_response.status_code not in [200, 201]:
-                    logger.error(f"Failed to activate signature request: {activate_response.text}")
+                if activate_response.status_code not in [200, 201, 204]:
+                    logger.error(f"Failed to activate signature request: {activate_response.status_code} - {activate_response.text}")
                 
-                # Get signing URLs for each signer
-                signers_info = []
-                for i, signer in enumerate(result.get('signers', [])):
-                    signers_info.append({
-                        "email": request_data['signers'][i]['email'],
-                        "name": request_data['signers'][i]['name'],
-                        "external_id": signer['id'],
-                        "signing_url": signer.get('signature_link', ''),
-                        "status": "sent"
-                    })
+                # Get the final signature request with signing links
+                final_response = await client.get(
+                    f"{base_url}/signature_requests/{signature_request_id}",
+                    headers=self._get_headers(api_key)
+                )
+                
+                if final_response.status_code == 200:
+                    final_data = final_response.json()
+                    # Update signers with their signing URLs
+                    for i, signer in enumerate(created_signers):
+                        if i < len(final_data.get('signers', [])):
+                            signer["signing_url"] = final_data['signers'][i].get('signature_link', '')
+                            signer["status"] = "sent"
                 
                 return {
                     "external_id": signature_request_id,
                     "status": "sent",
-                    "signers": signers_info,
-                    "expires_at": result.get('expiration_date')
+                    "signers": created_signers,
+                    "expires_at": signature_request.get('expiration_date')
                 }
                 
         except Exception as e:
             logger.error(f"Error creating YouSign signature request: {str(e)}")
             raise
     
-    async def _upload_document(
+    async def _upload_document_to_request(
         self, 
         client: httpx.AsyncClient, 
         base_url: str, 
-        api_key: str, 
+        api_key: str,
+        signature_request_id: str,
         document_content: bytes, 
         filename: str
     ) -> str:
-        """Upload a document to YouSign"""
+        """Upload a document to a specific YouSign signature request"""
         try:
             # YouSign v3 requires multipart/form-data
-            files = {'file': (filename, document_content, 'application/pdf')}
+            files = {
+                'file': (filename, document_content, 'application/pdf')
+            }
+            
+            # Form data
+            data = {
+                'nature': 'signable_document',
+                'parse_anchors': 'false'
+            }
+            
+            # Headers without Content-Type (let httpx set it for multipart)
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json"
+            }
             
             response = await client.post(
-                f"{base_url}/documents",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Accept": "application/json"
-                },
-                files=files
+                f"{base_url}/signature_requests/{signature_request_id}/documents",
+                headers=headers,
+                files=files,
+                data=data
             )
             
             if response.status_code not in [200, 201]:
                 raise Exception(f"Failed to upload document: {response.text}")
             
-            return response.json()['id']
+            result = response.json()
+            logger.info(f"Document uploaded with ID: {result['id']}")
+            return result['id']
             
         except Exception as e:
             logger.error(f"Error uploading document to YouSign: {str(e)}")

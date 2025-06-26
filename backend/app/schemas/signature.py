@@ -100,12 +100,21 @@ class SignatureRequestUpdate(BaseModel):
     status: Optional[str] = None
     request_metadata: Optional[Dict[str, Any]] = Field(None, alias="metadata")
 
-class SignatureRequest(SignatureRequestBase):
-    """Schema for signature request responses"""
+class SignatureRequest(BaseModel):
+    """Schema for signature request responses - without document_content"""
     id: UUID
     provider_id: UUID
     tenant_id: UUID
     created_by: UUID
+    title: str = Field(..., min_length=1, max_length=200)
+    message: Optional[str] = None
+    document_name: str = Field(..., min_length=1, max_length=255)
+    document_url: Optional[str] = None
+    signature_type: str = Field(default='sequential', pattern='^(sequential|parallel)$')
+    callback_url: Optional[str] = None
+    success_url: Optional[str] = None
+    error_url: Optional[str] = None
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
     external_id: Optional[str] = None
     status: str
     sent_at: Optional[datetime] = None
@@ -113,8 +122,5 @@ class SignatureRequest(SignatureRequestBase):
     expires_at: Optional[datetime] = None
     created_at: datetime
     signers: List[Signer] = []
-    
-    # Override document_content to exclude from response
-    document_content: None = Field(default=None, exclude=True)
     
     model_config = ConfigDict(from_attributes=True, json_encoders={UUID: str})
