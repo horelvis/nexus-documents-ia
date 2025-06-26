@@ -184,12 +184,32 @@ class DocumentService:
     ):
         """
         Extracts text and indexes it directly via LangChain/Qdrant.
-        No local database storage of chunks - everything goes to vector store.
+        Also extracts entities from the document content.
         """
         file_obj_for_text = io.BytesIO(file_contents)
         document_text = await asyncio.to_thread(self._extract_text, file_obj_for_text, file_ext)
         
         if document_text:
+            # Store the extracted text content in the document
+            db_document.content = document_text[:10000]  # Store first 10k chars for preview
+            
+            # Extract entities from the document text
+            try:
+                # Get LangChain client from vector service
+                langchain_client = self.vector_service.langchain_client
+                entities = await langchain_client.extract_entities(document_text, self.tenant_id)
+                
+                if entities:
+                    # Store extracted entities in the document
+                    db_document.extracted_entities = entities
+                    logger.info(f"Extracted {len(entities)} entities from document {db_document.id}")
+                else:
+                    db_document.extracted_entities = []
+                    
+            except Exception as e:
+                logger.error(f"Failed to extract entities from document {db_document.id}: {str(e)}")
+                db_document.extracted_entities = []
+            
             # Prepare metadata for the document
             document_metadata = {
                 "doc_id": str(db_document.id),
@@ -209,6 +229,7 @@ class DocumentService:
             db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
         else:
             db_document.indexed = IndexingStatus.INDEXING_ERROR
+            db_document.extracted_entities = []
     
     async def process_document(
         self, 
@@ -293,7 +314,8 @@ class DocumentService:
                 "indexed": db_document.indexed,
                 "created_at": db_document.created_at.isoformat(),
                 "updated_at": db_document.updated_at.isoformat(),
-                "tags": [tag.name for tag in db_document.tags]
+                "tags": [tag.name for tag in db_document.tags],
+                "extracted_entities": db_document.extracted_entities or []
             }
             
         except HTTPException:
@@ -365,6 +387,7 @@ class DocumentService:
                 "created_at": document.created_at.isoformat(),
                 "updated_at": document.updated_at.isoformat(),
                 "tags": [{"id": tag.id, "name": tag.name, "tenant_id": str(tag.tenant_id), "created_at": tag.created_at.isoformat()} for tag in document.tags],
+                "extracted_entities": document.extracted_entities or [],
                 "preview_chunks": chunks_dict
             }
             

@@ -236,6 +236,17 @@ async def summarize_text(request: Dict[str, Any]):
         logger.error(f"Error summarizing text: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/llm/extract-entities")
+async def extract_entities(request: Dict[str, str]):
+    """Extract named entities from text"""
+    try:
+        llm_service = LLMService()
+        entities = await llm_service.extract_entities(request["text"])
+        return {"entities": entities}
+    except Exception as e:
+        logger.error(f"Error extracting entities: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/documents/{tenant_id}/{doc_id}")
 async def delete_document(
     tenant_id: str, 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent } from "@/components/ui/popover"
 import { IconUser, IconBuilding, IconMail, IconRobot, IconLoader2 } from "@tabler/icons-react"
@@ -37,80 +37,68 @@ export function EntitySearchMenu({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const popoverRef = useRef<HTMLDivElement>(null)
   const entityService = useEntityService()
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Search entities when query changes
   useEffect(() => {
-    if (!open || !searchQuery) return
+    if (!open || !searchQuery) {
+      setEntities([])
+      setLoading(false)
+      return
+    }
 
-    let cancelled = false
-    setLoading(true)
-    
-    const searchEntities = async () => {
-      try {
-        // First try to get document-specific entities
-        const response = await entityService.searchEntities({
-          query: searchQuery,
-          documentId: documentId,
-          limit: 10
-        })
-        
-        if (!cancelled) {
-          if (response.data?.entities) {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+
+    // Only set loading true if we're actually going to search
+    if (searchQuery.length > 0) {
+      setLoading(true)
+      
+      // Debounce the search
+      searchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const timestamp = Date.now()
+          console.log(`[${timestamp}] Starting entity search - Query: '${searchQuery}', DocumentId: ${documentId}`)
+          
+          // Search for entities
+          const response = await entityService.searchEntities({
+            query: searchQuery,
+            documentId: documentId,
+            limit: 10
+          })
+          
+          console.log(`[${timestamp}] Entity search response:`, response)
+          
+          if (response.data?.entities && response.data.entities.length > 0) {
             // Type cast the entities to ensure type safety
             const typedEntities = response.data.entities.map(entity => ({
               ...entity,
               type: entity.type as Entity['type']
             }))
             setEntities(typedEntities)
+            console.log(`[${timestamp}] Found ${typedEntities.length} entities`)
           } else {
-            // Fallback to mock data if API is not available
-            const mockEntities: Entity[] = [
-              {
-                id: '1',
-                name: 'John Doe',
-                email: 'john.doe@example.com',
-                type: 'user',
-                role: 'Manager'
-              },
-              {
-                id: '2',
-                name: 'Jane Smith',
-                email: 'jane.smith@example.com',
-                type: 'user',
-                role: 'Director'
-              },
-              {
-                id: '3',
-                name: 'AI Assistant',
-                email: 'ai.assistant@agent.ai',
-                type: 'agent',
-                role: 'Document Analyzer'
-              }
-            ].filter(e => 
-              e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              e.email.toLowerCase().includes(searchQuery.toLowerCase())
-            )
-            setEntities(mockEntities)
+            // No results found
+            console.log(`[${timestamp}] No entities found for query '${searchQuery}'`)
+            setEntities([])
           }
-          setLoading(false)
-        }
-      } catch (error) {
-        console.error('Failed to search entities:', error)
-        if (!cancelled) {
+        } catch (error) {
+          console.error(`Failed to search entities for query '${searchQuery}':`, error)
           setEntities([])
+        } finally {
           setLoading(false)
         }
-      }
+      }, 300)
     }
-    
-    // Debounce the search
-    const timer = setTimeout(searchEntities, 300)
     
     return () => {
-      cancelled = true
-      clearTimeout(timer)
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
     }
-  }, [searchQuery, open, documentId, entityService])
+  }, [searchQuery, open, documentId]) // Remove entityService from dependencies
 
   // Reset selected index when entities change
   useEffect(() => {

@@ -392,3 +392,40 @@ class LangChainClient:
         except Exception as e:
             logger.error(f"Error getting collection info for tenant {tenant_id}: {str(e)}")
             raise
+
+    @retry(
+        stop=stop_after_attempt(settings.LANGCHAIN_CLIENT_RETRY_ATTEMPTS if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_ATTEMPTS') else 3),
+        wait=wait_exponential(
+            multiplier=settings.LANGCHAIN_CLIENT_RETRY_MULTIPLIER if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MULTIPLIER') else 1,
+            min=settings.LANGCHAIN_CLIENT_RETRY_MIN_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MIN_WAIT') else 1,
+            max=settings.LANGCHAIN_CLIENT_RETRY_MAX_WAIT if hasattr(settings, 'LANGCHAIN_CLIENT_RETRY_MAX_WAIT') else 10
+        ),
+        retry=retry_if_exception(should_retry_exception),
+        reraise=True
+    )
+    async def extract_entities(self, text: str, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Extract named entities from text using LangChain service."""
+        if not self.http_client:
+            raise RuntimeError("HTTP client not provided to LangChainClient.")
+        
+        try:
+            payload = {"text": text}
+            headers = self._get_auth_headers(tenant_id)
+            
+            response = await self.http_client.post(
+                f"{self.base_url}/llm/extract-entities",
+                json=payload,
+                headers=headers
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            return result.get("entities", [])
+            
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error extracting entities: {str(e)}")
+            return []
+        except Exception as e:
+            logger.error(f"Error extracting entities: {str(e)}")
+            return []

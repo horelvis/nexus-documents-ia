@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 
 from app.db.models import (
     SignatureProvider, SignatureRequest, SignatureRequestSigner, 
-    SignatureEvent, SignatureProviderAudit, Tenant, User
+    SignatureEvent, SignatureProviderAudit, Tenant, User, SignatureContact
 )
 from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate,
@@ -217,7 +217,7 @@ class AsyncSignatureService:
             self.db.add(signature_request)
             await self.db.flush()  # Para obtener el ID
             
-            # Crear firmantes
+            # Crear firmantes y guardar como contactos
             for i, signer_data in enumerate(request_data.signers):
                 signer = SignatureRequestSigner(
                     request_id=signature_request.id,
@@ -230,6 +230,15 @@ class AsyncSignatureService:
                     error_url=signer_data.error_url
                 )
                 self.db.add(signer)
+                
+                # Save or update signer as contact
+                await self._save_signer_as_contact(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    name=signer_data.name,
+                    email=signer_data.email,
+                    phone=signer_data.phone
+                )
             
             # Crear evento inicial
             await self._create_event(
@@ -868,3 +877,50 @@ class AsyncSignatureService:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error updating signer status: {str(e)}")
+    
+    async def _save_signer_as_contact(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        email: str,
+        phone: Optional[str] = None
+    ):
+        """Save or update a signer as a contact"""
+        try:
+            # Check if contact already exists
+            query = select(SignatureContact).where(
+                and_(
+                    SignatureContact.tenant_id == tenant_id,
+                    SignatureContact.email == email
+                )
+            )
+            result = await self.db.execute(query)
+            contact = result.scalar_one_or_none()
+            
+            if contact:
+                # Update existing contact
+                contact.usage_count += 1
+                contact.last_used_at = datetime.now(timezone.utc)
+                # Update name if different (in case of name changes)
+                if contact.name != name:
+                    contact.name = name
+                # Update phone if provided and different
+                if phone and contact.phone != phone:
+                    contact.phone = phone
+            else:
+                # Create new contact
+                contact = SignatureContact(
+                    tenant_id=tenant_id,
+                    created_by=user_id,
+                    name=name,
+                    email=email,
+                    phone=phone,
+                    usage_count=1,
+                    last_used_at=datetime.now(timezone.utc)
+                )
+                self.db.add(contact)
+                
+        except Exception as e:
+            logger.warning(f"Failed to save signer as contact: {str(e)}")
+            # Don't fail the signature request if contact saving fails

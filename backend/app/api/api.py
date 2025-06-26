@@ -35,6 +35,10 @@ api_router.include_router(signatures.router, prefix="/signatures", tags=["signat
 from app.api.v1 import signature_ai
 api_router.include_router(signature_ai.router, prefix="/signatures/ai", tags=["signature-ai"])
 
+# Signature contacts management
+from app.api.v1 import signature_contacts
+api_router.include_router(signature_contacts.router, prefix="/signatures/contacts", tags=["signature-contacts"])
+
 # Webhooks for external integrations
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 

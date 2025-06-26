@@ -1,15 +1,20 @@
 """
 API endpoints for entity management and search
 """
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func
 from uuid import UUID
+import hashlib
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
-from app.db.models import User, Document, DocumentView, DocumentShare
+from app.db.models import User, Document, DocumentView, DocumentShare, SignatureContact
+from sqlalchemy.dialects.postgresql import JSONB
 from app.schemas.entity import Entity, EntitySearchResponse
 
 router = APIRouter()
@@ -26,22 +31,78 @@ async def search_entities(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Search for entities (users, contacts, organizations, agents) with optional document context
+    Search for entities extracted from documents
     """
+    logger.info(f"Entity search - Query: '{q}', Document ID: {document_id}, Tenant ID: {tenant_id}")
+    
     entities = []
     search_pattern = f"%{q.lower()}%"
     
-    # Search users in the same tenant
+    # Build base query for documents with extracted entities
+    doc_query = select(Document).where(
+        and_(
+            Document.tenant_id == UUID(tenant_id),
+            Document.extracted_entities.isnot(None),
+            Document.extracted_entities != []
+        )
+    )
+    
+    # Filter by specific document if provided
+    if document_id:
+        doc_query = doc_query.where(Document.id == UUID(document_id))
+    
+    # Execute query
+    result = await db.execute(doc_query)
+    documents = result.scalars().all()
+    
+    # Extract entities from documents and filter by search query and types
+    seen_entities = {}  # Use dict to deduplicate by name+type
+    
+    for doc in documents:
+        if doc.extracted_entities:
+            for entity in doc.extracted_entities:
+                entity_name = entity.get('name', '').lower()
+                entity_type = entity.get('type', 'other')
+                
+                # Filter by search query
+                if q.lower() in entity_name:
+                    # Filter by types if specified
+                    if not types or entity_type in types:
+                        # Create unique key for deduplication
+                        entity_key = f"{entity_name}:{entity_type}"
+                        
+                        if entity_key not in seen_entities:
+                            # Generate a stable ID for the entity
+                            entity_id = str(UUID(bytes=hashlib.md5(entity_key.encode()).digest(), version=4))
+                            
+                            seen_entities[entity_key] = {
+                                "id": entity_id,
+                                "name": entity.get('name', ''),
+                                "type": entity_type,
+                                "role": entity.get('role', ''),
+                                "email": '',  # Entities from documents don't have emails
+                                "metadata": {
+                                    "context": entity.get('context', ''),
+                                    "document_id": str(doc.id),
+                                    "document_title": doc.title
+                                }
+                            }
+    
+    # Convert to list and sort by relevance
+    entities = list(seen_entities.values())
+    entities.sort(key=lambda e: e['name'])
+    
+    # Also search system users if 'user' type is requested
     if not types or 'user' in types:
         user_query = select(User).where(
             and_(
                 User.tenant_id == UUID(tenant_id),
                 or_(
-                    func.lower(User.full_name).like(search_pattern),
+                    func.lower(func.coalesce(User.full_name, '')).like(search_pattern),
                     func.lower(User.email).like(search_pattern)
                 )
             )
-        ).limit(limit)
+        ).limit(5)  # Limit user results to not overwhelm entity results
         
         result = await db.execute(user_query)
         users = result.scalars().all()
@@ -52,33 +113,51 @@ async def search_entities(
                 "name": user.full_name or user.email,
                 "email": user.email,
                 "type": "user",
-                "role": user.role if hasattr(user, 'role') else None
+                "role": user.role if hasattr(user, 'role') else None,
+                "metadata": {
+                    "is_system_user": True
+                }
             })
     
-    # TODO: Search agents from microservice
-    # Agents are managed in a separate microservice, not in the main database
-    # For now, we'll skip agent search
-    
-    # If document_id is provided, prioritize entities associated with the document
-    if document_id:
-        # Get users who have viewed or shared the document
-        view_query = select(User).join(DocumentView).where(
+    # Search signature contacts if 'contact' or 'signer' type is requested
+    if not types or 'contact' in types or 'signer' in types:
+        contact_query = select(SignatureContact).where(
             and_(
-                DocumentView.document_id == UUID(document_id),
-                User.tenant_id == UUID(tenant_id)
+                SignatureContact.tenant_id == UUID(tenant_id),
+                or_(
+                    func.lower(SignatureContact.name).like(search_pattern),
+                    func.lower(SignatureContact.email).like(search_pattern),
+                    func.lower(func.coalesce(SignatureContact.company, '')).like(search_pattern)
+                )
             )
-        ).distinct()
+        ).order_by(
+            desc(SignatureContact.is_favorite),
+            desc(SignatureContact.usage_count)
+        ).limit(10)
         
-        result = await db.execute(view_query)
-        document_users = result.scalars().all()
+        result = await db.execute(contact_query)
+        contacts = result.scalars().all()
         
-        # Prioritize document-associated entities
-        document_entity_ids = {str(u.id) for u in document_users}
-        entities.sort(key=lambda e: (e['id'] not in document_entity_ids, e['name']))
+        for contact in contacts:
+            entities.append({
+                "id": str(contact.id),
+                "name": contact.name,
+                "email": contact.email,
+                "type": "contact",
+                "role": contact.role or "Signer",
+                "metadata": {
+                    "is_signature_contact": True,
+                    "is_favorite": contact.is_favorite,
+                    "usage_count": contact.usage_count,
+                    "company": contact.company,
+                    "phone": contact.phone
+                }
+            })
     
-    # Limit results
+    # Limit total results
     entities = entities[:limit]
     
+    logger.info(f"Returning {len(entities)} total entities for query '{q}'")
     return EntitySearchResponse(
         entities=entities,
         total=len(entities)
@@ -93,7 +172,7 @@ async def get_document_entities(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Get entities associated with a specific document
+    Get entities extracted from a specific document
     """
     # Verify document exists and user has access
     doc_query = select(Document).where(
@@ -110,7 +189,28 @@ async def get_document_entities(
     
     entities = []
     
-    # Get document creator
+    # Get entities extracted from the document
+    if document.extracted_entities:
+        for entity in document.extracted_entities:
+            # Generate a stable ID for the entity
+            entity_key = f"{entity.get('name', '')}:{entity.get('type', 'other')}"
+            entity_id = str(UUID(bytes=hashlib.md5(entity_key.encode()).digest(), version=4))
+            
+            entities.append({
+                "id": entity_id,
+                "name": entity.get('name', ''),
+                "type": entity.get('type', 'other'),
+                "role": entity.get('role', ''),
+                "email": '',  # Entities from documents don't have emails
+                "metadata": {
+                    "context": entity.get('context', ''),
+                    "document_id": str(document.id),
+                    "document_title": document.title,
+                    "extraction_method": entity.get('metadata', {}).get('extraction_method', 'llm')
+                }
+            })
+    
+    # Also include document creator as a system entity
     creator_query = select(User).where(User.id == document.created_by)
     result = await db.execute(creator_query)
     creator = result.scalar_one_or_none()
@@ -121,26 +221,11 @@ async def get_document_entities(
             "name": creator.full_name or creator.email,
             "email": creator.email,
             "type": "user",
-            "role": "Document Creator"
+            "role": "Document Creator",
+            "metadata": {
+                "is_system_user": True
+            }
         })
-    
-    # Get users who have viewed the document
-    view_query = select(User).join(DocumentView).where(
-        DocumentView.document_id == UUID(document_id)
-    ).distinct().limit(10)
-    
-    result = await db.execute(view_query)
-    viewers = result.scalars().all()
-    
-    for viewer in viewers:
-        if str(viewer.id) != str(creator.id) if creator else True:
-            entities.append({
-                "id": str(viewer.id),
-                "name": viewer.full_name or viewer.email,
-                "email": viewer.email,
-                "type": "user",
-                "role": "Viewer"
-            })
     
     return EntitySearchResponse(
         entities=entities,

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -126,6 +126,7 @@ class Document(DocumentBase):
     created_at: datetime
     updated_at: datetime
     tags: List[Tag] = []
+    extracted_entities: Optional[List[Dict[str, Any]]] = []
     
     class Config:
         from_attributes = True

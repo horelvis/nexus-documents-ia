@@ -6,6 +6,7 @@ from app.api.v1.search import router as search_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.signatures import router as signatures_router
 from app.api.v1.signature_ai import router as signature_ai_router
+from app.api.v1.signature_contacts import router as signature_contacts_router
 from app.api.v1.entities import router as entities_router
 
 # Optional: Define __all__ to specify what gets imported with 'from app.api.v1 import *'
@@ -20,5 +21,6 @@ __all__ = [
     "tenants_router",
     "signatures_router",
     "signature_ai_router",
+    "signature_contacts_router",
     "entities_router",
 ]

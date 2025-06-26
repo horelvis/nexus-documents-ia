@@ -31,11 +31,14 @@ export class EntityService {
       params.types.forEach(type => searchParams.append('types', type))
     }
 
-    const endpoint = `${API_CONFIG.ENDPOINTS.SEARCH}/entities?${searchParams.toString()}`
-    return this.apiClient.get<{
+    const endpoint = `/search/entities?${searchParams.toString()}`
+    console.log('Entity search endpoint:', endpoint)
+    const response = await this.apiClient.get<{
       entities: Entity[]
       total: number
     }>(endpoint)
+    console.log('Entity search API response:', response)
+    return response
   }
 
   async getDocumentEntities(documentId: string) {

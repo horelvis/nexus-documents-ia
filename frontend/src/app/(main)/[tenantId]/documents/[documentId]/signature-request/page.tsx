@@ -301,19 +301,25 @@ export default function SignatureRequestPage() {
   const handleNameInputChange = (value: string, index: number) => {
     const updated = [...form.getValues('signers')]
     updated[index].name = value
-    form.setValue('signers', updated)
+    form.setValue('signers', updated, { shouldValidate: false, shouldDirty: true })
     
     // Check for @ symbol
     if (value.includes('@')) {
       const atIndex = value.lastIndexOf('@')
       const query = value.substring(atIndex + 1)
-      setEntitySearchQuery(query)
-      setEntitySearchIndex(index)
-      setEntitySearchOpen(true)
+      
+      // Only update search if query actually changed
+      if (query !== entitySearchQuery || !entitySearchOpen) {
+        setEntitySearchQuery(query)
+        setEntitySearchIndex(index)
+        setEntitySearchOpen(true)
+      }
     } else {
-      setEntitySearchOpen(false)
-      setEntitySearchIndex(null)
-      setEntitySearchQuery('')
+      if (entitySearchOpen) {
+        setEntitySearchOpen(false)
+        setEntitySearchIndex(null)
+        setEntitySearchQuery('')
+      }
     }
   }
 

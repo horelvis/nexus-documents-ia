@@ -236,6 +236,86 @@ class LLMService:
             logger.error(f"Error summarizing text: {str(e)}")
             return "Resumen no disponible."
     
+    async def extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Extract named entities from text.
+        
+        Args:
+            text: Text to analyze for entities
+            
+        Returns:
+            List of entities with their types and metadata
+        """
+        try:
+            logger.debug(f"Extracting entities from text of length: {len(text)}")
+            
+            prompt = f"""Extract all named entities from the following text. 
+            For each entity, identify:
+            1. Name of the entity
+            2. Type: person (contact), organization, location, or other
+            3. Any additional context or role mentioned
+            
+            Return the result as a JSON array of objects with the following structure:
+            [
+                {{
+                    "name": "Entity Name",
+                    "type": "contact|organization|location|other",
+                    "role": "role or description if mentioned",
+                    "context": "brief context where entity appears"
+                }}
+            ]
+            
+            Only return the JSON array, no additional text.
+            
+            Text: {text[:4000]}
+            
+            JSON:"""
+            
+            response = self.llm.invoke(prompt)
+            
+            # Try to parse the JSON response
+            try:
+                import json
+                entities_raw = json.loads(response)
+                
+                # Normalize entity types to match frontend expectations
+                type_mapping = {
+                    'person': 'contact',
+                    'company': 'organization',
+                    'org': 'organization',
+                    'location': 'location',
+                    'place': 'location'
+                }
+                
+                entities = []
+                for entity in entities_raw:
+                    entity_type = entity.get('type', 'other').lower()
+                    normalized_type = type_mapping.get(entity_type, entity_type)
+                    
+                    # Only include entities with valid types
+                    if normalized_type in ['contact', 'organization', 'location']:
+                        entities.append({
+                            'name': entity.get('name', ''),
+                            'type': normalized_type,
+                            'role': entity.get('role', ''),
+                            'context': entity.get('context', ''),
+                            'metadata': {
+                                'original_type': entity_type,
+                                'extraction_method': 'llm'
+                            }
+                        })
+                
+                logger.debug(f"Extracted {len(entities)} entities")
+                return entities
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse entity extraction response as JSON: {response}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error extracting entities: {str(e)}")
+            return []
+    
     def create_custom_prompt(self, template: str, variables: Dict[str, str]) -> str:
         """
         Crea un prompt personalizado con variables.

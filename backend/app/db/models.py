@@ -729,6 +729,51 @@ class SignatureProviderAudit(Base):
 
 
 # =====================================
+# SIGNATURE CONTACTS
+# =====================================
+
+class SignatureContact(Base):
+    """Saved contacts for signature requests"""
+    __tablename__ = "signature_contacts"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Contact information
+    name = Column(String(100), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(20), nullable=True)
+    role = Column(String(100), nullable=True)  # Common role/title for this contact
+    company = Column(String(200), nullable=True)
+    
+    # Usage tracking
+    is_favorite = Column(Boolean, default=False, nullable=False)
+    usage_count = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Additional metadata
+    notes = Column(Text, nullable=True)
+    contact_metadata = Column(JSONB, nullable=True, default={})
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+    
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'email', name='uq_signature_contact_tenant_email'),
+        Index('idx_signature_contacts_tenant_favorite', 'tenant_id', 'is_favorite'),
+        Index('idx_signature_contacts_tenant_usage', 'tenant_id', 'usage_count'),
+        Index('idx_signature_contacts_email', 'email'),
+        Index('idx_signature_contacts_name', 'name'),
+    )
+
+
+# =====================================
 # SIGNATURE AI MODELS
 # =====================================
 
