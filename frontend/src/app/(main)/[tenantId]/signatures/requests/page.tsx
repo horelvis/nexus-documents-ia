@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
-import { Plus, Search, FileText, Send, Download, Eye, RefreshCw } from 'lucide-react'
+import { Plus, Search, FileText, Send, Download, Eye, RefreshCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -163,6 +163,28 @@ export default function SignatureRequestsPage() {
   const handleViewDetails = (request: SignatureRequest) => {
     setSelectedRequest(request)
     setIsDetailsDialogOpen(true)
+  }
+
+  // Handle delete request
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!confirm('Are you sure you want to delete this signature request? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      await signatureService.deleteRequest(requestId)
+      toast({
+        title: 'Success',
+        description: 'Signature request deleted successfully',
+      })
+      loadRequests()
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to delete signature request',
+        variant: 'destructive',
+      })
+    }
   }
 
   // Count requests by status
@@ -363,6 +385,16 @@ export default function SignatureRequestsPage() {
                               onClick={() => handleDownloadDocument(request)}
                             >
                               <Download className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {request.status !== 'completed' && request.status !== 'sent' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteRequest(request.id)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           )}
                         </div>

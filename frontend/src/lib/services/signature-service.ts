@@ -175,6 +175,10 @@ class SignatureService {
     return response.data
   }
 
+  async deleteRequest(requestId: string): Promise<void> {
+    await apiClient.delete(`/signatures/requests/${requestId}`)
+  }
+
   async cancelRequest(requestId: string): Promise<void> {
     await apiClient.post(`/signatures/requests/${requestId}/cancel`)
   }

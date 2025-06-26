@@ -97,6 +97,10 @@ export function useSignatureService() {
       await apiClient.post(`/signatures/requests/${requestId}/send`)
     },
 
+    async deleteRequest(requestId: string): Promise<void> {
+      await apiClient.delete(`/signatures/requests/${requestId}`)
+    },
+
     // TODO: Implement cancel request when backend endpoint is available
     // async cancelRequest(requestId: string): Promise<void> {
     //   await apiClient.post(`/signatures/requests/${requestId}/cancel`)

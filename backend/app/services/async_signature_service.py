@@ -233,12 +233,17 @@ class AsyncSignatureService:
                         )
                         document_content = content  # This should be bytes
                         document_name = document.filename
-                        logger.info(f"Loaded document content from storage: {len(content)} bytes")
+                        logger.info(f"Loaded document content from storage: {len(content)} bytes for document {document.id}")
                     except Exception as e:
                         logger.error(f"Failed to load document from storage: {e}")
                         raise ValueError(f"Failed to load document content: {e}")
                 else:
                     raise ValueError("Document has no file path")
+            
+            # Ensure document_id is in metadata for future reference
+            metadata = request_data.request_metadata or {}
+            if request_data.document_id:
+                metadata['document_id'] = str(request_data.document_id)
             
             # Crear solicitud en base de datos
             signature_request = SignatureRequest(
@@ -254,7 +259,7 @@ class AsyncSignatureService:
                 callback_url=request_data.callback_url,
                 success_url=request_data.success_url,
                 error_url=request_data.error_url,
-                request_metadata=request_data.request_metadata,
+                request_metadata=metadata,
                 status='draft'
             )
             
@@ -332,6 +337,10 @@ class AsyncSignatureService:
             
             if request.status != 'draft':
                 raise ValueError("Only draft requests can be sent")
+            
+            # Check if document content is present
+            if not request.document_content:
+                raise ValueError("Document content is missing. Cannot send signature request without document.")
             
             # Obtener proveedor y credenciales
             provider = request.provider
@@ -413,6 +422,45 @@ class AsyncSignatureService:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+    
+    async def delete_signature_request(
+        self,
+        request_id: UUID,
+        tenant_id: UUID
+    ) -> bool:
+        """Eliminar solicitud de firma"""
+        try:
+            # Get the request first to verify it exists and belongs to tenant
+            request = await self.get_signature_request(request_id, tenant_id)
+            if not request:
+                return False
+            
+            # Delete signers first (due to foreign key constraints)
+            await self.db.execute(
+                delete(SignatureRequestSigner).where(
+                    SignatureRequestSigner.request_id == request_id
+                )
+            )
+            
+            # Delete the request
+            result = await self.db.execute(
+                delete(SignatureRequest).where(
+                    and_(
+                        SignatureRequest.id == request_id,
+                        SignatureRequest.tenant_id == tenant_id
+                    )
+                )
+            )
+            
+            await self.db.commit()
+            
+            logger.info(f"Deleted signature request {request_id}")
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error deleting signature request: {str(e)}")
+            raise
     
     async def get_signature_requests(
         self, 

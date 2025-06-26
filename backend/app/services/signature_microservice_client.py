@@ -27,7 +27,7 @@ class SignatureMicroserviceClient:
         provider_type: str,
         provider_credentials: Dict[str, Any],
         title: str,
-        document_content: bytes,
+        document_content: Optional[bytes],
         document_name: str,
         signers: List[Dict[str, Any]],
         message: Optional[str] = None,
@@ -37,6 +37,10 @@ class SignatureMicroserviceClient:
     ) -> Dict[str, Any]:
         """Create a signature request via the microservice"""
         try:
+            # Check if document content is provided
+            if document_content is None:
+                raise ValueError("Document content is required but was not provided")
+            
             # Encode document content to base64
             document_b64 = base64.b64encode(document_content).decode('utf-8')
             

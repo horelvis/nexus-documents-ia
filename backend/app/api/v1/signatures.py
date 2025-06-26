@@ -480,6 +480,67 @@ async def send_signature_request(
         )
 
 
+@router.delete("/requests/{request_id}")
+async def delete_signature_request(
+    request_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_user_async)
+):
+    """Eliminar una solicitud de firma"""
+    logger.info(f"User {current_user.id} deleting signature request {request_id}")
+    
+    try:
+        signature_service = AsyncSignatureService(db)
+        
+        # First check if the request exists and belongs to the user
+        request = await signature_service.get_signature_request(
+            request_id=UUID(request_id),
+            tenant_id=current_user.tenant_id
+        )
+        
+        if not request:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signature request not found"
+            )
+        
+        # Only allow deletion if status is draft or declined
+        if request.status not in ['draft', 'declined', 'expired']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot delete signature request with status: {request.status}"
+            )
+        
+        # Delete the request
+        success = await signature_service.delete_signature_request(
+            request_id=UUID(request_id),
+            tenant_id=current_user.tenant_id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Error deleting signature request"
+            )
+        
+        return {"message": "Signature request deleted successfully"}
+        
+    except ValueError as e:
+        logger.error(f"ValueError deleting signature request {request_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting signature request {request_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting signature request: {str(e)}"
+        )
+
+
 @router.get("/requests", response_model=List[SignatureRequest])
 async def get_signature_requests(
     status_filter: Optional[str] = None,
