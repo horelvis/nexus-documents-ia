@@ -39,9 +39,9 @@ sleep 5
 
 # Initialize Ollama models if needed
 echo "🤖 Checking Ollama models..."
-if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
-    echo "📥 Downloading embedding model (nomic-embed-text)..."
-    docker compose exec -T ollama-service ollama pull nomic-embed-text || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
+if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "all-minilm"; then
+    echo "📥 Downloading fast embedding model (all-minilm)..."
+    docker compose exec -T ollama-service ollama pull all-minilm:latest || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
 else
     echo "✅ Embedding model already present"
 fi

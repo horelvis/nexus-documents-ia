@@ -315,20 +315,29 @@ class AsyncDocumentService:
             
             if text:
                 try:
+                    # Limit text length for embedding generation to avoid timeouts
+                    # With all-minilm, we can process text faster but let's be conservative
+                    max_text_length = 30000  # Limit to ~30k characters for faster processing
+                    if len(text) > max_text_length:
+                        logger.warning(f"Text too long ({len(text)} chars), truncating to {max_text_length} for embeddings")
+                        text_for_embedding = text[:max_text_length]
+                    else:
+                        text_for_embedding = text
+                    
                     # Generate embeddings
-                    logger.info(f"Generating embeddings for document {doc_id}")
-                    embeddings = await self.embedding_service.generate_embeddings(text)
+                    logger.info(f"Generating embeddings for document {doc_id} (text length: {len(text_for_embedding)})")
+                    embeddings = await self.embedding_service.generate_embeddings(text_for_embedding)
                     logger.info(f"Generated {len(embeddings)} embeddings for document {doc_id}")
                 except Exception as e:
                     logger.error(f"Failed to generate embeddings for {doc_id}: {e}")
                     raise Exception(f"Embedding generation failed: {str(e)}")
                 
                 try:
-                    # Store in vector DB
+                    # Store in vector DB (use the same text that was used for embeddings)
                     logger.info(f"Storing document {doc_id} in vector database")
                     success = await self.vector_service.add_document(
                         doc_id=doc_id,
-                        text=text,
+                        text=text_for_embedding,  # Use the same text that was embedded
                         metadata={"file_type": file_ext, "tenant_id": self.tenant_id}
                     )
                     

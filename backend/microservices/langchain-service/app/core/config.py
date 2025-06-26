@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # LangChain/Ollama configuration
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
     OLLAMA_MODEL: str = "llama3.2"
-    EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_MODEL: str = "all-minilm:latest"  # Much faster and efficient embedding model
     
     # Vector database configuration
     QDRANT_HOST: str = "qdrant"

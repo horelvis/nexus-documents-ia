@@ -32,6 +32,17 @@ RUN echo '#!/bin/bash\n\
 # Set environment for GPU detection\n\
 export NVIDIA_VISIBLE_DEVICES=all\n\
 export NVIDIA_DRIVER_CAPABILITIES=compute,utility\n\
+export CUDA_VISIBLE_DEVICES=0\n\
+\n\
+# Check for GPU availability\n\
+if command -v nvidia-smi &> /dev/null; then\n\
+    echo "GPU detected:"\n\
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader\n\
+    export OLLAMA_GPU_LAYERS=999\n\
+    export OLLAMA_CUDA=1\n\
+else\n\
+    echo "No GPU detected, using CPU"\n\
+fi\n\
 \n\
 # Start Ollama server in background\n\
 ollama serve &\n\
@@ -44,10 +55,10 @@ sleep 10\n\
 if [ ! -d "/root/.ollama/models" ] || [ -z "$(ls -A /root/.ollama/models 2>/dev/null)" ]; then\n\
     echo "Pulling optimized models for high-end hardware..."\n\
     # Larger, more capable models for 64GB RAM + 42GB VRAM\n\
-    ollama pull llama3.1:8b\n\
-    ollama pull codellama:13b\n\
-    ollama pull mistral:7b\n\
-    ollama pull nomic-embed-text\n\
+    ollama pull llama3.2\n\
+    ollama pull all-minilm:latest\n\
+    # Optional: pull nomic-embed-text as backup\n\
+    # ollama pull nomic-embed-text\n\
     echo "Models downloaded successfully"\n\
 else\n\
     echo "Models already exist, skipping download"\n\

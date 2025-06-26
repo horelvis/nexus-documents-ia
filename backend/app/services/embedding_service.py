@@ -30,7 +30,9 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Generating embeddings for {len(texts)} texts")
-            async with httpx.AsyncClient(timeout=30.0) as http_client:
+            # Increase timeout for large documents
+            timeout = httpx.Timeout(60.0, connect=10.0)
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
                 lc_client = LangChainClient(http_client=http_client)
                 # Pass tenant_id as it's part of LangChainClient's get_embeddings signature
                 embeddings = await lc_client.get_embeddings(texts=texts, tenant_id=self.tenant_id)
@@ -52,7 +54,9 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Generating embedding for text of length: {len(text)}")
-            async with httpx.AsyncClient(timeout=30.0) as http_client:
+            # Increase timeout for single embedding too
+            timeout = httpx.Timeout(60.0, connect=10.0)
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
                 lc_client = LangChainClient(http_client=http_client)
                 # Adapt to use get_embeddings for a single text
                 embeddings_list = await lc_client.get_embeddings(texts=[text], tenant_id=self.tenant_id)
@@ -91,7 +95,9 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Chunking text of length: {len(text)}")
-            async with httpx.AsyncClient(timeout=30.0) as http_client:
+            # Increase timeout for chunking too
+            timeout = httpx.Timeout(60.0, connect=10.0)
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
                 lc_client = LangChainClient(http_client=http_client)
                 chunks = await lc_client.chunk_text(text=text, tenant_id=self.tenant_id)
             logger.debug(f"Text split into {len(chunks)} chunks successfully.")

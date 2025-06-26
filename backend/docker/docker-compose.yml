@@ -118,7 +118,7 @@ services:
       - QDRANT_PORT=6333
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - OLLAMA_MODEL=llama3.1:8b
-      - EMBEDDING_MODEL=nomic-embed-text
+      - EMBEDDING_MODEL=all-minilm:latest
       - DEBUG=${DEBUG:-true}  # Enable reload in dev
     volumes:
       # Mount the Python code for live reloading
@@ -147,7 +147,7 @@ services:
       - QDRANT_PORT=6333
       - OLLAMA_BASE_URL=http://ollama-service:11434
       - LLM_MODEL=llama3.2
-      - EMBEDDING_MODEL=nomic-embed-text
+      - EMBEDDING_MODEL=all-minilm:latest
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
       - LANGGRAPH_BACKEND=sqlite
@@ -184,7 +184,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama-service:11434
       # Optional: Set default models
       - DEFAULT_LLM_MODEL=llama3.2
-      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
+      - DEFAULT_EMBEDDING_MODEL=all-minilm:latest
     volumes:
       - langflow_data:/app
       - ./langflow/flows:/app/flows
@@ -223,6 +223,17 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=3
       - PYTHONPATH=/app
       - DEBUG=${DEBUG:-true}  # Enable reload in dev
+      # Model configuration
+      - OLLAMA_DEFAULT_MODEL=llama3.2
+      - OLLAMA_EMBEDDING_MODEL=all-minilm:latest
+      - EMBEDDING_MODEL=all-minilm:latest  # For consistency
+      # NVIDIA GPU settings
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      # Ollama GPU settings
+      - OLLAMA_GPU_LAYERS=999  # Use all available GPU layers
+      - OLLAMA_CUDA=1  # Force CUDA usage
     deploy:
       resources:
         reservations:
