@@ -451,6 +451,7 @@ async def send_signature_request(
     """Enviar solicitud de firma a los firmantes"""
     
     try:
+        logger.info(f"User {current_user.id} sending signature request {request_id}")
         signature_service = AsyncSignatureService(db)
         success = await signature_service.send_signature_request(
             request_id,
@@ -466,15 +467,16 @@ async def send_signature_request(
         return {"message": "Signature request sent successfully"}
         
     except ValueError as e:
+        logger.error(f"ValueError sending signature request {request_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Error sending signature request: {str(e)}")
+        logger.error(f"Error sending signature request {request_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending signature request"
+            detail=f"Error sending signature request: {str(e)}"
         )
 
 

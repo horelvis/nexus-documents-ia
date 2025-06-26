@@ -300,6 +300,7 @@ class AsyncSignatureService:
                     "email": signer.email,
                     "phone": signer.phone,
                     "order": signer.order,
+                    "role": "signer",  # Default role
                     "authentication_method": signer.authentication_method
                 }
                 for signer in request.signers

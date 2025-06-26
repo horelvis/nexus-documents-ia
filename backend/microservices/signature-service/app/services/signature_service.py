@@ -25,6 +25,13 @@ class SignatureService:
     
     def _get_strategy(self, provider_type: ProviderType) -> SignatureProviderStrategy:
         """Get the appropriate strategy for the provider"""
+        # Ensure provider_type is a ProviderType enum
+        if isinstance(provider_type, str):
+            try:
+                provider_type = ProviderType(provider_type.lower())
+            except ValueError:
+                raise ValueError(f"Unsupported provider: {provider_type}")
+        
         strategy = self.strategies.get(provider_type)
         if not strategy:
             raise ValueError(f"Unsupported provider: {provider_type}")
@@ -45,24 +52,37 @@ class SignatureService:
     ) -> Dict[str, Any]:
         """Create a new signature request"""
         try:
+            logger.info(f"Creating signature request with provider: {provider_type} (type: {type(provider_type)})")
             strategy = self._get_strategy(provider_type)
             
             # Prepare request data
+            # Handle signers - they might be objects or dictionaries
+            processed_signers = []
+            for idx, s in enumerate(signers):
+                if hasattr(s, 'email'):  # It's an object
+                    signer_data = {
+                        "email": s.email,
+                        "name": s.name,
+                        "phone": getattr(s, 'phone', None),
+                        "role": s.role.value if hasattr(s, 'role') else "signer",
+                        "order": getattr(s, 'order', idx + 1)
+                    }
+                else:  # It's a dictionary
+                    signer_data = {
+                        "email": s.get('email'),
+                        "name": s.get('name'),
+                        "phone": s.get('phone'),
+                        "role": s.get('role', 'signer'),
+                        "order": s.get('order', idx + 1)
+                    }
+                processed_signers.append(signer_data)
+            
             request_data = {
                 "title": title,
                 "message": message,
                 "document_content": document_content,
                 "document_name": document_name,
-                "signers": [
-                    {
-                        "email": s.email,
-                        "name": s.name,
-                        "phone": s.phone,
-                        "role": s.role.value,
-                        "order": s.order
-                    }
-                    for s in signers
-                ],
+                "signers": processed_signers,
                 "expires_in_days": expires_in_days,
                 "webhook_url": webhook_url,
                 "metadata": metadata or {}

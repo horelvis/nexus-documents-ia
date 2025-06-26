@@ -173,10 +173,13 @@ class SignatureService:
         self.encryption_key = self._get_encryption_key()
         self.fernet = Fernet(self.encryption_key)
         
+        # Import strategies dynamically to avoid circular imports
+        from .signature_providers import YouSignStrategy as RealYouSignStrategy
+        
         # Estrategias disponibles
         self.strategies = {
             'docusign': DocuSignStrategy(),
-            'yousign': YouSignStrategy(),
+            'yousign': RealYouSignStrategy(),  # Use the real implementation
             'signaturit': SignaturitStrategy()
         }
     
@@ -441,8 +444,8 @@ class SignatureService:
             
         except Exception as e:
             self.db.rollback()
-            logger.error(f"Error sending signature request: {str(e)}")
-            raise
+            logger.error(f"Error sending signature request: {str(e)}", exc_info=True)
+            raise Exception(f"Failed to send signature request: {str(e)}")
     
     def get_signature_request(
         self, 

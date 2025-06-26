@@ -36,7 +36,14 @@ async def create_signature_request(request: CreateSignatureRequest):
         
         return SignatureRequestResponse(**result)
         
+    except ValueError as e:
+        # Specific validation errors
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Log the full error for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error creating signature request: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/status", response_model=StatusResponse)
