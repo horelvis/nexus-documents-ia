@@ -279,6 +279,7 @@ class AsyncSignatureService:
                     name=signer_data.name,
                     email=signer_data.email,
                     phone=signer_data.phone,
+                    role=signer_data.role,
                     order=signer_data.order if signer_data.order else i + 1,
                     authentication_method=signer_data.authentication_method,
                     success_url=signer_data.success_url,
@@ -353,17 +354,17 @@ class AsyncSignatureService:
             credentials = self._decrypt_credentials(provider.encrypted_credentials)
             
             # Preparar datos para el proveedor
-            signers_data = [
-                {
+            signers_data = []
+            for signer in request.signers:
+                signer_data = {
                     "name": signer.name,
                     "email": signer.email,
                     "phone": signer.phone,
                     "order": signer.order,
-                    "role": "signer",  # Default role
+                    "role": getattr(signer, 'role', 'signer'),  # Get role from signer or default to 'signer'
                     "authentication_method": signer.authentication_method
                 }
-                for signer in request.signers
-            ]
+                signers_data.append(signer_data)
             
             # Construir URL de webhook
             webhook_url = f"{settings.API_BASE_URL}/api/v1/signatures/webhooks/{provider.provider_name}"

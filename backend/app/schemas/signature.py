@@ -48,6 +48,7 @@ class SignerBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     email: str = Field(..., pattern=r'^[^@]+@[^@]+\.[^@]+$')
     phone: Optional[str] = Field(None, max_length=20)
+    role: str = Field(default='signer', pattern='^(signer|viewer|approver)$')
     order: int = Field(default=1, ge=1)
     authentication_method: str = Field(default='email', pattern='^(email|sms|code)$')
     success_url: Optional[str] = None

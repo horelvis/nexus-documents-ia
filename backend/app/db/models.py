@@ -676,6 +676,7 @@ class SignatureRequestSigner(Base):
     name = Column(String(100), nullable=False)
     email = Column(String(255), nullable=False)
     phone = Column(String(20), nullable=True)
+    role = Column(String(20), nullable=False, default='signer')  # signer, viewer, approver
     order = Column(Integer, nullable=False, default=1)
     authentication_method = Column(String(20), default='email')
     success_url = Column(String(500), nullable=True)

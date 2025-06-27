@@ -120,6 +120,7 @@ class YouSignStrategy(SignatureProviderStrategy):
                     created_signers.append({
                         "email": signer['email'],
                         "name": signer.get('name', ''),
+                        "role": signer.get('role', 'signer'),
                         "external_id": signer_result['id'],
                         "status": "pending"
                     })
