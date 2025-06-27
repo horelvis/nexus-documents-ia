@@ -47,12 +47,23 @@ class YouSignStrategy(SignatureProviderStrategy):
             headers = self._get_headers(api_key)
             
             with httpx.Client() as client:
+                # Get metadata for language and timezone
+                metadata = request_data.get("metadata", {})
+                language = metadata.get("language", "en")
+                timezone = metadata.get("timezone", "Europe/Paris")
+                
                 # Step 1: Create the signature request (initiate)
                 signature_request_payload = {
                     "name": request_data.get("title", "Signature Request"),
                     "delivery_mode": "email",
-                    "timezone": "Europe/Paris"
+                    "timezone": timezone
                 }
+                
+                # Add custom message if provided
+                if request_data.get("message"):
+                    signature_request_payload["custom_experience"] = {
+                        "custom_thank_you_message": request_data.get("message")
+                    }
                 
                 logger.info(f"Step 1: Creating YouSign signature request: {signature_request_payload.get('name')}")
                 
@@ -91,6 +102,28 @@ class YouSignStrategy(SignatureProviderStrategy):
                 
                 # Step 3: Add signers one by one
                 created_signers = []
+                
+                # Get signature fields from metadata (already retrieved above)
+                signature_fields = metadata.get("signature_fields", [])
+                logger.info(f"Found {len(signature_fields)} signature fields in metadata")
+                if signature_fields:
+                    logger.info(f"Signature fields details: {signature_fields}")
+                
+                # Get language from metadata or use default
+                language = metadata.get("language", "en")
+                # Map common language codes to YouSign locale format
+                locale_map = {
+                    "en": "en",
+                    "es": "es",
+                    "fr": "fr",
+                    "de": "de",
+                    "it": "it",
+                    "pt": "pt",
+                    "nl": "nl"
+                }
+                locale = locale_map.get(language, "en")
+                logger.info(f"Using locale: {locale} for language: {language}")
+                
                 for i, signer in enumerate(request_data.get("signers", [])):
                     logger.info(f"Step 3.{i+1}: Adding signer {signer.get('email')}")
                     
@@ -99,27 +132,55 @@ class YouSignStrategy(SignatureProviderStrategy):
                     first_name = name_parts[0] if name_parts else "Signer"
                     last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else f"{i+1}"
                     
+                    # Get signer-specific language if provided
+                    signer_language = signer.get("language", language)
+                    signer_locale = locale_map.get(signer_language, locale)
+                    
                     signer_payload = {
                         "info": {
                             "first_name": first_name,
                             "last_name": last_name,
                             "email": signer.get("email"),
                             "phone_number": signer.get("phone", ""),
-                            "locale": "fr"
+                            "locale": signer_locale
                         },
                         "signature_level": "electronic_signature",
                         "signature_authentication_mode": "no_otp"
                     }
                     
-                    # Add signature field if we have a document
+                    # Add signature fields for this signer
                     if document_id:
-                        signer_payload["fields"] = [{
-                            "document_id": document_id,
-                            "type": "signature",
-                            "page": 1,
-                            "x": 77,  # Default position, should be configurable
-                            "y": 581
-                        }]
+                        signer_id = f"signer-{i}"
+                        # Find all fields for this signer
+                        signer_fields = [f for f in signature_fields if f.get("signer") == signer_id]
+                        logger.info(f"Found {len(signer_fields)} fields for signer {signer_id}")
+                        
+                        if signer_fields:
+                            # Use the actual field placements
+                            signer_payload["fields"] = []
+                            for field in signer_fields:
+                                # Note: YouSign API uses standard PDF coordinates (origin at bottom-left)
+                                # Frontend uses top-left origin, so we might need to convert
+                                field_data = {
+                                    "document_id": document_id,
+                                    "type": "signature",
+                                    "page": field.get("page", 1),
+                                    "x": int(field.get("x", 77)),
+                                    "y": int(field.get("y", 581)),
+                                    "width": int(field.get("width", 200)),
+                                    "height": int(field.get("height", 50))
+                                }
+                                logger.info(f"Adding field: page={field_data['page']}, x={field_data['x']}, y={field_data['y']}, width={field_data['width']}, height={field_data['height']}")
+                                signer_payload["fields"].append(field_data)
+                        else:
+                            # Default fallback if no fields specified
+                            signer_payload["fields"] = [{
+                                "document_id": document_id,
+                                "type": "signature",
+                                "page": 1,
+                                "x": 77,
+                                "y": 581
+                            }]
                     
                     signer_response = client.post(
                         f"{base_url}/signature_requests/{signature_request_id}/signers",

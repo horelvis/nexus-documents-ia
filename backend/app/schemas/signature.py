@@ -51,6 +51,7 @@ class SignerBase(BaseModel):
     role: str = Field(default='signer', pattern='^(signer|viewer|approver)$')
     order: int = Field(default=1, ge=1)
     authentication_method: str = Field(default='email', pattern='^(email|sms|code)$')
+    language: Optional[str] = Field(None, pattern='^(en|es|fr|de|it|pt|nl)$')
     success_url: Optional[str] = None
     error_url: Optional[str] = None
 

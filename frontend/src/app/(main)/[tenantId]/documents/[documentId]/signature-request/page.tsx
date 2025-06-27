@@ -109,6 +109,7 @@ export default function SignatureRequestPage() {
   const [entitySearchOpen, setEntitySearchOpen] = useState(false)
   const [entitySearchIndex, setEntitySearchIndex] = useState<number | null>(null)
   const [entitySearchQuery, setEntitySearchQuery] = useState('')
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('')
   const nameInputRefs = useRef<(HTMLInputElement | null)[]>([])
   
   const form = useForm<SignatureRequestFormData>({
@@ -127,6 +128,13 @@ export default function SignatureRequestPage() {
   useEffect(() => {
     loadDocument()
   }, [documentId])
+  
+  // Set default language based on browser
+  useEffect(() => {
+    const browserLang = navigator.language.split('-')[0]
+    const supportedLangs = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl']
+    setSelectedLanguage(supportedLangs.includes(browserLang) ? browserLang : 'en')
+  }, [])
 
   // Load providers on mount
   useEffect(() => {
@@ -380,12 +388,14 @@ export default function SignatureRequestPage() {
 
     setIsSubmitting(true)
     try {
-      // Create signature request with field placements
+      // Create signature request with field placements and language
       const request = await signatureService.createRequest({
         ...data,
         document_name: document.filename,
-        metadata: {
-          signature_fields: signatureFields
+        request_metadata: {
+          signature_fields: signatureFields,
+          language: selectedLanguage,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         }
       })
 
@@ -718,6 +728,27 @@ export default function SignatureRequestPage() {
                   </FormItem>
                 )}
               />
+              
+              <div className="space-y-2">
+                <Label>Language</Label>
+                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="es">Español</SelectItem>
+                    <SelectItem value="fr">Français</SelectItem>
+                    <SelectItem value="de">Deutsch</SelectItem>
+                    <SelectItem value="it">Italiano</SelectItem>
+                    <SelectItem value="pt">Português</SelectItem>
+                    <SelectItem value="nl">Nederlands</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Language for signature interface and email notifications
+                </p>
+              </div>
             </CardContent>
           </Card>
         )
@@ -773,6 +804,21 @@ export default function SignatureRequestPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Expires In</p>
                 <p className="font-medium">{formData.expires_in_days} days</p>
+              </div>
+              
+              <div>
+                <p className="text-sm text-muted-foreground">Language</p>
+                <p className="font-medium">
+                  {{
+                    'en': 'English',
+                    'es': 'Español',
+                    'fr': 'Français',
+                    'de': 'Deutsch',
+                    'it': 'Italiano',
+                    'pt': 'Português',
+                    'nl': 'Nederlands'
+                  }[selectedLanguage] || selectedLanguage}
+                </p>
               </div>
               
               {formData.message && (
@@ -869,7 +915,16 @@ export default function SignatureRequestPage() {
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="h-full">
+          <form 
+            onSubmit={(e) => {
+              if (currentStep !== STEPS.length - 1) {
+                e.preventDefault()
+                return
+              }
+              form.handleSubmit(onSubmit)(e)
+            }} 
+            className="h-full"
+          >
             {renderStepContent()}
           </form>
         </Form>

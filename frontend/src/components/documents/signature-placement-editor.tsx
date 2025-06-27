@@ -82,7 +82,9 @@ export function SignaturePlacementEditor({
   const [selectedField, setSelectedField] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [scale, setScale] = useState(0.8)
+  const [scale, setScale] = useState(1.0) // Start at 100% for better visibility
+  const [pageWidth, setPageWidth] = useState(0)
+  const [pageHeight, setPageHeight] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const [draggedFieldType, setDraggedFieldType] = useState<string | null>(null)
   const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null)
@@ -144,6 +146,7 @@ export function SignaturePlacementEditor({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     setIsDragging(false)
 
     if (!draggedFieldType || !containerRef.current) return
@@ -153,16 +156,16 @@ export function SignaturePlacementEditor({
     if (!pdfPage) return
 
     const rect = pdfPage.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const x = (e.clientX - rect.left) / scale
+    const y = (e.clientY - rect.top) / scale
 
     const newField: SignatureField = {
       id: `field-${Date.now()}`,
       type: 'signature',
       signer: selectedSigner,
       required: true,
-      x,
-      y,
+      x: Math.max(0, x),
+      y: Math.max(0, y),
       width: 200,
       height: 50,
       page: currentPage,
@@ -173,14 +176,18 @@ export function SignaturePlacementEditor({
     setFields(updatedFields)
     onFieldsChange(updatedFields)
     setSelectedField(newField.id)
+    setDraggedFieldType(null)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  const handleFieldClick = (fieldId: string) => {
+  const handleFieldClick = (e: React.MouseEvent, fieldId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
     setSelectedField(fieldId)
   }
   
@@ -188,11 +195,11 @@ export function SignaturePlacementEditor({
     e.preventDefault()
     e.stopPropagation()
     
-    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setDraggedFieldId(field.id)
     setDragOffset({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: (e.clientX - rect.left) / scale,
+      y: (e.clientY - rect.top) / scale
     })
   }
   
@@ -203,8 +210,8 @@ export function SignaturePlacementEditor({
     if (!pdfPage) return
     
     const rect = pdfPage.getBoundingClientRect()
-    const x = e.clientX - rect.left - dragOffset.x
-    const y = e.clientY - rect.top - dragOffset.y
+    const x = (e.clientX - rect.left - dragOffset.x) / scale
+    const y = (e.clientY - rect.top - dragOffset.y) / scale
     
     // Update field position
     const updatedFields = fields.map(field => 
@@ -271,6 +278,27 @@ export function SignaturePlacementEditor({
       }
     }
   }, [draggedFieldId, isResizing, dragOffset, resizeStart])
+
+  // Add keyboard shortcuts for zoom
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault()
+          setScale(prev => Math.min(2, prev + 0.1))
+        } else if (e.key === '-') {
+          e.preventDefault()
+          setScale(prev => Math.max(0.5, prev - 0.1))
+        } else if (e.key === '0') {
+          e.preventDefault()
+          setScale(1.0)
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const handleFieldDelete = (fieldId: string) => {
     const updatedFields = fields.filter(f => f.id !== fieldId)
@@ -347,8 +375,14 @@ export function SignaturePlacementEditor({
           <Label>Drag to add signature field</Label>
           <div
             draggable
-            onDragStart={(e) => handleDragStart(e, 'signature')}
-            onDragEnd={handleDragEnd}
+            onDragStart={(e) => {
+              e.stopPropagation()
+              handleDragStart(e, 'signature')
+            }}
+            onDragEnd={(e) => {
+              e.stopPropagation()
+              handleDragEnd()
+            }}
             className={cn(
               "flex items-center gap-2 p-3 border rounded-md cursor-move",
               "hover:bg-accent hover:border-accent-foreground/20",
@@ -375,7 +409,7 @@ export function SignaturePlacementEditor({
               return (
                 <div
                   key={field.id}
-                  onClick={() => handleFieldClick(field.id)}
+                  onClick={(e) => handleFieldClick(e, field.id)}
                   className={cn(
                     "p-2 border rounded-md cursor-pointer",
                     "hover:bg-accent",
@@ -430,9 +464,14 @@ export function SignaturePlacementEditor({
                   <div className="flex items-center justify-between">
                     <Label className="text-xs">Required</Label>
                     <Button
+                      type="button"
                       size="sm"
                       variant={field.required ? "default" : "outline"}
-                      onClick={() => handleFieldUpdate(field.id, { required: !field.required })}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        handleFieldUpdate(field.id, { required: !field.required })
+                      }}
                       className="h-7"
                     >
                       {field.required ? <IconCheck className="h-3 w-3" /> : <IconX className="h-3 w-3" />}
@@ -462,9 +501,14 @@ export function SignaturePlacementEditor({
                     </div>
                   )}
                   <Button
+                    type="button"
                     size="sm"
                     variant="destructive"
-                    onClick={() => handleFieldDelete(field.id)}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleFieldDelete(field.id)
+                    }}
                     className="w-full"
                   >
                     <IconTrash className="h-3 w-3 mr-1" />
@@ -480,52 +524,76 @@ export function SignaturePlacementEditor({
       {/* Document Viewer */}
       <Card className="flex-1 overflow-hidden">
         <div className="p-4 border-b flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
             >
-              Previous
+              <IconChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-sm">
+            <span className="text-sm font-medium">
               Page {currentPage} of {totalPages}
             </span>
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
             >
-              Next
+              <IconChevronRight className="h-4 w-4" />
             </Button>
           </div>
 
           <div className="flex items-center gap-2">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={() => setScale(Math.max(0.5, scale - 0.1))}
+              disabled={scale <= 0.5}
+              title="Zoom out (Ctrl+-)"
             >
-              -
+              <IconZoomOut className="h-4 w-4" />
             </Button>
-            <span className="text-sm w-16 text-center">{Math.round(scale * 100)}%</span>
+            <span className="text-sm w-20 text-center font-medium">{Math.round(scale * 100)}%</span>
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={() => setScale(Math.min(2, scale + 0.1))}
+              disabled={scale >= 2}
+              title="Zoom in (Ctrl++)"
             >
-              +
+              <IconZoomIn className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setScale(1.0)}
+              className="ml-2"
+              title="Reset zoom (Ctrl+0)"
+            >
+              100%
             </Button>
           </div>
         </div>
 
         <div 
           ref={containerRef}
-          className="relative overflow-auto flex-1 bg-gray-100 p-4"
+          className="relative overflow-auto flex-1 bg-gray-100"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            padding: '2rem'
+          }}
         >
           {isLoadingPdf ? (
             <div className="flex items-center justify-center h-full">
@@ -535,11 +603,13 @@ export function SignaturePlacementEditor({
               </div>
             </div>
           ) : pdfUrl ? (
-            <div className="relative inline-block">
+            <div className="relative inline-block" style={{ margin: '0 auto' }}>
               {/* PDF Document */}
               <Document
                 file={pdfUrl}
-                onLoadSuccess={(pdf) => setTotalPages(pdf.numPages)}
+                onLoadSuccess={(pdf) => {
+                  setTotalPages(pdf.numPages)
+                }}
                 loading={
                   <div className="flex items-center justify-center p-8">
                     <IconLoader2 className="h-6 w-6 animate-spin" />
@@ -557,6 +627,10 @@ export function SignaturePlacementEditor({
                     scale={scale}
                     renderTextLayer={false}
                     renderAnnotationLayer={false}
+                    onLoadSuccess={(page) => {
+                      setPageWidth(page.width)
+                      setPageHeight(page.height)
+                    }}
                   />
                   
                   {/* Overlay for signature fields */}
@@ -569,14 +643,14 @@ export function SignaturePlacementEditor({
                     return (
                       <div
                         key={field.id}
-                        onClick={() => handleFieldClick(field.id)}
+                        onClick={(e) => handleFieldClick(e, field.id)}
                         onMouseDown={(e) => handleFieldMouseDown(e, field)}
                         style={{
                           position: 'absolute',
-                          left: field.x,
-                          top: field.y,
-                          width: field.width,
-                          height: field.height,
+                          left: field.x * scale,
+                          top: field.y * scale,
+                          width: field.width * scale,
+                          height: field.height * scale,
                           border: `2px solid ${signer?.color || '#666'}`,
                           backgroundColor: `${signer?.color}20` || '#66666620',
                           cursor: draggedFieldId === field.id ? 'grabbing' : 'grab',
@@ -608,6 +682,7 @@ export function SignaturePlacementEditor({
                           <div
                             className="absolute bottom-0 right-0 w-4 h-4 bg-primary cursor-se-resize rounded-tl"
                             onMouseDown={(e) => handleResizeMouseDown(e, field)}
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <IconResize className="h-3 w-3 text-white" />
                           </div>
