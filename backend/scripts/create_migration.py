@@ -21,8 +21,10 @@ except ImportError:
 def run_alembic_command(command: str) -> tuple[bool, str]:
     """Ejecuta un comando de alembic y captura la salida"""
     try:
+        # Use shlex to properly handle quoted strings
+        import shlex
         result = subprocess.run(
-            command.split(),
+            shlex.split(command),
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent  # backend directory
