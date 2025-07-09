@@ -5,9 +5,9 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json* yarn.lock* ./
+COPY package.json yarn.lock ./
 # Install all dependencies (including dev) for the build stage
-RUN npm ci
+RUN yarn install --frozen-lockfile
 
 # Rebuild the source code only when needed
 FROM node:18-alpine AS builder
@@ -31,7 +31,7 @@ ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
 
 # Build the application
-RUN npm run build
+RUN yarn build
 
 # Production image, copy all the files and run next
 FROM node:18-alpine AS runner
@@ -46,6 +46,9 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy package.json for reference
+COPY --from=builder /app/package.json ./package.json
 
 USER nextjs
 
