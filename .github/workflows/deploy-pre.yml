@@ -96,7 +96,8 @@ jobs:
           --port 3000 \
           --allow-unauthenticated \
           --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-          --set-env-vars "NODE_ENV=production" \
+          --set-env-vars "NODE_ENV=production,ENVIRONMENT=pre" \
+          --set-secrets "CLERK_SECRET_KEY=clerk-secret-pre:latest" \
           --min-instances 1 \
           --max-instances 3 \
           --memory 512Mi \
