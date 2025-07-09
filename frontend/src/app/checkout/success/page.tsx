@@ -1,15 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { UnifiedLoader } from '@/components/ui/unified-loader'
-
-// Skip static generation for this page since it uses useSearchParams
-export const dynamic = 'force-dynamic'
 
 interface CheckoutSession {
   session_id: string
@@ -22,7 +19,7 @@ interface CheckoutSession {
   currency: string
 }
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const sessionId = searchParams.get('session_id')
@@ -205,5 +202,25 @@ export default function CheckoutSuccessPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Force dynamic rendering to avoid static generation issues with useSearchParams
+export const dynamic = 'force-dynamic'
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+        <UnifiedLoader 
+          variant="initial"
+          size="lg"
+          text="Cargando..."
+          showLogo={true}
+        />
+      </div>
+    }>
+      <CheckoutSuccessContent />
+    </Suspense>
   )
 }

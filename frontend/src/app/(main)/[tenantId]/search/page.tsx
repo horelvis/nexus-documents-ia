@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Suspense } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 
 // Skip static generation for this page since it uses useSearchParams
