@@ -1,0 +1,326 @@
+# Cloud Build configuration for PRE environment
+# Optimized for pre-production testing with enhanced logging
+
+substitutions:
+  _REGION: europe-west1
+  _SERVICE_ACCOUNT: nexus-cloud-run-pre@${PROJECT_ID}.iam.gserviceaccount.com
+  _ENVIRONMENT: pre
+  _DOMAIN: ${_DOMAIN}
+  _APP_SUBDOMAIN: pre-app
+  _API_SUBDOMAIN: pre-api
+  _FRONTEND_URL: https://pre-app.${_DOMAIN}
+  _API_URL: https://pre-api.${_DOMAIN}
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  substitution_option: 'ALLOW_LOOSE'
+  logging: CLOUD_LOGGING_ONLY
+  pool:
+    name: 'projects/${PROJECT_ID}/locations/${_REGION}/workerPools/nexus-pre-pool'
+
+steps:
+  # Step 1: Run comprehensive tests
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'run-unit-tests'
+    args:
+      - 'build'
+      - '-f'
+      - 'backend/Dockerfile.test'
+      - '-t'
+      - 'nexus-test'
+      - '--target'
+      - 'test'
+      - '.'
+    waitFor: ['-']
+
+  - name: 'nexus-test'
+    id: 'execute-tests'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd /app
+        # Run tests with coverage
+        pytest tests/ -v --cov=app --cov-report=xml --cov-report=html
+        # Run AI-specific tests
+        pytest tests/test_ai/ -v -m "ai"
+        # Security scanning
+        bandit -r app/ -f json -o bandit-report.json
+        # Code quality
+        pylint app/ --output-format=json > pylint-report.json || true
+    waitFor: ['run-unit-tests']
+
+  # Step 2: Build all images in parallel
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-api'
+    args:
+      - 'build'
+      - '-f'
+      - 'backend/Dockerfile.prod'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:latest'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:pre-${BUILD_ID}'
+      - '--build-arg'
+      - 'ENV=pre'
+      - '--cache-from'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:latest'
+      - '.'
+    waitFor: ['execute-tests']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-frontend'
+    args:
+      - 'build'
+      - '-f'
+      - 'frontend/Dockerfile.prod'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/frontend:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/frontend:latest'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=${_API_URL}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_ENVIRONMENT=pre'
+      - '--cache-from'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/frontend:latest'
+      - '.'
+    waitFor: ['execute-tests']
+
+  # Build AI microservices
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-langchain'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/langchain-service/Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langchain:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langchain:latest'
+      - './microservices/langchain-service'
+    waitFor: ['execute-tests']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-langroid'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/langroid-service/Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langroid:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langroid:latest'
+      - './microservices/langroid-service'
+    waitFor: ['execute-tests']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-storage'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/storage-service/Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/storage:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/storage:latest'
+      - './microservices/storage-service'
+    waitFor: ['execute-tests']
+
+  # Step 3: Push all images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api']
+    waitFor: ['build-api']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/frontend']
+    waitFor: ['build-frontend']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langchain']
+    waitFor: ['build-langchain']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langroid']
+    waitFor: ['build-langroid']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/storage']
+    waitFor: ['build-storage']
+
+  # Step 4: Database migrations with backup
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'backup-database'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo "Creating database backup before migration..."
+        gcloud sql backups create \
+          --instance=nexus-db-pre \
+          --description="Pre-migration backup ${BUILD_ID}"
+    waitFor: ['push-images']
+
+  - name: '${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:${SHORT_SHA}'
+    id: 'run-migrations'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd /app
+        echo "Running database migrations..."
+        alembic upgrade head
+        echo "Loading initial AI models metadata..."
+        python -m scripts.init_ai_models --env=pre
+    env:
+      - 'DATABASE_URL=postgresql://${_DB_USER}:${_DB_PASS}@${_DB_HOST}/${_DB_NAME}'
+      - 'ENVIRONMENT=pre'
+    secretEnv: ['_DB_USER', '_DB_PASS', '_DB_HOST', '_DB_NAME']
+    waitFor: ['backup-database']
+
+  # Step 5: Deploy services with health checks
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-api'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-api-pre'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/api:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--set-env-vars=ENVIRONMENT=pre,LOG_LEVEL=DEBUG'
+      - '--set-secrets=DATABASE_URL=database-url-pre:latest,REDIS_URL=redis-url-pre:latest'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=1'
+      - '--memory=2Gi'
+      - '--timeout=300'
+      - '--concurrency=100'
+    waitFor: ['run-migrations']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-frontend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-frontend-pre'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/frontend:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=0.5'
+      - '--memory=1Gi'
+      - '--port=3000'
+    waitFor: ['run-migrations']
+
+  # Deploy AI services
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-langchain'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-langchain-pre'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langchain:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=1'
+      - '--memory=2Gi'
+      - '--set-env-vars=ENVIRONMENT=pre'
+    waitFor: ['run-migrations']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-langroid'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-langroid-pre'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-pre/langroid:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=1'
+      - '--memory=2Gi'
+    waitFor: ['run-migrations']
+
+  # Step 6: Run smoke tests
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'smoke-tests'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo "Running smoke tests..."
+        # Get service URLs
+        API_URL=$(gcloud run services describe nexus-api-pre --region=${_REGION} --format='value(status.url)')
+        FRONTEND_URL=$(gcloud run services describe nexus-frontend-pre --region=${_REGION} --format='value(status.url)')
+        
+        # Test API health
+        curl -f ${API_URL}/health || exit 1
+        
+        # Test Frontend
+        curl -f ${FRONTEND_URL} || exit 1
+        
+        # Test AI endpoints
+        curl -f ${API_URL}/api/v1/ai/health || exit 1
+        
+        echo "Smoke tests passed!"
+    waitFor: ['deploy-api', 'deploy-frontend', 'deploy-langchain', 'deploy-langroid']
+
+  # Step 7: Update monitoring
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'update-monitoring'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo "Updating monitoring dashboards..."
+        gcloud monitoring dashboards create --config-from-file=monitoring/dashboard-pre.yaml || \
+        gcloud monitoring dashboards update pre-overview --config-from-file=monitoring/dashboard-pre.yaml
+    waitFor: ['smoke-tests']
+
+# Secrets configuration
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/db-user-pre/versions/latest
+      env: '_DB_USER'
+    - versionName: projects/${PROJECT_ID}/secrets/db-pass-pre/versions/latest
+      env: '_DB_PASS'
+    - versionName: projects/${PROJECT_ID}/secrets/db-host-pre/versions/latest
+      env: '_DB_HOST'
+    - versionName: projects/${PROJECT_ID}/secrets/db-name-pre/versions/latest
+      env: '_DB_NAME'
+
+# Build configuration
+timeout: '2400s'  # 40 minutes for comprehensive testing
+
+# Artifacts
+artifacts:
+  objects:
+    location: 'gs://${PROJECT_ID}_cloudbuild_pre/logs/${BUILD_ID}'
+    paths:
+      - '/workspace/backend/tests/coverage_report/**/*'
+      - '/workspace/bandit-report.json'
+      - '/workspace/pylint-report.json'
+
+# Notifications
+options:
+  logging: CLOUD_LOGGING_ONLY
+  logStreamingOption: STREAM_ON

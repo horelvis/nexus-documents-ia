@@ -40,18 +40,30 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Variables de entorno
+# Variables de entorno - IMPORTANTE!
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+!.env.pre
+!.env.prod
+*.local
+
+# Credenciales - NUNCA commitear!
+credentials/
+*.json
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+service-account.json
+gcs-credentials.json
+gcloud-key.json
+keyfile.json
 
 # SSL Certificates
 frontend/certificates/
-*.pem
-*.key
-*.crt
 
 # Archivos de cobertura de pruebas
 coverage/
@@ -61,3 +73,32 @@ coverage/
 *.swp
 
 videos/
+
+# Deployment específico
+deployment/gcp/.env
+deployment/gcp/*.log
+deployment/gcp/temp/
+deployment/*/credentials/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfvars
+
+# Docker
+docker-compose.override.yml
+.dockerignore.local
+
+# Backups
+backups/
+*.backup
+*.dump
+
+# Archivos compilados/ofuscados
+.pyarmor_config/
+.pyarmor_pack/
+*.pyc
+*.pyo

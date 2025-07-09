@@ -1,0 +1,235 @@
+# Cloud Monitoring Configuration for Nexus Document Backend
+
+# Uptime checks
+uptime_checks:
+  - name: nexus-api-health
+    display_name: "Nexus API Health Check"
+    monitored_resource:
+      type: uptime_url
+      labels:
+        host: api.nexusdocs.com
+        project_id: ${PROJECT_ID}
+    http_check:
+      path: /health
+      port: 443
+      use_ssl: true
+      validate_ssl: true
+    period: 60s
+    timeout: 10s
+
+  - name: nexus-api-docs
+    display_name: "Nexus API Docs"
+    monitored_resource:
+      type: uptime_url
+      labels:
+        host: api.nexusdocs.com
+        project_id: ${PROJECT_ID}
+    http_check:
+      path: /docs
+      port: 443
+      use_ssl: true
+    period: 300s
+
+# Alert policies
+alert_policies:
+  - name: high-error-rate
+    display_name: "High Error Rate Alert"
+    conditions:
+      - display_name: "5xx errors > 1%"
+        condition_threshold:
+          filter: |
+            resource.type = "cloud_run_revision"
+            metric.type = "run.googleapis.com/request_count"
+            metric.label.response_code_class = "5xx"
+          comparison: COMPARISON_GT
+          threshold_value: 0.01
+          duration: 300s
+          aggregations:
+            - alignment_period: 60s
+              per_series_aligner: ALIGN_RATE
+
+  - name: high-latency
+    display_name: "High Latency Alert"
+    conditions:
+      - display_name: "P95 latency > 2s"
+        condition_threshold:
+          filter: |
+            resource.type = "cloud_run_revision"
+            metric.type = "run.googleapis.com/request_latencies"
+          comparison: COMPARISON_GT
+          threshold_value: 2000
+          duration: 300s
+          aggregations:
+            - alignment_period: 60s
+              per_series_aligner: ALIGN_PERCENTILE_95
+
+  - name: database-connection-pool
+    display_name: "Database Connection Pool Alert"
+    conditions:
+      - display_name: "Connection pool > 80%"
+        condition_threshold:
+          filter: |
+            resource.type = "cloudsql_database"
+            metric.type = "cloudsql.googleapis.com/database/postgresql/num_backends"
+          comparison: COMPARISON_GT
+          threshold_value: 80
+          duration: 300s
+
+  - name: memory-usage
+    display_name: "High Memory Usage"
+    conditions:
+      - display_name: "Memory usage > 90%"
+        condition_threshold:
+          filter: |
+            resource.type = "cloud_run_revision"
+            metric.type = "run.googleapis.com/container/memory/utilizations"
+          comparison: COMPARISON_GT
+          threshold_value: 0.9
+          duration: 300s
+
+# Custom metrics
+custom_metrics:
+  - name: document_processing_time
+    display_name: "Document Processing Time"
+    metric_kind: GAUGE
+    value_type: DOUBLE
+    unit: s
+    description: "Time to process documents"
+    labels:
+      - key: document_type
+      - key: tenant_id
+
+  - name: ai_agent_execution_time
+    display_name: "AI Agent Execution Time"
+    metric_kind: GAUGE
+    value_type: DOUBLE
+    unit: s
+    description: "Time for AI agent to complete task"
+    labels:
+      - key: agent_type
+      - key: tenant_id
+
+  - name: storage_operations
+    display_name: "Storage Operations"
+    metric_kind: CUMULATIVE
+    value_type: INT64
+    description: "Count of storage operations"
+    labels:
+      - key: operation_type
+      - key: tenant_id
+      - key: status
+
+# Log-based metrics
+log_metrics:
+  - name: authentication_failures
+    description: "Count of authentication failures"
+    filter: |
+      resource.type="cloud_run_revision"
+      severity=ERROR
+      jsonPayload.event="authentication_failed"
+    metric_descriptor:
+      metric_kind: DELTA
+      value_type: INT64
+    label_extractors:
+      reason: EXTRACT(jsonPayload.reason)
+      
+  - name: api_requests_by_endpoint
+    description: "API requests grouped by endpoint"
+    filter: |
+      resource.type="cloud_run_revision"
+      jsonPayload.type="api_request"
+    metric_descriptor:
+      metric_kind: DELTA
+      value_type: INT64
+    label_extractors:
+      endpoint: EXTRACT(jsonPayload.endpoint)
+      method: EXTRACT(jsonPayload.method)
+      status_code: EXTRACT(jsonPayload.status_code)
+
+# Dashboards
+dashboards:
+  - name: nexus-overview
+    display_name: "Nexus System Overview"
+    widgets:
+      - title: "API Request Rate"
+        xy_chart:
+          data_sets:
+            - time_series_query:
+                time_series_filter:
+                  filter: |
+                    resource.type = "cloud_run_revision"
+                    metric.type = "run.googleapis.com/request_count"
+      
+      - title: "Error Rate"
+        xy_chart:
+          data_sets:
+            - time_series_query:
+                time_series_filter:
+                  filter: |
+                    resource.type = "cloud_run_revision"
+                    metric.type = "run.googleapis.com/request_count"
+                    metric.label.response_code_class = "5xx"
+      
+      - title: "P95 Latency"
+        xy_chart:
+          data_sets:
+            - time_series_query:
+                time_series_filter:
+                  filter: |
+                    resource.type = "cloud_run_revision"
+                    metric.type = "run.googleapis.com/request_latencies"
+                aggregation:
+                  alignment_period: 60s
+                  per_series_aligner: ALIGN_PERCENTILE_95
+      
+      - title: "Active Users by Tenant"
+        scorecard:
+          time_series_query:
+            time_series_filter:
+              filter: |
+                metric.type = "custom.googleapis.com/active_users"
+
+# Notification channels
+notification_channels:
+  - type: email
+    display_name: "DevOps Team"
+    labels:
+      email_address: "devops@nexusdocs.com"
+  
+  - type: slack
+    display_name: "Nexus Alerts"
+    labels:
+      channel_name: "#nexus-alerts"
+      auth_token: "${SLACK_TOKEN}"
+  
+  - type: pagerduty
+    display_name: "PagerDuty Integration"
+    labels:
+      service_key: "${PAGERDUTY_KEY}"
+
+# SLOs (Service Level Objectives)
+slos:
+  - name: api-availability
+    display_name: "API Availability"
+    service: nexus-api
+    sli:
+      request_based:
+        good_total_ratio:
+          good_service_filter: |
+            metric.type = "run.googleapis.com/request_count"
+            metric.label.response_code_class != "5xx"
+          total_service_filter: |
+            metric.type = "run.googleapis.com/request_count"
+    goal: 0.999  # 99.9% availability
+    rolling_period_days: 30
+    
+  - name: api-latency
+    display_name: "API Latency"
+    service: nexus-api
+    sli:
+      request_based:
+        distribution_cut:
+          range:
+            max: 500  # 500ms
+    goal: 0.95  # 95% of requests under 500ms
+    rolling_period_days: 30

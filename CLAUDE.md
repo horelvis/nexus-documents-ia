@@ -1,6 +1,6 @@
-# CLAUDE.md
+# CLAUDE.md - NexusDocs360 Project Guidelines
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in the NexusDocs360 repository.
 
 ## Development Commands
 
@@ -76,7 +76,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 ## Architecture Overview
 
 ### System Design
-This is a **multi-tenant intelligent document management system** with a microservices architecture:
+**NexusDocs360** is a **multi-tenant intelligent document management system** with a microservices architecture that provides a 360-degree view of organizational documents:
 
 **Backend**: FastAPI with Python 3.9+, using async/await patterns throughout
 **Frontend**: Next.js 15 with App Router, TypeScript, and Clerk authentication

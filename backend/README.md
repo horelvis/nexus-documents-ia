@@ -125,7 +125,7 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 │          │Session Store  │  │Service    │Service         │  │Cloud    │Payment │
 ├──────────┼──────────────┤  ├───────────┼────────────────┤  │Storage  │API     │
 │Qdrant    │Alembic       │  │Storage    │Ollama          │  ├─────────┼────────┤
-│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │SendGrid│
+│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │Google  │
 │          │              │  ├───────────┼────────────────┤  │Auth     │Email   │
 │          │              │  │Gotenberg  │                │  └─────────┴────────┘
 │          │              │  │Service    │                │
@@ -196,7 +196,7 @@ User Request → Clerk Auth → Tenant Resolution → Data Isolation → Respons
 ### External Services
 - **Clerk**: Authentication and user management
 - **Stripe**: Payment processing
-- **SendGrid**: Email notifications
+- **Google Workspace**: Email services
 - **Sentry**: Error tracking
 
 ## Project Structure

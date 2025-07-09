@@ -1,0 +1,197 @@
+# Arquitectura GCP - NexusDocs360
+
+## Nginx Reverse Proxy (Compute Engine)
+
+nginx_proxy:
+  type: compute_engine_vm
+  machine_type: e2-medium
+  zone: europe-west1-b
+  features:
+    - SSL/TLS termination with Let's Encrypt
+    - Automatic certificate renewal
+    - Rate limiting and DDoS protection
+    - Request routing to backend services
+    - Static asset caching
+    - WebSocket support
+    - Health monitoring
+  network:
+    static_ip: true
+    firewall_rules:
+      - allow_http: 0.0.0.0/0:80
+      - allow_https: 0.0.0.0/0:443
+  domains:
+    - nexusdocs360.com
+    - "*.nexusdocs360.com"
+    - app.nexusdocs360.com
+    - api.nexusdocs360.com
+
+## Servicios Core (Cloud Run)
+
+services:
+  # Frontend Next.js
+  frontend:
+    service: nexus-frontend
+    image: gcr.io/${PROJECT_ID}/nexus-frontend:${VERSION}
+    cpu: 1
+    memory: 512Mi
+    min_instances: 1
+    max_instances: 5
+    environment:
+      - name: NODE_ENV
+        value: production
+      - name: NEXT_PUBLIC_API_URL
+        value: https://api.nexusdocs360.com
+  main-api:
+    service: nexus-api
+    image: gcr.io/${PROJECT_ID}/nexus-api:${VERSION}
+    cpu: 1
+    memory: 2Gi
+    min_instances: 1
+    max_instances: 3
+    environment:
+      - name: DATABASE_URL
+        valueFrom:
+          secretRef: database-url
+      - name: REDIS_URL
+        valueFrom:
+          secretRef: redis-url
+    
+  storage-service:
+    service: nexus-storage
+    image: gcr.io/${PROJECT_ID}/nexus-storage:${VERSION}
+    cpu: 0.5
+    memory: 1Gi
+    min_instances: 1
+    max_instances: 2
+    
+  langchain-service:
+    service: nexus-langchain
+    image: gcr.io/${PROJECT_ID}/nexus-langchain:${VERSION}
+    cpu: 1
+    memory: 2Gi
+    min_instances: 1
+    max_instances: 2
+
+## Servicios en Compute Engine (Estado persistente)
+
+compute:
+  qdrant-vm:
+    machine_type: e2-medium
+    zone: europe-west1-b
+    disk:
+      size_gb: 20
+      type: pd-standard
+    network_tags:
+      - qdrant-server
+    
+  ollama-vm:
+    machine_type: n1-standard-2  # GPU opcional
+    zone: europe-west1-b
+    disk:
+      size_gb: 50
+      type: pd-ssd
+    accelerator:  # Opcional para producción
+      type: nvidia-tesla-t4
+      count: 1
+
+## Base de Datos
+
+cloud_sql:
+  instance_name: nexus-db-prod
+  database_version: POSTGRES_15
+  tier: db-f1-micro  # Actualizar a db-g1-small en producción
+  region: europe-west1
+  backup_configuration:
+    enabled: true
+    start_time: "03:00"
+  high_availability:
+    enabled: false  # Activar en producción
+
+memorystore:
+  instance_name: nexus-redis
+  tier: BASIC
+  memory_size_gb: 1
+  region: europe-west1
+
+## Almacenamiento
+
+storage:
+  buckets:
+    - name: nexus-docs-prod-eu
+      location: EU
+      storage_class: STANDARD
+      lifecycle:
+        - action: SetStorageClass
+          storage_class: NEARLINE
+          age_days: 30
+    
+    - name: nexus-backups-eu
+      location: EU
+      storage_class: NEARLINE
+      retention_days: 90
+
+## Red y Seguridad
+
+networking:
+  vpc:
+    name: nexus-vpc
+    subnets:
+      - name: nexus-subnet-eu
+        region: europe-west1
+        ip_range: 10.0.0.0/24
+  
+  cloud_nat:
+    name: nexus-nat
+    region: europe-west1
+  
+  firewall_rules:
+    - name: allow-qdrant
+      direction: INGRESS
+      source_ranges: ["10.0.0.0/24"]
+      target_tags: ["qdrant-server"]
+      allow:
+        - protocol: tcp
+          ports: ["6333", "6334"]
+
+load_balancer:
+  name: nexus-lb
+  ssl_certificates:
+    - managed:
+        domains:
+          - app.nexusdocs360.com
+          - api.nexusdocs360.com
+          - "*.nexusdocs360.com"
+  
+  backend_services:
+    - name: frontend-backend
+      cloud_run_service: nexus-frontend
+      host_rules:
+        - hosts: ["app.nexusdocs360.com"]
+          path_matcher: frontend-paths
+      path_matchers:
+        - name: frontend-paths
+          default_service: nexus-frontend
+          
+    - name: api-backend
+      cloud_run_service: nexus-api
+      host_rules:
+        - hosts: ["api.nexusdocs360.com"]
+          path_matcher: api-paths
+      path_matchers:
+        - name: api-paths
+          default_service: nexus-api
+
+# CDN Configuration
+cdn:
+  enabled: true
+  origin: nexus-lb
+  cache_modes:
+    - path_pattern: "/_next/static/*"
+      cache_mode: CACHE_ALL_STATIC
+      ttl: 31536000  # 1 year
+    - path_pattern: "/images/*"
+      cache_mode: CACHE_ALL_STATIC
+      ttl: 86400  # 1 day
+    - path_pattern: "/"
+      cache_mode: USE_ORIGIN_HEADERS
+      ttl: 0

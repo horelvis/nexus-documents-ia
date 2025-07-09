@@ -61,17 +61,21 @@ app = FastAPI(
     lifespan=lifespan, # Add lifespan handler
     title=settings.SERVER_NAME,
     description="""
-    # Sistema de Gestión Documental con Búsqueda Semántica
+    # NexusDocs360 - API de Gestión Documental Potenciada por IA 🧠
     
-    Esta API permite gestionar documentos, realizar búsquedas semánticas y chatear con tus documentos.
+    La primera plataforma donde la Inteligencia Artificial transforma radicalmente la gestión documental empresarial.
     
-    ## Características principales:
+    ## 🤖 Capacidades de IA Integradas:
     
-    * **Gestión de documentos**: Sube, descarga, categoriza y elimina documentos
-    * **Búsqueda semántica**: Encuentra documentos por similitud conceptual
-    * **Procesamiento inteligente**: Extracción de texto, generación de resúmenes y sugerencia de etiquetas
-    * **Multi-tenant**: Aislamiento de datos por organización
-    * **Autenticación segura**: JWT para todas las operaciones
+    * **Procesamiento Cognitivo**: IA que comprende, analiza y genera insights automáticamente
+    * **Agentes Especializados**: Legal, Financiero, Compliance - cada uno experto en su dominio
+    * **Chat Inteligente**: Conversa con tus documentos en lenguaje natural
+    * **Extracción Automática**: 99% de precisión en datos estructurados y no estructurados
+    * **Predicción y Recomendaciones**: IA que anticipa necesidades y sugiere acciones
+    * **Multimodal AI**: Procesa texto, imágenes, tablas con igual eficacia
+    
+    ## 🚀 Powered by:
+    GPT-4 | Claude | Llama 3.2 | LangChain | Qdrant | Vision AI
     
     Para más información, consulta el [repositorio del proyecto](https://github.com/tuorganizacion/doc-management).
     """,

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
-    SERVER_NAME: str = "Document Management API"
+    SERVER_NAME: str = "NexusDocs360 API"
     SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
     STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
