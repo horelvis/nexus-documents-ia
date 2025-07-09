@@ -44,20 +44,22 @@ jobs:
     # Build and push Backend images
     - name: Build and Push Backend
       run: |
-        cd backend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
-          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest .
+          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest \
+          -f backend/Dockerfile.prod \
+          backend/
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest
 
     # Build and push Frontend image
     - name: Build and Push Frontend
       run: |
-        cd frontend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest \
           --build-arg NEXT_PUBLIC_API_URL=https://pre-api.nexusdocs360.app \
-          --build-arg NEXT_PUBLIC_APP_URL=https://pre.nexusdocs360.app .
+          --build-arg NEXT_PUBLIC_APP_URL=https://pre.nexusdocs360.app \
+          -f frontend/Dockerfile.prod \
+          frontend/
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
 
@@ -98,8 +100,9 @@ jobs:
     # Deploy Microservices
     - name: Deploy Storage Service
       run: |
-        cd backend/microservices/storage-service
-        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest .
+        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest \
+          -f backend/microservices/storage-service/Dockerfile \
+          backend/microservices/storage-service/
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest
         
         gcloud run deploy storage-service-pre \
