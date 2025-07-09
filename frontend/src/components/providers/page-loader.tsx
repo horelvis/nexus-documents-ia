@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useTransition } from 'react'
+import { createContext, useContext, useEffect, useState, useTransition, Suspense } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { PageTransitionLoader } from '@/components/ui/unified-loader'
 
@@ -20,7 +20,7 @@ export function usePageLoader() {
   return useContext(PageLoaderContext)
 }
 
-export function PageLoaderProvider({ children }: { children: React.ReactNode }) {
+function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false)
   const [showLoader, setShowLoader] = useState(false)
   const pathname = usePathname()
@@ -66,5 +66,17 @@ export function PageLoaderProvider({ children }: { children: React.ReactNode }) 
       {children}
       {showLoader && <PageTransitionLoader />}
     </PageLoaderContext.Provider>
+  )
+}
+
+export function PageLoaderProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={
+      <PageLoaderContext.Provider value={{ isLoading: false, startLoading: () => {}, stopLoading: () => {} }}>
+        {children}
+      </PageLoaderContext.Provider>
+    }>
+      <PageLoaderProviderInner>{children}</PageLoaderProviderInner>
+    </Suspense>
   )
 }
