@@ -44,16 +44,18 @@ jobs:
     # Build and push Backend images
     - name: Build and Push Backend
       run: |
+        cd backend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest \
-          -f backend/Dockerfile.prod \
-          backend/
+          -f Dockerfile.prod \
+          .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest
 
     # Build and push Frontend image
     - name: Build and Push Frontend
       run: |
+        cd frontend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest \
           --build-arg NEXT_PUBLIC_API_URL=https://pre-api.nexusdocs360.app \
@@ -63,8 +65,8 @@ jobs:
           --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/sign-up \
           --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard \
           --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/onboarding \
-          -f frontend/Dockerfile.prod \
-          frontend/
+          -f Dockerfile.prod \
+          .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
 
@@ -106,9 +108,10 @@ jobs:
     # Deploy Microservices
     - name: Deploy Storage Service
       run: |
+        cd backend/microservices/storage-service
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest \
-          -f backend/microservices/storage-service/Dockerfile \
-          backend/microservices/storage-service/
+          -f Dockerfile \
+          .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest
         
         gcloud run deploy storage-service-pre \
