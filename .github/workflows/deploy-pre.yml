@@ -3,219 +3,146 @@ name: Deploy to PRE Environment
 on:
   push:
     branches:
-      - develop
+      - pre
+  workflow_dispatch:
 
 env:
   PROJECT_ID: nexusdocs360-pre
   REGION: europe-west1
-  REPOSITORY: nexus-registry-pre
+  GAR_LOCATION: europe-west1-docker.pkg.dev
+  REPOSITORY: nexusdocs360-pre
 
 jobs:
-  deploy:
-    name: Deploy to PRE
+  setup-build-deploy:
+    name: Setup, Build, and Deploy
     runs-on: ubuntu-latest
-    environment: pre-production
+
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    # Authenticate to Google Cloud using Workload Identity Federation
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
       with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        credentials_json: '${{ secrets.GCP_SA_KEY_PRE }}'
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY_PRE }}
-
+    # Setup gcloud CLI
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
 
-    - name: Configure Docker for Artifact Registry
+    # Configure Docker to use gcloud as a credential helper
+    - name: Configure Docker
       run: |
-        gcloud auth configure-docker ${REGION}-docker.pkg.dev
+        gcloud auth configure-docker ${{ env.GAR_LOCATION }}
 
-    # Backend Build
-    - name: Build Backend
+    # Build and push Backend images
+    - name: Build and Push Backend
       run: |
         cd backend
-        
-        # Install dependencies
-        pip install -r requirements.txt
-        pip install pyarmor
-        
-        # Compile Python to .pyc
-        python -m compileall -b app/
-        find app/ -name "*.py" -type f -delete
-        
-        # Create minimal Docker image
-        cat > Dockerfile.compiled << 'EOF'
-        FROM python:3.9-slim
-        WORKDIR /app
-        
-        # Copy only compiled files
-        COPY requirements.txt .
-        RUN pip install --no-cache-dir -r requirements.txt
-        
-        COPY app/ ./app/
-        COPY alembic.ini .
-        COPY .pyarmor_config/ ./.pyarmor_config/
-        
-        # Remove any source files that might have been missed
-        RUN find . -name "*.py" -type f -not -path "./venv/*" | grep -v __pycache__ | xargs rm -f
-        
-        EXPOSE 8000
-        CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-        EOF
-        
-        # Build and push
-        docker build -f Dockerfile.compiled -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_SHA} .
-        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_SHA}
+        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
+          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest .
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest
 
-    # Frontend Build
-    - name: Build Frontend
+    # Build and push Frontend image
+    - name: Build and Push Frontend
       run: |
         cd frontend
-        
-        # Install and build
-        npm ci
-        npm run build
-        
-        # Create production Docker image
-        cat > Dockerfile.production << 'EOF'
-        FROM node:18-alpine
-        WORKDIR /app
-        
-        # Copy only production files
-        COPY package*.json ./
-        RUN npm ci --only=production
-        
-        COPY .next ./.next
-        COPY public ./public
-        COPY next.config.js ./
-        
-        EXPOSE 3000
-        CMD ["npm", "start"]
-        EOF
-        
-        # Build and push
-        docker build -f Dockerfile.production -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_SHA} .
-        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_SHA}
+        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
+          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest \
+          --build-arg NEXT_PUBLIC_API_URL=https://pre-api.nexusdocs360.app \
+          --build-arg NEXT_PUBLIC_APP_URL=https://pre.nexusdocs360.app .
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
 
-    # Deploy Backend
+    # Deploy Backend to Cloud Run
     - name: Deploy Backend to Cloud Run
       run: |
-        gcloud run deploy nexus-api-pre \
-          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_SHA} \
-          --region ${REGION} \
+        gcloud run deploy nexus-backend-pre \
+          --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
+          --region ${{ env.REGION }} \
           --platform managed \
+          --port 8000 \
           --allow-unauthenticated \
-          --set-env-vars "ENVIRONMENT=pre" \
-          --set-secrets "DATABASE_URL=database-url-pre:latest" \
-          --set-secrets "REDIS_URL=redis-url-pre:latest" \
-          --set-secrets "CLERK_SECRET_KEY=clerk-secret-pre:latest" \
-          --set-secrets "OPENAI_API_KEY=openai-api-key-pre:latest" \
           --vpc-connector nexus-connector-pre \
+          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+          --set-env-vars "ENVIRONMENT=pre" \
+          --set-secrets "DATABASE_URL=database-url-pre:latest,ASYNC_DATABASE_URL=async-database-url-pre:latest,REDIS_URL=redis-url-pre:latest,SECRET_KEY=secret-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
           --min-instances 1 \
-          --max-instances 10 \
+          --max-instances 3 \
           --memory 1Gi \
           --cpu 1
 
-    # Deploy Frontend
+    # Deploy Frontend to Cloud Run
     - name: Deploy Frontend to Cloud Run
       run: |
         gcloud run deploy nexus-frontend-pre \
-          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_SHA} \
-          --region ${REGION} \
+          --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
+          --region ${{ env.REGION }} \
           --platform managed \
+          --port 3000 \
           --allow-unauthenticated \
-          --set-env-vars "NEXT_PUBLIC_API_URL=https://pre-api.nexusdocs360.com" \
-          --set-env-vars "NEXT_PUBLIC_APP_URL=https://pre-app.nexusdocs360.com" \
-          --set-secrets "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=clerk-publishable-key-pre:latest" \
+          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+          --set-env-vars "NODE_ENV=production" \
           --min-instances 1 \
-          --max-instances 10 \
+          --max-instances 3 \
           --memory 512Mi \
           --cpu 1
 
     # Deploy Microservices
-    - name: Deploy Microservices
+    - name: Deploy Storage Service
       run: |
-        # Deploy each microservice
-        for SERVICE in langchain langroid storage; do
-          cd $GITHUB_WORKSPACE/microservices/${SERVICE}-service
-          
-          # Build image
-          docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_SHA} .
-          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_SHA}
-          
-          # Deploy to Cloud Run
-          gcloud run deploy nexus-${SERVICE}-pre \
-            --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_SHA} \
-            --region ${REGION} \
-            --platform managed \
-            --no-allow-unauthenticated \
-            --vpc-connector nexus-connector-pre \
-            --min-instances 0 \
-            --max-instances 5 \
-            --memory 1Gi \
-            --cpu 1
-        done
-
-    # Run Database Migrations
-    - name: Run Database Migrations
-      run: |
-        # Create a temporary Cloud Run job for migrations
-        gcloud run jobs create migrate-db-pre-${GITHUB_SHA:0:7} \
-          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_SHA} \
-          --region ${REGION} \
-          --set-secrets "DATABASE_URL=database-url-pre:latest" \
+        cd backend/microservices/storage-service
+        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest .
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest
+        
+        gcloud run deploy storage-service-pre \
+          --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest \
+          --region ${{ env.REGION }} \
+          --platform managed \
+          --port 8001 \
+          --allow-unauthenticated \
           --vpc-connector nexus-connector-pre \
-          --command "alembic" \
-          --args "upgrade,head" \
-          --max-retries 1 \
-          --task-timeout 5m
-        
-        # Execute the job
-        gcloud run jobs execute migrate-db-pre-${GITHUB_SHA:0:7} --region ${REGION} --wait
-        
-        # Delete the job
-        gcloud run jobs delete migrate-db-pre-${GITHUB_SHA:0:7} --region ${REGION} --quiet
+          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+          --set-secrets "GCS_CREDENTIALS=gcs-credentials-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
+          --memory 512Mi
 
-    # Smoke Tests
-    - name: Run Smoke Tests
+    # Update Nginx configuration with Cloud Run URLs
+    - name: Update Nginx Configuration
       run: |
-        # Wait for services to be ready
-        sleep 30
+        BACKEND_URL=$(gcloud run services describe nexus-backend-pre --region=${{ env.REGION }} --format='value(status.url)')
+        FRONTEND_URL=$(gcloud run services describe nexus-frontend-pre --region=${{ env.REGION }} --format='value(status.url)')
         
-        # Test endpoints
-        for endpoint in "https://pre-api.nexusdocs360.com/health" "https://pre-app.nexusdocs360.com/api/health"; do
-          echo "Testing $endpoint"
-          curl -f -s $endpoint || exit 1
-        done
+        echo "Backend URL: $BACKEND_URL"
+        echo "Frontend URL: $FRONTEND_URL"
         
-        echo "All smoke tests passed!"
+        # SSH to Nginx and update configuration
+        gcloud compute ssh nginx-proxy-pre --zone=europe-west1-b --command="
+          sudo tee /etc/nginx/conf.d/cloud-run-upstream.conf > /dev/null <<EOF
+          upstream backend {
+              server ${BACKEND_URL#https://};
+          }
+          upstream frontend {
+              server ${FRONTEND_URL#https://};
+          }
+        EOF
+          sudo nginx -s reload
+        "
 
-    # Notify on Success
-    - name: Notify Success
-      if: success()
+    # Send notification
+    - name: Deployment Notification
+      if: always()
       run: |
-        echo "✅ Deployment to PRE completed successfully!"
-        echo "Frontend: https://pre-app.nexusdocs360.com"
-        echo "API: https://pre-api.nexusdocs360.com"
-        echo "Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-    # Notify on Failure
-    - name: Notify Failure
-      if: failure()
-      run: |
-        echo "❌ Deployment to PRE failed!"
-        echo "Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Deployment to PRE environment completed successfully!"
+          echo "🌐 Frontend: https://pre.nexusdocs360.app"
+          echo "🔧 API: https://pre-api.nexusdocs360.app"
+        else
+          echo "❌ Deployment to PRE environment failed!"
+        fi
