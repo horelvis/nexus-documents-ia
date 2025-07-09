@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useParams, useSearchParams } from "next/navigation"
+
+// Skip static generation for this page since it uses useSearchParams
+export const dynamic = 'force-dynamic'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"

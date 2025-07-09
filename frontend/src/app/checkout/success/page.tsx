@@ -8,6 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { UnifiedLoader } from '@/components/ui/unified-loader'
 
+// Skip static generation for this page since it uses useSearchParams
+export const dynamic = 'force-dynamic'
+
 interface CheckoutSession {
   session_id: string
   customer_id: string
