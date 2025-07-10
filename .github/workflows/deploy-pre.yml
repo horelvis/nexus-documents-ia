@@ -119,7 +119,6 @@ jobs:
           --platform managed \
           --port 8001 \
           --allow-unauthenticated \
-          --vpc-connector nexus-connector-pre \
           --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
           --set-secrets "GCS_CREDENTIALS=gcs-credentials-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
           --memory 512Mi
