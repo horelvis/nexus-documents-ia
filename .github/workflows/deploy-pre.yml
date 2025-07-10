@@ -127,8 +127,8 @@ jobs:
           --set-secrets "GCS_CREDENTIALS=gcs-credentials-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
           --memory 512Mi
 
-    # Update Nginx configuration with Cloud Run URLs
-    - name: Update Nginx Configuration
+    # Get Cloud Run URLs for reference
+    - name: Get Service URLs
       run: |
         BACKEND_URL=$(gcloud run services describe nexus-backend-pre --region=${{ env.REGION }} --format='value(status.url)')
         FRONTEND_URL=$(gcloud run services describe nexus-frontend-pre --region=${{ env.REGION }} --format='value(status.url)')
@@ -136,18 +136,8 @@ jobs:
         echo "Backend URL: $BACKEND_URL"
         echo "Frontend URL: $FRONTEND_URL"
         
-        # SSH to Nginx and update configuration
-        gcloud compute ssh nginx-proxy-pre --zone=europe-west1-b --command="
-          sudo tee /etc/nginx/conf.d/cloud-run-upstream.conf > /dev/null <<EOF
-          upstream backend {
-              server ${BACKEND_URL#https://};
-          }
-          upstream frontend {
-              server ${FRONTEND_URL#https://};
-          }
-        EOF
-          sudo nginx -s reload
-        "
+        # Note: Nginx proxy instance has been removed.
+        # Services are now directly accessible via Cloud Run URLs
 
     # Send notification
     - name: Deployment Notification
