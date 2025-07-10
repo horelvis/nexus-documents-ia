@@ -79,7 +79,6 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --vpc-connector nexus-connector-pre \
           --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
           --set-env-vars "ENVIRONMENT=pre" \
           --set-secrets "DATABASE_URL=database-url-pre:latest,ASYNC_DATABASE_URL=async-database-url-pre:latest,REDIS_URL=redis-url-pre:latest,SECRET_KEY=secret-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
