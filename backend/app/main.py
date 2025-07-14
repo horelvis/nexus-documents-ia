@@ -138,7 +138,12 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # Configurar archivos estáticos (logos, favicons, etc.)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+import os
+static_dir = "app/static"
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+else:
+    logger.warning(f"Static directory '{static_dir}' not found, skipping static files mount")
 
 # Configurar CORS - Solución simple para IPs dinámicas
 if settings.ALLOW_ALL_CORS and settings.DEBUG:
