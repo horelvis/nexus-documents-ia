@@ -54,13 +54,16 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "nexus_db")
-    SQLALCHEMY_DATABASE_URI: Optional[str] = None
+    SQLALCHEMY_DATABASE_URI: Optional[str] = os.getenv("DATABASE_URL")
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:
-        if isinstance(v, str):
+        # Si DATABASE_URL está disponible, usarla directamente
+        if v:
             return v
+        
+        # Si no, construir desde variables individuales
         values = info.data if hasattr(info, 'data') else {}
         user = values.get("POSTGRES_USER")
         password = values.get("POSTGRES_PASSWORD")
