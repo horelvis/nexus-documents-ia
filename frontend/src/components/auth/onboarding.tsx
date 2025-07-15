@@ -18,22 +18,27 @@ import {
   Loader2
 } from 'lucide-react'
 import { useUserContext } from '@/contexts/user-context'
+import { useLanguage } from '@/contexts/language-context'
 import { useApiClient } from '@/lib/api-client'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-// Plan imports removed - no longer needed for simplified onboarding
 
-// Schema simplificado - solo datos esenciales
-const unifiedDataSchema = z.object({
-  firstName: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
-  lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
-  companyName: z.string().min(2, "El nombre de la empresa es requerido"),
-  cif: z.string().min(8, "El CIF debe tener al menos 8 caracteres"),
+// Dynamic schema based on language
+const createUnifiedDataSchema = (t: (key: string) => string) => z.object({
+  firstName: z.string().min(2, t('errors.validationError')),
+  lastName: z.string().min(2, t('errors.validationError')),
+  companyName: z.string().min(2, t('errors.validationError')),
+  cif: z.string().min(8, t('errors.validationError')),
 })
 
-type UnifiedFormData = z.infer<typeof unifiedDataSchema>
+type UnifiedFormData = {
+  firstName: string
+  lastName: string
+  companyName: string
+  cif: string
+}
 
 interface NewUserOnboardingProps {
   onComplete?: (tenantId?: string) => void
@@ -43,6 +48,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const apiClient = useApiClient()
+  const { t } = useLanguage()
   const { 
     clerkUser, 
     markOnboardingComplete,
@@ -54,7 +60,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const [isProcessing, setIsProcessing] = useState(false)
 
   const unifiedForm = useForm<UnifiedFormData>({
-    resolver: zodResolver(unifiedDataSchema),
+    resolver: zodResolver(createUnifiedDataSchema(t)),
     defaultValues: {
       firstName: clerkUser?.firstName || '',
       lastName: clerkUser?.lastName || '',
@@ -66,14 +72,14 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   const steps = [
     {
       id: 'data',
-      title: 'Información de la Empresa',
-      description: 'Completa los datos de tu empresa',
+      title: t('onboarding.companyInfo'),
+      description: t('onboarding.companyInfoDesc'),
       icon: <Building className="h-5 w-5" />
     },
     {
       id: 'complete',
-      title: 'Todo Listo',
-      description: 'Acceso a tu dashboard',
+      title: t('onboarding.allSet'),
+      description: t('onboarding.accountReady'),
       icon: <CheckCircle className="h-5 w-5" />
     }
   ]
@@ -107,7 +113,6 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
       setCurrentStep(currentStep - 1)
     }
   }
-
 
   const handleComplete = async () => {
     try {
@@ -170,17 +175,17 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl md:text-4xl font-bold mb-4 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            ¡Bienvenido a Nexus!
+            {t('onboarding.welcome')}
           </h1>
           <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto mb-6">
-            Configura tu cuenta en unos simples pasos
+            {t('onboarding.setupAccount')}
           </p>
           
           {/* Progress */}
           <div className="max-w-md mx-auto">
             <div className="flex items-center justify-between text-sm font-medium text-gray-600 dark:text-gray-300 mb-3">
-              <span>Progreso</span>
-              <span>{currentStep + 1} de {steps.length}</span>
+              <span>{t('onboarding.progress')}</span>
+              <span>{currentStep + 1} {t('onboarding.of')} {steps.length}</span>
             </div>
             <Progress value={progressPercentage} className="h-2" />
           </div>
@@ -235,11 +240,11 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                 <div className="space-y-6">
                   <Form {...unifiedForm}>
                     <form className="space-y-6">
-                      {/* Datos personales */}
+                      {/* Personal data */}
                       <div className="space-y-4">
                         <div className="flex items-center space-x-2 mb-3">
                           <User className="h-4 w-4 text-gray-500" />
-                          <h3 className="font-medium text-gray-900 dark:text-gray-100">Datos Personales</h3>
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">{t('onboarding.personalData')}</h3>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -248,9 +253,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                             name="firstName"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Nombre *</FormLabel>
+                                <FormLabel>{t('onboarding.firstName')} *</FormLabel>
                                 <FormControl>
-                                  <Input placeholder="Tu nombre" {...field} />
+                                  <Input placeholder={t('onboarding.yourFirstName')} {...field} />
                                 </FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -262,9 +267,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                             name="lastName"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Apellidos *</FormLabel>
+                                <FormLabel>{t('onboarding.lastName')} *</FormLabel>
                                 <FormControl>
-                                  <Input placeholder="Tus apellidos" {...field} />
+                                  <Input placeholder={t('onboarding.yourLastName')} {...field} />
                                 </FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -273,11 +278,11 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                         </div>
                       </div>
 
-                      {/* Datos de empresa */}
+                      {/* Company data */}
                       <div className="space-y-4 border-t pt-6">
                         <div className="flex items-center space-x-2 mb-3">
                           <Building className="h-4 w-4 text-gray-500" />
-                          <h3 className="font-medium text-gray-900 dark:text-gray-100">Datos de Facturación</h3>
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">{t('onboarding.billingData')}</h3>
                         </div>
                         
                         <FormField
@@ -285,9 +290,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                           name="companyName"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Nombre de la Empresa *</FormLabel>
+                              <FormLabel>{t('onboarding.companyName')} *</FormLabel>
                               <FormControl>
-                                <Input placeholder="Ej: Mi Empresa SL" {...field} />
+                                <Input placeholder={t('onboarding.companyNamePlaceholder')} {...field} />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -299,9 +304,9 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                           name="cif"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>CIF/NIF *</FormLabel>
+                              <FormLabel>{t('onboarding.taxId')} *</FormLabel>
                               <FormControl>
-                                <Input placeholder="Ej: B12345678" {...field} />
+                                <Input placeholder={t('onboarding.taxIdPlaceholder')} {...field} />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -322,10 +327,10 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                   
                   <div>
                     <h3 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
-                      ¡Todo listo!
+                      {t('onboarding.allSet')}
                     </h3>
                     <p className="text-gray-600 dark:text-gray-300 mb-6">
-                      Tu cuenta está configurada. ¡Bienvenido a Nexus!
+                      {t('onboarding.accountReady')}
                     </p>
                   </div>
 
@@ -334,41 +339,43 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                     size="lg"
                     className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8"
                   >
-                    Ir al Dashboard
+                    {t('onboarding.goToDashboard')}
                     <ArrowRight className="h-5 w-5 ml-2" />
                   </Button>
                 </div>
               )}
 
               {/* Navigation Buttons */}
-              {currentStep > 0 && currentStep < steps.length - 1 && (
+              {currentStep < steps.length - 1 && (
                 <div className="flex justify-between pt-6 border-t mt-8">
                   <Button
                     variant="outline"
                     onClick={handlePrevious}
-                    disabled={currentStep <= 1}
+                    disabled={currentStep === 0}
+                    className={currentStep === 0 ? 'invisible' : ''}
                   >
                     <ArrowLeft className="h-4 w-4 mr-2" />
-                    Anterior
+                    {t('common.previous')}
                   </Button>
 
                   <Button
                     onClick={handleNext}
                     disabled={isProcessing}
+                    className={currentStep === 0 ? 'ml-auto' : ''}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        Procesando...
+                        {t('onboarding.processing')}
                       </>
-                    ) : currentStep === 1 ? (
+                    ) : currentStep === steps.length - 2 ? (
                       <>
-                        Completar
+                        {t('onboarding.complete')}
                         <CheckCircle className="h-4 w-4 ml-2" />
                       </>
                     ) : (
                       <>
-                        Siguiente
+                        {t('common.next')}
                         <ArrowRight className="h-4 w-4 ml-2" />
                       </>
                     )}

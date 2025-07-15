@@ -8,12 +8,14 @@ import {
   IconUserCircle,
   IconCrown,
   IconReceipt,
+  IconLanguage,
 } from "@tabler/icons-react"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useApiClient } from "@/lib/api-client"
 import { useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useUserContext } from "@/contexts/user-context"
+import { useLanguage } from "@/contexts/language-context"
 import { Badge } from "@/components/ui/badge"
 
 import {
@@ -50,6 +52,7 @@ export function NavUser({
   const { user: clerkUser } = useUser()
   const { signOut, openUserProfile } = useClerk()
   const { backendUser } = useUserContext()
+  const { t, language, setLanguage, availableLanguages } = useLanguage()
   const apiClient = useApiClient()
   const router = useRouter()
   const params = useParams()
@@ -133,14 +136,15 @@ export function NavUser({
   const getPlanBadge = () => {
     // Use subscription_plan from backend user (populated from Stripe)
     const planType = backendUser?.subscription_plan || 'free'
-    const planConfigs: Record<string, { name: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      'free': { name: 'Gratuito', variant: 'secondary' },
-      'pro': { name: 'Profesional', variant: 'default' },
-      'professional': { name: 'Profesional', variant: 'default' },
-      'enterprise': { name: 'Empresarial', variant: 'destructive' }
+    const planConfigs: Record<string, { nameKey: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+      'free': { nameKey: 'plans.free', variant: 'secondary' },
+      'pro': { nameKey: 'plans.professional', variant: 'default' },
+      'professional': { nameKey: 'plans.professional', variant: 'default' },
+      'enterprise': { nameKey: 'plans.enterprise', variant: 'destructive' }
     }
     
-    return planConfigs[planType] || { name: planType, variant: 'secondary' }
+    const config = planConfigs[planType] || { nameKey: planType, variant: 'secondary' }
+    return { name: t(config.nameKey), variant: config.variant }
   }
 
   return (
@@ -190,7 +194,7 @@ export function NavUser({
             {/* Plan actual */}
             <div className="px-2 py-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Plan actual</span>
+                <span className="text-sm text-muted-foreground">{t('plans.currentPlan')}</span>
                 <Badge variant={getPlanBadge().variant} className="text-xs">
                   {getPlanBadge().name}
                 </Badge>
@@ -202,30 +206,56 @@ export function NavUser({
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={handleAccountSettings}>
                 <IconUserCircle />
-                Mi cuenta
+                {t('account.myAccount')}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleViewPlans}>
                 <IconCrown />
-                Ver planes
+                {t('plans.viewPlans')}
               </DropdownMenuItem>
               {backendUser?.is_superuser && (
                 <DropdownMenuItem onClick={handleBillingPortal} disabled={isLoadingBilling}>
                   <IconReceipt />
-                  {isLoadingBilling ? 'Abriendo...' : 
+                  {isLoadingBilling ? t('account.opening') : 
                    (backendUser?.subscription_plan && backendUser.subscription_plan !== 'free' 
-                     ? 'Portal de facturación' 
-                     : 'Facturas y pagos')}
+                     ? t('plans.billingPortal') 
+                     : t('plans.invoicesAndPayments'))}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem>
                 <IconNotification />
-                Notificaciones
+                {t('account.notifications')}
               </DropdownMenuItem>
             </DropdownMenuGroup>
+            
+            <DropdownMenuSeparator />
+            
+            {/* Language Selector */}
+            <DropdownMenuGroup>
+              <div className="px-2 py-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm flex items-center gap-2">
+                    <IconLanguage className="h-4 w-4" />
+                    {t('common.language')}
+                  </span>
+                  <select 
+                    value={language} 
+                    onChange={(e) => setLanguage(e.target.value as any)}
+                    className="text-xs border rounded px-2 py-1"
+                  >
+                    {availableLanguages.map(lang => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </DropdownMenuGroup>
+            
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut}>
               <IconLogout />
-              Cerrar sesión
+              {t('account.signOut')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
