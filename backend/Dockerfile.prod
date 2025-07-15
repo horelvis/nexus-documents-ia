@@ -42,7 +42,7 @@ ENV PATH=/usr/local/bin:$PATH
 ENV PYTHONPATH=/app
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/uploads && \
+RUN mkdir -p /app/logs /app/uploads /app/app/static && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
