@@ -1,9 +1,9 @@
-import { HomeSectionV2 } from "@/components/landing/v2"
+import { HomeSection } from "@/components/landing/caps-copy"
 
 export default function LandingV2Page() {
   return (
-    <div className="min-h-screen">
-      <HomeSectionV2 />
+    <div className="min-h-screen bg-background">
+      <HomeSection />
     </div>
   )
 }
