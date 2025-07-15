@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { 
   IconTrendingUp, 
-  IconZap, 
+  IconBolt, 
   IconShieldCheck, 
   IconUsers,
   IconSparkles
@@ -20,7 +20,7 @@ const services = [
     bgColor: "from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20"
   },
   {
-    icon: IconZap,
+    icon: IconBolt,
     title: "Automatización veloz",
     description: "Procesamiento automático de documentos con análisis instantáneo y clasificación inteligente.",
     color: "from-purple-500 to-pink-500",
