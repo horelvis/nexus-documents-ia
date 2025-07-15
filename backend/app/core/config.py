@@ -50,10 +50,10 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # PostgreSQL
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
+    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "nexus_db")
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
@@ -82,9 +82,9 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = "documents"
     
     # Google Cloud Storage
-    GCS_BUCKET_NAME: str
-    GCS_CREDENTIALS: Optional[str] = None
-    GCS_PROJECT_ID: Optional[str] = None
+    GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "nexus-default-bucket")
+    GCS_CREDENTIALS: Optional[str] = os.getenv("GCS_CREDENTIALS")
+    GCS_PROJECT_ID: Optional[str] = os.getenv("GCS_PROJECT_ID")
     GCS_REGION: str = "europe-west1"  # Región por defecto
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
