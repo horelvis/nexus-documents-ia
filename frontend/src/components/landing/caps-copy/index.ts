@@ -22,5 +22,8 @@ export { default as Marquee } from './ui/marquee';
 // Constants
 export * from './constants';
 
+// Navigation
+export { default as CapsNavbar } from './navbar';
+
 // Main component
 export { default as HomeSection } from './home-section';

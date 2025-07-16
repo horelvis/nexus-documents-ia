@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from 'framer-motion';
-import { CreditCard, History, Play } from 'lucide-react';
+import { CreditCard, History, Play, FileText, Sheet, Presentation, FileImage } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,9 @@ const Hero = () => {
     return (
         <div className="relative flex flex-col items-center justify-center w-full py-20">
 
+            {/* Background dots pattern - only in hero section */}
+            <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.2)_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent)] hidden lg:flex"></div>
+
             <div className="absolute flex sm:hidden w-72 h-72 rounded-full bg-primary blur-[10rem] -top-16 left-0 -z-10"></div>
 
             <div className="flex flex-col items-center justify-center max-w-3xl gap-y-8">
@@ -33,26 +36,26 @@ const Hero = () => {
                                 NEW
                             </span>
                             <span>
-                                Discover our latest AI-powered feature
+                                Discover our latest AI-powered document analysis
                             </span>
                         </Badge>
                     </AnimationContainer>
                     <AnimationContainer delay={0.15}>
                         <h1 className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold text-center !leading-tight">
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                Supercharge your {" "}
+                                Transform your {" "}
                             </span>
-                            <span className="text-primary to-primaryLight-foreground">
-                                social media {" "}
+                            <span className="text-transparent bg-gradient-to-b from-primary to-primaryLight bg-clip-text">
+                                document management {" "}
                             </span>
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                presence with AI
+                                with intelligent AI
                             </span>
                         </h1>
                     </AnimationContainer>
                     <AnimationContainer delay={0.2}>
                         <p className="max-w-xl mt-2 text-base text-center text-accent-foreground/60">
-                            Elevate your social media game with AI-powered caption generation and scheduling. <span className="hidden lg:inline">CapsAI is a powerful tool that uses AI to generate captivating captions from your photos.</span>
+                            Revolutionize your document workflow with AI-powered organization, analysis, and search. <span className="hidden lg:inline">NexusDocs360 provides intelligent document management with semantic search, automated categorization, and real-time insights.</span>
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
                             <Button size="lg" asChild>
@@ -62,7 +65,7 @@ const Hero = () => {
                             </Button>
                             <Button size="lg" variant="secondary" asChild>
                                 <Link href="/" className="flex items-center">
-                                    How it works
+                                    See demo
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
                             </Button>
@@ -77,7 +80,7 @@ const Hero = () => {
                             </Button>
                             <Button variant="secondary" asChild>
                                 <Link href="/" className="flex items-center">
-                                    How it works
+                                    See demo
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
                             </Button>
@@ -86,7 +89,7 @@ const Hero = () => {
                             <div className="flex items-center gap-x-2">
                                 <History className="w-4 h-4 text-muted-foreground" />
                                 <span className="text-sm text-muted-foreground">
-                                    14-day free trial
+                                    30-day free trial
                                 </span>
                                 <span className="text-muted-foreground">
                                     •
@@ -105,40 +108,40 @@ const Hero = () => {
                             variants={leftVariants}
                             initial="hidden"
                             animate="visible"
-                            className="absolute left-0 flex items-center justify-center opacity-50 group top-1/2"
+                            className="absolute left-1/4 flex items-center justify-center opacity-50 group top-1/4"
                         >
-                            <div className="relative">
-                                <Icons.facebook className="w-auto h-8" />
+                            <div className="relative p-2 bg-blue-500/20 rounded-lg backdrop-blur-sm">
+                                <FileText className="w-6 h-6 text-blue-400" />
                             </div>
                         </motion.div>
                         <motion.div
                             variants={leftVariants}
                             initial="hidden"
                             animate="visible"
-                            className="absolute flex items-center justify-center opacity-50 left-36 group bottom-1/4"
+                            className="absolute flex items-center justify-center opacity-50 left-1/3 group bottom-1/4"
                         >
-                            <div className="relative">
-                                <Icons.instagram className="w-auto h-8" />
+                            <div className="relative p-2 bg-green-500/20 rounded-lg backdrop-blur-sm">
+                                <Sheet className="w-6 h-6 text-green-400" />
                             </div>
                         </motion.div>
                         <motion.div
                             variants={rightVariants}
                             initial="hidden"
                             animate="visible"
-                            className="absolute right-0 flex items-center justify-center opacity-50 group top-1/2"
+                            className="absolute right-1/4 flex items-center justify-center opacity-50 group top-1/4"
                         >
-                            <div className="relative">
-                                <Icons.twitter className="w-auto h-8" />
+                            <div className="relative p-2 bg-orange-500/20 rounded-lg backdrop-blur-sm">
+                                <Presentation className="w-6 h-6 text-orange-400" />
                             </div>
                         </motion.div>
                         <motion.div
                             variants={rightVariants}
                             initial="hidden"
                             animate="visible"
-                            className="absolute flex items-center justify-center opacity-50 right-36 group bottom-1/4"
+                            className="absolute flex items-center justify-center opacity-50 right-1/3 group bottom-1/4"
                         >
-                            <div className="relative">
-                                <Icons.linkedin className="w-auto h-8" />
+                            <div className="relative p-2 bg-purple-500/20 rounded-lg backdrop-blur-sm">
+                                <FileImage className="w-6 h-6 text-purple-400" />
                             </div>
                         </motion.div>
                     </div>

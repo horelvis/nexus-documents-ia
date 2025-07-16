@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { IconPlugConnectedX, IconRefresh, IconWifi, IconWifiOff } from "@tabler/icons-react"
+import { IconPlugConnectedX, IconRefresh, IconWifi, IconWifiOff, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -9,9 +9,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 interface ConnectionErrorProps {
   onRetry?: () => void
   error?: Error | null
+  onClose?: () => void
 }
 
-export function ConnectionError({ onRetry, error }: ConnectionErrorProps) {
+export function ConnectionError({ onRetry, error, onClose }: ConnectionErrorProps) {
   const [isOnline, setIsOnline] = useState(true)
   const [retrying, setRetrying] = useState(false)
 
@@ -46,7 +47,17 @@ export function ConnectionError({ onRetry, error }: ConnectionErrorProps) {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <Card className="max-w-md w-full">
+      <Card className="max-w-md w-full relative">
+        {/* Close Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose || (() => window.history.back())}
+          className="absolute right-2 top-2 h-8 w-8"
+        >
+          <IconX className="h-4 w-4" />
+        </Button>
+        
         <CardHeader className="text-center">
           <div className="mx-auto mb-4">
             <IconPlugConnectedX className="h-24 w-24 text-destructive opacity-50" />

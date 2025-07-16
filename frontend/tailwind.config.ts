@@ -7,15 +7,13 @@ const {
   default: flattenColorPalette,
 } = require("tailwindcss/lib/util/flattenColorPalette");
 
-const config = {
-  darkMode: ["class"],
+const config: Config = {
   content: [
     './pages/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
     './app/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
   ],
-  prefix: "",
   theme: {
     container: {
       center: true,
@@ -110,6 +108,10 @@ const config = {
           '0%': { transform: 'translateX(100%)' },
           '100%': { transform: 'translateX(0%)' },
         },
+        "marquee-vertical": {
+          '0%': { transform: 'translateY(0%)' },
+          '100%': { transform: 'translateY(-100%)' },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -119,6 +121,7 @@ const config = {
         "marquee": 'marquee 25s linear infinite',
         "marqueet": 'marquee var(--duration) linear infinite',
         "marquee2": 'marquee2 25s linear infinite',
+        "marquee-vertical": 'marquee-vertical 25s linear infinite',
       },
       spacing: {
         "1/10": "10%",
@@ -151,6 +154,27 @@ const config = {
           }),
         },
         { values: flattenColorPalette(theme("backgroundColor")), type: "color" }
+      );
+    },
+    function ({ matchUtilities }: any) {
+      matchUtilities(
+        {
+          "mask-radial": (value: any) => ({
+            maskImage: `radial-gradient(ellipse at center, transparent ${value}, black)`,
+          }),
+          "mask-linear": (value: any) => ({
+            maskImage: `linear-gradient(to right, transparent, black ${value}, black ${100 - parseInt(value)}%, transparent)`,
+          }),
+        },
+        { 
+          values: { 
+            '10': '10%', 
+            '20': '20%', 
+            '30': '30%', 
+            '40': '40%', 
+            '50': '50%'
+          } 
+        }
       );
     },
   ],

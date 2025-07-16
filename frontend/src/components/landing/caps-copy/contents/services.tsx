@@ -9,10 +9,10 @@ const Services = () => {
                     <div className="grid w-full place-items-center grid-cols-1 p-6 md:p-8 md:grid-cols-[.55fr_1fr] rounded-2xl bg-[#121212]/50 border border-border">
                         <div className="flex flex-col items-start justify-center lg:pl-6">
                             <h4 className="text-xl font-semibold lg:text-2xl">
-                                Explore our services
+                                Explore our AI-powered solutions
                             </h4>
                             <p className="mt-4 text-neutral-500 lg:text-lg">
-                                We provide the best services for our customers with the best quality and the best price.
+                                Transform your document management with intelligent automation, advanced search capabilities, and seamless collaboration tools.
                             </p>
                         </div>
                         <div className="flex items-center justify-center w-full mt-8 sm:mt-0 lg:py-4 lg:px-10">
@@ -27,19 +27,19 @@ const Services = () => {
                             <Images.service2 className="w-full h-auto px-8" />
                             <div className="flex flex-col items-start lg:pl-6">
                                 <h5 className="mt-8 text-xl font-semibold lg:text-2xl">
-                                    Improves your business
+                                    Boost your productivity
                                 </h5>
                                 <p className="mt-2 lg:max-w-sm text-neutral-500">
-                                    We provide the best services for our customers with the best quality and the best price.
+                                    Streamline your document workflows with AI-powered organization, automated categorization, and instant retrieval.
                                 </p>
                             </div>
                         </div>
                         <div className="flex flex-col items-start w-full px-6 py-6 border border-border bg-[#121212]/50 rounded-2xl lg:px-8 lg:py-8">
                             <h5 className="text-xl font-semibold lg:text-2xl">
-                                Speed automation
+                                Intelligent automation
                             </h5>
                             <p className="mt-2 lg:max-w-xs text-neutral-500">
-                                Improve your business with our services and speed up your automation.
+                                Automate document processing with smart extraction, classification, and workflow management.
                             </p>
                             <div className="flex items-center w-full px-16 lg:px-0">
                                 <Images.service3 className="w-full h-auto mt-6" />
@@ -56,20 +56,20 @@ const Services = () => {
                             </div>
                             <div className="flex flex-col items-start mt-4 lg:mt-auto lg:pl-2">
                                 <h5 className="text-xl font-semibold lg:text-2xl">
-                                    It&apos;s safe and effective
+                                    Secure and reliable
                                 </h5>
                                 <p className="mt-2 lg:max-w-sm text-neutral-500">
-                                    Chat with our bot to get the best services for your business.
+                                    Enterprise-grade security with end-to-end encryption, access controls, and compliance features.
                                 </p>
                             </div>
                         </div>
                         <div className="flex flex-col items-start w-full p-6 border lg:p-8 border-border bg-[#121212]/50 rounded-2xl">
                             <div className="flex flex-col items-start lg:pl-2">
                                 <h5 className="text-xl font-semibold lg:text-2xl">
-                                    Control your audience
+                                    Advanced analytics
                                 </h5>
                                 <p className="mt-2 lg:max-w-sm text-neutral-500">
-                                    Take your business to the next level with insights and analytics.
+                                    Gain valuable insights from your documents with AI-powered analytics and reporting dashboards.
                                 </p>
                             </div>
                             <div className="flex items-center w-full mt-8">

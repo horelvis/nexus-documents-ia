@@ -1,38 +1,32 @@
-import { SectionContainer, Hero, HeroImage, Companies, Services, Features, Offerings, Pricing, Testimonial, Tools, Banner } from "./index";
+import { Hero, HeroImage, Services, Features, Offerings, Pricing, Testimonial, Tools, Banner } from "./index";
 
 const HomeSection = () => {
     return (
-        <SectionContainer>
+        <div className="relative flex flex-col items-start justify-center w-full mx-auto z-10">
 
-            <div className="relative flex flex-col items-start justify-center w-full mx-auto">
+            <div className="mx-auto relative flex flex-col items-center justify-center w-full">
 
-                <div className="mx-auto relative flex flex-col items-cennter justify-center w-full">
+                <Hero />
 
-                    <Hero />
+                <HeroImage />
 
-                    <HeroImage />
+                <Services />
 
-                    <Companies />
+                <Features />
 
-                    <Services />
+                <Offerings />
 
-                    <Features />
+                <Pricing />
 
-                    <Offerings />
+                <Testimonial />
 
-                    <Pricing />
+                <Tools />
 
-                    <Testimonial />
-
-                    <Tools />
-
-                    <Banner />
-
-                </div>
+                <Banner />
 
             </div>
 
-        </SectionContainer>
+        </div>
     )
 };
 

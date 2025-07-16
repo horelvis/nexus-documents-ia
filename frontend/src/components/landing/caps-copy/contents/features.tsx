@@ -72,7 +72,7 @@ const Features = () => {
                 <AnimationContainer delay={0.25}>
                     <div className="items-center justify-center hidden w-full lg:flex">
                         <div className="relative flex max-w-4xl">
-                            <div className="absolute h-full pointer-events-none inset-0 flex items-center justify-center bg-black [mask-image:radial-gradient(ellipse_at_center,transparent_10%,black)]"></div>
+                            <div className="absolute h-full pointer-events-none inset-0 flex items-center justify-center bg-black [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]"></div>
                             <Images.grad className="w-full h-[650px]" />
                         </div>
                     </div>
