@@ -77,7 +77,7 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --set-env-vars "PORT=8000,DEBUG=true" \
+          --set-env-vars "DEBUG=true" \
           --min-instances 0 \
           --max-instances 3 \
           --memory 512Mi \

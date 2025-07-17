@@ -12,8 +12,5 @@ COPY app/main_minimal.py app/main_minimal.py
 # Expose port
 EXPOSE 8000
 
-# Set PORT environment variable
-ENV PORT=8000
-
-# Run minimal app
-CMD ["python", "-m", "uvicorn", "app.main_minimal:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+# Run minimal app - Cloud Run sets PORT automatically
+CMD ["sh", "-c", "python -m uvicorn app.main_minimal:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info"]
