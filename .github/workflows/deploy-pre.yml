@@ -1,10 +1,14 @@
-name: Deploy to PRE Environment
+name: Deploy to PRE Environment (DEPRECATED - Use separate workflows)
 
 on:
-  push:
-    branches:
-      - pre
+  # Disabled - use deploy-backend-pre.yml and deploy-frontend-pre.yml instead
   workflow_dispatch:
+    inputs:
+      force_legacy_deploy:
+        description: 'Force legacy deployment (not recommended)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   PROJECT_ID: nexusdocs360-pre
@@ -14,8 +18,9 @@ env:
 
 jobs:
   setup-build-deploy:
-    name: Setup, Build, and Deploy
+    name: Setup, Build, and Deploy (Legacy)
     runs-on: ubuntu-latest
+    if: ${{ inputs.force_legacy_deploy == true }}
 
     permissions:
       contents: read
