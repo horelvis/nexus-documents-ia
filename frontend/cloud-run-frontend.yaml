@@ -1,0 +1,54 @@
+# Cloud Run service configuration for Frontend
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexus-frontend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/PROJECT_ID/nexus-frontend:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+          value: "YOUR_CLERK_KEY"
+        - name: NEXT_PUBLIC_API_BASE_URL
+          value: "https://nexus-backend-HASH-uc.a.run.app"
+        - name: NEXT_PUBLIC_FRONTEND_URL
+          value: "https://nexus-frontend-HASH-uc.a.run.app"
+        - name: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+          value: "YOUR_STRIPE_KEY"
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  traffic:
+  - percent: 100
+    latestRevision: true
