@@ -52,7 +52,7 @@ jobs:
         cd backend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest \
-          -f Dockerfile.minimal \
+          -f Dockerfile.prod \
           .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest
@@ -77,7 +77,7 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --set-env-vars "DEBUG=true" \
+          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_SERVER=localhost,POSTGRES_DB=nexusdocuments360db,POSTGRES_USER=postgres" \
           --min-instances 0 \
           --max-instances 3 \
           --memory 512Mi \
