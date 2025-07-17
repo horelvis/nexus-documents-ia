@@ -27,43 +27,47 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
     logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
     
-    # Crear tablas si no existen
-    try:
-        logger.info("🔧 Verificando estructura de base de datos...")
-        logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
-        
-        from app.db.base_class import Base
-        from app.db.database import engine
-        import app.db.models  # Importar módulo para registrar los modelos
-        
-        # Test connection first
-        logger.info("🧪 Probando conexión a la base de datos...")
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
-            logger.info("✅ Conexión a la base de datos exitosa")
-        
-        # Crear todas las tablas desde los modelos
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Estructura de base de datos verificada/creada")
-        
-        # Auto-upgrade de la base de datos (solo para registrar versión de Alembic)
-        try:
-            logger.info("🔧 Registrando versión de Alembic...")
-            from app.db.migrations import auto_upgrade_database
-            auto_upgrade_database()
-            logger.info("✅ Versión de Alembic registrada")
-        except Exception as alembic_e:
-            logger.warning(f"⚠️ Error en Alembic (continuando): {alembic_e}")
-            
-    except Exception as e:
-        logger.error(f"❌ Error en configuración de BD: {e}")
-        logger.error(f"🔍 Database URI intentado: {settings.SQLALCHEMY_DATABASE_URI}")
-        if not settings.DEBUG and not settings.IS_CLOUD_RUN:
-            logger.error("💥 Aplicación no puede iniciar sin BD")
-            raise
-        else:
-            logger.warning("⚠️ Continuando sin BD en modo debug/Cloud Run")
+    # Skip database initialization temporarily for debugging
+    logger.info("⚠️ SKIPPING DATABASE INITIALIZATION FOR DEBUGGING")
+    logger.info(f"🔗 Database URI would be: {settings.SQLALCHEMY_DATABASE_URI}")
+    
+    # # Crear tablas si no existen
+    # try:
+    #     logger.info("🔧 Verificando estructura de base de datos...")
+    #     logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+    #     
+    #     from app.db.base_class import Base
+    #     from app.db.database import engine
+    #     import app.db.models  # Importar módulo para registrar los modelos
+    #     
+    #     # Test connection first
+    #     logger.info("🧪 Probando conexión a la base de datos...")
+    #     from sqlalchemy import text
+    #     with engine.connect() as conn:
+    #         result = conn.execute(text("SELECT 1"))
+    #         logger.info("✅ Conexión a la base de datos exitosa")
+    #     
+    #     # Crear todas las tablas desde los modelos
+    #     Base.metadata.create_all(bind=engine)
+    #     logger.info("✅ Estructura de base de datos verificada/creada")
+    #     
+    #     # Auto-upgrade de la base de datos (solo para registrar versión de Alembic)
+    #     try:
+    #         logger.info("🔧 Registrando versión de Alembic...")
+    #         from app.db.migrations import auto_upgrade_database
+    #         auto_upgrade_database()
+    #         logger.info("✅ Versión de Alembic registrada")
+    #     except Exception as alembic_e:
+    #         logger.warning(f"⚠️ Error en Alembic (continuando): {alembic_e}")
+    #         
+    # except Exception as e:
+    #     logger.error(f"❌ Error en configuración de BD: {e}")
+    #     logger.error(f"🔍 Database URI intentado: {settings.SQLALCHEMY_DATABASE_URI}")
+    #     if not settings.DEBUG and not settings.IS_CLOUD_RUN:
+    #         logger.error("💥 Aplicación no puede iniciar sin BD")
+    #         raise
+    #     else:
+    #         logger.warning("⚠️ Continuando sin BD en modo debug/Cloud Run")
     
     logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     yield
