@@ -22,21 +22,21 @@ const Features = () => {
     return (
         <div className="relative flex flex-col items-center justify-center py-20">
 
-            <div className="absolute -top-1/10 -left-1/5 bg-primary w-72 h-72 rounded-full -z-10 blur-[14rem]"></div>
+            <div className="absolute -top-1/10 -left-1/5 bg-purple-600 w-72 h-72 rounded-full -z-10 blur-[14rem]"></div>
 
             <AnimationContainer delay={0.5}>
                 <div className="flex flex-col items-center justify-center max-w-2xl mx-auto">
                     <Badge size="lg" variant="outline">
                         <Icons.bolt className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            AI-Powered Features
+                            AI-Powered Document Features
                         </span>
                     </Badge>
                     <h2 className="mt-6 text-2xl font-semibold text-center lg:text-3xl xl:text-4xl">
-                        Innovative features for even more convenience
+                        Intelligent document management made simple
                     </h2>
                     <p className="max-w-lg mt-6 text-center text-neutral-500">
-                        Our platform is packed with innovative features to help you get the most out of your experience.
+                        Transform how you organize, search, and analyze documents with our AI-powered features designed for modern workflows.
                     </p>
                 </div>
             </AnimationContainer>

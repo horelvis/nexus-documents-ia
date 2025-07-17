@@ -36,7 +36,7 @@ const Companies = () => {
                 <AnimationContainer delay={0.2}>
                     <div className="relative flex items-center -mt-20">
                         <Images.lines className="z-10 w-full h-auto" />
-                        <div className="absolute left-[calc(50%-20px)] z-20 -bottom-6 w-16 h-16 rounded-full bg-primary/70 lg:bg-primary blur-2xl"></div>
+                        <div className="absolute left-[calc(50%-20px)] z-20 -bottom-6 w-16 h-16 rounded-full bg-purple-600/70 lg:bg-purple-600 blur-2xl"></div>
                         <motion.div
                             initial={{ opacity: 0, scale: 0.5 }}
                             animate={{ opacity: 1, scale: 1 }}

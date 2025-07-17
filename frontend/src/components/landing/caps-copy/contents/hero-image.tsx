@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from "react";
 import Tilt from 'react-parallax-tilt';
-import Images from "../ui/images";
+import StaticImages from "../ui/png-images";
 import AnimationContainer from "../utils/animation-container";
 
 const HeroImage = () => {
@@ -33,14 +33,14 @@ const HeroImage = () => {
                     transitionSpeed={2000}
                     glareEnable={false}
                 >
-                    <Images.dashboard className="w-full h-full" />
+                    <StaticImages.dashboard className="w-full h-full" />
                 </Tilt>
             </div>
             <div className="absolute hidden lg:flex items-center justify-center max-w-md bottom-[5%] left-[5%]">
-                <Images.leftboard className="w-full h-full" />
+                <StaticImages.leftboard className="w-full h-full" />
             </div>
             <div className="absolute hidden lg:flex items-center justify-center max-w-xs bottom-[15%] right-[5%]">
-                <Images.rightboard className="w-full h-full" />
+                <StaticImages.rightboard className="w-full h-full" />
             </div>
         </AnimationContainer>
     )

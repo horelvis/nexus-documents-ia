@@ -5,7 +5,6 @@ import { CreditCard, History, Play, FileText, Sheet, Presentation, FileImage } f
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import Icons from '../ui/icons';
 import AnimationContainer from "../utils/animation-container";
 
 const Hero = () => {
@@ -26,12 +25,12 @@ const Hero = () => {
             {/* Background dots pattern - only in hero section */}
             <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.2)_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent)] hidden lg:flex"></div>
 
-            <div className="absolute flex sm:hidden w-72 h-72 rounded-full bg-primary blur-[10rem] -top-16 left-0 -z-10"></div>
+            <div className="absolute flex sm:hidden w-72 h-72 rounded-full bg-purple-600 blur-[10rem] -top-16 left-0 -z-10"></div>
 
             <div className="flex flex-col items-center justify-center max-w-3xl gap-y-8">
                 <div className="flex flex-col items-center justify-center gap-y-4">
                     <AnimationContainer className="relative hidden lg:block overflow-hidden">
-                        <Badge size="sm" variant="outline" className="px-3 cursor-pointer">
+                        <Badge variant="outline" className="px-3 cursor-pointer">
                             <span className="px-2 py-[0.5px] h-[18px] tracking-wide flex items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-orange-600 text-[9px] font-medium mr-2 text-white">
                                 NEW
                             </span>
@@ -64,7 +63,7 @@ const Hero = () => {
                                 </Link>
                             </Button>
                             <Button size="lg" variant="secondary" asChild>
-                                <Link href="/" className="flex items-center">
+                                <Link href="/pricing" className="flex items-center">
                                     See demo
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
@@ -79,7 +78,7 @@ const Hero = () => {
                                 </Link>
                             </Button>
                             <Button variant="secondary" asChild>
-                                <Link href="/" className="flex items-center">
+                                <Link href="/pricing" className="flex items-center">
                                     See demo
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>

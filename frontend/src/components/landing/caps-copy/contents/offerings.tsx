@@ -14,21 +14,21 @@ const Offerings = () => {
     return (
         <div className="flex flex-col relative items-center justify-center py-20">
 
-            <div className="hidden lg:block absolute -bottom-1/4 -left-1/4 bg-primary w-72 h-72 rounded-full -z-10 blur-[14rem]"></div>
+            <div className="hidden lg:block absolute -bottom-1/4 -left-1/4 bg-purple-600 w-72 h-72 rounded-full -z-10 blur-[14rem]"></div>
 
             <AnimationContainer>
                 <div className="flex flex-col items-center justify-center mx-auto max-w-2xl">
                     <Badge size="lg" variant="outline">
                         <LifeBuoy className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            Everything on track
+                            Document Intelligence
                         </span>
                     </Badge>
                     <h2 className="text-2xl mt-6 lg:text-3xl font-semibold text-center xl:text-4xl">
-                        Thousand ways to manage your business
+                        Comprehensive document management solutions
                     </h2>
                     <p className="mt-6 text-center text-neutral-500 max-w-lg">
-                        Keep your business on track with our innovative offerings to help you get the most out of your experience.
+                        Streamline your document workflows with intelligent organization, automated processing, and advanced search capabilities.
                     </p>
                     <div className="flex items-center relative w-full">
                         <Images.offer className="w-full h-[350px] md:h-[450px]" />

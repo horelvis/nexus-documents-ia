@@ -36,13 +36,13 @@ const Pricing = () => {
                 <AnimationContainer className="flex flex-col items-center justify-center">
                     <Badge size="lg" variant="outline">
                         <Gem className="w-4 h-4" />
-                        <span className="ml-2 text-sm">Choose your plan</span>
+                        <span className="ml-2 text-sm">Document Management Plans</span>
                     </Badge>
                     <h2 className="mt-6 text-2xl font-semibold text-center lg:text-3xl xl:text-4xl">
-                        Unlock the Right Plan for Your Business
+                        Choose the Perfect Document Management Plan
                     </h2>
                     <p className="max-w-lg mt-6 text-center text-neutral-500">
-                        Our pricing plans are designed to meet the needs of your business. Get started with our free plan and upgrade as you grow.
+                        Scale your document management capabilities with flexible plans designed for teams of all sizes. Start free and upgrade as your needs grow.
                     </p>
                 </AnimationContainer>
 

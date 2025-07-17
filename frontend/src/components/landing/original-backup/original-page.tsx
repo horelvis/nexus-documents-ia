@@ -5,7 +5,15 @@ import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
 import { InitialLoader } from '@/components/ui/unified-loader'
-import { CapsNavbar, SectionContainer, HomeSection } from "@/components/landing/caps-copy"
+import { 
+  HeroSection, 
+  FeaturesSection, 
+  StatsSection, 
+  PricingSection,
+  CTASection, 
+  LandingHeader, 
+  LandingFooter 
+} from "@/components/landing"
 
 export default function Home() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -29,13 +37,16 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <CapsNavbar />
-      <SectionContainer>
-        <div className="relative flex flex-col items-center justify-center px-4 pt-20">
-          <HomeSection />
-        </div>
-      </SectionContainer>
+    <div className="min-h-screen bg-white">
+      <LandingHeader />
+      <main>
+        <HeroSection />
+        <FeaturesSection />
+        <StatsSection />
+        <PricingSection />
+        <CTASection />
+      </main>
+      <LandingFooter />
     </div>
   )
 }

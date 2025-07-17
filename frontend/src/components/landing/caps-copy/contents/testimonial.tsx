@@ -19,7 +19,7 @@ const Testimonial = () => {
     return (
         <div className="relative flex flex-col items-center justify-center py-20">
 
-            <div className="hidden lg:block absolute -translate-x-1/2 rounded-full blur-[10rem] translate-y-1/4 -z-10 left-1/2 top-1/2 w-72 h-60 bg-primary/60"></div>
+            <div className="hidden lg:block absolute -translate-x-1/2 rounded-full blur-[10rem] translate-y-1/4 -z-10 left-1/2 top-1/2 w-72 h-60 bg-purple-600/60"></div>
 
             <AnimationContainer>
                 <div className="flex flex-col items-center justify-center max-w-2xl mx-auto">
@@ -29,7 +29,7 @@ const Testimonial = () => {
                     >
                         <Users className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            Our Customers
+                            Customer Success Stories
                         </span>
                     </Badge>
                     <motion.h2
@@ -37,14 +37,14 @@ const Testimonial = () => {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.4, delay: 0.2, type: 'spring', stiffness: 100 }}
                         className="mt-6 text-2xl font-semibold text-center lg:text-3xl xl:text-4xl">
-                        What people are saying
+                        What our users are saying
                     </motion.h2>
                     <motion.p
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.4, delay: 0.4, type: 'spring', stiffness: 100 }}
                         className="max-w-lg mt-6 text-center text-neutral-500">
-                        We are very proud of the service we provide and stand by every product we carry. Read our testimonials from our happy customers.
+                        Discover how teams worldwide are transforming their document workflows with our AI-powered platform. Read testimonials from satisfied users.
                     </motion.p>
                 </div>
             </AnimationContainer>

@@ -1,4 +1,5 @@
-import { Hero, HeroImage, Services, Features, Offerings, Pricing, Testimonial, Tools, Banner } from "./index";
+import { Hero, HeroImage, Services, Features, Offerings, Tools, Banner } from "./index";
+import { PricingSection } from "@/components/landing/pricing-section";
 
 const HomeSection = () => {
     return (
@@ -16,9 +17,7 @@ const HomeSection = () => {
 
                 <Offerings />
 
-                <Pricing />
-
-                <Testimonial />
+                <PricingSection />
 
                 <Tools />
 
