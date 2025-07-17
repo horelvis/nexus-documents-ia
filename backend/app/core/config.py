@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Development/Debug mode
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     
+    # Cloud Run environment detection
+    CLOUD_RUN_SERVICE_URL: Optional[str] = os.getenv("CLOUD_RUN_SERVICE_URL")
+    IS_CLOUD_RUN: bool = os.getenv("K_SERVICE") is not None
+    
     # CORS - Valores por defecto para desarrollo
     # CORS Origins - Configuración para desarrollo con IPs dinámicas
     ALLOW_ALL_CORS: bool = os.getenv("ALLOW_ALL_CORS", "false").lower() == "true"
@@ -75,9 +79,11 @@ class Settings(BaseSettings):
         return url
     
     # Redis
+    # Redis configuration - Cloud Run compatible
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
+    REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)  # Full Redis URL for Cloud services
     
     # Vector DB (Qdrant)
     QDRANT_HOST: str = "localhost"
@@ -129,7 +135,9 @@ class Settings(BaseSettings):
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
     # Microservices URLs
+    # Storage service configuration - Cloud Run compatible
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
+    STORAGE_SERVICE_INTERNAL_URL: str = os.getenv("STORAGE_SERVICE_INTERNAL_URL", "http://storage-service:8001")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")

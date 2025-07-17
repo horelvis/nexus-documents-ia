@@ -1,0 +1,40 @@
+# Cloud Run Environment Configuration
+# Variables de entorno necesarias para Cloud Run
+
+# Redis Configuration (Google Cloud Memorystore)
+REDIS_URL: "redis://your-redis-instance:6379"
+REDIS_HOST: "your-redis-instance"
+REDIS_PORT: "6379"
+REDIS_PASSWORD: "your-redis-password"
+
+# Storage Service Configuration (Cloud Run Service)
+STORAGE_SERVICE_URL: "https://storage-service-[hash]-uc.a.run.app"
+STORAGE_SERVICE_INTERNAL_URL: "https://storage-service-[hash]-uc.a.run.app"
+STORAGE_API_KEY: "your-storage-api-key"
+
+# Database Configuration (Cloud SQL)
+DATABASE_URL: "postgresql://user:password@/db?host=/cloudsql/project:region:instance"
+
+# GCS Configuration
+GCS_BUCKET_NAME: "your-gcs-bucket"
+GCS_PROJECT_ID: "your-project-id"
+GCS_CREDENTIALS: "/etc/secrets/gcs-key/key.json"
+
+# Cloud Run Environment
+K_SERVICE: "nexus-backend-pre"
+IS_CLOUD_RUN: "true"
+CLOUD_RUN_SERVICE_URL: "https://nexus-backend-pre-[hash]-uc.a.run.app"
+
+# Other services
+QDRANT_HOST: "your-qdrant-instance"
+QDRANT_PORT: "6333"
+
+# API Keys
+CLERK_SECRET_KEY: "your-clerk-secret"
+STRIPE_SECRET_KEY: "your-stripe-secret"
+
+# Debug and CORS
+DEBUG: "false"
+ALLOW_ALL_CORS: "false"
+FRONTEND_URL: "https://your-frontend-domain.com"
+API_BASE_URL: "https://nexus-backend-pre-[hash]-uc.a.run.app"

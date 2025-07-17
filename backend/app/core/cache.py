@@ -21,22 +21,36 @@ class RedisCache:
     def _connect(self):
         """Connect to Redis"""
         try:
-            self._redis_client = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
-            )
+            # Use REDIS_URL if available (for Cloud services), otherwise use individual settings
+            if settings.REDIS_URL:
+                self._redis_client = redis.from_url(
+                    settings.REDIS_URL,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                    retry_on_timeout=True,
+                    health_check_interval=30
+                )
+                logger.info(f"✅ Connected to Redis using URL: {settings.REDIS_URL}")
+            else:
+                self._redis_client = redis.Redis(
+                    host=settings.REDIS_HOST,
+                    port=settings.REDIS_PORT,
+                    password=settings.REDIS_PASSWORD,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                    retry_on_timeout=True,
+                    health_check_interval=30
+                )
+                logger.info(f"✅ Connected to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+            
             # Test connection
             self._redis_client.ping()
-            logger.info(f"✅ Connected to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
         except Exception as e:
             logger.error(f"❌ Failed to connect to Redis: {e}")
             self._redis_client = None
+            raise
     
     def get(self, key: str) -> Optional[str]:
         """Get value from cache"""
