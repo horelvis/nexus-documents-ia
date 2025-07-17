@@ -80,14 +80,16 @@ jobs:
           --vpc-connector nexus-connector-pre \
           --vpc-egress private-ranges-only \
           --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-          --set-env-vars "ENVIRONMENT=pre,DEBUG=false,TESTING=false,ALLOW_ALL_CORS=false,GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu,POSTGRES_USER=your_user,POSTGRES_DB=nexusdocuments360db,MAIL_USERNAME=hcastillo.mendoza@gmail.es,MAIL_FROM=hcastillo.mendoza@gmail.es" \
+          --set-env-vars "ENVIRONMENT=pre,DEBUG=false,TESTING=false,ALLOW_ALL_CORS=false,GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu,POSTGRES_SERVER=/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db,MAIL_USERNAME=hcastillo.mendoza@gmail.es,MAIL_FROM=hcastillo.mendoza@gmail.es" \
           --set-secrets "CLERK_SECRET_KEY=clerk-secret-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,POSTGRES_PASSWORD=postgres-password:latest,MICROSERVICES_API_KEY=microservices-api-key:latest,MAIL_PASSWORD=mail-password:latest" \
           --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 1 \
           --max-instances 10 \
           --memory 1Gi \
           --cpu 2 \
-          --timeout 300
+          --timeout 900 \
+          --concurrency 80 \
+          --no-cpu-throttling
 
     # Deploy Storage Service to Cloud Run
     - name: Deploy Storage Service to Cloud Run

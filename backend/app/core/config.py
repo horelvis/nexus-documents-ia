@@ -69,13 +69,19 @@ class Settings(BaseSettings):
         
         # Si no, construir desde variables individuales
         values = info.data if hasattr(info, 'data') else {}
-        user = values.get("POSTGRES_USER")
-        password = values.get("POSTGRES_PASSWORD")
-        host = values.get("POSTGRES_SERVER")
-        db = values.get("POSTGRES_DB")
+        user = values.get("POSTGRES_USER", "postgres")
+        password = values.get("POSTGRES_PASSWORD", "postgres")
+        host = values.get("POSTGRES_SERVER", "localhost")
+        db = values.get("POSTGRES_DB", "nexus_db")
         
-        # Construir URL manualmente para Pydantic v2
-        url = f"postgresql://{user}:{password}@{host}/{db}"
+        # Para Cloud SQL, el host debe ser el socket Unix
+        if host and host.startswith("/cloudsql/"):
+            # Cloud SQL Unix socket connection
+            url = f"postgresql://{user}:{password}@/{db}?host={host}"
+        else:
+            # TCP connection
+            url = f"postgresql://{user}:{password}@{host}/{db}"
+            
         return url
     
     # Redis
