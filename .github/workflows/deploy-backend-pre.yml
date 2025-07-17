@@ -46,29 +46,29 @@ jobs:
       run: |
         gcloud auth configure-docker ${{ env.GAR_LOCATION }}
 
-    # Build and push Backend API
+    # Build and push Backend API (MINIMAL VERSION FOR DEBUGGING)
     - name: Build and Push Backend API
       run: |
         cd backend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest \
-          -f Dockerfile.prod \
+          -f Dockerfile.minimal \
           .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest
 
-    # Build and push Storage Service
-    - name: Build and Push Storage Service
-      run: |
-        cd backend/microservices/storage-service
-        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }} \
-          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest \
-          -f Dockerfile \
-          .
-        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }}
-        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest
+    # Build and push Storage Service (DISABLED FOR DEBUGGING)
+    # - name: Build and Push Storage Service
+    #   run: |
+    #     cd backend/microservices/storage-service
+    #     docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }} \
+    #       -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest \
+    #       -f Dockerfile \
+    #       .
+    #     docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }}
+    #     docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:latest
 
-    # Deploy Backend API to Cloud Run
+    # Deploy Backend API to Cloud Run (MINIMAL CONFIG FOR DEBUGGING)
     - name: Deploy Backend API to Cloud Run
       run: |
         gcloud run deploy nexus-backend-pre \
@@ -77,63 +77,54 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --vpc-connector nexus-connector-pre \
-          --vpc-egress private-ranges-only \
-          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-          --set-env-vars "ENVIRONMENT=pre,DEBUG=false,TESTING=false,ALLOW_ALL_CORS=false,GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu,POSTGRES_SERVER=/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db,MAIL_USERNAME=hcastillo.mendoza@gmail.es,MAIL_FROM=hcastillo.mendoza@gmail.es" \
-          --set-secrets "CLERK_SECRET_KEY=clerk-secret-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,POSTGRES_PASSWORD=postgres-password:latest,MICROSERVICES_API_KEY=microservices-api-key:latest,MAIL_PASSWORD=mail-password:latest" \
-          --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
-          --min-instances 1 \
-          --max-instances 10 \
-          --memory 1Gi \
-          --cpu 2 \
-          --timeout 900 \
-          --concurrency 80 \
-          --no-cpu-throttling
-
-    # Deploy Storage Service to Cloud Run
-    - name: Deploy Storage Service to Cloud Run
-      run: |
-        gcloud run deploy storage-service-pre \
-          --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }} \
-          --region ${{ env.REGION }} \
-          --platform managed \
-          --port 8003 \
-          --allow-unauthenticated \
-          --vpc-connector nexus-connector-pre \
-          --vpc-egress private-ranges-only \
-          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-          --set-secrets "GCS_CREDENTIALS=gcs-credentials:latest,MICROSERVICES_API_KEY=microservices-api-key:latest" \
-          --set-env-vars "GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu" \
+          --set-env-vars "PORT=8000,DEBUG=true" \
+          --min-instances 0 \
+          --max-instances 3 \
           --memory 512Mi \
           --cpu 1 \
           --timeout 300
+
+    # Deploy Storage Service to Cloud Run (DISABLED FOR DEBUGGING)
+    # - name: Deploy Storage Service to Cloud Run
+    #   run: |
+    #     gcloud run deploy storage-service-pre \
+    #       --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/storage-service:${{ github.sha }} \
+    #       --region ${{ env.REGION }} \
+    #       --platform managed \
+    #       --port 8003 \
+    #       --allow-unauthenticated \
+    #       --vpc-connector nexus-connector-pre \
+    #       --vpc-egress private-ranges-only \
+    #       --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+    #       --set-secrets "GCS_CREDENTIALS=gcs-credentials:latest,MICROSERVICES_API_KEY=microservices-api-key:latest" \
+    #       --set-env-vars "GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu" \
+    #       --memory 512Mi \
+    #       --cpu 1 \
+    #       --timeout 300
 
     # Get service URLs
     - name: Get Service URLs
       id: urls
       run: |
         BACKEND_URL=$(gcloud run services describe nexus-backend-pre --region=${{ env.REGION }} --format='value(status.url)')
-        STORAGE_URL=$(gcloud run services describe storage-service-pre --region=${{ env.REGION }} --format='value(status.url)')
         
         echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
-        echo "storage_url=$STORAGE_URL" >> $GITHUB_OUTPUT
         
         echo "🔧 Backend API: $BACKEND_URL"
-        echo "💾 Storage Service: $STORAGE_URL"
+        echo "💾 Storage Service: DISABLED FOR DEBUGGING"
 
     # Backend deployment notification
     - name: Backend Deployment Notification
       if: always()
       run: |
         if [ "${{ job.status }}" == "success" ]; then
-          echo "✅ Backend deployment to PRE environment completed successfully!"
+          echo "✅ MINIMAL Backend deployment to PRE environment completed successfully!"
           echo "🔧 Backend API: ${{ steps.urls.outputs.backend_url }}"
-          echo "💾 Storage Service: ${{ steps.urls.outputs.storage_url }}"
+          echo "💾 Storage Service: DISABLED FOR DEBUGGING"
+          echo "🔍 This is a minimal deployment for debugging purposes"
         else
-          echo "❌ Backend deployment to PRE environment failed!"
+          echo "❌ MINIMAL Backend deployment to PRE environment failed!"
         fi
 
     outputs:
       backend_url: ${{ steps.urls.outputs.backend_url }}
-      storage_url: ${{ steps.urls.outputs.storage_url }}
