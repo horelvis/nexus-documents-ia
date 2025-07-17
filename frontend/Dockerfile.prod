@@ -1,5 +1,8 @@
 # Frontend Dockerfile for production deployment
-FROM node:18-alpine AS base
+FROM node:20-alpine AS base
+
+# Update npm to latest version
+RUN npm install -g npm@latest
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -7,12 +10,13 @@ WORKDIR /app
 
 # Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json* ./
+RUN npm ci
 COPY . .
 
 # Build arguments for environment variables
