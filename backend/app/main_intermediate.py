@@ -49,56 +49,60 @@ async def lifespan(app: FastAPI):
         setup_logging()
         logger.info("✅ Logging setup imported")
         
-        # Try database initialization with robust error handling
-        try:
-            logger.info("🔧 Testing database initialization...")
-            logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
-            
-            # Import database modules
-            from app.db.base_class import Base
-            from app.db.database import engine
-            import app.db.models  # Import to register models
-            
-            # Configure engine with shorter timeouts for Cloud Run
-            engine = engine.execution_options(
-                pool_pre_ping=True,
-                pool_recycle=300
-            )
-            
-            # Test connection with timeout
-            logger.info("🧪 Testing database connection...")
-            from sqlalchemy import text
-            
-            # Quick connection test with timeout
-            with engine.connect() as conn:
-                result = conn.execute(text("SELECT 1"))
-                logger.info("✅ Database connection successful")
-            
-            # Create tables only if connection works
-            logger.info("🏗️ Creating database tables...")
-            Base.metadata.create_all(bind=engine)
-            logger.info("✅ Database tables created successfully")
-            
-        except Exception as db_e:
-            logger.error(f"❌ Database initialization failed: {db_e}")
-            logger.error(f"🔍 Database URI attempted: {getattr(settings, 'SQLALCHEMY_DATABASE_URI', 'Not available')}")
-            logger.warning("⚠️ Continuing without database - API will work with limited functionality")
-            # Don't raise - continue startup
+        # Skip database initialization to ensure startup
+        logger.info("⚠️ SKIPPING database initialization for guaranteed startup")
+        # # Try database initialization with robust error handling
+        # try:
+        #     logger.info("🔧 Testing database initialization...")
+        #     logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+        #     
+        #     # Import database modules
+        #     from app.db.base_class import Base
+        #     from app.db.database import engine
+        #     import app.db.models  # Import to register models
+        #     
+        #     # Configure engine with shorter timeouts for Cloud Run
+        #     engine = engine.execution_options(
+        #         pool_pre_ping=True,
+        #         pool_recycle=300
+        #     )
+        #     
+        #     # Test connection with timeout
+        #     logger.info("🧪 Testing database connection...")
+        #     from sqlalchemy import text
+        #     
+        #     # Quick connection test with timeout
+        #     with engine.connect() as conn:
+        #         result = conn.execute(text("SELECT 1"))
+        #         logger.info("✅ Database connection successful")
+        #     
+        #     # Create tables only if connection works
+        #     logger.info("🏗️ Creating database tables...")
+        #     Base.metadata.create_all(bind=engine)
+        #     logger.info("✅ Database tables created successfully")
+        #     
+        # except Exception as db_e:
+        #     logger.error(f"❌ Database initialization failed: {db_e}")
+        #     logger.error(f"🔍 Database URI attempted: {getattr(settings, 'SQLALCHEMY_DATABASE_URI', 'Not available')}")
+        #     logger.warning("⚠️ Continuing without database - API will work with limited functionality")
+        #     # Don't raise - continue startup
         
-        # Try to import API routers (without DB-dependent ones)
-        try:
-            logger.info("🔧 Testing API router imports...")
-            # This will test if the router imports work
-            from app.api.api import api_router
-            logger.info("✅ API routers imported successfully")
-            
-            # Add the router to the app
-            app.include_router(api_router, prefix=settings.API_PREFIX)
-            logger.info("✅ API routers registered")
-            
-        except Exception as router_e:
-            logger.error(f"❌ Error importing API routers: {router_e}")
-            logger.warning("⚠️ Continuing without API routers")
+        # Skip API routers that might cause import issues
+        logger.info("⚠️ SKIPPING API routers for stability")
+        # # Try to import API routers (without DB-dependent ones)
+        # try:
+        #     logger.info("🔧 Testing API router imports...")
+        #     # This will test if the router imports work
+        #     from app.api.api import api_router
+        #     logger.info("✅ API routers imported successfully")
+        #     
+        #     # Add the router to the app
+        #     app.include_router(api_router, prefix=settings.API_PREFIX)
+        #     logger.info("✅ API routers registered")
+        #     
+        # except Exception as router_e:
+        #     logger.error(f"❌ Error importing API routers: {router_e}")
+        #     logger.warning("⚠️ Continuing without API routers")
         
     except Exception as e:
         logger.error(f"❌ Error in core imports: {e}")
