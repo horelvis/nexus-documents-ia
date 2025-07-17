@@ -77,7 +77,9 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_SERVER=localhost,POSTGRES_DB=nexusdocuments360db,POSTGRES_USER=postgres" \
+          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_SERVER=/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db,POSTGRES_DB=nexusdocuments360db,POSTGRES_USER=postgres" \
+          --set-secrets "POSTGRES_PASSWORD=postgres-password:latest" \
+          --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 0 \
           --max-instances 3 \
           --memory 512Mi \
