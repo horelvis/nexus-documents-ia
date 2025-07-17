@@ -2,6 +2,7 @@ from typing import List, Optional
 import os
 import datetime
 
+from backend.app.services.async_document_service import AsyncDocumentService
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
