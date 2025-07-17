@@ -25,11 +25,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application code
 COPY . .
 
+# Create non-root user
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
 # Expose port
 EXPOSE 8000
 
-# Run as root temporarily for debugging
-# USER appuser
-
-# Run the application with more verbose logging - Cloud Run sets PORT automatically
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level info --access-log"]
+# Run the application - Cloud Run sets PORT automatically
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level info"]

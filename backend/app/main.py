@@ -27,14 +27,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
     logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
     
-    # Try database initialization - continue if fails
+    # Database initialization with robust error handling (based on debugging)
     try:
-        logger.info("🔧 Attempting database initialization...")
+        logger.info("🔧 Initializing database...")
         logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
         
         from app.db.base_class import Base
         from app.db.database import engine
-        import app.db.models  # Importar módulo para registrar los modelos
+        import app.db.models  # Import to register models
+        
+        # Configure engine for Cloud Run
+        engine = engine.execution_options(
+            pool_pre_ping=True,
+            pool_recycle=300
+        )
         
         # Test connection first
         logger.info("🧪 Testing database connection...")
@@ -43,13 +49,24 @@ async def lifespan(app: FastAPI):
             result = conn.execute(text("SELECT 1"))
             logger.info("✅ Database connection successful")
         
-        # Crear todas las tablas desde los modelos
+        # Create tables
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Database structure verified/created")
         
+        # Try Alembic migration (non-fatal)
+        try:
+            logger.info("🔧 Running Alembic migrations...")
+            from app.db.migrations import auto_upgrade_database
+            auto_upgrade_database()
+            logger.info("✅ Alembic migrations completed")
+        except Exception as alembic_e:
+            logger.warning(f"⚠️ Alembic migration failed (continuing): {alembic_e}")
+        
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"🔍 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
         logger.warning("⚠️ Continuing without database - API will have limited functionality")
+        # Continue startup without raising
     
     logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     yield
