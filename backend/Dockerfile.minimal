@@ -3,8 +3,10 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install only FastAPI and uvicorn
+# Install FastAPI and requirements
+COPY requirements.txt .
 RUN pip install fastapi uvicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy intermediate app
 COPY app/main_intermediate.py app/main_intermediate.py

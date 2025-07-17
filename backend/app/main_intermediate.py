@@ -14,19 +14,24 @@ from contextlib import asynccontextmanager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Basic settings
-class Settings:
-    API_PREFIX: str = "/api/v1"
-    SERVER_NAME: str = "NexusDocs360 API"
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
-    BACKEND_CORS_ORIGINS = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://pre.nexusdocs360.app",
-        "https://pre-api.nexusdocs360.app"
-    ]
-
-settings = Settings()
+# Import real settings but skip database
+try:
+    from app.core.config import settings
+    logger.info("✅ Real settings imported successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to import real settings: {e}")
+    # Fallback to basic settings
+    class Settings:
+        API_PREFIX: str = "/api/v1"
+        SERVER_NAME: str = "NexusDocs360 API"
+        DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+        BACKEND_CORS_ORIGINS = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://pre.nexusdocs360.app",
+            "https://pre-api.nexusdocs360.app"
+        ]
+    settings = Settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +40,38 @@ async def lifespan(app: FastAPI):
     logger.info(f"📍 Server starting...")
     logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
-    logger.info("✅ Basic startup completed")
+    
+    # Try to import core modules (without DB)
+    try:
+        logger.info("🔧 Testing core imports...")
+        # Import logging setup
+        from app.core.logging import setup_logging
+        setup_logging()
+        logger.info("✅ Logging setup imported")
+        
+        # Skip database imports for now
+        logger.info("⚠️ SKIPPING database imports for testing")
+        
+        # Try to import API routers (without DB-dependent ones)
+        try:
+            logger.info("🔧 Testing API router imports...")
+            # This will test if the router imports work
+            from app.api.api import api_router
+            logger.info("✅ API routers imported successfully")
+            
+            # Add the router to the app
+            app.include_router(api_router, prefix=settings.API_PREFIX)
+            logger.info("✅ API routers registered")
+            
+        except Exception as router_e:
+            logger.error(f"❌ Error importing API routers: {router_e}")
+            logger.warning("⚠️ Continuing without API routers")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in core imports: {e}")
+        logger.warning("⚠️ Continuing with basic configuration")
+    
+    logger.info("✅ Startup completed")
     yield
     # Shutdown
     logger.info("⏹️ Application shutdown...")
