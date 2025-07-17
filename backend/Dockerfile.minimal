@@ -6,11 +6,11 @@ WORKDIR /app
 # Install only FastAPI and uvicorn
 RUN pip install fastapi uvicorn
 
-# Copy minimal app
-COPY app/main_minimal.py app/main_minimal.py
+# Copy intermediate app
+COPY app/main_intermediate.py app/main_intermediate.py
 
 # Expose port
 EXPOSE 8000
 
-# Run minimal app - Cloud Run sets PORT automatically
-CMD ["sh", "-c", "python -m uvicorn app.main_minimal:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info"]
+# Run intermediate app - Cloud Run sets PORT automatically
+CMD ["sh", "-c", "python -m uvicorn app.main_intermediate:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info"]
