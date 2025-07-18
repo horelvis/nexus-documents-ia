@@ -49,43 +49,27 @@ async def lifespan(app: FastAPI):
         setup_logging()
         logger.info("✅ Logging setup imported")
         
-        # Skip database initialization to ensure startup
-        logger.info("⚠️ SKIPPING database initialization for guaranteed startup")
-        # # Try database initialization with robust error handling
-        # try:
-        #     logger.info("🔧 Testing database initialization...")
-        #     logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
-        #     
-        #     # Import database modules
-        #     from app.db.base_class import Base
-        #     from app.db.database import engine
-        #     import app.db.models  # Import to register models
-        #     
-        #     # Configure engine with shorter timeouts for Cloud Run
-        #     engine = engine.execution_options(
-        #         pool_pre_ping=True,
-        #         pool_recycle=300
-        #     )
-        #     
-        #     # Test connection with timeout
-        #     logger.info("🧪 Testing database connection...")
-        #     from sqlalchemy import text
-        #     
-        #     # Quick connection test with timeout
-        #     with engine.connect() as conn:
-        #         result = conn.execute(text("SELECT 1"))
-        #         logger.info("✅ Database connection successful")
-        #     
-        #     # Create tables only if connection works
-        #     logger.info("🏗️ Creating database tables...")
-        #     Base.metadata.create_all(bind=engine)
-        #     logger.info("✅ Database tables created successfully")
-        #     
-        # except Exception as db_e:
-        #     logger.error(f"❌ Database initialization failed: {db_e}")
-        #     logger.error(f"🔍 Database URI attempted: {getattr(settings, 'SQLALCHEMY_DATABASE_URI', 'Not available')}")
-        #     logger.warning("⚠️ Continuing without database - API will work with limited functionality")
-        #     # Don't raise - continue startup
+        # Initialize database using environment-aware proxy
+        try:
+            logger.info("🔧 Initializing database with environment detection...")
+            
+            from app.db.database_proxy import db_proxy
+            
+            # Initialize database connection (auto-detects environment)
+            if db_proxy.initialize():
+                logger.info("✅ Database proxy initialized")
+                
+                # Create tables
+                if db_proxy.create_tables():
+                    logger.info("✅ Database tables ready")
+                else:
+                    logger.warning("⚠️ Table creation failed, but connection works")
+            else:
+                logger.warning("⚠️ Database proxy initialization failed")
+                
+        except Exception as db_e:
+            logger.error(f"❌ Database initialization failed: {db_e}")
+            logger.warning("⚠️ Continuing without database - API will have limited functionality")
         
         # Skip API routers that might cause import issues
         logger.info("⚠️ SKIPPING API routers for stability")
@@ -147,11 +131,28 @@ async def health_v1():
 
 @app.get("/debug")
 async def debug():
+    # Check database status
+    db_status = "unknown"
+    try:
+        from app.db.database_proxy import db_proxy
+        if db_proxy.health_check():
+            db_status = "healthy"
+        else:
+            db_status = "unhealthy"
+    except:
+        db_status = "error"
+        
     return {
         "environment": {
             "DEBUG": settings.DEBUG,
             "PORT": os.getenv("PORT", "8000"),
-            "API_PREFIX": settings.API_PREFIX
+            "API_PREFIX": settings.API_PREFIX,
+            "K_SERVICE": os.getenv("K_SERVICE", "not_set"),
+            "ENVIRONMENT": os.getenv("ENVIRONMENT", "unknown")
+        },
+        "database": {
+            "status": db_status,
+            "environment": os.getenv("K_SERVICE") and "cloud_run" or "local"
         },
         "status": "debug_mode_active"
     }
