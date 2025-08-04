@@ -78,14 +78,15 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db" \
+          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db,PYTHONUNBUFFERED=1" \
           --set-secrets "POSTGRES_PASSWORD=postgres-password:latest" \
           --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 0 \
           --max-instances 3 \
-          --memory 512Mi \
-          --cpu 1 \
-          --timeout 300
+          --memory 1Gi \
+          --cpu 2 \
+          --timeout 900 \
+          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
 
     # Deploy Storage Service to Cloud Run
     - name: Deploy Storage Service to Cloud Run

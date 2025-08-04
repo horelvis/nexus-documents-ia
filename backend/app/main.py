@@ -27,29 +27,38 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
     logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
     
-    # Crear tablas si no existen
-    try:
-        logger.info("🔧 Verificando estructura de base de datos...")
-        from app.db.base_class import Base
-        from app.db.database import engine
-        import app.db.models  # Importar módulo para registrar los modelos
-        
-        # Crear todas las tablas desde los modelos
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Estructura de base de datos verificada/creada")
-        
-        # Auto-upgrade de la base de datos (solo para registrar versión de Alembic)
-        logger.info("🔧 Registrando versión de Alembic...")
-        from app.db.migrations import auto_upgrade_database
-        auto_upgrade_database()
-        logger.info("✅ Versión de Alembic registrada")
-    except Exception as e:
-        logger.error(f"❌ Error en configuración de BD: {e}")
-        if not settings.DEBUG:
-            logger.error("💥 Aplicación no puede iniciar sin BD")
-            raise
-        else:
-            logger.warning("⚠️ Continuando en modo DEBUG a pesar del error de BD")
+    # Crear tablas si no existen - con reintentos para producción
+    max_retries = 3
+    retry_delay = 10
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"🔧 Verificando estructura de base de datos... (intento {attempt + 1}/{max_retries})")
+            from app.db.base_class import Base
+            from app.db.database import engine
+            import app.db.models  # Importar módulo para registrar los modelos
+            
+            # Crear todas las tablas desde los modelos
+            Base.metadata.create_all(bind=engine)
+            logger.info("✅ Estructura de base de datos verificada/creada")
+            
+            # Auto-upgrade de la base de datos (solo para registrar versión de Alembic)
+            logger.info("🔧 Registrando versión de Alembic...")
+            from app.db.migrations import auto_upgrade_database
+            auto_upgrade_database()
+            logger.info("✅ Versión de Alembic registrada")
+            break  # Éxito, salir del loop
+        except Exception as e:
+            logger.error(f"❌ Error en configuración de BD (intento {attempt + 1}): {e}")
+            if attempt == max_retries - 1:  # Último intento
+                if not settings.DEBUG:
+                    logger.warning("⚠️ Continuando sin BD - la aplicación intentará conectar más tarde")
+                else:
+                    logger.warning("⚠️ Continuando en modo DEBUG a pesar del error de BD")
+            else:
+                logger.info(f"⏳ Reintentando en {retry_delay} segundos...")
+                import asyncio
+                await asyncio.sleep(retry_delay)
     
     logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     yield
