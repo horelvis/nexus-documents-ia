@@ -1,4 +1,4 @@
-# Actualización para app/main.py
+# Actualización para app/main.py - v0.1.1
 
 import logging
 from fastapi import FastAPI, Request, Depends, HTTPException
