@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
+    
+    # Production/Staging URLs
+    STAGING_FRONTEND_URL: str = "https://pre.nexusdocs360.app"
+    STAGING_API_URL: str = "https://api.pre.nexusdocs360.app"
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode

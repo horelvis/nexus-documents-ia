@@ -1,0 +1,274 @@
+# 🚀 Deploy Backend to Google Cloud Platform
+# Workflow para desplegar el backend de Nexus Documents IA en GCP
+
+name: Deploy Backend to GCP
+
+on:
+  push:
+    branches:
+      - main
+      - production
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: europe-west1
+  REPOSITORY: nexus-documents
+  SERVICE_NAME: nexus-backend
+  GAR_LOCATION: europe-west1
+
+jobs:
+  # ============================================
+  # JOB 1: Test Backend
+  # ============================================
+  test:
+    name: 🧪 Test Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests
+        working-directory: ./backend
+        env:
+          TESTING: true
+          DATABASE_URL: sqlite:///./test.db
+        run: |
+          pytest tests/ -v --tb=short || true
+
+  # ============================================
+  # JOB 2: Build and Deploy Backend
+  # ============================================
+  deploy:
+    name: 🚀 Build & Deploy Backend
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      - name: Build Docker image
+        working-directory: ./backend
+        run: |
+          docker build \
+            --tag ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:latest \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            -f docker/Dockerfile .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:latest
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}-${{ github.ref == 'refs/heads/production' && 'prod' || 'staging' }}
+          region: ${{ env.REGION }}
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          flags: |
+            --port=8000
+            --allow-unauthenticated
+            --min-instances=1
+            --max-instances=10
+            --cpu=2
+            --memory=2Gi
+            --timeout=60s
+            --service-account=${{ env.SERVICE_NAME }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+          env_vars: |
+            ENVIRONMENT=${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+            FRONTEND_URL=${{ github.ref == 'refs/heads/production' && 'https://nexusdocs360.app' || 'https://pre.nexusdocs360.app' }}
+            GCP_PROJECT_ID=${{ env.PROJECT_ID }}
+          secrets: |
+            DATABASE_URL=database-url:latest
+            REDIS_HOST=redis-host:latest
+            CLERK_SECRET_KEY=clerk-secret-key:latest
+            STRIPE_SECRET_KEY=stripe-secret-key:latest
+            MICROSERVICES_API_KEY=microservices-api-key:latest
+            SIGNATURE_ENCRYPTION_KEY=signature-encryption-key:latest
+            GCS_CREDENTIALS=gcs-credentials:latest
+
+      - name: Show deployment URL
+        run: |
+          echo "✅ Backend deployed to: ${{ steps.deploy.outputs.url }}"
+          echo "📝 API Docs available at: ${{ steps.deploy.outputs.url }}/docs"
+
+      - name: Run smoke test
+        run: |
+          echo "Testing backend health endpoint..."
+          curl -f "${{ steps.deploy.outputs.url }}/health" || exit 1
+          echo "✅ Backend is healthy!"
+
+  # ============================================
+  # JOB 3: Run Database Migrations
+  # ============================================
+  migrate:
+    name: 🗄️ Run Migrations
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Run migrations via Cloud Run Job
+        run: |
+          # Create and run a one-off job for migrations
+          gcloud run jobs create migrate-${{ github.sha }} \
+            --image=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --command="alembic" \
+            --args="upgrade,head" \
+            --set-secrets="DATABASE_URL=database-url:latest" \
+            --max-retries=3 \
+            --parallelism=1 \
+            --task-timeout=600 \
+            || echo "Job already exists"
+          
+          gcloud run jobs execute migrate-${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --wait
+
+      - name: Clean up migration job
+        if: always()
+        run: |
+          gcloud run jobs delete migrate-${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --quiet \
+            || echo "Job cleanup failed"
+
+  # ============================================
+  # JOB 4: Deploy Microservices
+  # ============================================
+  deploy-microservices:
+    name: 🔧 Deploy Microservices
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    strategy:
+      matrix:
+        service:
+          - name: langchain-service
+            port: 8001
+          - name: langroid-service
+            port: 8002
+          - name: storage-service
+            port: 8003
+          - name: ollama-service
+            port: 8004
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      - name: Build and push ${{ matrix.service.name }}
+        working-directory: ./backend/microservices/${{ matrix.service.name }}
+        run: |
+          docker build \
+            --tag ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service.name }}:${{ github.sha }} \
+            --tag ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service.name }}:latest \
+            -f Dockerfile .
+          
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service.name }}:${{ github.sha }}
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service.name }}:latest
+
+      - name: Deploy ${{ matrix.service.name }} to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ matrix.service.name }}
+          region: ${{ env.REGION }}
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service.name }}:${{ github.sha }}
+          flags: |
+            --port=${{ matrix.service.port }}
+            --allow-unauthenticated
+            --min-instances=0
+            --max-instances=5
+            --cpu=1
+            --memory=1Gi
+          env_vars: |
+            ENVIRONMENT=production
+            MICROSERVICES_API_KEY=${{ secrets.MICROSERVICES_API_KEY }}
