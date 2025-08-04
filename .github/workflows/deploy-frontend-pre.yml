@@ -1,0 +1,142 @@
+name: Deploy Frontend to PRE Environment
+
+on:
+  push:
+    branches:
+      - pre
+      - develp-new  # Agregado para tu rama actual
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend-pre.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      backend_url:
+        description: 'Backend URL to use for frontend build'
+        required: false
+        type: string
+        default: 'https://pre-api.nexusdocs360.app'
+
+env:
+  PROJECT_ID: nexusdocs360-pre
+  REGION: europe-west1
+  GAR_LOCATION: europe-west1-docker.pkg.dev
+  REPOSITORY: nexusdocs360-pre
+
+jobs:
+  deploy-frontend:
+    name: Deploy Frontend Application
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Authenticate to Google Cloud
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY_PRE }}'
+
+    # Setup gcloud CLI
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    # Configure Docker
+    - name: Configure Docker
+      run: |
+        gcloud auth configure-docker ${{ env.GAR_LOCATION }}
+
+    # Get Backend URL (from input or existing service)
+    - name: Get Backend URL
+      id: backend
+      run: |
+        if [ -n "${{ inputs.backend_url }}" ]; then
+          BACKEND_URL="${{ inputs.backend_url }}"
+        else
+          BACKEND_URL=$(gcloud run services describe nexus-backend-pre --region=${{ env.REGION }} --format='value(status.url)' 2>/dev/null || echo "https://pre-api.nexusdocs360.app")
+        fi
+        echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+        echo "Using Backend URL: $BACKEND_URL"
+
+    # Build and push Frontend image
+    - name: Build and Push Frontend
+      run: |
+        cd frontend
+        docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
+          -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest \
+          --build-arg NEXT_PUBLIC_API_BASE_URL=${{ steps.backend.outputs.backend_url }} \
+          --build-arg NEXT_PUBLIC_FRONTEND_URL=https://pre.nexusdocs360.app \
+          --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_ZGVlcC1yYWJiaXQtMjkuY2xlcmsuYWNjb3VudHMuZGV2JA \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_URL=/auth/sign-in \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/sign-up \
+          --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard \
+          --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/onboarding \
+          --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_51RitIlR8hZSzPrz7s9giSrKIVQOQrHkxnlDkpRvxFwlJwAayDMsbqlkoweIq164iInWmYsYGaRZ0Tkn7oTKW3d7c00bl16u2XR \
+          -f Dockerfile.prod \
+          .
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
+        docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
+
+    # Deploy Frontend to Cloud Run
+    - name: Deploy Frontend to Cloud Run
+      run: |
+        gcloud run deploy nexus-frontend-pre \
+          --image ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
+          --region ${{ env.REGION }} \
+          --platform managed \
+          --port 3000 \
+          --allow-unauthenticated \
+          --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+          --set-env-vars "NODE_ENV=production,ENVIRONMENT=pre,NEXT_TELEMETRY_DISABLED=1" \
+          --min-instances 0 \
+          --max-instances 10 \
+          --memory 512Mi \
+          --cpu 1 \
+          --timeout 300 \
+          --concurrency 100
+
+    # Get Frontend URL
+    - name: Get Frontend URL
+      id: frontend
+      run: |
+        FRONTEND_URL=$(gcloud run services describe nexus-frontend-pre --region=${{ env.REGION }} --format='value(status.url)')
+        echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+        echo "🌐 Frontend: $FRONTEND_URL"
+
+    # Update Nginx configuration (if exists)
+    - name: Update Nginx Configuration
+      continue-on-error: true
+      run: |
+        FRONTEND_URL=${{ steps.frontend.outputs.frontend_url }}
+        BACKEND_URL=${{ steps.backend.outputs.backend_url }}
+        
+        echo "Updating Nginx with:"
+        echo "Frontend: $FRONTEND_URL"
+        echo "Backend: $BACKEND_URL"
+        
+        gcloud compute ssh nginx-proxy-pre --zone=europe-west1-b --command="
+          # Update frontend configuration
+          sudo sed -i \"s|proxy_pass .*frontend.*;|proxy_pass \${FRONTEND_URL};|\" /etc/nginx/sites-available/nexusdocs360-pre
+          sudo nginx -s reload
+        " || echo "Note: Nginx update skipped. Instance may not exist."
+
+    # Frontend deployment notification
+    - name: Frontend Deployment Notification
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Frontend deployment to PRE environment completed successfully!"
+          echo "🌐 Frontend: ${{ steps.frontend.outputs.frontend_url }}"
+          echo "🔗 Custom Domain: https://pre.nexusdocs360.app"
+        else
+          echo "❌ Frontend deployment to PRE environment failed!"
+        fi
+
+    outputs:
+      frontend_url: ${{ steps.frontend.outputs.frontend_url }}
