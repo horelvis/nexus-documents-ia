@@ -250,6 +250,9 @@ export function useBackendUser() {
   return { backendUser, userLoading, userError }
 }
 
+// Re-export useUser from Clerk for convenience
+export { useUser } from '@clerk/nextjs'
+
 export function useOnboardingStatus() {
   const { onboarding } = useUserContext()
   return onboarding
