@@ -6,13 +6,7 @@ from enum import Enum
 
 class GraphType(str, Enum):
     """Available graph types"""
-    TAG_GENERATION = "tag_generation"
-    DOCUMENT_PROCESSING = "document_processing"
-    CAG = "cag"  # Contextual Augmented Generation (includes RAG capabilities)
-    CONVERSATIONAL = "conversational"
-    ANALYTICAL = "analytical"
-    CREW_ORCHESTRATION = "crew_orchestration"
-    DOCUMENT_ANALYSIS_CREW = "document_analysis_crew"
+    CAG = "cag"  # Contextual Augmented Generation - handles all document Q&A needs
 
 
 class GraphExecutionMode(str, Enum):
@@ -88,59 +82,6 @@ class GraphRunResult(BaseModel):
     checkpoint_id: Optional[str] = None
 
 
-class TagGenerationInput(BaseModel):
-    """Input for tag generation graph"""
-    text: str
-    max_tags: int = 5
-    tag_type: str = "general"  # general, technical, business
-
-
-class TagGenerationOutput(BaseModel):
-    """Output from tag generation graph"""
-    tags: List[str]
-    confidence_scores: Optional[Dict[str, float]] = None
-    reasoning: Optional[str] = None
-
-
-class DocumentProcessingInput(BaseModel):
-    """Input for document processing graph"""
-    document_id: str
-    content: str
-    filename: str
-    tenant_id: str
-    user_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class DocumentProcessingOutput(BaseModel):
-    """Output from document processing graph"""
-    document_id: str
-    chunks: List[Dict[str, Any]]
-    embeddings_generated: bool
-    metadata: Dict[str, Any]
-    quality_score: Optional[float] = None
-    processing_notes: Optional[List[str]] = None
-
-
-class RAGInput(BaseModel):
-    """Input for RAG graph"""
-    query: str
-    tenant_id: str
-    user_id: Optional[str] = None
-    max_results: int = 5
-    filters: Optional[Dict[str, Any]] = None
-    include_sources: bool = True
-
-
-class RAGOutput(BaseModel):
-    """Output from RAG graph"""
-    answer: str
-    sources: Optional[List[Dict[str, Any]]] = None
-    confidence_score: float
-    search_results: Optional[List[Dict[str, Any]]] = None
-    refinement_notes: Optional[str] = None
-
-
 class CAGInput(BaseModel):
     """Input for CAG (Contextual Augmented Generation) graph"""
     query: str
@@ -165,22 +106,3 @@ class CAGOutput(BaseModel):
     gaps_filled: Optional[int] = None
     context_expansion_count: Optional[int] = None
     quality_metrics: Optional[Dict[str, float]] = None
-
-
-class CrewOrchestrationInput(BaseModel):
-    """Input for CrewAI orchestration graph"""
-    query: str
-    task_type: Optional[str] = "general"
-    metadata: Optional[Dict[str, Any]] = None
-    preferred_agents: Optional[List[str]] = None
-    max_agents: int = 3
-
-
-class CrewOrchestrationOutput(BaseModel):
-    """Output from CrewAI orchestration"""
-    synthesis: str
-    confidence_score: float
-    agents_used: List[str]
-    memory_insights: int
-    success: bool
-    agent_contributions: Optional[Dict[str, str]] = None

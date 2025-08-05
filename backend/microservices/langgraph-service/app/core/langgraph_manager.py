@@ -125,15 +125,11 @@ class LangGraphManager:
     async def _register_graphs(self):
         """Register all available graph types"""
         try:
-            from app.graphs.tag_generation_graph import TagGenerationGraph
-            from app.graphs.document_processing_graph import DocumentProcessingGraph
             from app.graphs.cag_graph import CAGGraph
             
-            # Register core graph classes
+            # Register only CAG - it handles all document Q&A needs
             self.graphs = {
-                "tag_generation": TagGenerationGraph,
-                "document_processing": DocumentProcessingGraph,
-                "cag": CAGGraph,  # Contextual Augmented Generation (includes RAG capabilities)
+                "cag": CAGGraph,  # Contextual Augmented Generation - the only graph needed
             }
             
             # Try to register CrewAI graphs (may fail due to dependencies)
