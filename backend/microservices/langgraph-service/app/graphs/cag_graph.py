@@ -17,7 +17,7 @@ from app.core.cag_engine import (
     ContextSource,
     ContextGapType
 )
-from app.graphs.rag_graph import EnhancedRAGGraph
+# Removed dependency on RAG graph - CAG is self-contained
 
 
 class CAGGraphState(TypedDict):
@@ -87,14 +87,7 @@ class CAGGraph:
             config=self.cag_config
         )
         
-        # Initialize RAG Graph
-        self.rag_graph = EnhancedRAGGraph(
-            llm=llm,
-            embeddings=embeddings,
-            qdrant_client=qdrant_client,
-            checkpointer=checkpointer,
-            tenant_id=tenant_id
-        )
+        # CAG is self-contained, no need for separate RAG graph
         
         self.graph = self._build_graph()
     
@@ -165,36 +158,41 @@ class CAGGraph:
         return state
     
     async def initial_rag_search(self, state: CAGGraphState) -> CAGGraphState:
-        """Perform initial RAG search"""
-        logger.info("Performing initial RAG search")
+        """Perform initial search using vector service"""
+        logger.info("Performing initial vector search")
         
-        # Use the existing RAG graph
-        rag_result = await self.rag_graph.ainvoke({
-            "query": state["query"],
-            "tenant_id": state["tenant_id"],
-            "user_id": state.get("user_id"),
-            "max_results": 10,
-            "include_sources": True
-        })
-        
-        # Extract results
-        state["rag_results"] = rag_result.get("search_results", [])
-        state["rag_context"] = self._build_rag_context(rag_result)
-        
-        # Convert RAG results to context chunks
-        context_chunks = []
-        for i, result in enumerate(state["rag_results"][:5]):
-            chunk = {
-                "content": result.get("content", ""),
-                "source": ContextSource.VECTOR_SEARCH.value,
-                "relevance_score": result.get("score", 0.0),
-                "timestamp": datetime.utcnow().isoformat(),
-                "chunk_id": f"rag_{i}",
-                "metadata": result.get("metadata", {})
-            }
-            context_chunks.append(chunk)
-        
-        state["context_chunks"] = context_chunks
+        # Direct vector search using the CAG engine's vector service
+        try:
+            search_results = await self.cag_engine.vector_service.search_similar(
+                query=state["query"],
+                limit=10,
+                filters=state.get("filters")
+            )
+            
+            # Store results
+            state["rag_results"] = search_results
+            
+            # Convert search results to context chunks
+            context_chunks = []
+            for i, result in enumerate(search_results[:5]):
+                chunk = {
+                    "content": result.get("text", ""),
+                    "source": ContextSource.VECTOR_SEARCH.value,
+                    "relevance_score": result.get("score", 0.0),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "chunk_id": f"initial_{i}",
+                    "metadata": result.get("metadata", {})
+                }
+                context_chunks.append(chunk)
+            
+            state["context_chunks"] = context_chunks
+            state["rag_context"] = "\n\n".join([chunk["content"] for chunk in context_chunks])
+            
+        except Exception as e:
+            logger.error(f"Error in initial search: {e}")
+            state["rag_results"] = []
+            state["context_chunks"] = []
+            state["rag_context"] = ""
         
         return state
     
@@ -451,17 +449,6 @@ Provide a comprehensive answer based on the context above.
         
         return state
     
-    def _build_rag_context(self, rag_result: Dict[str, Any]) -> str:
-        """Build context text from RAG results"""
-        sources = rag_result.get("sources", [])
-        if not sources:
-            return ""
-        
-        context_parts = []
-        for source in sources[:5]:  # Top 5 sources
-            context_parts.append(source.get("content", ""))
-        
-        return "\n\n".join(context_parts)
     
     async def ainvoke(self, input_data: Dict[str, Any], config: Optional[Dict[str, Any]] = None):
         """Invoke the CAG graph"""

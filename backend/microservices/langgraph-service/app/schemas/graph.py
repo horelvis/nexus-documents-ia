@@ -8,8 +8,7 @@ class GraphType(str, Enum):
     """Available graph types"""
     TAG_GENERATION = "tag_generation"
     DOCUMENT_PROCESSING = "document_processing"
-    RAG = "rag"
-    CAG = "cag"  # Contextual Augmented Generation
+    CAG = "cag"  # Contextual Augmented Generation (includes RAG capabilities)
     CONVERSATIONAL = "conversational"
     ANALYTICAL = "analytical"
     CREW_ORCHESTRATION = "crew_orchestration"

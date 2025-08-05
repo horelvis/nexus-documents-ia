@@ -127,15 +127,13 @@ class LangGraphManager:
         try:
             from app.graphs.tag_generation_graph import TagGenerationGraph
             from app.graphs.document_processing_graph import DocumentProcessingGraph
-            from app.graphs.rag_graph import EnhancedRAGGraph
             from app.graphs.cag_graph import CAGGraph
             
             # Register core graph classes
             self.graphs = {
                 "tag_generation": TagGenerationGraph,
                 "document_processing": DocumentProcessingGraph,
-                "rag": EnhancedRAGGraph,
-                "cag": CAGGraph,  # NEW: Contextual Augmented Generation
+                "cag": CAGGraph,  # Contextual Augmented Generation (includes RAG capabilities)
             }
             
             # Try to register CrewAI graphs (may fail due to dependencies)
