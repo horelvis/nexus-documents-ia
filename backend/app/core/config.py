@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
     
+    @field_validator("ALLOWED_EXTENSIONS", mode="before")
+    def parse_allowed_extensions(cls, v):
+        if isinstance(v, str):
+            return [ext.strip() for ext in v.split(",")]
+        return v
+    
     # Tenants
     MULTI_TENANT: bool = True
     DEFAULT_TENANT: str = "default"
