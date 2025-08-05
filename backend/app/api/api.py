@@ -2,7 +2,7 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search, teams, langgraph, users, entities, dashboard
+    agents, signatures, webhooks, search, teams, langgraph, users, entities, dashboard, document_analyzer
 )
 from fastapi import APIRouter
 
@@ -56,3 +56,6 @@ api_router.include_router(entities.router, tags=["entities"])
 
 # Dashboard and analytics
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+
+# Document Analyzer - CAG-based document analysis
+api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

@@ -26,6 +26,7 @@ from app.api import graphs as graph_routes
 from app.api import embeddings as embeddings_routes
 from app.api import vector_search as vector_routes
 from app.api import llm as llm_routes
+from app.api import document_analyzer as analyzer_routes
 from app.core.langgraph_manager import LangGraphManager
 
 
@@ -142,6 +143,11 @@ app.include_router(
     llm_routes.router,
     prefix="/api/v1",
     tags=["llm"]
+)
+app.include_router(
+    analyzer_routes.router,
+    prefix="/api/v1/analyzer",
+    tags=["document-analyzer"]
 )
 
 

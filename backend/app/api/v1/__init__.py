@@ -8,6 +8,7 @@ from app.api.v1.signatures import router as signatures_router
 from app.api.v1.signature_ai import router as signature_ai_router
 from app.api.v1.signature_contacts import router as signature_contacts_router
 from app.api.v1.entities import router as entities_router
+from app.api.v1.document_analyzer import router as document_analyzer_router
 
 # Optional: Define __all__ to specify what gets imported with 'from app.api.v1 import *'
 # For clarity, it's often better to rely on specific imports as done in main.py,
@@ -23,4 +24,5 @@ __all__ = [
     "signature_ai_router",
     "signature_contacts_router",
     "entities_router",
+    "document_analyzer_router",
 ]
