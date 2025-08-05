@@ -2,7 +2,8 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search, teams, langgraph, users, entities, dashboard, document_analyzer
+    agents, signatures, webhooks, search, teams, langgraph, users, entities, dashboard, document_analyzer,
+    contract_intelligence
 )
 from fastapi import APIRouter
 
@@ -59,3 +60,6 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 
 # Document Analyzer - CAG-based document analysis
 api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])
+
+# Contract Intelligence - AI-powered contract analysis
+api_router.include_router(contract_intelligence.router, prefix="/contracts", tags=["contract-intelligence"])
