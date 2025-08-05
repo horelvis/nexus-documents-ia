@@ -119,9 +119,22 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
     @classmethod
     def parse_allowed_extensions(cls, v):
+        # Debug print
+        print(f"DEBUG: ALLOWED_EXTENSIONS validator received: {v!r} (type: {type(v)})")
+        
+        if v is None:
+            # Return default value if not provided
+            return ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
         if isinstance(v, str):
-            return [ext.strip() for ext in v.split(",")]
-        return v
+            # Handle comma-separated string from env
+            result = [ext.strip() for ext in v.split(",") if ext.strip()]
+            print(f"DEBUG: Parsed string to list: {result}")
+            return result
+        if isinstance(v, list):
+            return v
+        # If it's something else, return the default
+        print(f"DEBUG: Unexpected type, returning default")
+        return ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
     
     # Tenants
     MULTI_TENANT: bool = True
