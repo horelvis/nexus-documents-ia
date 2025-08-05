@@ -112,29 +112,20 @@ class Settings(BaseSettings):
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
-    ALLOWED_EXTENSIONS: List[str] = ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
+    # Store as string to avoid JSON parsing issues
+    _ALLOWED_EXTENSIONS: str = "pdf,docx,txt,md,csv,xlsx,png,jpg,jpeg,gif,bmp,tiff,webp,json"
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
     
-    @field_validator("ALLOWED_EXTENSIONS", mode="before")
-    @classmethod
-    def parse_allowed_extensions(cls, v):
-        # Debug print
-        print(f"DEBUG: ALLOWED_EXTENSIONS validator received: {v!r} (type: {type(v)})")
+    @property
+    def ALLOWED_EXTENSIONS(self) -> List[str]:
+        """Parse comma-separated extensions into list"""
+        if hasattr(self, '_allowed_extensions_parsed'):
+            return self._allowed_extensions_parsed
         
-        if v is None:
-            # Return default value if not provided
-            return ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
-        if isinstance(v, str):
-            # Handle comma-separated string from env
-            result = [ext.strip() for ext in v.split(",") if ext.strip()]
-            print(f"DEBUG: Parsed string to list: {result}")
-            return result
-        if isinstance(v, list):
-            return v
-        # If it's something else, return the default
-        print(f"DEBUG: Unexpected type, returning default")
-        return ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
+        extensions_str = os.getenv("ALLOWED_EXTENSIONS", self._ALLOWED_EXTENSIONS)
+        self._allowed_extensions_parsed = [ext.strip() for ext in extensions_str.split(",") if ext.strip()]
+        return self._allowed_extensions_parsed
     
     # Tenants
     MULTI_TENANT: bool = True
