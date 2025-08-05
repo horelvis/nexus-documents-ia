@@ -65,13 +65,11 @@ class EnhancedRAGGraph:
         # Set entry point
         workflow.set_entry_point("analyze_query")
         
-        # Add edges - parallel search
+        # Sequential search approach for now
         workflow.add_edge("analyze_query", "vector_search")
-        workflow.add_edge("analyze_query", "keyword_search")
-        workflow.add_edge("analyze_query", "metadata_search")
-        
-        # Merge all search results
-        workflow.add_edge(["vector_search", "keyword_search", "metadata_search"], "merge_results")
+        workflow.add_edge("vector_search", "keyword_search")
+        workflow.add_edge("keyword_search", "metadata_search")
+        workflow.add_edge("metadata_search", "merge_results")
         
         # Continue processing
         workflow.add_edge("merge_results", "rerank_results")
@@ -90,8 +88,8 @@ class EnhancedRAGGraph:
         
         workflow.add_edge("refine_answer", END)
         
-        # Compile with checkpointer
-        return workflow.compile(checkpointer=self.checkpointer)
+        # Compile without checkpointer for now (TODO: fix checkpointer type)
+        return workflow.compile()
     
     async def analyze_query(self, state: RAGState) -> RAGState:
         """Analyze query to understand intent and optimize search"""

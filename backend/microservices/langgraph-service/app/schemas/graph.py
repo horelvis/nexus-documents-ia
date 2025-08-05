@@ -9,6 +9,7 @@ class GraphType(str, Enum):
     TAG_GENERATION = "tag_generation"
     DOCUMENT_PROCESSING = "document_processing"
     RAG = "rag"
+    CAG = "cag"  # Contextual Augmented Generation
     CONVERSATIONAL = "conversational"
     ANALYTICAL = "analytical"
     CREW_ORCHESTRATION = "crew_orchestration"
@@ -139,6 +140,32 @@ class RAGOutput(BaseModel):
     confidence_score: float
     search_results: Optional[List[Dict[str, Any]]] = None
     refinement_notes: Optional[str] = None
+
+
+class CAGInput(BaseModel):
+    """Input for CAG (Contextual Augmented Generation) graph"""
+    query: str
+    tenant_id: str
+    user_id: Optional[str] = None
+    enable_cag: bool = True
+    max_iterations: int = 5
+    quality_threshold: float = 0.8
+    initial_context: Optional[List[Dict[str, Any]]] = None
+    filters: Optional[Dict[str, Any]] = None
+
+
+class CAGOutput(BaseModel):
+    """Output from CAG graph"""
+    answer: str
+    confidence_score: float
+    sources: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+    # CAG-specific metadata
+    cag_iterations: Optional[int] = None
+    gaps_identified: Optional[int] = None
+    gaps_filled: Optional[int] = None
+    context_expansion_count: Optional[int] = None
+    quality_metrics: Optional[Dict[str, float]] = None
 
 
 class CrewOrchestrationInput(BaseModel):

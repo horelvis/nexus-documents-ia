@@ -1,7 +1,7 @@
 """
-LangChain Client Service - Interface para comunicarse con el microservicio LangChain
-NOTA: Esta es una implementación simplificada para mantener compatibilidad con servicios existentes.
-Para agentes avanzados, usar LangroidClient en su lugar.
+LangChain Client Service - Interface para comunicarse con el microservicio LangGraph
+NOTA: Esta interfaz ahora apunta al servicio LangGraph que consolidó toda la funcionalidad de LangChain.
+Los endpoints han sido migrados pero mantienen compatibilidad con la API existente.
 """
 import asyncio
 import logging
@@ -72,7 +72,7 @@ class LangChainClient:
             headers = self._get_auth_headers(tenant_id)
             
             response = await self.http_client.post(
-                f"{self.base_url}/embeddings",
+                f"{self.base_url}/api/v1/embeddings/generate",
                 json=payload,
                 headers=headers
             )
@@ -120,7 +120,7 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                f"{self.base_url}/llm/generate",
+                f"{self.base_url}/api/v1/llm/generate",
                 json=payload,
                 headers=self._get_auth_headers(tenant_id)
             )
@@ -176,7 +176,7 @@ class LangChainClient:
             }
             
             response = await self.http_client.post(
-                f"{self.base_url}/search",
+                f"{self.base_url}/api/v1/vector/search",
                 json=payload,
                 headers=self._get_auth_headers(tenant_id)
             )
@@ -226,7 +226,7 @@ class LangChainClient:
             headers = self._get_auth_headers(tenant_id)
             
             response = await self.http_client.post(
-                f"{self.base_url}/documents/add-single", # Correct endpoint
+                f"{self.base_url}/api/v1/vector/documents/add-single",
                 json=payload,
                 headers=headers
             )
@@ -294,7 +294,7 @@ class LangChainClient:
                 "metadatas": metadatas
             }
             response = await self.http_client.post(
-                f"{self.base_url}/documents/add",
+                f"{self.base_url}/api/v1/vector/documents/add",
                 json=payload,
                 headers=self._get_auth_headers(tenant_id)
             )
@@ -326,7 +326,7 @@ class LangChainClient:
         try:
             headers = self._get_auth_headers(tenant_id)
             response = await self.http_client.delete(
-                f"{self.base_url}/documents/{tenant_id}/{doc_id}",
+                f"{self.base_url}/api/v1/vector/documents/{tenant_id}/{doc_id}",
                 headers=headers
             )
             response.raise_for_status()
@@ -355,7 +355,7 @@ class LangChainClient:
         try:
             payload = {"text": text, "tenant_id": tenant_id or settings.DEFAULT_TENANT}
             headers = self._get_auth_headers(tenant_id)
-            response = await self.http_client.post(f"{self.base_url}/chunk", json=payload, headers=headers)
+            response = await self.http_client.post(f"{self.base_url}/api/v1/embeddings/chunk", json=payload, headers=headers)
             response.raise_for_status()
             result = response.json()
             return result.get("chunks", [{"text": text}])
@@ -383,7 +383,7 @@ class LangChainClient:
         try:
             # Assuming tenant_id might be a query parameter for GET requests
             params = {"tenant_id": tenant_id}
-            response = await self.http_client.get(f"{self.base_url}/vectorstore/info", params=params)
+            response = await self.http_client.get(f"{self.base_url}/api/v1/vector/info", params=params)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -413,7 +413,7 @@ class LangChainClient:
             headers = self._get_auth_headers(tenant_id)
             
             response = await self.http_client.post(
-                f"{self.base_url}/llm/extract-entities",
+                f"{self.base_url}/api/v1/llm/extract-entities",
                 json=payload,
                 headers=headers
             )

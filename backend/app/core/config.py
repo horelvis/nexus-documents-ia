@@ -104,12 +104,14 @@ class Settings(BaseSettings):
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
     
-    # LangChain Microservice
-    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
-    
-    
     # LangGraph Microservice (State-based Workflows)
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    
+    # LangChain Microservice URL now points to LangGraph (for backward compatibility)
+    @property
+    def LANGCHAIN_SERVICE_URL(self) -> str:
+        """LangChain functionality has been consolidated into LangGraph service"""
+        return self.LANGGRAPH_SERVICE_URL
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
