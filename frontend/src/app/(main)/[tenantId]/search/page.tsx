@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Suspense } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -34,7 +34,7 @@ import { SubscriptionErrorDialog } from "@/components/common/subscription-error-
 import { getAgentUseCase, getQuickPrompts } from "@/lib/agent-use-cases"
 import { AgentDetailsDialog } from "@/components/agents/agent-details-dialog"
 
-export default function SearchPage() {
+function SearchPageContent() {
   const params = useParams()
   const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
@@ -556,6 +556,18 @@ export default function SearchPage() {
         }}
       />
     </div>
+  )
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    }>
+      <SearchPageContent />
+    </Suspense>
   )
 }
 

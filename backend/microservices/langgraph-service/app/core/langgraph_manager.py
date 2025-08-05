@@ -128,18 +128,27 @@ class LangGraphManager:
             from app.graphs.tag_generation_graph import TagGenerationGraph
             from app.graphs.document_processing_graph import DocumentProcessingGraph
             from app.graphs.rag_graph import EnhancedRAGGraph
-            from app.graphs.crewai_orchestration_graph import CrewAIOrchestrationGraph
-            from app.graphs.document_analysis_crew import DocumentAnalysisCrew
+            from app.graphs.cag_graph import CAGGraph
             
-            # Register graph classes
+            # Register core graph classes
             self.graphs = {
                 "tag_generation": TagGenerationGraph,
                 "document_processing": DocumentProcessingGraph,
                 "rag": EnhancedRAGGraph,
-                "crew_orchestration": CrewAIOrchestrationGraph,
-                "document_analysis_crew": DocumentAnalysisCrew
+                "cag": CAGGraph,  # NEW: Contextual Augmented Generation
             }
-            logger.info(f"Registered {len(self.graphs)} graph types")
+            
+            # Try to register CrewAI graphs (may fail due to dependencies)
+            try:
+                from app.graphs.crewai_orchestration_graph import CrewAIOrchestrationGraph
+                from app.graphs.document_analysis_crew import DocumentAnalysisCrew
+                self.graphs["crew_orchestration"] = CrewAIOrchestrationGraph
+                self.graphs["document_analysis_crew"] = DocumentAnalysisCrew
+                logger.info("Successfully registered CrewAI graphs")
+            except Exception as crew_error:
+                logger.warning(f"Could not register CrewAI graphs: {crew_error}")
+            
+            logger.info(f"Registered {len(self.graphs)} graph types: {list(self.graphs.keys())}")
         except Exception as e:
             logger.error(f"Failed to register graphs: {e}")
             # Continue with empty graphs dict

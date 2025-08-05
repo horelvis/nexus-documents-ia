@@ -5,9 +5,27 @@ from loguru import logger
 import sys
 from contextlib import asynccontextmanager
 
+# Apply patches before importing anything that uses them
+try:
+    import app.patch_on_startup  # This applies the monkey patch on import
+except Exception as e:
+    logger.warning(f"Could not apply litellm patch: {e}")
+
+try:
+    import app.patch.fix_aiohttp  # Fix aiohttp compatibility
+except Exception as e:
+    logger.warning(f"Could not apply aiohttp patch: {e}")
+
+try:
+    import app.patch.fix_litellm  # Fix litellm compatibility  
+except Exception as e:
+    logger.warning(f"Could not apply litellm patch: {e}")
 
 from app.core.config import settings
 from app.api import graphs as graph_routes
+from app.api import embeddings as embeddings_routes
+from app.api import vector_search as vector_routes
+from app.api import llm as llm_routes
 from app.core.langgraph_manager import LangGraphManager
 
 
@@ -109,6 +127,21 @@ app.include_router(
     graph_routes.router,
     prefix="/api/v1/graphs",
     tags=["graphs"]
+)
+app.include_router(
+    embeddings_routes.router,
+    prefix="/api/v1",
+    tags=["embeddings"]
+)
+app.include_router(
+    vector_routes.router,
+    prefix="/api/v1",
+    tags=["vector-search"]
+)
+app.include_router(
+    llm_routes.router,
+    prefix="/api/v1",
+    tags=["llm"]
 )
 
 

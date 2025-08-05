@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SignUp, useAuth, useUser } from '@clerk/nextjs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,7 +9,7 @@ import { CheckCircle, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getAllPlans } from '@/lib/stripe-plans'
 
-export default function SignUpPage() {
+function SignUpContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { isSignedIn, isLoaded } = useAuth()
@@ -264,5 +264,13 @@ export default function SignUpPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div></div>}>
+      <SignUpContent />
+    </Suspense>
   )
 }

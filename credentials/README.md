@@ -1,21 +1,32 @@
-# GCS Credentials
+# Credentials Directory
 
-This directory contains Google Cloud Storage service account credentials.
+This directory contains sensitive credential files that should **NEVER** be committed to version control.
 
-## Required Files
+## Files in this directory:
 
-For the storage service to work properly, you need:
+- `github-actions-pre-key.json` - Service account key for GitHub Actions (PRE environment)
+- `github-actions-prod-key.json` - Service account key for GitHub Actions (PROD environment)
+- `nexus-document-ia-04252dae0146.json` - GCS credentials (if needed locally)
+- Any other service account keys or credentials
 
-- `nexus-document-ia-04252dae0146.json` - GCS service account key file
+## Security Notes:
 
-## Setup Instructions
+1. **This directory is in .gitignore** - Never remove it from .gitignore
+2. **Keep credentials secure** - Only authorized personnel should have access
+3. **Rotate regularly** - Service account keys should be rotated periodically
+4. **Use Secret Manager** - In production, use Google Secret Manager instead of files
+5. **Delete after use** - Remove keys from local machine after adding to GitHub Secrets
 
-1. Download your GCS service account key from Google Cloud Console
-2. Place the JSON file in this directory
-3. Ensure the filename matches what's configured in docker-compose files
+## If you accidentally commit credentials:
 
-## Security
+1. Immediately revoke the compromised keys in GCP Console
+2. Generate new keys
+3. Update all services using the old keys
+4. Remove the file from git history using BFG or git filter-branch
 
-- This directory is git-ignored for security
-- Never commit credential files to version control
-- Mount this directory as read-only in Docker containers
+## Best Practices:
+
+- Use separate service accounts for each environment (dev, pre, prod)
+- Grant minimal necessary permissions
+- Use Workload Identity Federation when possible
+- Monitor service account usage in GCP logs

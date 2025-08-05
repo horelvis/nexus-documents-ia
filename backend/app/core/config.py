@@ -2,7 +2,7 @@ import os
 import secrets
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import AnyHttpUrl, field_validator, Field
 from pydantic_settings import BaseSettings
 
 
@@ -33,17 +33,13 @@ class Settings(BaseSettings):
     # CORS Origins - Configuración para desarrollo con IPs dinámicas
     ALLOW_ALL_CORS: bool = os.getenv("ALLOW_ALL_CORS", "false").lower() == "true"
     
+    # Default CORS origins for production/specific environments
+    # In development, use ALLOW_ALL_CORS=true instead of hardcoding IPs
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000", 
         "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://192.168.1.47:3000",
-        "http://192.168.1.47:8000",
-        "http://192.168.1.45:3000",
-        "http://192.168.1.45:8000",
-        "http://192.168.1.54:3000",
-        "http://192.168.1.54:8000"
+        "http://127.0.0.1:8000"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -95,12 +91,14 @@ class Settings(BaseSettings):
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
     
-    # LangChain Microservice
-    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
-    
-    
-    # LangGraph Microservice (State-based Workflows)
+    # LangGraph Microservice (Consolidated AI Service - includes embeddings, vector search, LLM, and multi-agent workflows)
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    
+    # DEPRECATED: LangChain service functionality has been moved to LangGraph
+    # LANGCHAIN_SERVICE_URL points to LangGraph for backward compatibility
+    @property
+    def LANGCHAIN_SERVICE_URL(self) -> str:
+        return self.LANGGRAPH_SERVICE_URL
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -112,9 +110,27 @@ class Settings(BaseSettings):
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
-    ALLOWED_EXTENSIONS: List[str] = ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
+    ALLOWED_EXTENSIONS: Optional[List[str]] = None
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
+    
+    @field_validator("ALLOWED_EXTENSIONS", mode="before")
+    @classmethod
+    def assemble_allowed_extensions(cls, v: Optional[Union[str, List[str]]]) -> List[str]:
+        # Default extensions
+        default_extensions = ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
+        
+        if v is None:
+            return default_extensions
+        if isinstance(v, str):
+            # Parse comma-separated string from env
+            extensions = [ext.strip() for ext in v.split(",")]
+            # Merge with defaults to ensure we have all needed extensions
+            all_extensions = list(set(extensions + default_extensions))
+            return all_extensions
+        elif isinstance(v, list):
+            return v
+        return default_extensions
     
     # Tenants
     MULTI_TENANT: bool = True

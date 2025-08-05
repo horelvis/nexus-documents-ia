@@ -10,7 +10,6 @@ services:
       - db
       - redis
       - qdrant
-      - langchain-service
       - langgraph-service
       - ollama-service
       - storage-service
@@ -100,33 +99,33 @@ services:
       retries: 3
 
 
-  # LangChain microservice - DEVELOPMENT MODE
-  langchain-service:
-    build:
-      context: ../microservices/langchain-service
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    depends_on:
-      - qdrant
-      - ollama-service
-    networks:
-      - backend-network
-    environment:
-      - MICROSERVICES_API_KEY=unified-microservices-key-12345
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - OLLAMA_BASE_URL=http://ollama-service:11434
-      - OLLAMA_MODEL=llama3.1:8b
-      - EMBEDDING_MODEL=all-minilm:latest
-      - DEBUG=${DEBUG:-true}  # Enable reload in dev
-    volumes:
-      # Mount the Python code for live reloading
-      - ../microservices/langchain-service/app:/app/app:rw
-    restart: unless-stopped
+  # LangChain microservice - REMOVED (functionality moved to LangGraph)
+  # langchain-service:
+  #   build:
+  #     context: ../microservices/langchain-service
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8001:8001"
+  #   depends_on:
+  #     - qdrant
+  #     - ollama-service
+  #   networks:
+  #     - backend-network
+  #   environment:
+  #     - MICROSERVICES_API_KEY=unified-microservices-key-12345
+  #     - QDRANT_HOST=qdrant
+  #     - QDRANT_PORT=6333
+  #     - OLLAMA_BASE_URL=http://ollama-service:11434
+  #     - OLLAMA_MODEL=llama3.1:8b
+  #     - EMBEDDING_MODEL=all-minilm:latest
+  #     - DEBUG=${DEBUG:-true}  # Enable reload in dev
+  #   volumes:
+  #     # Mount the Python code for live reloading
+  #     - ../microservices/langchain-service/app:/app/app:rw
+  #   restart: unless-stopped
 
 
-  # LangGraph microservice - DEVELOPMENT MODE
+  # LangGraph microservice - DEVELOPMENT MODE (CONSOLIDATED AI SERVICE)
   langgraph-service:
     build:
       context: ../microservices/langgraph-service

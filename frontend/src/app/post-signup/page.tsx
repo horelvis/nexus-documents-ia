@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth, useUser } from '@clerk/nextjs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,7 +21,7 @@ interface ProcessStep {
  * Página de confirmación y procesamiento post-registro
  * Muestra el progreso paso a paso del proceso de configuración
  */
-export default function PostSignUpPage() {
+function PostSignUpContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { isLoaded, isSignedIn } = useAuth()
@@ -360,5 +360,17 @@ export default function PostSignUpPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function PostSignUpPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    }>
+      <PostSignUpContent />
+    </Suspense>
   )
 }

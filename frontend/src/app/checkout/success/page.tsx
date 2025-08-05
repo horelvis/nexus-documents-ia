@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ interface CheckoutSession {
   currency: string
 }
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const sessionId = searchParams.get('session_id')
@@ -202,5 +202,19 @@ export default function CheckoutSuccessPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    }>
+      <CheckoutSuccessContent />
+    </Suspense>
   )
 }
