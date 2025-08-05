@@ -1,4 +1,5 @@
 import os
+import secrets
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import AnyHttpUrl, field_validator
@@ -7,8 +8,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
+    SECRET_KEY: str = secrets.token_urlsafe(32)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
-    SERVER_NAME: str = "NexusDocs360 API"
+    SERVER_NAME: str = "Document Management API"
     SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
     STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
@@ -18,14 +20,14 @@ class Settings(BaseSettings):
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
+    
+    # Production/Staging URLs
+    STAGING_FRONTEND_URL: str = "https://pre.nexusdocs360.app"
+    STAGING_API_URL: str = "https://api.pre.nexusdocs360.app"
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
-    
-    # Cloud Run environment detection
-    CLOUD_RUN_SERVICE_URL: Optional[str] = os.getenv("CLOUD_RUN_SERVICE_URL")
-    IS_CLOUD_RUN: bool = os.getenv("K_SERVICE") is not None
     
     # CORS - Valores por defecto para desarrollo
     # CORS Origins - Configuración para desarrollo con IPs dinámicas
@@ -54,42 +56,31 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # PostgreSQL
-    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "nexus_db")
-    SQLALCHEMY_DATABASE_URI: Optional[str] = os.getenv("DATABASE_URL")
+    POSTGRES_SERVER: str
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
+    SQLALCHEMY_DATABASE_URI: Optional[str] = None
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:
-        # Si DATABASE_URL está disponible, usarla directamente
-        if v:
+        if isinstance(v, str):
             return v
-        
-        # Si no, construir desde variables individuales
         values = info.data if hasattr(info, 'data') else {}
-        user = values.get("POSTGRES_USER", "postgres")
-        password = values.get("POSTGRES_PASSWORD", "postgres")
-        host = values.get("POSTGRES_SERVER", "localhost")
-        db = values.get("POSTGRES_DB", "nexus_db")
+        user = values.get("POSTGRES_USER")
+        password = values.get("POSTGRES_PASSWORD")
+        host = values.get("POSTGRES_SERVER")
+        db = values.get("POSTGRES_DB")
         
-        # Para Cloud SQL, el host debe ser el socket Unix
-        if host and host.startswith("/cloudsql/"):
-            # Cloud SQL Unix socket connection
-            url = f"postgresql://{user}:{password}@/{db}?host={host}"
-        else:
-            # TCP connection
-            url = f"postgresql://{user}:{password}@{host}/{db}"
-            
+        # Construir URL manualmente para Pydantic v2
+        url = f"postgresql://{user}:{password}@{host}/{db}"
         return url
     
     # Redis
-    # Redis configuration - Cloud Run compatible
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
-    REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)  # Full Redis URL for Cloud services
     
     # Vector DB (Qdrant)
     QDRANT_HOST: str = "localhost"
@@ -97,21 +88,19 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = "documents"
     
     # Google Cloud Storage
-    GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "nexus-default-bucket")
-    GCS_CREDENTIALS: Optional[str] = os.getenv("GCS_CREDENTIALS")
-    GCS_PROJECT_ID: Optional[str] = os.getenv("GCS_PROJECT_ID")
+    GCS_BUCKET_NAME: str
+    GCS_CREDENTIALS: Optional[str] = None
+    GCS_PROJECT_ID: Optional[str] = None
     GCS_REGION: str = "europe-west1"  # Región por defecto
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
     
+    # LangChain Microservice
+    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
+    
+    
     # LangGraph Microservice (State-based Workflows)
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
-    
-    # LangChain Microservice URL now points to LangGraph (for backward compatibility)
-    @property
-    def LANGCHAIN_SERVICE_URL(self) -> str:
-        """LangChain functionality has been consolidated into LangGraph service"""
-        return self.LANGGRAPH_SERVICE_URL
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -128,6 +117,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
     
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
+    @classmethod
     def parse_allowed_extensions(cls, v):
         if isinstance(v, str):
             return [ext.strip() for ext in v.split(",")]
@@ -149,9 +139,7 @@ class Settings(BaseSettings):
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
     # Microservices URLs
-    # Storage service configuration - Cloud Run compatible
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
-    STORAGE_SERVICE_INTERNAL_URL: str = os.getenv("STORAGE_SERVICE_INTERNAL_URL", "http://storage-service:8001")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")
