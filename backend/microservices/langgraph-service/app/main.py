@@ -28,6 +28,7 @@ from app.api import vector_search as vector_routes
 from app.api import llm as llm_routes
 from app.api import document_analyzer as analyzer_routes
 from app.api import contract_intelligence as contract_routes
+from app.api import compliance_checker as compliance_routes
 from app.core.langgraph_manager import LangGraphManager
 
 
@@ -155,6 +156,12 @@ app.include_router(
     contract_routes.router,
     prefix="/api/v1/contracts",
     tags=["contract-intelligence"]
+)
+
+app.include_router(
+    compliance_routes.router,
+    prefix="/api/v1/compliance",
+    tags=["compliance-checker"]
 )
 
 
