@@ -24,7 +24,7 @@ from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
-from app.services.vector_service import VectorService
+from app.services.vector_service_direct import VectorServiceDirect
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -47,19 +47,20 @@ class AsyncDocumentService:
         self._initialized = False
     
     @classmethod
-    async def create(cls, tenant_id: str = None, user_id: str = None):
+    async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
         """
         Factory method to create and initialize AsyncDocumentService
         """
         service = cls(tenant_id, user_id)
-        await service._initialize()
+        await service._initialize(db)
         return service
     
-    async def _initialize(self):
+    async def _initialize(self, db: AsyncSession = None):
         """Initialize the service with async operations"""
         # If tenant_id is None or "default", get the real UUID
         if not self.tenant_id or self.tenant_id == settings.DEFAULT_TENANT:
-            async with AsyncSessionLocal() as db:
+            if db:
+                # Use provided session
                 stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
                 result = await db.execute(stmt)
                 default_tenant = result.scalar_one_or_none()
@@ -73,14 +74,35 @@ class AsyncDocumentService:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
+            else:
+                # Create new session only if not provided
+                async with AsyncSessionLocal() as new_db:
+                    stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
+                    result = await new_db.execute(stmt)
+                    default_tenant = result.scalar_one_or_none()
+                    
+                    if default_tenant:
+                        self.tenant_id = str(default_tenant.id)
+                    else:
+                        raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
+                    
+                    # Create storage service using async factory
+                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
+                        self.tenant_id, self.user_id, new_db
+                    )
         else:
-            async with AsyncSessionLocal() as db:
+            if db:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
+            else:
+                async with AsyncSessionLocal() as new_db:
+                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
+                        self.tenant_id, self.user_id, new_db
+                    )
         
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorService(self.tenant_id, self.user_id)
+        self.vector_service = VectorServiceDirect(self.tenant_id, self.user_id)
         self.llm_service = LLMService()
         self._initialized = True
     
@@ -222,7 +244,7 @@ class AsyncDocumentService:
         try:
             # Ensure service is initialized
             if not self._initialized:
-                await self._initialize()
+                await self._initialize(db)
             # Validate file
             file_ext, contents, file_size = await self._validate_file(file, file.filename)
             
@@ -294,7 +316,14 @@ class AsyncDocumentService:
             doc = result.scalar_one()
             
             # Extract text and index asynchronously
-            task = asyncio.create_task(self._process_document_async(str(doc.id), contents, file_ext))
+            # Pass document info to avoid needing new DB session
+            doc_info = {
+                "id": str(doc.id),
+                "filename": doc.filename,
+                "tenant_id": self.tenant_id,
+                "user_id": self.user_id
+            }
+            task = asyncio.create_task(self._process_document_async(doc_info, contents, file_ext))
             # Add error handler for the background task
             task.add_done_callback(lambda t: logger.error(f"Background processing failed: {t.exception()}") if t.exception() else None)
             
@@ -305,8 +334,9 @@ class AsyncDocumentService:
             logger.error(f"Error uploading document: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def _process_document_async(self, doc_id: str, contents: bytes, file_ext: str):
+    async def _process_document_async(self, doc_info: dict, contents: bytes, file_ext: str):
         """Process document in background"""
+        doc_id = doc_info["id"]
         try:
             logger.info(f"Starting async processing for document {doc_id}, file type: {file_ext}")
             
@@ -349,7 +379,7 @@ class AsyncDocumentService:
                     logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
                     raise Exception(f"Vector storage failed: {str(e)}")
                 
-                # Update document status
+                # Update document status and perform routing in single session
                 async with AsyncSessionLocal() as db:
                     stmt = select(Document).filter(Document.id == doc_id)
                     result = await db.execute(stmt)
@@ -357,9 +387,14 @@ class AsyncDocumentService:
                     
                     if doc:
                         doc.indexed = IndexingStatus.INDEXED
-                        doc.content = text[:1000]  # Store first 1000 chars
+                        # Generate summary instead of storing first 1000 chars
+                        summary = await self._generate_document_summary(text, doc_info["filename"])
+                        doc.content = summary[:1000]  # Store summary (max 1000 chars)
                         await db.commit()
-                        logger.info(f"Document {doc_id} marked as INDEXED")
+                        logger.info(f"Document {doc_id} marked as INDEXED with summary")
+                        
+                        # Perform routing analysis in the same session
+                        await self._perform_routing_analysis(db, doc_info, text, file_ext)
                 
                 # Queue document for auto-categorization
                 try:
@@ -374,6 +409,8 @@ class AsyncDocumentService:
                 except Exception as e:
                     logger.warning(f"Failed to queue categorization for {doc_id}: {e}")
                     # Don't fail the whole process if categorization queueing fails
+                
+                # Routing is now handled in the same DB session above to avoid greenlet errors
             else:
                 logger.warning(f"No text extracted from document {doc_id}")
                 raise Exception("No text could be extracted from the document")
@@ -706,3 +743,122 @@ class AsyncDocumentService:
             await db.rollback()
             logger.error(f"Error removing tag from document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="Error removing tag")
+    
+    async def _generate_document_summary(self, text: str, filename: str) -> str:
+        """Generate a concise summary of the document"""
+        try:
+            import httpx
+            from app.core.config import settings
+            
+            # Prepare text for summarization (limit to reasonable size)
+            text_for_summary = text[:5000] if len(text) > 5000 else text
+            
+            # Try to generate summary using LangChain service
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
+                        json={
+                            "messages": [{
+                                "role": "system",
+                                "content": "You are a document summarizer. Create a concise summary of the document in 2-3 sentences. Focus on the main topic, purpose, and key points. Maximum 200 words."
+                            }, {
+                                "role": "user",
+                                "content": f"Summarize this document:\n\nFilename: {filename}\n\nContent:\n{text_for_summary}"
+                            }],
+                            "model": settings.OLLAMA_MODEL,
+                            "max_tokens": 300,
+                            "temperature": 0.3
+                        },
+                        headers={
+                            "X-API-Key": settings.MICROSERVICES_API_KEY,
+                            "Content-Type": "application/json"
+                        },
+                        timeout=20.0
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if summary:
+                            logger.info(f"Generated summary for {filename}: {len(summary)} chars")
+                            return summary
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate LLM summary: {e}")
+            
+            # Fallback to simple extraction if LLM fails
+            return self._create_simple_summary(text, filename)
+            
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return self._create_simple_summary(text, filename)
+    
+    def _create_simple_summary(self, text: str, filename: str) -> str:
+        """Create a simple summary without LLM"""
+        # Clean up text
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        # Use DocumentTypeDetector for accurate type detection
+        try:
+            from app.services.document_type_detector import get_document_type_detector
+            detector = get_document_type_detector()
+            doc_type, confidence = detector.detect_type(text, filename)
+            
+            # Capitalize first letter for display
+            doc_type_display = doc_type.capitalize()
+            
+            # Add confidence indicator if low
+            if confidence < 0.5:
+                doc_type_display = f"Possible {doc_type_display}"
+        except Exception as e:
+            logger.warning(f"Could not use DocumentTypeDetector: {e}")
+            # Fallback to basic detection
+            doc_type_display = "Document"
+        
+        # Get first meaningful lines
+        meaningful_lines = []
+        for line in lines[:10]:
+            if len(line) > 20:  # Skip very short lines
+                meaningful_lines.append(line)
+                if len(meaningful_lines) >= 3:
+                    break
+        
+        if meaningful_lines:
+            preview = " ".join(meaningful_lines[:2])[:200]
+            return f"{doc_type_display}: {filename}. {preview}..."
+        else:
+            return f"{doc_type_display}: {filename}. Content preview: {text[:200]}..."
+    
+    async def _perform_routing_analysis(self, db: AsyncSession, doc_info: dict, text: str, file_ext: str):
+        """Perform routing analysis using the same DB session"""
+        try:
+            from app.services.agent_router_service import AgentRouterService
+            
+            # Initialize router service
+            router_service = AgentRouterService(
+                tenant_id=doc_info["tenant_id"],
+                user_id=doc_info["user_id"]
+            )
+            
+            # Analyze and route document
+            routing_result = await router_service.analyze_and_route_document(
+                db=db,
+                document_id=doc_info["id"],
+                content=text,
+                filename=doc_info["filename"],
+                file_type=file_ext
+            )
+            
+            if routing_result.get("success"):
+                logger.info(
+                    f"Document {doc_info['id']} routed successfully: "
+                    f"Type: {routing_result.get('document_type')}, "
+                    f"Agents: {len(routing_result.get('assigned_agents', []))}"
+                )
+            else:
+                logger.warning(f"Document routing failed for {doc_info['id']}: {routing_result.get('error')}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to route document {doc_info['id']} with Agent Router: {e}")
+            # Don't fail the whole process if routing fails

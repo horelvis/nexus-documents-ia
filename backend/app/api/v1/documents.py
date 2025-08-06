@@ -75,7 +75,7 @@ async def create_document(
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
     
     from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
     return await document_service.upload_document(
         db=db,
         file=file,

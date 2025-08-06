@@ -270,11 +270,11 @@ export function DocumentsDataTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
-              onClick={() => onViewDocument(document)}
-              title="View Details"
+              onClick={() => onFullPagePreview(document)}
+              title="Full Preview"
             >
               <IconEye className="h-4 w-4" />
-              <span className="sr-only">View Details</span>
+              <span className="sr-only">Full Preview</span>
             </Button>
             <Button
               variant="ghost"
@@ -310,9 +310,9 @@ export function DocumentsDataTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={() => onFullPagePreview(document)}>
+                <DropdownMenuItem onClick={() => onViewDocument(document)}>
                   <IconEye className="mr-2 h-4 w-4" />
-                  Full Page Preview
+                  View Details
                 </DropdownMenuItem>
                 {onRequestSignature && (
                   <DropdownMenuItem onClick={() => onRequestSignature(document)}>

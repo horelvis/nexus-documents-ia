@@ -33,7 +33,7 @@ export function AgentHealthCheck() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [services, setServices] = useState<ServiceStatus[]>([
     {
-      name: 'LangGraph Service',
+      name: 'CAG Service',
       status: 'unknown',
     },
     {
@@ -61,29 +61,29 @@ export function AgentHealthCheck() {
     const startTime = Date.now()
 
     try {
-      // Check LangGraph health
-      const langgraphHealth = await checkLangGraphHealth()
+      // Check CAG health
+      const cagHealth = await checkCAGHealth()
       
-      // Update services status
+      // Update services status based on CAG health checks
       setServices([
         {
-          name: 'LangGraph Service',
-          status: langgraphHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
-          response_time: langgraphHealth.response_time,
+          name: 'CAG Service',
+          status: cagHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
+          response_time: cagHealth.response_time,
           last_check: new Date().toISOString(),
-          details: langgraphHealth.details,
-          error: langgraphHealth.error
+          details: cagHealth.details,
+          error: cagHealth.error
         },
         {
           name: 'Ollama LLM',
-          status: langgraphHealth.ollama_status || 'unknown',
-          response_time: langgraphHealth.ollama_response_time,
+          status: cagHealth.checks?.llm || cagHealth.checks?.cag_engine ? 'healthy' : 'unhealthy',
+          response_time: cagHealth.response_time,
           last_check: new Date().toISOString(),
         },
         {
           name: 'Qdrant Vector DB',
-          status: langgraphHealth.qdrant_status || 'unknown',
-          response_time: langgraphHealth.qdrant_response_time,
+          status: cagHealth.checks?.qdrant || cagHealth.checks?.embeddings ? 'healthy' : 'unhealthy',
+          response_time: cagHealth.response_time,
           last_check: new Date().toISOString(),
         },
         {
@@ -109,10 +109,10 @@ export function AgentHealthCheck() {
     }
   }
 
-  const checkLangGraphHealth = async () => {
+  const checkCAGHealth = async () => {
     const startTime = Date.now()
     try {
-      const result = await agentsService.checkLangGraphHealth()
+      const result = await agentsService.checkCAGHealth()
       if (result.error) {
         return {
           status: 'unhealthy',
@@ -120,14 +120,21 @@ export function AgentHealthCheck() {
           error: result.error
         }
       }
+      
+      // Parse the CAG health response structure
+      const cagData = result.data?.cag_service || result.data
+      const checks = cagData?.checks || {}
+      
       return {
-        status: result.data?.status || 'healthy',
+        status: result.data?.status === 'healthy' ? 'healthy' : 'unhealthy',
         response_time: Date.now() - startTime,
         details: result.data,
-        ollama_status: result.data?.langgraph_service?.models ? 'healthy' : 'unknown',
-        ollama_response_time: 50, // Mock
-        qdrant_status: result.data?.langgraph_service?.active_agents !== undefined ? 'healthy' : 'unknown',
-        qdrant_response_time: 30, // Mock
+        checks: {
+          llm: checks.llm || false,
+          embeddings: checks.embeddings || false,
+          qdrant: checks.qdrant || false,
+          cag_engine: checks.cag_engine || false
+        }
       }
     } catch (error) {
       return {
@@ -141,7 +148,7 @@ export function AgentHealthCheck() {
   const runIntegrationTest = async () => {
     setIsChecking(true)
     try {
-      const result = await agentsService.testLangGraphAgent()
+      const result = await agentsService.testCAGAgent()
       if (result.error) {
         alert('❌ Integration test failed!\n\n' + result.error)
       } else {
@@ -182,7 +189,7 @@ export function AgentHealthCheck() {
 
   const getServiceIcon = (serviceName: string) => {
     switch (serviceName) {
-      case 'Langroid Service':
+      case 'CAG Service':
         return <Activity className="h-4 w-4" />
       case 'Ollama LLM':
         return <Cpu className="h-4 w-4" />
@@ -334,7 +341,7 @@ export function AgentHealthCheck() {
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               This test will create a temporary agent, execute a simple task, and clean up. 
-              It verifies the complete integration between frontend, backend, and LangGraph services.
+              It verifies the complete integration between frontend, backend, and CAG services.
             </p>
             
             <Button

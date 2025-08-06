@@ -10,9 +10,8 @@ services:
       - db
       - redis
       - qdrant
-      - langchain-service
-      - langgraph-service
-      - ollama-service
+      # - langchain-service  # Deprecated - replaced by CAG service
+      - cag-service
       - storage-service
       - gotenberg
     networks:
@@ -23,10 +22,11 @@ services:
       # Unified API Key for all microservices
       - MICROSERVICES_API_KEY=unified-microservices-key-12345
       # Services URLs
-      - STORAGE_SERVICE_URL=http://storage-service:8001
-      - LANGCHAIN_SERVICE_URL=http://langchain-service:8001
-      - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
-      - OLLAMA_BASE_URL=http://ollama-service:11434
+      - STORAGE_SERVICE_URL=http://storage-service:8003
+      # - LANGCHAIN_SERVICE_URL=http://langchain-service:8001  # Deprecated - replaced by CAG service
+      # - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007  # Deprecated - using CAG service
+      - CAG_SERVICE_URL=http://cag-service:8008
+      - OLLAMA_BASE_URL=http://genai-ollama:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
       - REDIS_HOST=redis
@@ -100,153 +100,107 @@ services:
       retries: 3
 
 
-  # LangChain microservice - DEVELOPMENT MODE
-  langchain-service:
-    build:
-      context: ../microservices/langchain-service
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    depends_on:
-      - qdrant
-      - ollama-service
-    networks:
-      - backend-network
-    environment:
-      - MICROSERVICES_API_KEY=unified-microservices-key-12345
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - OLLAMA_BASE_URL=http://ollama-service:11434
-      - OLLAMA_MODEL=llama3.1:8b
-      - EMBEDDING_MODEL=all-minilm:latest
-      - DEBUG=${DEBUG:-true}  # Enable reload in dev
-    volumes:
-      # Mount the Python code for live reloading
-      - ../microservices/langchain-service/app:/app/app:rw
-    restart: unless-stopped
+  # LangChain microservice - DEPRECATED (replaced by CAG service)
+  # langchain-service:
+  #   build:
+  #     context: ../microservices/langchain-service
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8001:8001"
+  #   depends_on:
+  #     - qdrant
+  #   networks:
+  #     - backend-network
+  #   environment:
+  #     - MICROSERVICES_API_KEY=unified-microservices-key-12345
+  #     - QDRANT_HOST=qdrant
+  #     - QDRANT_PORT=6333
+  #     - OLLAMA_BASE_URL=http://genai-ollama:11434
+  #     - OLLAMA_MODEL=mistral:instruct
+  #     - EMBEDDING_MODEL=all-minilm:latest
+  #     - DEBUG=${DEBUG:-true}  # Enable reload in dev
+  #   volumes:
+  #     # Mount the Python code for live reloading
+  #     - ../microservices/langchain-service/app:/app/app:rw
+  #   restart: unless-stopped
 
 
-  # LangGraph microservice - DEVELOPMENT MODE
-  langgraph-service:
+  # CAG microservice - DEVELOPMENT MODE
+  cag-service:
     build:
-      context: ../microservices/langgraph-service
+      context: ../microservices/cag-service
       dockerfile: Dockerfile
     ports:
-      - "8007:8007"
+      - "8008:8008"
     depends_on:
       - qdrant
-      - ollama-service
       - redis
       - db
     networks:
       - backend-network
     environment:
       - MICROSERVICES_API_KEY=unified-microservices-key-12345
-      - SERVICE_API_KEY=unified-microservices-key-12345
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - OLLAMA_BASE_URL=http://ollama-service:11434
-      - LLM_MODEL=llama3.2
+      - OLLAMA_BASE_URL=http://genai-ollama:11434
+      - LLM_MODEL=llama3.2:latest
       - EMBEDDING_MODEL=all-minilm:latest
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
-      - LANGGRAPH_BACKEND=sqlite
-      - CHECKPOINT_DB_PATH=/tmp/langgraph_checkpoints.db
       - LOG_LEVEL=INFO
       - DEBUG=${DEBUG:-true}  # Enable reload in dev
     volumes:
       # Mount the Python code for live reloading
-      - ../microservices/langgraph-service/app:/app/app:rw
-      # Mount checkpoints directory
-      - langgraph_checkpoints:/tmp
+      - ../microservices/cag-service/app:/app/app:rw
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  # Langflow - Visual agent builder for development
-  langflow:
-    image: langflowai/langflow:latest
-    container_name: nexus_langflow
-    ports:
-      - "7860:7860"
-    environment:
-      - LANGFLOW_DATABASE_URL=sqlite:////app/langflow.db
-      - LANGFLOW_CONFIG_DIR=/app/config
-      - LANGFLOW_COMPONENTS_PATH=/app/components
-      - LANGFLOW_LOG_LEVEL=info
-      - LANGFLOW_OPEN_BROWSER=false
-      - LANGFLOW_REMOVE_API_KEYS=false
-      # Connect to local Ollama
-      - OLLAMA_BASE_URL=http://ollama-service:11434
-      # Optional: Set default models
-      - DEFAULT_LLM_MODEL=llama3.2
-      - DEFAULT_EMBEDDING_MODEL=all-minilm:latest
-    volumes:
-      - langflow_data:/app
-      - ./langflow/flows:/app/flows
-      - ./langflow/components:/app/components
-    depends_on:
-      - ollama-service
-    networks:
-      - backend-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # LangGraph microservice - DEPRECATED - Replaced by CAG service
+  # langgraph-service:
+  #   build:
+  #     context: ../microservices/langgraph-service
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8007:8007"
+  #   depends_on:
+  #     - qdrant
+  #     - redis
+  #     - db
+  #   networks:
+  #     - backend-network
+  #   environment:
+  #     - MICROSERVICES_API_KEY=unified-microservices-key-12345
+  #     - SERVICE_API_KEY=unified-microservices-key-12345
+  #     - QDRANT_HOST=qdrant
+  #     - QDRANT_PORT=6333
+  #     - OLLAMA_BASE_URL=http://genai-ollama:11434
+  #     - LLM_MODEL=llama3.2
+  #     - EMBEDDING_MODEL=all-minilm:latest
+  #     - REDIS_URL=redis://redis:6379
+  #     - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+  #     - LANGGRAPH_BACKEND=sqlite
+  #     - CHECKPOINT_DB_PATH=/tmp/langgraph_checkpoints.db
+  #     - LOG_LEVEL=INFO
+  #     - DEBUG=${DEBUG:-true}  # Enable reload in dev
+  #   volumes:
+  #     # Mount the Python code for live reloading
+  #     - ../microservices/langgraph-service/app:/app/app:rw
+  #     # Mount checkpoints directory
+  #     - langgraph_checkpoints:/tmp
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
 
-  # Ollama Microservice - DEVELOPMENT MODE
-  ollama-service:
-    build:
-      context: ../microservices/ollama-service
-      dockerfile: Dockerfile
-    ports:
-      - "11434:11434"  # Ollama server port
-      - "8004:8000"    # FastAPI wrapper port
-    volumes:
-      - ollama_data:/root/.ollama
-      # Mount the Python code for live reloading
-      - ../microservices/ollama-service/app:/app/app:rw
-    networks:
-      - backend-network
-    restart: unless-stopped
-    environment:
-      - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_PORT=11434
-      - OLLAMA_NUM_PARALLEL=4
-      - OLLAMA_MAX_LOADED_MODELS=3
-      - PYTHONPATH=/app
-      - DEBUG=${DEBUG:-true}  # Enable reload in dev
-      # Model configuration
-      - OLLAMA_DEFAULT_MODEL=llama3.2
-      - OLLAMA_EMBEDDING_MODEL=all-minilm:latest
-      - EMBEDDING_MODEL=all-minilm:latest  # For consistency
-      # NVIDIA GPU settings
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - CUDA_VISIBLE_DEVICES=0
-      # Ollama GPU settings
-      - OLLAMA_GPU_LAYERS=999  # Use all available GPU layers
-      - OLLAMA_CUDA=1  # Force CUDA usage
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+
 
   # Storage Microservice - DEVELOPMENT MODE
   storage-service:
@@ -260,7 +214,7 @@ services:
     networks:
       - backend-network
     volumes:
-      - ../credentials:/app/credentials:ro
+      - ../../credentials:/app/credentials:ro
       # Mount the Python code for live reloading
       - ../microservices/storage-service/app:/app/app:rw
     env_file:
@@ -268,7 +222,7 @@ services:
     environment:
       - MICROSERVICES_API_KEY=unified-microservices-key-12345
       - GCS_PROJECT_ID=nexus-document-ia
-      - GCS_CREDENTIALS=/app/credentials/nexus-document-ia-04252dae0146.json
+      - GCS_CREDENTIALS=/app/credentials/nexusdocs360-pre-7d2cb195adc7.json
       - GCS_BUCKET_NAME=nexus-docs-eu
       - SIGNED_URL_EXPIRATION=3600
       - MAX_UPLOAD_SIZE=104857600
@@ -313,6 +267,34 @@ services:
       retries: 3
       start_period: 30s
 
+  # LangExtract service for structured document extraction
+  langextract-service:
+    build:
+      context: ../microservices/langextract-service
+      dockerfile: Dockerfile
+    container_name: langextract-service
+    environment:
+      - OLLAMA_HOST=http://genai-ollama:11434
+      - OLLAMA_MODEL=llama3.2:latest
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY:-dev-api-key-2024}
+      - DEFAULT_PROVIDER=ollama
+    ports:
+      - "8009:8009"
+    depends_on:
+      - genai-ollama
+    volumes:
+      - ../microservices/langextract-service/app:/app/app:ro
+    networks:
+      - backend-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Gotenberg service for document conversion
   gotenberg:
     image: gotenberg/gotenberg:8
@@ -336,6 +318,8 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
-  ollama_data:
-  langflow_data:
   langgraph_checkpoints:
+
+# Include GenAI Stack
+include:
+  - genai-stack-simple.yml

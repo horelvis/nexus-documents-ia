@@ -28,7 +28,8 @@ class LangChainClient:
 
     def __init__(self, http_client: httpx.AsyncClient, tenant_id: str = None, user_id: str = None):
         self.http_client = http_client
-        self.base_url = settings.LANGCHAIN_SERVICE_URL
+        # Use CAG service for embeddings (LangChain service is deprecated)
+        self.base_url = settings.CAG_SERVICE_URL
         self.tenant_id = tenant_id
         self.user_id = user_id
         # self.timeout = 30.0 # Timeout is now managed by the passed client or per-request
@@ -59,22 +60,20 @@ class LangChainClient:
         reraise=True
     )
     async def get_embeddings(self, texts: List[str], tenant_id: str = None) -> List[List[float]]:
-        """Generar embeddings usando LangChain service"""
+        """Generar embeddings usando CAG service"""
         
         if not self.http_client:
             raise RuntimeError("HTTP client not provided to LangChainClient.")
         
         try:
-            payload = {
-                "texts": texts
-            }
-            
+            # CAG service expects texts as a list directly
             headers = self._get_auth_headers(tenant_id)
             
             response = await self.http_client.post(
-                f"{self.base_url}/api/v1/embeddings/generate",
-                json=payload,
-                headers=headers
+                f"{self.base_url}/api/v1/cag/embeddings",
+                json=texts,  # Send texts directly as array
+                headers=headers,
+                params={"tenant_id": tenant_id} if tenant_id else None
             )
             
             response.raise_for_status()

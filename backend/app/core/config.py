@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
     STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
+    STRIPE_BASIC_PRICE_ID: Optional[str] = os.getenv("STRIPE_BASIC_PRICE_ID")
     STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -80,6 +81,11 @@ class Settings(BaseSettings):
     # Redis
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    
+    @property
+    def REDIS_URL(self) -> str:
+        """Generate Redis URL from host and port"""
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
     # Vector DB (Qdrant)
@@ -94,13 +100,18 @@ class Settings(BaseSettings):
     GCS_REGION: str = "europe-west1"  # Región por defecto
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
+    # Cloud Run detection
+    IS_CLOUD_RUN: bool = os.getenv("K_SERVICE", None) is not None
     
     # LangChain Microservice
     LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
     
     
-    # LangGraph Microservice (State-based Workflows)
+    # LangGraph Microservice (State-based Workflows) - DEPRECATED
     LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    
+    # CAG Microservice (Contextual Augmented Generation)
+    CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -143,7 +154,7 @@ class Settings(BaseSettings):
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
     # Microservices URLs
-    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
+    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")

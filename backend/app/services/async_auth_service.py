@@ -343,6 +343,21 @@ class AsyncAuthService:
             user_tenant_id = user_tenant.id
             is_team_member = False
         
+        # Check if user selected a plan (from metadata)
+        selected_plan = metadata.get('selected_plan') if metadata else None
+        
+        # Set trial data for free plan
+        trial_ends_at = None
+        subscription_plan = None
+        subscription_status = None
+        
+        if selected_plan == 'free':
+            # User selected free trial plan
+            trial_ends_at = datetime.utcnow() + timedelta(days=14)
+            subscription_plan = 'trial'
+            subscription_status = 'trialing'
+            logger.info(f"🎁 Setting up 14-day trial for user")
+        
         # Crear usuario con password temporal (no se usará con Clerk)
         new_user = User(
             id=uuid4(),
@@ -355,7 +370,10 @@ class AsyncAuthService:
             stripe_customer_id=stripe_customer_id,
             is_active=True,
             is_team_member=is_team_member,
-            invited_at=datetime.utcnow() if is_team_member else None
+            invited_at=datetime.utcnow() if is_team_member else None,
+            subscription_plan=subscription_plan,
+            subscription_status=subscription_status,
+            trial_ends_at=trial_ends_at
         )
         
         db.add(new_user)

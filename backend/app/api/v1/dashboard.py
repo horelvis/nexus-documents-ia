@@ -39,9 +39,9 @@ async def get_dashboard_stats(
     doc_stats = await db.execute(
         select(
             func.count(Document.id).label('total'),
-            func.sum(case([(Document.indexed == 1, 1)], else_=0)).label('processed'),
-            func.sum(case([(Document.indexed == 0, 1)], else_=0)).label('processing'),
-            func.sum(case([(Document.indexing_error != None, 1)], else_=0)).label('error'),
+            func.sum(case((Document.indexed == 1, 1), else_=0)).label('processed'),
+            func.sum(case((Document.indexed == 0, 1), else_=0)).label('processing'),
+            func.sum(case((Document.indexing_error != None, 1), else_=0)).label('error'),
             func.coalesce(func.sum(Document.file_size), 0).label('total_size')
         ).where(Document.tenant_id == tenant_uuid)
     )
@@ -55,7 +55,7 @@ async def get_dashboard_stats(
     # Get active users (users who accessed documents in last 30 days)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     active_users_query = await db.execute(
-        select(func.count(func.distinct(DocumentView.viewer_id)))
+        select(func.count(func.distinct(DocumentView.user_id)))
         .where(
             and_(
                 DocumentView.viewed_at >= thirty_days_ago,
@@ -120,7 +120,7 @@ async def get_dashboard_stats(
     # Active users trend
     sixty_days_ago = datetime.utcnow() - timedelta(days=60)
     prev_active_users = await db.execute(
-        select(func.count(func.distinct(DocumentView.viewer_id)))
+        select(func.count(func.distinct(DocumentView.user_id)))
         .where(
             and_(
                 DocumentView.viewed_at >= sixty_days_ago,

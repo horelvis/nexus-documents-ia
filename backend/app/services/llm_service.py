@@ -14,6 +14,8 @@ class LLMService:
     
     def __init__(self):
         logger.info("LLMService initialized with LangChain microservice client")
+        # Default model for agent operations (Gemma 3)
+        self.default_model = "gemma3:12b-it-qat"
     
     async def generate_response(
         self, 
@@ -155,3 +157,58 @@ class LLMService:
         except Exception as e:
             logger.error(f"Error creating custom prompt: {str(e)}")
             return template
+    
+    async def generate_completion(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        model: Optional[str] = None
+    ) -> str:
+        """
+        Generate a completion for a given prompt using the agent model.
+        
+        Args:
+            prompt: The input prompt
+            temperature: Temperature for generation (0-1)
+            max_tokens: Maximum tokens to generate
+            model: Optional model name (defaults to Gemma 3)
+            
+        Returns:
+            Generated text completion
+        """
+        try:
+            model_name = model or self.default_model
+            logger.debug(f"Generating completion with model {model_name}, temp={temperature}")
+            
+            # Use Ollama directly for agent completions
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"http://docker-genai-ollama-1:11434/api/generate",
+                    json={
+                        "model": model_name,
+                        "prompt": prompt,
+                        "temperature": temperature,
+                        "options": {
+                            "num_predict": max_tokens
+                        },
+                        "stream": False
+                    }
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get("response", "")
+                    else:
+                        # Fallback to LangChain client
+                        async with LangChainClient() as client:
+                            result = await client.generate_response(
+                                query=prompt,
+                                max_tokens=max_tokens
+                            )
+                            return result.get("answer", "")
+                            
+        except Exception as e:
+            logger.error(f"Error generating completion: {e}")
+            # Fallback response
+            return "No pude procesar tu solicitud. Por favor, intenta de nuevo."

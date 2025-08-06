@@ -1,0 +1,359 @@
+# Document Type Detection Patterns Configuration
+# This file defines patterns for detecting document types
+# Can be easily extended without modifying code
+
+document_types:
+  contract:
+    priority: 1
+    keywords:
+      english:
+        - agreement
+        - contract
+        - party
+        - parties
+        - hereby
+        - shall
+        - terms and conditions
+        - obligations
+        - whereas
+        - covenant
+        - binding
+        - executed
+      spanish:
+        - contrato
+        - acuerdo
+        - parte
+        - partes
+        - cláusula
+        - obligaciones
+        - firmado
+        - suscrito
+        - celebrado
+        - convenio
+        - estipulaciones
+      portuguese:
+        - contrato
+        - acordo
+        - parte
+        - obrigações
+        - cláusulas
+        - assinado
+    patterns:
+      - "this agreement"
+      - "este contrato"
+      - "las partes acuerdan"
+      - "the parties agree"
+    min_keywords_match: 2
+    confidence_base: 0.7
+    confidence_per_match: 0.05
+
+  invoice:
+    priority: 2
+    keywords:
+      english:
+        - invoice
+        - bill
+        - payment
+        - total amount
+        - due date
+        - tax
+        - subtotal
+        - item
+        - quantity
+        - price
+        - billing
+      spanish:
+        - factura
+        - cuenta
+        - pago
+        - importe
+        - vencimiento
+        - impuesto
+        - subtotal
+        - cantidad
+        - precio
+        - cobro
+      portuguese:
+        - fatura
+        - conta
+        - pagamento
+        - valor total
+        - vencimento
+        - imposto
+    patterns:
+      - "invoice number"
+      - "número de factura"
+      - "payment due"
+      - "total a pagar"
+    min_keywords_match: 2
+    confidence_base: 0.7
+    confidence_per_match: 0.05
+
+  report:
+    priority: 3
+    keywords:
+      english:
+        - executive summary
+        - findings
+        - conclusion
+        - analysis
+        - recommendation
+        - report
+        - methodology
+        - results
+        - discussion
+        - abstract
+      spanish:
+        - resumen ejecutivo
+        - hallazgos
+        - conclusión
+        - análisis
+        - recomendación
+        - informe
+        - metodología
+        - resultados
+        - discusión
+      portuguese:
+        - resumo executivo
+        - conclusões
+        - análise
+        - recomendações
+        - relatório
+    patterns:
+      - "executive summary"
+      - "resumen ejecutivo"
+      - "key findings"
+      - "principales hallazgos"
+    min_keywords_match: 2
+    confidence_base: 0.65
+    confidence_per_match: 0.05
+
+  legal:
+    priority: 4
+    keywords:
+      english:
+        - whereas
+        - pursuant
+        - jurisdiction
+        - legal
+        - compliance
+        - regulation
+        - statute
+        - provision
+        - liability
+        - indemnification
+      spanish:
+        - considerando
+        - jurisdicción
+        - legal
+        - cumplimiento
+        - regulación
+        - estatuto
+        - disposición
+        - responsabilidad
+        - indemnización
+      portuguese:
+        - considerando
+        - jurisdição
+        - legal
+        - cumprimento
+        - regulamento
+    patterns:
+      - "pursuant to"
+      - "in accordance with"
+      - "de conformidad con"
+      - "subject to"
+    min_keywords_match: 2
+    confidence_base: 0.65
+    confidence_per_match: 0.05
+
+  financial:
+    priority: 5
+    keywords:
+      english:
+        - financial statement
+        - balance sheet
+        - profit
+        - loss
+        - revenue
+        - expense
+        - assets
+        - liabilities
+        - equity
+        - cash flow
+      spanish:
+        - estado financiero
+        - balance
+        - ganancia
+        - pérdida
+        - ingresos
+        - gastos
+        - activos
+        - pasivos
+        - patrimonio
+        - flujo de caja
+      portuguese:
+        - demonstração financeira
+        - balanço
+        - lucro
+        - prejuízo
+        - receita
+        - despesa
+    patterns:
+      - "balance sheet"
+      - "estado de resultados"
+      - "cash flow statement"
+      - "estado financiero"
+    min_keywords_match: 2
+    confidence_base: 0.65
+    confidence_per_match: 0.05
+
+  hr:
+    priority: 6
+    keywords:
+      english:
+        - employee
+        - resume
+        - cv
+        - experience
+        - qualification
+        - salary
+        - benefits
+        - position
+        - employment
+        - skills
+      spanish:
+        - empleado
+        - currículum
+        - experiencia
+        - calificación
+        - salario
+        - beneficios
+        - puesto
+        - empleo
+        - habilidades
+      portuguese:
+        - funcionário
+        - currículo
+        - experiência
+        - qualificação
+        - salário
+    patterns:
+      - "work experience"
+      - "experiencia laboral"
+      - "job description"
+      - "descripción del puesto"
+    min_keywords_match: 2
+    confidence_base: 0.6
+    confidence_per_match: 0.05
+
+  technical:
+    priority: 7
+    keywords:
+      english:
+        - technical
+        - specification
+        - manual
+        - installation
+        - configuration
+        - api
+        - documentation
+        - requirements
+        - architecture
+        - implementation
+      spanish:
+        - técnico
+        - especificación
+        - manual
+        - instalación
+        - configuración
+        - documentación
+        - requisitos
+        - arquitectura
+        - implementación
+      portuguese:
+        - técnico
+        - especificação
+        - manual
+        - instalação
+        - configuração
+    patterns:
+      - "technical specification"
+      - "especificación técnica"
+      - "user manual"
+      - "implementation guide"
+    min_keywords_match: 2
+    confidence_base: 0.6
+    confidence_per_match: 0.05
+
+  correspondence:
+    priority: 8
+    keywords:
+      english:
+        - dear
+        - sincerely
+        - regards
+        - memo
+        - subject
+        - attention
+        - response
+        - inquiry
+        - request
+      spanish:
+        - estimado
+        - atentamente
+        - saludos
+        - asunto
+        - atención
+        - respuesta
+        - consulta
+        - solicitud
+      portuguese:
+        - prezado
+        - atenciosamente
+        - saudações
+        - assunto
+    patterns:
+      - "dear sir"
+      - "estimado señor"
+      - "in response to"
+      - "en respuesta a"
+    min_keywords_match: 1
+    confidence_base: 0.5
+    confidence_per_match: 0.05
+
+# Default configuration
+default:
+  type: general
+  confidence: 0.3
+  description: "Document type could not be determined with confidence"
+
+# Language detection hints
+language_indicators:
+  spanish:
+    - "el"
+    - "la"
+    - "de"
+    - "que"
+    - "en"
+    - "los"
+    - "las"
+    - "del"
+  english:
+    - "the"
+    - "of"
+    - "and"
+    - "to"
+    - "in"
+    - "that"
+    - "is"
+    - "for"
+  portuguese:
+    - "o"
+    - "a"
+    - "de"
+    - "que"
+    - "em"
+    - "os"
+    - "as"
+    - "do"

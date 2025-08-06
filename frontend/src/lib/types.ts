@@ -143,6 +143,7 @@ export interface BackendUser {
   // Subscription info from Stripe (populated dynamically)
   subscription_plan?: string
   subscription_status?: string
+  trial_ends_at?: string
 }
 
 export interface OnboardingStatus {
@@ -172,6 +173,11 @@ export interface UserContextType {
   resetOnboarding: () => Promise<boolean>
   checkOnboardingStatus: () => Promise<void>
   refetchUser: () => Promise<void>
+  
+  // Subscription helpers
+  hasValidTrial: () => boolean
+  hasPaidSubscription: () => boolean
+  needsPayment: () => boolean
 }
 
 export interface UserProviderProps {

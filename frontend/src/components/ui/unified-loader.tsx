@@ -15,7 +15,7 @@ function CompanyLogo({ className, size = "md" }: { className?: string; size?: "s
   return (
     <div className={cn("flex items-center justify-center", className)}>
       <div className={cn(
-        "bg-gradient-to-br from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500",
+        "bg-gradient-to-br from-purple-500 to-purple-700 dark:from-purple-500 dark:to-purple-700",
         "text-white rounded-lg shadow-lg font-bold",
         sizeClasses[size]
       )}>
@@ -60,17 +60,29 @@ export function UnifiedLoader({
 
   // Componente principal del spinner con animaciones mejoradas
   const SpinnerComponent = (
-    <div className="relative">
-      <IconLoader2 
-        className={cn(
-          "animate-spin text-purple-600 dark:text-purple-400",
-          sizeClasses[size]
-        )} 
-      />
+    <div className="relative flex items-center justify-center">
+      {/* Círculo exterior que gira */}
+      <div className={cn(
+        "absolute rounded-full border-4 border-purple-200 dark:border-purple-900",
+        sizeClasses[size]
+      )} />
+      <div className={cn(
+        "absolute animate-spin rounded-full border-4 border-transparent border-t-purple-600 dark:border-t-purple-400",
+        sizeClasses[size]
+      )} />
+      
+      {/* Logo en el centro (no gira) */}
+      {showLogo && (variant === "initial" || variant === "page") && (
+        <div className="relative z-10">
+          <CompanyLogo size={size === "lg" ? "md" : size === "md" ? "sm" : "sm"} />
+        </div>
+      )}
+      
+      {/* Efecto ping para variantes principales */}
       {(variant === "initial" || variant === "page") && size !== "sm" && (
         <div className={cn(
-          "absolute inset-0 animate-ping rounded-full bg-purple-600/20 dark:bg-purple-400/20",
-          sizeClasses[size]
+          "absolute animate-ping rounded-full bg-purple-600/10 dark:bg-purple-400/10",
+          size === "lg" ? "h-20 w-20" : size === "md" ? "h-14 w-14" : "h-8 w-8"
         )} />
       )}
     </div>
@@ -84,8 +96,11 @@ export function UnifiedLoader({
   // Variante inline - para uso dentro de componentes
   if (variant === "inline") {
     return (
-      <div className={cn("flex items-center justify-center gap-2 py-4", className)}>
-        <IconLoader2 className="h-4 w-4 animate-spin text-purple-600 dark:text-purple-400" />
+      <div className={cn("flex items-center justify-center gap-3 py-4", className)}>
+        <div className="relative flex items-center justify-center">
+          <div className="absolute h-4 w-4 rounded-full border-2 border-purple-200 dark:border-purple-900" />
+          <div className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-t-purple-600 dark:border-t-purple-400" />
+        </div>
         {text && <span className="text-sm text-muted-foreground">{text}</span>}
       </div>
     )
@@ -93,11 +108,7 @@ export function UnifiedLoader({
 
   // Contenido del loader para variantes initial y page
   const LoaderContent = (
-    <div className="flex flex-col items-center space-y-4">
-      {showLogo && variant === "initial" && (
-        <CompanyLogo size={size} className="mb-2" />
-      )}
-      
+    <div className="flex flex-col items-center space-y-6">
       {SpinnerComponent}
       
       <div className="space-y-2 text-center">

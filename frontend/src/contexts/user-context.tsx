@@ -128,21 +128,62 @@ export function UserProvider({ children }: UserProviderProps) {
       const userData: BackendUser = response.data
       setBackendUser(userData)
       
-      // Check if user needs onboarding (only after first payment)
+      // Check if user needs onboarding (only after first payment or trial start)
       const hasCompletedOnboarding = userData?.onboarding_completed || false
+      const needsOnboarding = !hasCompletedOnboarding && 
+        (userData?.subscription_plan !== 'free' || userData?.subscription_status === 'trialing')
+      
       setOnboarding({
-        needsOnboarding: !hasCompletedOnboarding && userData?.subscription_plan !== 'free',
+        needsOnboarding,
         isNewUser: false,
         hasCompletedSync: true,
         loading: false,
         error: null
       })
 
-      // Redirect to onboarding only if:
-      // 1. User has not completed onboarding
-      // 2. User has a paid subscription (just came from checkout)
-      // 3. Not already on onboarding page
-      if (!hasCompletedOnboarding && userData?.subscription_plan !== 'free' && !isOnboardingPath()) {
+      // Redirect logic based on subscription status
+      // 1. Check if user needs to pay (no valid trial or subscription)
+      const hasValidTrial = userData?.trial_ends_at && new Date(userData.trial_ends_at) > new Date()
+      const hasPaidSubscription = userData?.subscription_plan && 
+        ['basic', 'pro', 'professional', 'enterprise'].includes(userData.subscription_plan)
+      
+      // If no valid trial and no paid subscription, redirect to plans page
+      if (!hasValidTrial && !hasPaidSubscription) {
+        const isProtectedPath = !pathname.includes('/plans') && 
+          !pathname.includes('/checkout') && 
+          !pathname.includes('/pricing') && 
+          !pathname.includes('/auth/') &&
+          !pathname.includes('/onboarding-simple')
+        
+        if (isProtectedPath && userData?.tenant_id) {
+          console.log('No valid trial or subscription, redirecting to plans')
+          router.push(`/${userData.tenant_id}/plans`)
+          return
+        }
+      }
+      
+      // 2. If user has trial plan or is in trial status, check if expired
+      if (userData?.subscription_plan === 'trial' || userData?.subscription_status === 'trialing') {
+        const trialEndsAt = userData.trial_ends_at ? new Date(userData.trial_ends_at) : null
+        const isExpired = !trialEndsAt || trialEndsAt < new Date()
+        
+        // If trial expired or missing, redirect to plans page
+        if (isExpired && 
+            !pathname.includes('/plans') &&
+            !pathname.includes('/checkout') &&
+            !pathname.includes('/pricing') && 
+            !pathname.includes('/auth/') &&
+            userData?.tenant_id) {
+          console.log('Trial expired or missing, redirecting to plans')
+          router.push(`/${userData.tenant_id}/plans`)
+          return
+        }
+      }
+      
+      // 3. If user has paid plan (including valid trial) but hasn't completed onboarding
+      const hasValidPlan = hasPaidSubscription || hasValidTrial
+      
+      if (!hasCompletedOnboarding && hasValidPlan && !isOnboardingPath()) {
         router.push(getOnboardingPath(userData))
       }
 
@@ -180,6 +221,21 @@ export function UserProvider({ children }: UserProviderProps) {
     } finally {
       setUserLoading(false)
     }
+  }
+
+  // Helper functions for subscription status
+  const hasValidTrial = (): boolean => {
+    if (!backendUser?.trial_ends_at) return false
+    return new Date(backendUser.trial_ends_at) > new Date()
+  }
+  
+  const hasPaidSubscription = (): boolean => {
+    if (!backendUser?.subscription_plan) return false
+    return ['basic', 'pro', 'professional', 'enterprise'].includes(backendUser.subscription_plan)
+  }
+  
+  const needsPayment = (): boolean => {
+    return !hasValidTrial() && !hasPaidSubscription()
   }
 
   // Refetch user data
@@ -225,7 +281,12 @@ export function UserProvider({ children }: UserProviderProps) {
     markOnboardingComplete,
     resetOnboarding,
     checkOnboardingStatus,
-    refetchUser
+    refetchUser,
+    
+    // Subscription helpers
+    hasValidTrial,
+    hasPaidSubscription,
+    needsPayment
   }
 
   return (

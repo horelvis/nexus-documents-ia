@@ -27,7 +27,8 @@ async def run_graph(
     """Run a graph to completion"""
     try:
         # Validate tenant access
-        tenant_id = validate_tenant_access(request.tenant_id, context)
+        security_context = validate_tenant_access(request.tenant_id, context)
+        tenant_id = request.tenant_id  # Use the tenant_id from the request
         
         # Get graph manager
         manager = LangGraphManager()
@@ -100,7 +101,8 @@ async def stream_graph(
     """Stream graph execution results"""
     try:
         # Validate tenant access
-        tenant_id = validate_tenant_access(request.tenant_id, context)
+        security_context = validate_tenant_access(request.tenant_id, context)
+        tenant_id = request.tenant_id  # Use the tenant_id from the request
         
         # Get graph manager
         manager = LangGraphManager()

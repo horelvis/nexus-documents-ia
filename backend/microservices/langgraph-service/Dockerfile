@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     g++ \
     build-essential \
     curl \
+    tesseract-ocr \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching

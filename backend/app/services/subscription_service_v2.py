@@ -32,7 +32,8 @@ if not stripe.api_key:
 
 class SubscriptionPlan(str, Enum):
     """Subscription plan types"""
-    FREE = "free"
+    TRIAL = "trial"
+    BASIC = "basic"
     PRO = "pro"
     ENTERPRISE = "enterprise"
 
@@ -52,12 +53,19 @@ class SubscriptionStatus(str, Enum):
 class PlanLimits:
     """Plan limits configuration"""
     LIMITS = {
-        SubscriptionPlan.FREE: {
+        SubscriptionPlan.TRIAL: {
             "documents": 10,
             "storage_mb": 100,
             "agents_per_month": 0,
             "team_members": 0,
             "api_calls_per_day": 100
+        },
+        SubscriptionPlan.BASIC: {
+            "documents": 500,
+            "storage_mb": 10240,  # 10 GB
+            "agents_per_month": 10,
+            "team_members": 0,
+            "api_calls_per_day": 1000
         },
         SubscriptionPlan.PRO: {
             "documents": 1000,
@@ -78,17 +86,25 @@ class PlanLimits:
     @classmethod
     def get_limits(cls, plan: str) -> Dict[str, int]:
         """Get limits for a specific plan"""
-        return cls.LIMITS.get(SubscriptionPlan(plan), cls.LIMITS[SubscriptionPlan.FREE])
+        return cls.LIMITS.get(SubscriptionPlan(plan), cls.LIMITS[SubscriptionPlan.TRIAL])
 
 
 class PermissionManager:
     """Manages permissions based on subscription plans"""
     
     PERMISSIONS = {
-        SubscriptionPlan.FREE: {
+        SubscriptionPlan.TRIAL: {
             'view_documents',
             'basic_search',
             'upload_documents'
+        },
+        SubscriptionPlan.BASIC: {
+            'view_documents',
+            'basic_search',
+            'upload_documents',
+            'advanced_search',
+            'use_agents',  # Limited agents
+            'export_documents'
         },
         SubscriptionPlan.PRO: {
             'view_documents',
@@ -127,7 +143,7 @@ class PermissionManager:
             plan_enum = SubscriptionPlan(plan)
             return permission in cls.PERMISSIONS.get(plan_enum, set())
         except ValueError:
-            return permission in cls.PERMISSIONS[SubscriptionPlan.FREE]
+            return permission in cls.PERMISSIONS[SubscriptionPlan.TRIAL]
 
 
 def handle_stripe_errors(func):
@@ -402,12 +418,12 @@ class SubscriptionServiceV2:
     def _get_free_plan_status(message: str = "Free Plan") -> Dict[str, Any]:
         """Get free plan status"""
         return {
-            "plan": SubscriptionPlan.FREE.value,
+            "plan": SubscriptionPlan.TRIAL.value,
             "status": SubscriptionStatus.ACTIVE.value,
             "can_use_agents": False,
             "can_use_advanced_features": False,
             "message": message,
-            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "limits": PlanLimits.get_limits(SubscriptionPlan.TRIAL),
             "updated_at": datetime.utcnow().isoformat()
         }
     
@@ -415,13 +431,13 @@ class SubscriptionServiceV2:
     def _get_error_status(error: str) -> Dict[str, Any]:
         """Get error status"""
         return {
-            "plan": SubscriptionPlan.FREE.value,
+            "plan": SubscriptionPlan.TRIAL.value,
             "status": SubscriptionStatus.ERROR.value,
             "can_use_agents": False,
             "can_use_advanced_features": False,
             "message": "Error checking subscription",
             "error": error,
-            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "limits": PlanLimits.get_limits(SubscriptionPlan.TRIAL),
             "updated_at": datetime.utcnow().isoformat()
         }
     
@@ -547,7 +563,7 @@ class SubscriptionServiceV2:
             return False, f"Your subscription is {status['status']}. Please update your subscription."
         
         # Check permission
-        plan = status.get('plan', SubscriptionPlan.FREE.value)
+        plan = status.get('plan', SubscriptionPlan.TRIAL.value)
         if PermissionManager.has_permission(plan, permission):
             return True, None
         

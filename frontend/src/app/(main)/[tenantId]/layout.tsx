@@ -3,6 +3,7 @@ import { SiteHeader } from "@/components/layout/site-header"
 import { AuthGuard, ProfileVerificationGuard } from "@/components/auth"
 import { GlobalUploadDialog } from "@/components/dashboard/global-upload-dialog"
 import { NavigationProgress } from "@/components/layout/navigation-progress"
+import { VirtualAssistant } from "@/components/virtual-assistant/virtual-assistant"
 import {
   SidebarInset,
   SidebarProvider,
@@ -40,6 +41,9 @@ export default async function TenantLayout({
           
           {/* Global Upload Dialog */}
           <GlobalUploadDialog />
+          
+          {/* Virtual Assistant */}
+          <VirtualAssistant />
         </SidebarProvider>
       </ProfileVerificationGuard>
     </AuthGuard>

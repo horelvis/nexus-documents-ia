@@ -81,25 +81,25 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
   const getActivityColor = (type: string) => {
     switch (type) {
       case 'document_upload':
-        return 'text-blue-600 bg-blue-50 dark:bg-blue-950/30'
+        return 'text-blue-600 dark:text-blue-400 bg-blue-500/10 dark:bg-blue-500/10'
       case 'document_view':
-        return 'text-purple-600 bg-purple-50 dark:bg-purple-950/30'
+        return 'text-purple-600 dark:text-purple-400 bg-purple-500/10 dark:bg-purple-500/10'
       case 'document_share':
-        return 'text-teal-600 bg-teal-50 dark:bg-teal-950/30'
+        return 'text-teal-600 dark:text-teal-400 bg-teal-500/10 dark:bg-teal-500/10'
       case 'document_download':
-        return 'text-green-600 bg-green-50 dark:bg-green-950/30'
+        return 'text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-500/10'
       case 'document_edit':
-        return 'text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30'
+        return 'text-yellow-600 dark:text-yellow-400 bg-yellow-500/10 dark:bg-yellow-500/10'
       case 'document_delete':
-        return 'text-red-600 bg-red-50 dark:bg-red-950/30'
+        return 'text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-500/10'
       case 'agent_execution':
-        return 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30'
+        return 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 dark:bg-indigo-500/10'
       case 'user_action':
-        return 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/30'
+        return 'text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 dark:bg-cyan-500/10'
       case 'error':
-        return 'text-red-600 bg-red-50 dark:bg-red-950/30'
+        return 'text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-500/10'
       default:
-        return 'text-gray-600 bg-gray-50 dark:bg-gray-950/30'
+        return 'text-gray-600 dark:text-gray-400 bg-gray-500/10 dark:bg-gray-500/10'
     }
   }
 

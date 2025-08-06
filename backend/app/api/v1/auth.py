@@ -21,6 +21,30 @@ router = APIRouter()
 # Log que el router se está cargando
 logger.info("🚀 Auth router loaded with endpoints: register, sync-user, me, complete-onboarding")
 
+# Helper function to serialize user without lazy-loaded relationships
+def serialize_user(user: User) -> dict:
+    """Convert User model to dict avoiding lazy-loaded relationships."""
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+        "is_superuser": user.is_superuser,
+        "onboarding_completed": user.onboarding_completed,
+        "stripe_customer_id": user.stripe_customer_id,
+        "tenant_id": str(user.tenant_id),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "subscription_plan": getattr(user, 'subscription_plan', 'trial'),
+        "subscription_status": getattr(user, 'subscription_status', 'active'),
+        "clerk_user_id": user.clerk_user_id,
+        "is_team_member": getattr(user, 'is_team_member', False),
+        "trial_ends_at": user.trial_ends_at.isoformat() if hasattr(user, 'trial_ends_at') and user.trial_ends_at else None,
+        # Omit image and roles to avoid lazy loading issues
+        "image": None,
+        "roles": []
+    }
+
 @router.post("/register", response_model=UserResponse)
 async def register_user(
     user_in: UserCreate,
@@ -43,11 +67,11 @@ async def register_user(
     
     return user
 
-@router.post("/sync-user", response_model=UserResponse, tags=["auth"])
+@router.post("/sync-user", tags=["auth"])
 async def sync_user(
     user_data: UserSync,
     db: AsyncSession = Depends(get_async_db)
-) -> Any:
+) -> dict:
     """
     Sync user from Clerk authentication system.
     Creates user if it doesn't exist, updates if it does.
@@ -59,64 +83,61 @@ async def sync_user(
         clerk_user_id=user_data.clerk_user_id,
         email=user_data.email,
         full_name=user_data.full_name,
-        stripe_customer_id=user_data.stripe_customer_id
+        stripe_customer_id=user_data.stripe_customer_id,
+        metadata={
+            'selected_plan': user_data.dict().get('selected_plan', 'free')
+        }
     )
     
     logger.info(f"✅ User synced successfully: {user.id}")
-    return user
+    
+    # Return user data without lazy-loaded relationships
+    return serialize_user(user)
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 async def get_current_user_info(
     current_user: User = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
-):
+) -> dict:
     """Get current authenticated user information with subscription details."""
     logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
     
     # Log user status for debugging
     logger.info(f"📋 [AUTH_ENDPOINT] User onboarding completed: {current_user.onboarding_completed}")
     
+    # TODO: Fix SubscriptionServiceV2 to be fully async
+    # For now, use the values from the database
     try:
-        from app.services.subscription_service_v2 import SubscriptionServiceV2
-        
-        # Clear cache to ensure fresh data
-        SubscriptionServiceV2.clear_cache(str(current_user.id))
-        
-        # Get subscription status from Stripe
-        # Now using async version of SubscriptionServiceV2 methods
-        subscription_info = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
-        logger.info(f"📋 [AUTH_ENDPOINT] User subscription status: {subscription_info}")
-        
-        # Update user record with latest subscription info
-        current_user.subscription_plan = subscription_info.get('plan', 'free')
-        current_user.subscription_status = subscription_info.get('status', 'active')
-        
-        # Save to database
-        await db.commit()
-        await db.refresh(current_user)
-        
-        logger.info(f"📋 [AUTH_ENDPOINT] User plan updated: {current_user.subscription_plan}")
-        logger.info(f"📋 [AUTH_ENDPOINT] User subscription status updated: {current_user.subscription_status}")
-        
-    except Exception as e:
-        logger.error(f"Error getting subscription status: {e}")
-        await db.rollback()
-        # Use existing values or defaults
+        # Ensure user has default subscription values
         if not current_user.subscription_plan:
-            current_user.subscription_plan = 'free'
+            current_user.subscription_plan = 'trial'
         if not current_user.subscription_status:
             current_user.subscription_status = 'active'
+        
+        # If user has trial_ends_at, check if it's still valid
+        if hasattr(current_user, 'trial_ends_at') and current_user.trial_ends_at:
+            from datetime import datetime
+            if current_user.trial_ends_at < datetime.utcnow():
+                # Trial expired
+                current_user.subscription_status = 'expired'
+        
+        await db.commit()
+        
+    except Exception as e:
+        logger.error(f"Error updating subscription status: {e}")
+        await db.rollback()
     
-    return current_user
+    # Return user data without lazy-loaded relationships
+    return serialize_user(current_user)
 
 
-@router.post("/complete-onboarding", response_model=UserResponse)
+@router.post("/complete-onboarding")
 async def complete_onboarding(
     onboarding_data: OnboardingComplete = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async)
-) -> Any:
+) -> dict:
     """
     Mark user onboarding as completed. 
     Datos de perfil se obtienen de Clerk y Stripe, no necesitamos duplicarlos.
@@ -143,7 +164,7 @@ async def complete_onboarding(
         await db.refresh(current_user)
         
         logger.info(f"✅ Onboarding completed for user: {current_user.id}")
-        return current_user
+        return serialize_user(current_user)
         
     except Exception as e:
         logger.error(f"Error completing onboarding: {str(e)}")
@@ -170,7 +191,7 @@ async def reset_onboarding(
         await db.refresh(current_user)
         
         logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
-        return current_user
+        return serialize_user(current_user)
         
     except Exception as e:
         logger.error(f"Error resetting onboarding: {str(e)}")

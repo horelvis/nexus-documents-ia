@@ -10,6 +10,12 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 
+# Import agent models
+from app.db.agent_models import (
+    AgentType, AgentExecutionMode, AgentDefinition, 
+    AgentConfiguration, AgentExecution, AgentExecutionLog
+)
+
 # =====================================
 # TABLAS DE ASOCIACIÓN (Many-to-Many)
 # =====================================
@@ -129,8 +135,9 @@ class User(Base):
     stripe_customer_id = Column(String(255), nullable=True, unique=True, index=True)
     
     # Subscription info cached from Stripe
-    subscription_plan = Column(String(50), nullable=True, default="free")
-    subscription_status = Column(String(50), nullable=True, default="active")
+    subscription_plan = Column(String(50), nullable=True, default="trial")
+    subscription_status = Column(String(50), nullable=True, default="trialing")
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     
     # Team member info
     is_team_member = Column(Boolean(), default=False, nullable=False)

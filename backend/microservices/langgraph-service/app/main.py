@@ -26,9 +26,9 @@ from app.api import graphs as graph_routes
 from app.api import embeddings as embeddings_routes
 from app.api import vector_search as vector_routes
 from app.api import llm as llm_routes
-from app.api import document_analyzer as analyzer_routes
-from app.api import contract_intelligence as contract_routes
-from app.api import compliance_checker as compliance_routes
+# from app.api import document_analyzer as analyzer_routes
+# from app.api import contract_intelligence as contract_routes
+# from app.api import compliance_checker as compliance_routes
 from app.core.langgraph_manager import LangGraphManager
 
 
@@ -146,23 +146,23 @@ app.include_router(
     prefix="/api/v1",
     tags=["llm"]
 )
-app.include_router(
-    analyzer_routes.router,
-    prefix="/api/v1/analyzer",
-    tags=["document-analyzer"]
-)
+# app.include_router(
+#     analyzer_routes.router,
+#     prefix="/api/v1/analyzer",
+#     tags=["document-analyzer"]
+# )
 
-app.include_router(
-    contract_routes.router,
-    prefix="/api/v1/contracts",
-    tags=["contract-intelligence"]
-)
+# app.include_router(
+#     contract_routes.router,
+#     prefix="/api/v1/contracts",
+#     tags=["contract-intelligence"]
+# )
 
-app.include_router(
-    compliance_routes.router,
-    prefix="/api/v1/compliance",
-    tags=["compliance-checker"]
-)
+# app.include_router(
+#     compliance_routes.router,
+#     prefix="/api/v1/compliance",
+#     tags=["compliance-checker"]
+# )
 
 
 if __name__ == "__main__":

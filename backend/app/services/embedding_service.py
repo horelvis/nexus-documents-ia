@@ -1,12 +1,11 @@
 """
-Embedding Service using LangChain microservice HTTP client
+Embedding Service using CAG microservice HTTP client
 """
 import asyncio
 import logging
 import httpx # Added httpx import
 from typing import List, Dict, Any
 from app.core.config import settings
-from app.services.langchain_client import LangChainClient
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class EmbeddingService:
     
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
-        Genera embeddings para una lista de textos usando el microservicio LangChain.
+        Genera embeddings para una lista de textos usando el microservicio CAG.
         
         Args:
             texts: Lista de textos para generar embeddings
@@ -33,9 +32,22 @@ class EmbeddingService:
             # Increase timeout for large documents
             timeout = httpx.Timeout(60.0, connect=10.0)
             async with httpx.AsyncClient(timeout=timeout) as http_client:
-                lc_client = LangChainClient(http_client=http_client)
-                # Pass tenant_id as it's part of LangChainClient's get_embeddings signature
-                embeddings = await lc_client.get_embeddings(texts=texts, tenant_id=self.tenant_id)
+                headers = {
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                    "X-Tenant-ID": self.tenant_id or settings.DEFAULT_TENANT
+                }
+                
+                response = await http_client.post(
+                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/embeddings",
+                    json=texts,  # Send texts directly as array
+                    headers=headers,
+                    params={"tenant_id": self.tenant_id} if self.tenant_id else None
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                embeddings = result.get("embeddings", [])
+                
             logger.debug(f"Generated {len(embeddings)} embeddings successfully")
             return embeddings
         except Exception as e:
@@ -54,13 +66,9 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Generating embedding for text of length: {len(text)}")
-            # Increase timeout for single embedding too
-            timeout = httpx.Timeout(60.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout) as http_client:
-                lc_client = LangChainClient(http_client=http_client)
-                # Adapt to use get_embeddings for a single text
-                embeddings_list = await lc_client.get_embeddings(texts=[text], tenant_id=self.tenant_id)
-                embedding = embeddings_list[0] if embeddings_list else []
+            # Use get_embeddings for a single text
+            embeddings_list = await self.get_embeddings([text])
+            embedding = embeddings_list[0] if embeddings_list else []
             logger.debug("Embedding generated successfully")
             return embedding
         except Exception as e:
@@ -85,7 +93,7 @@ class EmbeddingService:
     
     async def chunk_text(self, text: str) -> List[Dict[str, Any]]:
         """
-        Divide texto en chunks usando el microservicio LangChain.
+        Divide texto en chunks localmente.
         
         Args:
             text: Texto a dividir
@@ -95,11 +103,28 @@ class EmbeddingService:
         """
         try:
             logger.debug(f"Chunking text of length: {len(text)}")
-            # Increase timeout for chunking too
-            timeout = httpx.Timeout(60.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout) as http_client:
-                lc_client = LangChainClient(http_client=http_client)
-                chunks = await lc_client.chunk_text(text=text, tenant_id=self.tenant_id)
+            
+            # Simple chunking implementation
+            chunk_size = 2000  # Characters per chunk
+            chunk_overlap = 200  # Overlap between chunks
+            chunks = []
+            
+            if len(text) <= chunk_size:
+                # Text is small enough, return as single chunk
+                chunks = [{"text": text, "metadata": {"chunk_index": 0}}]
+            else:
+                # Split into overlapping chunks
+                for i in range(0, len(text), chunk_size - chunk_overlap):
+                    chunk_text = text[i:i + chunk_size]
+                    chunks.append({
+                        "text": chunk_text,
+                        "metadata": {"chunk_index": len(chunks)}
+                    })
+                    
+                    # If this chunk completes the text, stop
+                    if i + chunk_size >= len(text):
+                        break
+            
             logger.debug(f"Text split into {len(chunks)} chunks successfully.")
             return chunks
         except Exception as e:

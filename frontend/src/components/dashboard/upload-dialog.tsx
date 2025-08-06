@@ -55,6 +55,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
   const [isUploading, setIsUploading] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [uploadCompleted, setUploadCompleted] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
   const [currentUploadIndex, setCurrentUploadIndex] = useState(0)
   const documentService = useDocumentService()
 
@@ -184,9 +185,19 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       }
 
       // Check if all uploads completed successfully
-      const allSuccess = files.every(f => f.status === 'success' || f.status === 'pending')
-      if (allSuccess) {
+      const updatedFiles = [...files]
+      const allSuccess = updatedFiles.every(f => {
+        const currentFile = pendingFiles.find(pf => pf.id === f.id)
+        return !currentFile || f.status === 'success'
+      })
+      
+      if (allSuccess && pendingFiles.length > 0) {
         setUploadCompleted(true)
+        setShowSuccess(true)
+        // Auto-close dialog after a short delay to show success status
+        setTimeout(() => {
+          onOpenChange(false)
+        }, 2000)
       }
 
     } catch (error) {
@@ -248,6 +259,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       setFiles([])
       setIsMinimized(false)
       setUploadCompleted(false)
+      setShowSuccess(false)
       setCurrentUploadIndex(0)
     }
   }, [open, form])
@@ -287,6 +299,28 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
             )}
           </div>
         </DialogHeader>
+
+        {/* Success Message Overlay */}
+        {showSuccess && !isMinimized && (
+          <div className="absolute inset-0 bg-white/95 dark:bg-gray-900/95 z-10 flex items-center justify-center rounded-lg">
+            <div className="text-center space-y-4 p-6">
+              <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                <IconCheck className="h-8 w-8 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-green-600 dark:text-green-400">
+                  Upload Successful!
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {completedFiles} {completedFiles === 1 ? 'document has' : 'documents have'} been uploaded successfully.
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Closing automatically...
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Minimized View */}
         {isMinimized ? (

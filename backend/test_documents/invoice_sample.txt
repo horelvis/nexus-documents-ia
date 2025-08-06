@@ -1,0 +1,41 @@
+INVOICE
+
+Invoice Number: INV-2025-08-001
+Date: August 6, 2025
+Due Date: September 6, 2025
+
+FROM:
+TechCorp Solutions Inc.
+123 Innovation Drive
+San Francisco, CA 94105
+Tax ID: 87-1234567
+
+TO:
+Digital Innovations Ltd.
+456 Tech Park Avenue
+Palo Alto, CA 94301
+
+DESCRIPTION OF SERVICES:
+
+Item                                    Quantity    Rate        Amount
+-----------------------------------------------------------------------
+Software Development Services           160 hrs     $150/hr     $24,000.00
+Cloud Infrastructure Setup              1           $5,000      $5,000.00
+Database Optimization                   40 hrs      $175/hr     $7,000.00
+Technical Documentation                 20 hrs      $100/hr     $2,000.00
+Project Management                      30 hrs      $125/hr     $3,750.00
+
+                                        Subtotal:               $41,750.00
+                                        Tax (8.5%):             $3,548.75
+                                        TOTAL DUE:              $45,298.75
+
+Payment Terms: Net 30
+Payment Methods: Wire Transfer, ACH, Check
+
+Bank Details:
+Bank of America
+Account: 123456789
+Routing: 987654321
+
+Please reference invoice number on all payments.
+Thank you for your business!

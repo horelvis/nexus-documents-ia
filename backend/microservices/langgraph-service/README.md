@@ -199,7 +199,7 @@ LangGraph Service
 
 ## Future Enhancements
 
-1. **Visual Graph Editor**: Integration with Langflow
+1. **Visual Graph Editor**: Future enhancement
 2. **Custom Graph Builder**: API for dynamic graph creation
 3. **Advanced Checkpointing**: Redis-based distributed checkpoints
 4. **Graph Templates**: Pre-built graphs for common workflows

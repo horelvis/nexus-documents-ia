@@ -52,55 +52,71 @@ class DocumentAnalysisRequest(BaseModel):
 # =====================================
 
 @router.get("/health")
-async def check_langgraph_health():
-    """Check connectivity with LangGraph service"""
+async def check_cag_health():
+    """Check connectivity with CAG service"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
+        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
+            response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             health_data = response.json()
             
         return {
             "status": "healthy",
-            "langgraph_service": health_data,
+            "cag_service": health_data,
             "integration": "working"
         }
     except Exception as e:
-        logger.error(f"LangGraph health check failed: {str(e)}")
+        logger.error(f"CAG health check failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LangGraph service unavailable: {str(e)}"
+            detail=f"CAG service unavailable: {str(e)}"
         )
 
 @router.get("/status")
 async def get_service_status():
-    """Get service health status from LangGraph"""
+    """Get service health status from CAG"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
-        async with httpx.AsyncClient() as client:
-            # Use the health endpoint instead of non-existent status endpoint
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
-            response.raise_for_status()
-            
-            health_data = response.json()
-            
-            # Also get available graph types
-            types_response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
-            types_data = types_response.json() if types_response.status_code == 200 else []
+        # Check CAG service health
+        cag_health = {"status": "unknown"}
+        try:
+            headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
+                if response.status_code == 200:
+                    cag_health = response.json()
+        except Exception as e:
+            logger.warning(f"CAG health check failed: {e}")
+        
+        # Determine overall status
+        overall_status = "operational"
+        if cag_health.get("status") != "healthy":
+            overall_status = "degraded"
         
         return {
             "service": "agents",
-            "langgraph_health": health_data,
-            "available_types": types_data,
-            "status": "operational" if health_data.get("status") == "healthy" else "degraded"
+            "cag_health": cag_health,
+            "status": overall_status,
+            "system_resources": {
+                "cpu_percent": 25.0,  # Mock data for now
+                "memory_percent": 45.0,
+                "disk_percent": 60.0
+            }
         }
     except Exception as e:
         logger.error(f"Error getting service status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Service status unavailable: {str(e)}"
-        )
+        # Return degraded status instead of error
+        return {
+            "service": "agents",
+            "status": "degraded",
+            "error": str(e),
+            "cag_health": {"status": "unknown"},
+            "system_resources": {
+                "cpu_percent": 0,
+                "memory_percent": 0,
+                "disk_percent": 0
+            }
+        }
 
 # =====================================
 # AGENT TYPES AND LISTING
@@ -108,65 +124,70 @@ async def get_service_status():
 
 @router.get("/types")
 async def list_agent_types():
-    """List available agent types from LangGraph"""
+    """List available agent types - CAG-based agents"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
-            response.raise_for_status()
-            
-        graph_types = response.json()
-        
-        # Map LangGraph types to agent types
+        # Define CAG-based agent types
         agent_types = {
             "document_analyzer": {
                 "name": "Document Analyzer",
-                "description": "Analyzes and categorizes documents",
-                "capabilities": ["classification", "extraction", "analysis"],
-                "source": "langgraph"
+                "description": "Analyzes and categorizes documents using CAG",
+                "capabilities": ["classification", "extraction", "analysis", "summarization"],
+                "source": "cag"
             },
             "rag_assistant": {
                 "name": "RAG Assistant",
-                "description": "Retrieval-augmented generation for Q&A",
-                "capabilities": ["search", "qa", "context_retrieval"],
-                "source": "langgraph"
+                "description": "CAG-powered retrieval and Q&A",
+                "capabilities": ["search", "qa", "context_retrieval", "multi-turn_conversation"],
+                "source": "cag"
             },
             "digital_signature": {
                 "name": "Digital Signature Agent",
                 "description": "Manages signature workflows",
-                "capabilities": ["signature_management", "tracking"],
-                "source": "langgraph"
+                "capabilities": ["signature_management", "tracking", "validation"],
+                "source": "cag"
+            },
+            "legal_compliance": {
+                "name": "Legal Compliance Agent",
+                "description": "Validates legal requirements and compliance",
+                "capabilities": ["compliance_check", "risk_assessment", "regulatory_validation"],
+                "source": "cag"
+            },
+            "financial_analysis": {
+                "name": "Financial Analysis Agent",
+                "description": "Analyzes financial documents and metrics",
+                "capabilities": ["financial_metrics", "trend_analysis", "reporting"],
+                "source": "cag"
+            },
+            "contract_analyzer": {
+                "name": "Contract Analyzer",
+                "description": "Analyzes contracts and legal agreements",
+                "capabilities": ["clause_extraction", "risk_identification", "comparison"],
+                "source": "cag"
             }
         }
-        
-        # Add graph types as agent types
-        if isinstance(graph_types, dict):
-            for graph_type in graph_types.get("available_graphs", []):
-                if graph_type not in agent_types:
-                    agent_types[graph_type] = {
-                        "name": graph_type.replace("_", " ").title(),
-                        "description": f"LangGraph {graph_type} workflow",
-                        "capabilities": ["workflow", "automation"],
-                        "source": "langgraph"
-                    }
-        elif isinstance(graph_types, list):
-            for graph_type in graph_types:
-                if graph_type not in agent_types:
-                    agent_types[graph_type] = {
-                        "name": graph_type.replace("_", " ").title(),
-                        "description": f"LangGraph {graph_type} workflow",
-                        "capabilities": ["workflow", "automation"],
-                        "source": "langgraph"
-                    }
         
         return {"available_types": agent_types, "total": len(agent_types)}
         
     except Exception as e:
         logger.error(f"Error listing agent types: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list agent types: {str(e)}"
-        )
+        # Return default CAG agents even if there's an error
+        return {
+            "available_types": {
+                "document_analyzer": {
+                    "name": "Document Analyzer",
+                    "description": "Analyzes and categorizes documents using CAG",
+                    "capabilities": ["classification", "extraction", "analysis"],
+                    "source": "cag"
+                },
+                "rag_assistant": {
+                    "name": "RAG Assistant",
+                    "description": "CAG-powered retrieval and Q&A",
+                    "capabilities": ["search", "qa", "context_retrieval"],
+                    "source": "cag"
+                }
+            },
+            "total": 2
+        }
 
 @router.get("/list")
 async def list_agents(current_user: User = Depends(get_current_active_user_async)):
@@ -187,31 +208,26 @@ async def analyze_document(
     async def event_stream():
         try:
             async with httpx.AsyncClient() as client:
-                # Use document_analysis_crew graph
-                stream_request = {
-                    "graph_type": "document_analysis_crew",
-                    "input_data": {
-                        "document_id": request.document_id or "temp-doc",
-                        "document_content": request.document_content,
-                        "tenant_id": str(current_user.tenant_id),
-                        "user_id": str(current_user.id)
-                    },
+                # Use CAG service for document analysis
+                analysis_request = {
+                    "document_content": request.document_content,
+                    "document_id": request.document_id or "temp-doc",
                     "tenant_id": str(current_user.tenant_id),
                     "user_id": str(current_user.id),
-                    "mode": "stream"
+                    "analysis_type": request.analysis_type
                 }
                 
                 headers = {
-                    "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
                     "X-Tenant-ID": str(current_user.tenant_id),
                     "X-User-ID": str(current_user.id)
                 }
                 
-                # Stream from LangGraph
+                # Use streaming CAG endpoint
                 async with client.stream(
                     "POST",
-                    f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/stream",
-                    json=stream_request,
+                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/analyze/stream",
+                    json=analysis_request,
                     headers=headers,
                     timeout=120.0
                 ) as response:
@@ -219,57 +235,45 @@ async def analyze_document(
                     
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                yield "data: [DONE]\n\n"
+                                break
+                            
                             try:
-                                data = json.loads(line[6:])
+                                event = json.loads(data_str)
                                 
-                                # Transform LangGraph events to our format
-                                if data.get("type") == "node_start":
-                                    node_name = data.get("node", "")
-                                    progress_map = {
-                                        "classify_document": 20,
-                                        "select_specialist_agents": 30,
-                                        "extract_entities": 40,
-                                        "execute_specialist_crew": 50,
-                                        "analyze_compliance": 60,
-                                        "synthesize_findings": 80,
-                                        "generate_recommendations": 90
-                                    }
-                                    progress = progress_map.get(node_name, 50)
-                                    
-                                    yield f"data: {json.dumps({'type': 'progress', 'content': f'Processing: {node_name}', 'progress': progress})}\n\n"
-                                
-                                elif data.get("type") == "result":
-                                    # Final result from LangGraph
-                                    result_data = data.get("data", {})
-                                    
+                                # Transform CAG events to expected format
+                                if event["type"] == "result":
+                                    # Transform to document analysis result
                                     result = {
                                         "type": "result",
                                         "content": {
-                                            "document_type": result_data.get("document_type", "general"),
-                                            "is_signable": result_data.get("requires_signature", False),
-                                            "required_agents": result_data.get("agents_used", ["document_analyzer"]),
-                                            "confidence": result_data.get("confidence_scores", {}).get("overall", 0.85),
-                                            "execution_type": "sequential",
-                                            "analysis": result_data.get("analysis", {}),
-                                            "recommendations": result_data.get("recommendations", []),
-                                            "action_items": result_data.get("action_items", []),
-                                            "extracted_data": result_data.get("extracted_data", {}),
-                                            "compliance_status": result_data.get("compliance_status", {}),
-                                            "risk_assessment": result_data.get("risk_assessment", {}),
+                                            "document_type": event["content"].get("analysis_type", "general"),
+                                            "is_signable": False,
+                                            "required_agents": ["document_analyzer"],
+                                            "confidence": event["content"].get("quality_score", 0.85),
+                                            "execution_type": "cag",
+                                            "analysis": {
+                                                "summary": event["content"].get("analysis", ""),
+                                                "quality_score": event["content"].get("quality_score", 0),
+                                                "execution_time": event["content"].get("execution_time", 0)
+                                            },
+                                            "recommendations": [],
+                                            "action_items": [],
+                                            "extracted_data": {},
+                                            "compliance_status": {},
+                                            "risk_assessment": {},
                                             "analysis_timestamp": datetime.utcnow().isoformat()
                                         }
                                     }
-                                    
                                     yield f"data: {json.dumps(result)}\n\n"
-                                
                                 else:
-                                    # Pass through other events
-                                    yield f"data: {json.dumps(data)}\n\n"
+                                    # Pass through other events (progress, error)
+                                    yield f"data: {json.dumps(event)}\n\n"
                                     
                             except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse SSE data: {line}")
-                    
-                    yield f"data: [DONE]\n\n"
+                                logger.warning(f"Failed to parse SSE data: {data_str}")
                     
         except Exception as e:
             logger.error(f"Error in document analysis: {str(e)}")
@@ -298,29 +302,25 @@ async def chat_with_agent(
     async def event_stream():
         try:
             async with httpx.AsyncClient() as client:
-                # Use RAG graph for chat
-                stream_request = {
-                    "graph_type": "rag",
-                    "input_data": {
-                        "question": request.message,
-                        "conversation_id": request.conversation_id,
-                        "context": request.context or {}
-                    },
+                # Use CAG service for chat
+                query_request = {
+                    "query": request.message,
                     "tenant_id": str(current_user.tenant_id),
                     "user_id": str(current_user.id),
-                    "mode": "stream"
+                    "context": request.context or {}
                 }
                 
                 headers = {
-                    "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
                     "X-Tenant-ID": str(current_user.tenant_id),
                     "X-User-ID": str(current_user.id)
                 }
                 
+                # Use streaming CAG endpoint
                 async with client.stream(
                     "POST",
-                    f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/stream",
-                    json=stream_request,
+                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/query/stream",
+                    json=query_request,
                     headers=headers,
                     timeout=60.0
                 ) as response:
@@ -328,7 +328,30 @@ async def chat_with_agent(
                     
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
-                            yield line + "\n\n"
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                yield "data: [DONE]\n\n"
+                                break
+                            
+                            try:
+                                event = json.loads(data_str)
+                                
+                                # Transform CAG events for chat
+                                if event["type"] == "result":
+                                    # Transform to chat response
+                                    response_event = {
+                                        "type": "response",
+                                        "content": event["content"].get("answer", ""),
+                                        "quality_score": event["content"].get("quality_score", 0),
+                                        "iterations": event["content"].get("iterations", 0)
+                                    }
+                                    yield f"data: {json.dumps(response_event)}\n\n"
+                                else:
+                                    # Pass through other events (progress, error)
+                                    yield f"data: {json.dumps(event)}\n\n"
+                                    
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse SSE data: {data_str}")
                             
         except Exception as e:
             logger.error(f"Error in chat: {str(e)}")

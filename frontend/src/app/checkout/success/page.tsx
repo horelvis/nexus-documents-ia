@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/nextjs'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +23,7 @@ interface CheckoutSession {
 function CheckoutSuccessContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const { isSignedIn, isLoaded } = useAuth()
   const sessionId = searchParams.get('session_id')
   
   const [checkoutData, setCheckoutData] = useState<CheckoutSession | null>(null)
@@ -58,9 +60,14 @@ function CheckoutSuccessContent() {
 
   const handleContinueToSignup = () => {
     if (checkoutData) {
-      // Redirect to sign-up with session data
-      // The backend will create the user with the subscription when they sign up
-      router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
+      // Check if user is already signed in
+      if (isSignedIn) {
+        // User is already authenticated, go to dashboard
+        router.push('/dashboard?upgraded=true&sync=true')
+      } else {
+        // User needs to sign up with the session data
+        router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
+      }
     }
   }
 
@@ -81,7 +88,7 @@ function CheckoutSuccessContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+      <div className="min-h-screen flex items-center justify-center">
         <UnifiedLoader 
           variant="initial"
           size="lg"
@@ -94,7 +101,7 @@ function CheckoutSuccessContent() {
 
   if (error || !checkoutData) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Card className="max-w-md w-full mx-4">
           <CardHeader className="text-center">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -118,7 +125,7 @@ function CheckoutSuccessContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="max-w-2xl w-full mx-4 space-y-8">
         {/* Success Message */}
         <Card className="text-center">
@@ -168,18 +175,37 @@ function CheckoutSuccessContent() {
             <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold mb-3">¿Qué sigue?</h3>
               <ol className="text-left space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
-                  Completa tu registro con los datos de tu empresa
-                </li>
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
-                  Configura tu workspace y agrega tu equipo
-                </li>
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
-                  ¡Empieza a usar todas las funcionalidades premium!
-                </li>
+                {isSignedIn ? (
+                  <>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
+                      Tu suscripción está activa y lista
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
+                      Accede a todas las funcionalidades premium
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
+                      ¡Comienza a trabajar con tus documentos!
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
+                      Completa tu registro con los datos de tu empresa
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
+                      Configura tu workspace y agrega tu equipo
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
+                      ¡Empieza a usar todas las funcionalidades premium!
+                    </li>
+                  </>
+                )}
               </ol>
             </div>
           </CardContent>
@@ -190,9 +216,9 @@ function CheckoutSuccessContent() {
           <Button 
             onClick={handleContinueToSignup}
             size="lg"
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3"
+            className="bg-gradient-to-r from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white px-8 py-3"
           >
-            Completar Registro
+            {isSignedIn ? 'Ir al Dashboard' : 'Completar Registro'}
           </Button>
         </div>
 
@@ -211,7 +237,7 @@ export const dynamic = 'force-dynamic'
 export default function CheckoutSuccessPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+      <div className="min-h-screen flex items-center justify-center">
         <UnifiedLoader 
           variant="initial"
           size="lg"

@@ -14,20 +14,12 @@ export function PricingSection() {
   const plans = getAllPlans()
 
   const handlePlanSelection = (plan: Plan) => {
-    if (plan.id === 'free') {
-      // Free plan: go to signup if not signed in, dashboard if signed in
-      if (isSignedIn) {
-        router.push('/dashboard')
-      } else {
-        router.push('/auth/sign-up?plan=free')
-      }
+    if (isSignedIn) {
+      // If already signed in, go to dashboard
+      router.push('/dashboard')
     } else {
-      // Paid plans: go to signup to start onboarding flow with plan selection
-      if (isSignedIn) {
-        router.push('/dashboard')
-      } else {
-        router.push('/auth/sign-up')
-      }
+      // For all plans (including trial), pass the plan ID
+      router.push(`/auth/sign-up?plan=${plan.id}`)
     }
   }
 
@@ -65,13 +57,13 @@ export function PricingSection() {
               key={plan.id} 
               className={`relative transition-all duration-300 hover:shadow-xl ${
                 plan.popular 
-                  ? 'ring-2 ring-blue-500 shadow-lg scale-105' 
+                  ? 'ring-2 ring-purple-600 shadow-lg scale-105' 
                   : 'hover:scale-105'
               }`}
             >
               {plan.popular && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-1">
+                  <Badge className="bg-gradient-to-r from-purple-500 to-purple-700 text-white px-4 py-1">
                     <IconStar className="w-4 h-4 mr-1" />
                     Más Popular
                   </Badge>

@@ -49,10 +49,10 @@ async def create_checkout_session(
     """
     try:
         # Validate plan ID
-        if request.planId not in ['pro', 'enterprise']:
+        if request.planId not in ['basic', 'pro']:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid plan ID: {request.planId}. Must be 'pro' or 'enterprise'"
+                detail=f"Invalid plan ID: {request.planId}. Must be 'basic' or 'pro'"
             )
         
         # Validate interval
@@ -64,13 +64,13 @@ async def create_checkout_session(
         
         # Centralized plan to price mapping
         plan_price_mapping = {
+            'basic': {
+                'month': settings.STRIPE_BASIC_PRICE_ID,
+                'year': getattr(settings, 'STRIPE_BASIC_YEARLY_PRICE_ID', None)
+            },
             'pro': {
                 'month': settings.STRIPE_PRO_PRICE_ID,
                 'year': getattr(settings, 'STRIPE_PRO_YEARLY_PRICE_ID', None)
-            },
-            'enterprise': {
-                'month': settings.STRIPE_ENTERPRISE_PRICE_ID,
-                'year': getattr(settings, 'STRIPE_ENTERPRISE_YEARLY_PRICE_ID', None)
             }
         }
         

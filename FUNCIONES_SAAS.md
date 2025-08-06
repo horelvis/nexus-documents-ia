@@ -60,7 +60,6 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 - **Agente de Contratos**: Análisis especializado de términos contractuales
 - **Agente Financiero**: Extracción y análisis de datos financieros
 - **Agente Legal**: Identificación de cláusulas y términos legales
-- **Constructor visual de agentes** con Langflow (solo administradores)
 
 ### 3. 👥 Colaboración y Compartición
 

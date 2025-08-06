@@ -2,7 +2,8 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, signatures, webhooks, search, teams, langgraph, users, entities, dashboard
+    agents, agent_management, signatures, webhooks, search, teams, langgraph, users, entities, dashboard,
+    simple_auth, assistant, assistant_v2
     # document_analyzer, contract_intelligence, compliance_checker
 )
 from fastapi import APIRouter
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 logger.info("🔧 Including auth router with endpoints...")
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(simple_auth.router, prefix="/simple-auth", tags=["simple-auth"])
 
 logger.info("✅ Auth router included with prefix=/auth")
 api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
@@ -27,9 +29,12 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+api_router.include_router(assistant.router, prefix="/assistant", tags=["assistant"])
+api_router.include_router(assistant_v2.router, tags=["assistant-v2"])
 
 # AI Agents and Digital Signature routes
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
+api_router.include_router(agent_management.router, prefix="/agent-management", tags=["agent-management"])
 api_router.include_router(signatures.router, prefix="/signatures", tags=["signatures"])
 
 # AI-powered signature placement

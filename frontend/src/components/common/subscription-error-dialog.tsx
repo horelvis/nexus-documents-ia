@@ -57,8 +57,7 @@ export function SubscriptionErrorDialog({
       onClose()
       // Small delay to ensure dialog closes before navigation
       setTimeout(() => {
-        const plansUrl = `/plans/${tenantId}`
-        router.push(plansUrl)
+        router.push(`/${tenantId}/plans`)
       }, 100)
     }
   }

@@ -41,20 +41,19 @@ export interface AgentHealth {
 }
 
 export interface AgentServiceStatus {
-  langgraph_service: {
+  cag_service: {
     status: string
-    graphs_loaded: number
-    active_sessions: number
+    checks: {
+      llm: boolean
+      embeddings: boolean
+      qdrant: boolean
+      cag_engine: boolean
+    }
   }
   system_resources: {
     cpu_percent: number
     memory_percent: number
     disk_percent: number
-  }
-  graph_stats: {
-    total_graphs: number
-    active_graphs: number
-    graphs_by_type: Record<string, number>
   }
 }
 
@@ -74,16 +73,12 @@ export interface ChatMessage {
 class AgentService {
   constructor(private apiClient: ReturnType<typeof useApiClient>) {}
 
-  async getAgents(): Promise<{ data?: Agent[]; error?: string }> {
+  async getAgents(): Promise<{ data?: any; error?: string }> {
     try {
       const response = await this.apiClient.get('/agents/list')
       
-      // Handle the nested structure from the API
-      if (response.data && typeof response.data === 'object' && 'agents' in response.data) {
-        return { data: response.data.agents }
-      }
-      
-      // Fallback to direct array if API changes
+      // The /agents/list endpoint returns available_types from the CAG integration
+      // Return the full response data to let components handle the structure
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to fetch agents:', error)
@@ -300,31 +295,59 @@ class AgentService {
         throw new Error('No response body')
       }
 
+      let buffer = ''
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        // Decode the chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Process complete lines
+        const lines = buffer.split('\n')
+        
+        // Keep the last line in buffer if it's incomplete
+        buffer = lines.pop() || ''
 
         for (const line of lines) {
+          if (line.trim() === '') continue
+          
           if (line.startsWith('data: ')) {
-            const data = line.slice(6)
+            const data = line.slice(6).trim()
             if (data === '[DONE]') {
               return {}
             }
-            try {
-              const parsed = JSON.parse(data)
-              if (parsed.type === 'progress' && onProgress) {
-                onProgress(parsed)
-              } else if (parsed.type === 'result' && onResult) {
-                onResult(parsed.content)
-              } else if (parsed.type === 'error' && onError) {
-                onError(parsed.content)
+            
+            if (data) {
+              try {
+                const parsed = JSON.parse(data)
+                if (parsed.type === 'progress' && onProgress) {
+                  onProgress(parsed)
+                } else if (parsed.type === 'result' && onResult) {
+                  onResult(parsed.content)
+                } else if (parsed.type === 'error' && onError) {
+                  onError(parsed.content)
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE data:', e, 'Data:', data)
               }
-            } catch (e) {
-              console.error('Failed to parse SSE data:', e)
             }
+          }
+        }
+      }
+
+      // Process any remaining data in buffer
+      if (buffer.trim() && buffer.startsWith('data: ')) {
+        const data = buffer.slice(6).trim()
+        if (data && data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.type === 'result' && onResult) {
+              onResult(parsed.content)
+            }
+          } catch (e) {
+            console.error('Failed to parse final SSE data:', e)
           }
         }
       }

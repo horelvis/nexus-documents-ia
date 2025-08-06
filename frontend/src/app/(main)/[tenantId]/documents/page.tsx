@@ -654,8 +654,8 @@ export default function DocumentsPage() {
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleViewDocument(document)}
-                            title="View details"
+                            onClick={() => handleFullPagePreview(document)}
+                            title="Full Preview"
                             className="h-7 w-7 p-0"
                           >
                             <IconEye className="h-3.5 w-3.5" />
@@ -692,9 +692,9 @@ export default function DocumentsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
+                              <DropdownMenuItem onClick={() => handleViewDocument(document)}>
                                 <IconEye className="mr-2 h-4 w-4" />
-                                Full Page Preview
+                                View Details
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleDownloadDocument(document)}>
                                 <IconDownload className="mr-2 h-4 w-4" />
