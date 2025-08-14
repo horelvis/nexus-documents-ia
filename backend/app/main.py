@@ -164,16 +164,34 @@ else:
 
 # Configurar CORS - Solución simple para IPs dinámicas
 if settings.ALLOW_ALL_CORS and settings.DEBUG:
-    # SOLO para desarrollo - permitir todos los orígenes
-    logger.warning("⚠️ ALLOW_ALL_CORS enabled - permitting all origins (DEVELOPMENT ONLY)")
+    # Para desarrollo: permitir todas las IPs locales comunes con credenciales
+    dev_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://localhost:3002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
+        "http://192.168.1.50:3000",
+        "http://192.168.1.50:3001",
+        "http://192.168.1.50:3002",
+        # Agregar más IPs locales comunes si es necesario
+        "http://192.168.0.50:3000",
+        "http://192.168.0.50:3001",
+        "http://192.168.0.50:3002",
+        "http://10.0.0.50:3000",
+        "http://10.0.0.50:3001",
+        "http://10.0.0.50:3002",
+    ]
+    logger.warning(f"⚠️ ALLOW_ALL_CORS enabled - permitting dev origins: {dev_origins[:3]}... (DEVELOPMENT ONLY)")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,  # No se puede usar credentials con origins="*"
+        allow_origins=dev_origins,
+        allow_credentials=True,  # Ahora podemos usar credentials con origins específicos
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    logger.info("✅ CORS middleware configured (all origins)")
+    logger.info("✅ CORS middleware configured (dev origins with credentials)")
 else:
     cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
     logger.info(f"🌐 Configuring CORS with origins: {cors_origins}")

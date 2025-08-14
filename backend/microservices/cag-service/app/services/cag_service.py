@@ -4,7 +4,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from loguru import logger
 
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_community.llms import Ollama
+from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Qdrant as QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams

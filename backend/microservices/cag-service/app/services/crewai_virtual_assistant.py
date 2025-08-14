@@ -6,16 +6,18 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import (
-    DirectoryReadTool,
+    DirectorySearchTool,  # Changed from DirectoryReadTool
     FileReadTool, 
-    SerperDevTool,
+    # SerperDevTool,  # Not available in this version
     WebsiteSearchTool,
     PDFSearchTool,
     DOCXSearchTool,
     CSVSearchTool
 )
-from crewai.memory import ShortTermMemory, LongTermMemory
+# from crewai.memory import ShortTermMemory, LongTermMemory  # Not available in this version
 from loguru import logger
+
+from ..core.config import settings
 
 
 class CrewAIVirtualAssistant:
@@ -40,7 +42,7 @@ class CrewAIVirtualAssistant:
         """Configurar herramientas disponibles"""
         return [
             # Búsqueda de documentos
-            DirectoryReadTool(directory=self.workspace),
+            DirectorySearchTool(directory=self.workspace),
             PDFSearchTool(directory=self.workspace),
             DOCXSearchTool(directory=self.workspace),
             CSVSearchTool(directory=self.workspace),
@@ -63,7 +65,7 @@ class CrewAIVirtualAssistant:
             backstory="""You are an expert at searching through documents 
                         and finding the most relevant information.""",
             tools=self.tools,
-            llm='ollama/llama3.2',  # Usar Ollama local
+            llm=f'ollama/{settings.llm_model}',  # Usar Ollama local
             verbose=True,
             allow_delegation=False,
             max_iter=3
@@ -76,7 +78,7 @@ class CrewAIVirtualAssistant:
             backstory="""You are a senior analyst specialized in 
                         understanding complex documents and extracting insights.""",
             tools=self.tools,
-            llm='ollama/gemma3:12b',  # Modelo más potente para análisis
+            llm=f'ollama/{settings.llm_model}',  # Modelo más potente para análisis
             verbose=True,
             allow_delegation=True,  # Puede delegar a search_agent
             max_iter=5
@@ -88,7 +90,7 @@ class CrewAIVirtualAssistant:
             goal='Provide clear, accurate answers to user questions',
             backstory="""You are an expert communicator who can synthesize 
                         complex information into clear, actionable responses.""",
-            llm='ollama/llama3.2',
+            llm=f'ollama/{settings.llm_model}',
             verbose=True,
             allow_delegation=False
         )
@@ -100,7 +102,7 @@ class CrewAIVirtualAssistant:
             backstory="""You are a compliance expert who ensures all 
                         documents meet legal and regulatory standards.""",
             tools=self.tools,
-            llm='ollama/llama3.2',
+            llm=f'ollama/{settings.llm_model}',
             verbose=True
         )
         
@@ -120,12 +122,12 @@ class CrewAIVirtualAssistant:
                 "provider": "ollama",
                 "config": {
                     "model": "nomic-embed-text",
-                    "base_url": "http://ollama-service:11434"
+                    "base_url": "http://genai-ollama:11434"
                 }
             },
             # Configuración de LLM manager
-            manager_llm="ollama/llama3.2",
-            function_calling_llm="ollama/gemma3:12b"
+            manager_llm=f"ollama/{settings.llm_model}",
+            function_calling_llm=f"ollama/{settings.llm_model}"
         )
     
     async def process_query(
