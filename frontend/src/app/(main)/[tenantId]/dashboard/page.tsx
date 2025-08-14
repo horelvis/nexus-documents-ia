@@ -9,6 +9,7 @@ import { SharedDocumentsPanel } from "@/components/dashboard/shared-documents-pa
 import { AIInsightsPanel } from "@/components/dashboard/ai-insights-panel"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SubscriptionDebugPanel } from "@/components/testing/subscription-debug"
 
 export default function DashboardPage() {
   const params = useParams()
@@ -16,6 +17,9 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6 py-4 md:py-6">
+      {/* Debug Panel - REMOVE IN PRODUCTION */}
+      <SubscriptionDebugPanel />
+      
       {/* Welcome Section */}
       <div className="px-4 lg:px-6">
         <h1 className="text-3xl font-bold mb-2">Dashboard</h1>

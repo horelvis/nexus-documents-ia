@@ -100,7 +100,25 @@
     "uploadDocument": "Subir Documento",
     "startChat": "Iniciar Chat",
     "viewAllDocuments": "Ver Todos los Documentos",
-    "noRecentDocuments": "No hay documentos recientes"
+    "noRecentDocuments": "No hay documentos recientes",
+    "stats": {
+      "totalDocuments": "Total de Documentos",
+      "processed": "Procesados",
+      "processing": "Procesando",
+      "errors": "Errores",
+      "storageUsed": "Almacenamiento Usado",
+      "activeUsers": "Usuarios Activos",
+      "documentsInLibrary": "Documentos en tu biblioteca",
+      "readyForSearch": "Listos para búsqueda y análisis",
+      "beingIndexed": "Se están indexando",
+      "needAttention": "Requieren atención",
+      "totalStorage": "Consumo total de almacenamiento",
+      "teamMembers": "Miembros del equipo este mes",
+      "allUploaded": "Todos los documentos subidos",
+      "successfullyIndexed": "Indexados correctamente",
+      "acrossDocuments": "En todos los documentos",
+      "accessedRecently": "Accedidos recientemente"
+    }
   },
   "documents": {
     "title": "Documentos",
@@ -119,7 +137,27 @@
     "noDocuments": "No se encontraron documentos",
     "uploadHint": "Arrastra y suelta archivos aquí o haz clic para buscar",
     "supportedFormats": "Formatos soportados: PDF, DOC, DOCX, TXT",
-    "maxFileSize": "Tamaño máximo: 50MB"
+    "maxFileSize": "Tamaño máximo: 50MB",
+    "statusLabels": {
+      "INDEXED": "Procesado correctamente",
+      "PROCESSING": "Procesando contenido",
+      "INDEXING_ERROR": "Error en el procesamiento",
+      "PENDING": "Pendiente de procesar"
+    },
+    "statusDescriptions": {
+      "INDEXED": "El documento ha sido procesado y está disponible para búsqueda",
+      "PROCESSING": "El documento se está analizando y extrayendo su contenido",
+      "INDEXING_ERROR": "Hubo un problema al procesar el documento. Puede reintentarse",
+      "PENDING": "El documento está en cola esperando a ser procesado"
+    },
+    "errorDetails": {
+      "INDEXING_ERROR": "Error de indexación: El sistema no pudo extraer o procesar el contenido del documento",
+      "PROCESSING_TIMEOUT": "El procesamiento tardó más de lo esperado",
+      "UNSUPPORTED_FORMAT": "Formato de archivo no compatible",
+      "CORRUPTED_FILE": "El archivo parece estar dañado",
+      "INSUFFICIENT_MEMORY": "No hay suficiente memoria para procesar el archivo",
+      "NETWORK_ERROR": "Error de conexión durante el procesamiento"
+    }
   },
   "errors": {
     "genericError": "Algo salió mal",
@@ -130,6 +168,13 @@
     "validationError": "Por favor verifica tu entrada",
     "uploadError": "Error al subir el archivo",
     "fileTooLarge": "El archivo es demasiado grande",
-    "unsupportedFormat": "Formato de archivo no soportado"
+    "unsupportedFormat": "Formato de archivo no soportado",
+    "needsAttention": "Requieren atención",
+    "indexingErrors": {
+      "title": "Errores de procesamiento",
+      "description": "Algunos documentos no pudieron ser procesados correctamente",
+      "action": "Ver detalles y reintentar",
+      "count": "{count} documento(s) con errores"
+    }
   }
 }

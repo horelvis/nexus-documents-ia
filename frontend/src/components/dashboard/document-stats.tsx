@@ -23,12 +23,14 @@ import {
 import { useDashboardService, type DashboardStats } from "@/lib/services/dashboard.service"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatFileSize } from "@/lib/document-utils"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export function DocumentStats() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const dashboardService = useDashboardService()
+  const { t } = useTranslation()
 
   useEffect(() => {
     loadStats()
@@ -78,45 +80,45 @@ export function DocumentStats() {
 
   const statCards = [
     {
-      title: "Total Documents",
+      title: t('dashboard.stats.totalDocuments'),
       value: stats?.total_documents || 0,
-      description: "Documents in your library",
+      description: t('dashboard.stats.documentsInLibrary'),
       trend: stats?.trends.documents || 0,
       icon: IconFile,
-      footer: "All uploaded documents",
+      footer: t('dashboard.stats.allUploaded'),
       iconColor: "text-blue-600 dark:text-blue-400",
       bgColor: "bg-blue-500/10 dark:bg-blue-500/10",
       borderColor: "border-blue-500/20"
     },
     {
-      title: "Processed",
+      title: t('dashboard.stats.processed'),
       value: stats?.processed_documents || 0,
-      description: "Ready for search & analysis",
+      description: t('dashboard.stats.readyForSearch'),
       trend: stats?.trends.processed || 0,
       icon: IconFileCheck,
-      footer: "Successfully indexed",
+      footer: t('dashboard.stats.successfullyIndexed'),
       iconColor: "text-green-600 dark:text-green-400",
       bgColor: "bg-green-500/10 dark:bg-green-500/10",
       borderColor: "border-green-500/20"
     },
     {
-      title: "Storage Used",
+      title: t('dashboard.stats.storageUsed'),
       value: formatFileSize(stats?.total_storage_bytes || 0),
-      description: "Total storage consumption",
+      description: t('dashboard.stats.totalStorage'),
       trend: stats?.trends.storage || 0,
       icon: IconCloud,
-      footer: "Across all documents",
+      footer: t('dashboard.stats.acrossDocuments'),
       iconColor: "text-purple-600 dark:text-purple-400",
       bgColor: "bg-purple-500/10 dark:bg-purple-500/10",
       borderColor: "border-purple-500/20"
     },
     {
-      title: "Active Users",
+      title: t('dashboard.stats.activeUsers'),
       value: stats?.active_users || 0,
-      description: "Team members this month",
+      description: t('dashboard.stats.teamMembers'),
       trend: stats?.trends.active_users || 0,
       icon: IconUsers,
-      footer: "Accessed documents recently",
+      footer: t('dashboard.stats.accessedRecently'),
       iconColor: "text-orange-600 dark:text-orange-400",
       bgColor: "bg-orange-500/10 dark:bg-orange-500/10",
       borderColor: "border-orange-500/20"
@@ -171,7 +173,7 @@ export function DocumentStats() {
         <Card className="@container/card border-yellow-500/30 bg-yellow-500/10 dark:border-yellow-500/20 dark:bg-yellow-500/10">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardDescription>Processing</CardDescription>
+              <CardDescription>{t('dashboard.stats.processing')}</CardDescription>
               <IconClock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
             </div>
             <CardTitle className="text-2xl font-semibold tabular-nums">
@@ -179,7 +181,7 @@ export function DocumentStats() {
             </CardTitle>
           </CardHeader>
           <CardFooter className="text-sm text-yellow-700 dark:text-yellow-400">
-            Documents being indexed
+            {t('dashboard.stats.beingIndexed')}
           </CardFooter>
         </Card>
       )}
@@ -188,7 +190,7 @@ export function DocumentStats() {
         <Card className="@container/card border-red-500/30 bg-red-500/10 dark:border-red-500/20 dark:bg-red-500/10">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardDescription>Errors</CardDescription>
+              <CardDescription>{t('dashboard.stats.errors')}</CardDescription>
               <IconAlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
             </div>
             <CardTitle className="text-2xl font-semibold tabular-nums">
@@ -196,7 +198,7 @@ export function DocumentStats() {
             </CardTitle>
           </CardHeader>
           <CardFooter className="text-sm text-red-700 dark:text-red-400">
-            Need attention
+            {t('dashboard.stats.needAttention')}
           </CardFooter>
         </Card>
       )}

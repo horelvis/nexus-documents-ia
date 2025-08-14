@@ -100,11 +100,8 @@ function OnboardingContent() {
 
 export default function OnboardingPage() {
   return (
-    <div className="min-h-screen relative">
-      {/* Landing page background */}
-      <div className="fixed inset-0 bg-black -z-10"></div>
-      <div className="absolute top-[-266px] left-[calc(55%-379px/2)] bg-purple-600/60 opacity-50 rounded-full blur-[10rem] w-[379px] h-[620px] -z-10"></div>
-      <div className="absolute top-[-60px] left-[calc(50%-433px/2)] bg-purple-600/40 opacity-50 rounded-full blur-[15rem] w-[433px] h-[525px] -z-10"></div>
+    <div className="min-h-screen bg-background">
+      
       
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center">

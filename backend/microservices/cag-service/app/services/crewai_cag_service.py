@@ -6,6 +6,7 @@ import os
 import json
 import redis
 import pickle
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -57,8 +58,43 @@ class CrewAICAGService:
             
             # Configurar variables de entorno para Ollama (CrewAI usa litellm internamente)
             # IMPORTANTE: CrewAI/LiteLLM requiere OLLAMA_API_BASE, no OLLAMA_HOST
-            os.environ["OLLAMA_API_BASE"] = "http://genai-ollama:11434"  # Esta es la clave!
+            ollama_url = settings.ollama_base_url
+            logger.info(f"🔧 Configurando Ollama URL: {ollama_url}")
+            
+            # Configurar múltiples variables para asegurar compatibilidad
+            os.environ["OLLAMA_API_BASE"] = ollama_url
+            os.environ["OLLAMA_HOST"] = ollama_url  
+            os.environ["OLLAMA_BASE_URL"] = ollama_url
             os.environ["OPENAI_API_KEY"] = "not-needed"  # CrewAI requiere esto aunque use Ollama
+            
+            # Configurar parámetros de estabilidad del LLM
+            os.environ["OLLAMA_TEMPERATURE"] = str(settings.llm_temperature)
+            os.environ["OLLAMA_MAX_TOKENS"] = str(settings.llm_max_tokens)
+            os.environ["OLLAMA_TIMEOUT"] = str(settings.llm_timeout)
+            
+            # Probar conectividad con Ollama antes de continuar
+            try:
+                import requests
+                response = requests.get(f"{ollama_url}/api/tags", timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"✅ Ollama conectado correctamente en {ollama_url}")
+                    models = response.json().get("models", [])
+                    model_names = [m["name"] for m in models]
+                    logger.info(f"📋 Modelos disponibles: {model_names}")
+                    
+                    # Verificar si nuestro modelo está disponible
+                    if settings.llm_model not in str(model_names):
+                        logger.warning(f"⚠️ Modelo {settings.llm_model} no encontrado en la lista")
+                        # Buscar modelo compatible
+                        for model in model_names:
+                            if "llama" in model.lower():
+                                logger.info(f"🔄 Usando modelo alternativo: {model}")
+                                settings.llm_model = model.split(":")[0]  # Sin tag
+                                break
+                else:
+                    logger.error(f"❌ Error conectando a Ollama: HTTP {response.status_code}")
+            except Exception as e:
+                logger.error(f"❌ Error verificando conexión a Ollama: {e}")
             
             # Configurar para memoria de CrewAI (sin ChromaDB por ahora)
             # La memoria de CrewAI funciona sin configuración adicional cuando memory=True
@@ -380,12 +416,20 @@ class CrewAICAGService:
     def _classify_query_intent(self, query: str) -> str:
         """
         Clasificar la intención del query usando análisis híbrido
-        Retorna: 'personal', 'document_search', 'analysis', 'general'
+        Retorna: 'welcome', 'personal', 'document_search', 'analysis', 'general'
         """
         query_lower = query.lower()
         
         # Análisis basado en patrones y contexto
         # Esto es más rápido y confiable que llamar al LLM para clasificación
+        
+        # Detectar mensajes de bienvenida específicos
+        welcome_patterns = [
+            'generate a personalized welcome message',
+            'system: generate a personalized',
+            'personalized welcome',
+            'bienvenida personalizada'
+        ]
         
         # Detectar interacciones personales
         personal_patterns = [
@@ -414,12 +458,15 @@ class CrewAICAGService:
         ]
         
         # Contar coincidencias para cada categoría
+        welcome_score = sum(1 for pattern in welcome_patterns if pattern in query_lower)
         personal_score = sum(1 for pattern in personal_patterns if pattern in query_lower)
         document_score = sum(1 for pattern in document_patterns if pattern in query_lower)
         analysis_score = sum(1 for pattern in analysis_patterns if pattern in query_lower)
         
-        # Determinar intención basada en puntuaciones
-        if personal_score > 0 and personal_score >= max(document_score, analysis_score):
+        # Determinar intención basada en puntuaciones, dando prioridad a bienvenida
+        if welcome_score > 0:
+            intent = 'welcome'
+        elif personal_score > 0 and personal_score >= max(document_score, analysis_score):
             intent = 'personal'
         elif document_score > analysis_score:
             intent = 'document_search'
@@ -473,7 +520,7 @@ class CrewAICAGService:
             
             # Clasificar la intención del query usando LLM
             query_intent = self._classify_query_intent(query)
-            is_personal = (query_intent == 'personal')
+            is_personal = (query_intent in ['personal', 'welcome'])
             
             # Obtener contexto de conversación de Redis/cache PRIMERO
             prev_context = self._get_conversation_context(tenant_id, user_id)
@@ -487,7 +534,7 @@ class CrewAICAGService:
                     formatted_history += f"Assistant: {item.get('response', '')}\n\n"
             
             # Obtener el crew apropiado
-            if is_personal:
+            if is_personal or query_intent == 'welcome':
                 logger.info(f"🤖 Usando Crew de Asistente Virtual para: {query[:50]}")
                 crew = self._get_assistant_crew(tenant_id)
             else:
@@ -517,15 +564,80 @@ class CrewAICAGService:
             logger.info(f"🎭 Intención detectada: {query_intent}")
             logger.debug(f"📝 Inputs: {inputs}")
             
-            try:
-                result = crew.kickoff(inputs=inputs)
-            except Exception as crew_error:
-                logger.error(f"❌ Error ejecutando Crew: {crew_error}")
-                # Si falla el crew, intentar respuesta simple
-                if is_personal:
-                    result = "Lo siento, tuve un problema procesando tu mensaje. ¿Podrías reformularlo?"
-                else:
-                    result = "No pude procesar tu solicitud en este momento. Por favor, intenta de nuevo."
+            # Implementar retry logic para mejorar estabilidad
+            max_retries = 2
+            retry_delay = 1  # seconds
+            result = None
+            last_error = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    if attempt > 0:
+                        logger.info(f"🔄 Reintentando ejecución de Crew (intento {attempt + 1}/{max_retries + 1})...")
+                        await asyncio.sleep(retry_delay * attempt)  # Exponential backoff
+                    
+                    # Configurar timeout para la ejecución del crew
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(crew.kickoff, inputs=inputs),
+                        timeout=settings.llm_timeout + 10  # +10 seconds buffer
+                    )
+                    
+                    # Verificar si el resultado está vacío o es None (indicativo de fallo de LLM)
+                    if not result or str(result).strip() in ["", "None", "null"] or "Invalid response from LLM" in str(result):
+                        last_error = f"CrewAI returned empty result: {result}"
+                        if attempt < max_retries:
+                            logger.warning(f"⚠️ Intento {attempt + 1} falló: {last_error}")
+                            continue
+                        else:
+                            raise Exception(last_error)
+                    
+                    # Si llegamos aquí, el resultado es válido
+                    logger.info(f"✅ Crew ejecutado exitosamente en intento {attempt + 1}")
+                    break
+                    
+                except asyncio.TimeoutError:
+                    last_error = f"Crew execution timeout after {settings.llm_timeout + 10} seconds"
+                    if attempt < max_retries:
+                        logger.warning(f"⏰ Intento {attempt + 1} timeout: {last_error}")
+                        continue
+                    else:
+                        logger.error(f"❌ Error ejecutando Crew después de {max_retries + 1} intentos: {last_error}")
+                        break
+                        
+                except Exception as crew_error:
+                    last_error = str(crew_error)
+                    if attempt < max_retries:
+                        logger.warning(f"⚠️ Intento {attempt + 1} falló: {last_error}")
+                        continue
+                    else:
+                        logger.error(f"❌ Error ejecutando Crew después de {max_retries + 1} intentos: {last_error}")
+                        break
+            
+            # Si después de todos los intentos no tenemos resultado válido
+            if not result or str(result).strip() in ["", "None", "null"]:
+                logger.error(f"❌ Error ejecutando Crew: {last_error}")
+                
+                # IMPORTANTE: Devolver error real para activar fallbacks en el cliente
+                return {
+                    "success": False,
+                    "query": query,
+                    "answer": None,
+                    "error": f"CrewAI processing failed after {max_retries + 1} attempts: {last_error}",
+                    "quality_score": 0.0,
+                    "iterations": 0,
+                    "gaps_identified": 0,
+                    "context_chunks_used": 0,
+                    "execution_time": (datetime.utcnow() - start_time).total_seconds(),
+                    "metadata": {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "tasks_count": len(tasks),
+                        "is_welcome": context and context.get("is_welcome", False),
+                        "error_type": "crewai_failure",
+                        "attempts": attempt + 1,
+                        "max_retries": max_retries
+                    }
+                }
             
             logger.info(f"✅ Resultado obtenido: {str(result)[:200] if result else 'NONE'}")
             
@@ -616,38 +728,24 @@ class CrewAICAGService:
         # Detectar intención y crear tareas apropiadas
         
         # Manejar específicamente el mensaje de bienvenida personalizado
-        if "SYSTEM: Generate a personalized welcome message" in query or (context and context.get("is_welcome")):
-            # Primero obtener estadísticas del usuario
-            stats_task = Task(
-                description=f"""Get user statistics and information for tenant {context.get('tenant_id', 'unknown')} 
-                              and user {context.get('user_id', 'unknown')}.
-                              Include document count, recent activity, etc.""",
-                expected_output="User statistics in JSON format",
-                agent=agents["search"]  # Usar el agente de búsqueda para obtener estadísticas
-            )
-            tasks.append(stats_task)
+        if "SYSTEM: Generate a personalized welcome message" in query or "Generate a personalized welcome message" in query or (context and context.get("is_welcome")):
             
-            # Luego generar mensaje personalizado
+            # Generar mensaje de bienvenida simplificado
             welcome_task = Task(
-                description=f"""Generate a warm, personalized welcome message in Spanish based on the user statistics.
+                description=f"""Generate a friendly welcome message in Spanish.
                               
-                              Context provided: {json.dumps(context or {})}
+                              User context: {json.dumps(context or {}, ensure_ascii=False)}
                               
-                              Requirements:
-                              - Be friendly and personal
-                              - If the user has documents, mention how many they have
-                              - If they worked today, congratulate them on their productivity
-                              - If they are new (0 documents), welcome them and suggest getting started
-                              - Suggest 2-3 relevant actions based on their history
-                              - Keep the message concise (2-3 sentences)
-                              - MUST BE IN SPANISH
+                              Create a warm welcome message that:
+                              - Greets the user warmly in Spanish
+                              - Mentions this is their document assistant
+                              - Offers help with document management
+                              - Keeps it concise (2-3 sentences maximum)
                               
-                              Example if they have documents: "¡Bienvenido de vuelta! Veo que tienes 15 documentos en tu biblioteca y has estado trabajando activamente. ¿Quieres buscar algún documento específico o subir uno nuevo?"
-                              
-                              Example if new: "¡Bienvenido a tu asistente de documentos! Veo que es tu primera vez aquí. Te puedo ayudar a subir tu primer documento o explorar las funciones disponibles."
+                              Example: "¡Bienvenido a tu asistente de documentos! Estoy aquí para ayudarte a organizar y gestionar tus archivos. ¿En qué puedo ayudarte hoy?"
                               """,
-                expected_output="Personalized welcome message in Spanish",
-                agent=agents["response"]  # Usar instancia del agente
+                expected_output="A warm welcome message in Spanish",
+                agent=agents["response"]
             )
             tasks.append(welcome_task)
             return tasks

@@ -52,7 +52,7 @@ class CAGClient:
                         "conversation_id": context.get("conversation_id"),
                         "message_history": context.get("message_history", []),
                         "working_memory": context.get("working_memory", {}),
-                        "is_welcome": context.get("working_memory", {}).get("is_welcome", False),  # Pass welcome flag
+                        "is_welcome": context.get("is_welcome", False),  # Pass welcome flag directly
                         "agent_type": agent_type,
                         "tools": tools or [
                             "search_documents",
@@ -79,19 +79,33 @@ class CAGClient:
                 if response.status_code == 200:
                     result = response.json()
                     
-                    # Transform CAG response to match expected format
+                    # Check if CAG actually failed even with HTTP 200
+                    cag_success = result.get("success", False)
+                    cag_error = result.get("error")
+                    
+                    if not cag_success or cag_error:
+                        # CAG failed, return error to trigger fallback
+                        logger.warning(f"CAG reported failure: {cag_error}")
+                        return {
+                            "error": cag_error or "CAG processing failed",
+                            "fallback": True,
+                            "response": None,
+                            "metadata": result.get("metadata", {})
+                        }
+                    
+                    # Transform successful CAG response to match expected format
                     return {
                         "response": result.get("response") or result.get("answer", ""),
-                        "success": result.get("success", False),
+                        "success": True,
                         "quality_score": result.get("quality_score", 0),
                         "confidence": result.get("confidence", 0.7),
                         "iterations": result.get("iterations", 1),
                         "context_chunks_used": result.get("context_chunks_used", 0),
                         "tools_used": result.get("tools_used", []),
                         "reasoning_steps": result.get("iterations", 1),
-                        "suggestions": result.get("suggestions", []),  # Include suggestions from CAG
+                        "suggestions": result.get("suggestions", []),
                         "metadata": result.get("metadata", {}),
-                        "error": result.get("error")
+                        "error": None  # Clear error for successful responses
                     }
                 else:
                     logger.error(f"CAG service error: {response.status_code} - {response.text}")

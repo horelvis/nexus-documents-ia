@@ -50,13 +50,23 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
         return
       }
       
-      // If trial expired, redirect to pricing
+      // Only redirect to pricing if subscription has actually expired/cancelled
+      // Not for temporary states or processing issues
       if (backendUser.subscription_status === 'trialing' && backendUser.trial_ends_at) {
         const trialEndsAt = new Date(backendUser.trial_ends_at)
         if (trialEndsAt < new Date()) {
-          router.push('/pricing')
+          // Trial has truly expired, redirect to pricing
+          router.push('/pricing?expired=trial')
           return
         }
+      }
+      
+      // Only redirect for actually expired subscriptions, not temporary issues
+      if (backendUser.subscription_status === 'canceled' || 
+          backendUser.subscription_status === 'past_due' ||
+          (backendUser.subscription_status === 'inactive' && backendUser.subscription_plan !== 'free')) {
+        router.push('/pricing?expired=subscription')
+        return
       }
     }
   }, [isClerkLoaded, isSignedIn, backendUser, userLoading, pathname, isAllowedPath])

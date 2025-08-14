@@ -13,8 +13,13 @@ class Settings(BaseSettings):
     
     # Ollama configuration
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama-service:11434")
-    llm_model: str = os.getenv("LLM_MODEL", "llama3.2")
+    llm_model: str = os.getenv("LLM_MODEL", "llama3.2")  # Using llama3.2 for better stability
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-minilm:latest")
+    
+    # LLM stability settings
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))  # Low temperature for consistency
+    llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+    llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "30"))  # 30 seconds timeout
     
     # Qdrant configuration
     qdrant_host: str = os.getenv("QDRANT_HOST", "qdrant")

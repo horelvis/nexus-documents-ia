@@ -203,7 +203,7 @@ class VirtualAssistantAgent:
                     message=message,
                     context=cag_context,
                     agent_type="virtual_assistant",  # CrewAI will orchestrate multiple agents
-                    tools=["search_documents", "analyze_document", "get_statistics", "extract_entities"]
+                    tools=["search_documents", "analyze_document", "get_statistics", "extract_entities", "signature_request"]
                 )
                 
                 logger.info(f"CAG response: {cag_response}")
@@ -248,18 +248,96 @@ class VirtualAssistantAgent:
                         requires_confirmation=False
                     )
                 else:
-                    # NO fallback - return error if CrewAI fails
+                    # Smart fallback - handle common queries locally when CAG fails
                     error_msg = cag_response.get('error', 'Unknown error')
-                    logger.error(f"CAG service error: {error_msg}")
+                    logger.warning(f"CAG service error: {error_msg}, attempting local fallback")
                     
+                    # Special handling for welcome messages - provide a warm, natural fallback
+                    if is_welcome:
+                        try:
+                            # Get basic stats for personalized welcome
+                            stats = await self._get_user_stats(context)
+                            
+                            # Generate personalized welcome message
+                            if stats.get('total_documents', 0) > 0:
+                                welcome_msg = f"¡Hola de nuevo! 👋 Veo que tienes {stats['total_documents']} documentos en tu biblioteca. "
+                                if "today" in stats.get('recent_activity', ''):
+                                    welcome_msg += "¡Qué bien que hayas estado trabajando hoy! "
+                                welcome_msg += "¿En qué puedo ayudarte hoy?"
+                                
+                                suggestions = [
+                                    f"Buscar entre mis {stats['total_documents']} documentos",
+                                    "Ver estadísticas detalladas", 
+                                    "Revisar documentos recientes"
+                                ]
+                            else:
+                                welcome_msg = "¡Bienvenido a tu asistente de documentos! 🎉 Veo que es tu primera vez aquí. Estoy aquí para ayudarte a organizar y gestionar tus documentos de manera inteligente. ¿Te gustaría empezar subiendo tu primer documento?"
+                                
+                                suggestions = [
+                                    "Subir mi primer documento",
+                                    "Explorar las funciones disponibles",
+                                    "Conocer las capacidades del asistente"
+                                ]
+                            
+                            return AgentResponse(
+                                message=welcome_msg,
+                                actions_taken=[{"action": "welcome_fallback", "success": True, "result": stats}],
+                                suggestions=suggestions,
+                                confidence=0.85,
+                                metadata={"fallback": True, "agent": "welcome_fallback", "stats": stats},
+                                requires_confirmation=False
+                            )
+                            
+                        except Exception as welcome_error:
+                            logger.error(f"Welcome fallback error: {welcome_error}")
+                            return AgentResponse(
+                                message="¡Bienvenido! 😊 Soy tu asistente virtual de documentos. Aunque estoy teniendo algunas dificultades técnicas en este momento, estoy aquí para ayudarte con la gestión de tus documentos.",
+                                actions_taken=[],
+                                suggestions=["Intentar de nuevo", "Explorar funciones", "Contactar soporte"],
+                                confidence=0.6,
+                                metadata={"fallback": True, "agent": "simple_welcome_fallback"},
+                                requires_confirmation=False
+                            )
+                    
+                    # Intelligent fallback using local LLM with real data for non-welcome messages
+                    try:
+                        # Analyze intent and get relevant data
+                        intent_analysis = await self._analyze_intent_simple(message, context)
+                        action_results = []
+                        
+                        # Execute relevant tools based on intent
+                        if any(word in message.lower() for word in ["firma", "firmar", "signature", "sign", "pendiente", "pending"]):
+                            stats = await self._get_statistics(context)
+                            action_results.append({
+                                "action": "get_statistics", 
+                                "success": True, 
+                                "result": stats
+                            })
+                            
+                        # Use local LLM to generate natural response
+                        llm_response = await self._generate_response(intent_analysis, action_results, context)
+                        
+                        return AgentResponse(
+                            message=llm_response["message"],
+                            actions_taken=action_results,
+                            suggestions=llm_response.get("suggestions", ["Buscar documentos", "Ver estadísticas", "Ayuda"]),
+                            confidence=llm_response.get("confidence", 0.7),
+                            metadata={"fallback": True, "agent": "local_LLM"},
+                            requires_confirmation=llm_response.get("requires_confirmation", False)
+                        )
+                        
+                    except Exception as fallback_error:
+                        logger.error(f"LLM fallback error: {fallback_error}")
+                    
+                    # Final fallback
                     return AgentResponse(
-                        message=f"I'm sorry, I encountered an error processing your request: {error_msg}",
+                        message="Lo siento, tengo dificultades para procesar tu solicitud en este momento. ¿Podrías reformularla o intentarlo de nuevo?",
                         actions_taken=[],
-                        suggestions=["Please try again or contact support if the issue persists"],
-                        confidence=0.0,
+                        suggestions=["Buscar documentos", "Ver estadísticas", "Revisar firmas pendientes"],
+                        confidence=0.3,
                         metadata={
                             "error": error_msg,
-                            "agent": "CrewAI",
+                            "agent": "final_fallback",
                             "conversation_id": context.conversation_id
                         },
                         requires_confirmation=False
@@ -847,7 +925,8 @@ Respuesta:"""
             # Get document count
             doc_count = await db.execute(
                 select(func.count(Document.id)).where(
-                    Document.user_id == user.id
+                    Document.created_by == user.id,
+                    Document.tenant_id == context.tenant_id
                 )
             )
             total_documents = doc_count.scalar() or 0
@@ -855,7 +934,8 @@ Respuesta:"""
             # Get recent activity
             recent_doc = await db.execute(
                 select(Document).where(
-                    Document.user_id == user.id
+                    Document.created_by == user.id,
+                    Document.tenant_id == context.tenant_id
                 ).order_by(Document.updated_at.desc()).limit(1)
             )
             recent = recent_doc.scalar_one_or_none()
@@ -947,6 +1027,53 @@ Respuesta:"""
                 "parameters": {},
                 "confidence": 0.5
             }
+
+    async def _analyze_intent_simple(self, message: str, context: AgentContext) -> Dict[str, Any]:
+        """
+        Simple intent analysis for fallback scenarios
+        """
+        try:
+            prompt = f"""Analiza brevemente la siguiente pregunta del usuario:
+            
+"{message}"
+
+Responde en formato JSON:
+{{
+    "primary_intent": "search_documents|get_statistics|signature_request|general",
+    "entities": {{"document_names": [], "actions": []}},
+    "confidence": 0.0-1.0
+}}
+
+Ejemplos:
+- "¿tengo documentos por firmar?" → "signature_request"
+- "buscar contratos" → "search_documents" 
+- "estadísticas" → "get_statistics"
+"""
+
+            response = await self.llm_service.generate_response(
+                prompt=prompt,
+                max_tokens=200,
+                temperature=0.1
+            )
+            
+            # Parse JSON response
+            try:
+                import json
+                return json.loads(response.strip())
+            except:
+                # Fallback analysis
+                if any(word in message.lower() for word in ["firma", "firmar", "signature", "sign"]):
+                    return {"primary_intent": "signature_request", "entities": {}, "confidence": 0.8}
+                elif any(word in message.lower() for word in ["buscar", "search", "encontrar"]):
+                    return {"primary_intent": "search_documents", "entities": {}, "confidence": 0.8}
+                elif any(word in message.lower() for word in ["estadísticas", "stats", "números"]):
+                    return {"primary_intent": "get_statistics", "entities": {}, "confidence": 0.8}
+                else:
+                    return {"primary_intent": "general", "entities": {}, "confidence": 0.5}
+                    
+        except Exception as e:
+            logger.error(f"Simple intent analysis error: {e}")
+            return {"primary_intent": "general", "entities": {}, "confidence": 0.3}
 
 
 # Singleton instance

@@ -39,6 +39,7 @@ services:
       # General
       - DEBUG=${DEBUG:-true}
       - TESTING=${TESTING:-false}
+      - ALLOW_ALL_CORS=${ALLOW_ALL_CORS:-true}
     volumes:
       - ../:/app  # Live code reloading for development
     restart: unless-stopped

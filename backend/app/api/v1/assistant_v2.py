@@ -14,11 +14,7 @@ import logging
 from app.db.async_database import get_async_db
 from app.db.models import User, Document, Tenant
 from app.api.dependencies import get_current_user
-from app.services.virtual_assistant_agent import (
-    VirtualAssistantAgent,
-    AgentContext,
-    AgentResponse
-)
+from app.services.cag_client import CAGClient
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +64,8 @@ class ConversationMemory:
             del cls._conversations[conversation_id]
 
 
-# Initialize agent
-agent = VirtualAssistantAgent()
+# Initialize CAG client for real agent processing
+cag_client = CAGClient()
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -105,24 +101,68 @@ async def chat_with_agent(
         # Get conversation history
         message_history = ConversationMemory.get_history(conversation_id)
         
-        # Create agent context with welcome flag
-        working_memory = {"is_welcome": is_welcome} if is_welcome else {}
+        # For welcome messages, enhance the message to be more specific
+        actual_message = request.message
+        if is_welcome and "SYSTEM:" in request.message:
+            # Get basic stats for personalized welcome
+            try:
+                from sqlalchemy import select, func
+                from app.db.models import Document, SignatureRequest
+                
+                # Get document count
+                doc_query = select(func.count(Document.id)).where(Document.tenant_id == tenant_id)
+                doc_result = await db.execute(doc_query)
+                document_count = doc_result.scalar() or 0
+                
+                # Get pending signatures
+                sig_query = select(func.count(SignatureRequest.id)).where(
+                    SignatureRequest.tenant_id == tenant_id,
+                    SignatureRequest.status == "pending"
+                )
+                sig_result = await db.execute(sig_query)
+                pending_signatures = sig_result.scalar() or 0
+                
+                actual_message = f"Generate a personalized welcome message for {current_user.full_name or 'this user'}. They have {document_count} documents and {pending_signatures} pending signatures."
+                
+            except Exception as e:
+                logger.warning(f"Could not get stats for welcome: {e}")
+                actual_message = f"Generate a personalized welcome message for {current_user.full_name or 'this user'}"
         
-        context = AgentContext(
-            user=current_user,
-            tenant_id=tenant_id,
-            db_session=db,
-            conversation_id=conversation_id,
-            message_history=message_history,
-            working_memory=working_memory,
-            tools_used=[]
+        # Prepare context for CAG/CrewAI
+        cag_context = {
+            "tenant_id": tenant_id,
+            "user_id": current_user.id,
+            "conversation_id": conversation_id,
+            "message_history": message_history[-5:],  # Last 5 messages
+            "is_welcome": is_welcome,
+            "user_email": current_user.email,
+            "user_name": current_user.full_name or "Usuario"
+        }
+        
+        # Process with CrewAI via CAG service
+        logger.info(f"Processing with CAG - Message: {actual_message[:100]}")
+        logger.info(f"CAG Context: {cag_context}")
+        
+        cag_response = await cag_client.process_with_agent(
+            message=actual_message,
+            context=cag_context,
+            agent_type="virtual_assistant",
+            tools=["search_documents", "analyze_document", "get_statistics", "signature_request", "document_sharing"]
         )
         
-        # Process request with agent
-        agent_response: AgentResponse = await agent.process_request(
-            message=request.message,
-            context=context
-        )
+        logger.info(f"CAG Response: {cag_response}")
+        
+        # Extract response from CAG
+        if cag_response.get("error"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Agent processing error: {cag_response['error']}"
+            )
+        
+        response_message = cag_response.get("response", "I'm sorry, I couldn't process your request.")
+        actions_taken = cag_response.get("actions", [])
+        suggestions = cag_response.get("suggestions", ["Ask about your documents", "Check signatures", "Get statistics"])
+        confidence = cag_response.get("confidence", 0.8)
         
         # Store in conversation memory
         ConversationMemory.add_message(conversation_id, {
@@ -132,23 +172,25 @@ async def chat_with_agent(
         })
         ConversationMemory.add_message(conversation_id, {
             "role": "assistant",
-            "content": agent_response.message,
+            "content": response_message,
             "timestamp": datetime.utcnow().isoformat(),
-            "metadata": agent_response.metadata
+            "metadata": cag_response.get("metadata", {})
         })
         
         return ChatResponse(
-            response=agent_response.message,
+            response=response_message,
             conversation_id=conversation_id,
-            actions_taken=agent_response.actions_taken,
-            suggestions=agent_response.suggestions,
-            confidence=agent_response.confidence,
-            metadata=agent_response.metadata,
-            requires_confirmation=agent_response.requires_confirmation
+            actions_taken=actions_taken,
+            suggestions=suggestions,
+            confidence=confidence,
+            metadata=cag_response.get("metadata", {}),
+            requires_confirmation=cag_response.get("requires_confirmation", False)
         )
         
     except Exception as e:
+        import traceback
         logger.error(f"Agent chat error: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing chat: {str(e)}"
@@ -177,25 +219,32 @@ async def chat_with_agent_stream(
             # Get conversation history
             message_history = ConversationMemory.get_history(conversation_id)
             
-            # Create agent context
-            context = AgentContext(
-                user=current_user,
-                tenant_id=tenant_id,
-                db_session=db,
-                conversation_id=conversation_id,
-                message_history=message_history,
-                working_memory={},
-                tools_used=[]
+            # Prepare context for CAG/CrewAI
+            cag_context = {
+                "tenant_id": tenant_id,
+                "user_id": current_user.id,
+                "conversation_id": conversation_id,
+                "message_history": message_history[-5:],
+                "user_email": current_user.email,
+                "user_name": current_user.full_name or "Usuario"
+            }
+            
+            # Process with CrewAI via CAG service
+            cag_response = await cag_client.process_with_agent(
+                message=request.message,
+                context=cag_context,
+                agent_type="virtual_assistant",
+                tools=["search_documents", "analyze_document", "get_statistics", "signature_request"]
             )
             
-            # Process with agent
-            agent_response = await agent.process_request(
-                message=request.message,
-                context=context
-            )
+            if cag_response.get("error"):
+                yield f"data: {json.dumps({'type': 'error', 'error': cag_response['error']})}\n\n"
+                return
+                
+            agent_message = cag_response.get("response", "No response generated")
             
             # Stream the response in chunks
-            words = agent_response.message.split()
+            words = agent_message.split()
             current_chunk = ""
             
             for i, word in enumerate(words):
@@ -210,9 +259,9 @@ async def chat_with_agent_stream(
             # Send metadata and suggestions
             metadata_data = {
                 'type': 'metadata',
-                'actions': agent_response.actions_taken,
-                'suggestions': agent_response.suggestions,
-                'confidence': agent_response.confidence
+                'actions': cag_response.get("actions", []),
+                'suggestions': cag_response.get("suggestions", []),
+                'confidence': cag_response.get("confidence", 0.8)
             }
             yield f"data: {json.dumps(metadata_data)}\n\n"
             
@@ -227,7 +276,7 @@ async def chat_with_agent_stream(
             })
             ConversationMemory.add_message(conversation_id, {
                 "role": "assistant",
-                "content": agent_response.message,
+                "content": agent_message,
                 "timestamp": datetime.utcnow().isoformat()
             })
             

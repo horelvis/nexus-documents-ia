@@ -163,31 +163,13 @@ else:
     logger.warning(f"Static directory '{static_dir}' not found, skipping static files mount")
 
 # Configurar CORS - Solución simple para IPs dinámicas
-if settings.ALLOW_ALL_CORS and settings.DEBUG:
-    # Para desarrollo: permitir todas las IPs locales comunes con credenciales
-    dev_origins = [
-        "http://localhost:3000",
-        "http://localhost:3001", 
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-        "http://192.168.1.50:3000",
-        "http://192.168.1.50:3001",
-        "http://192.168.1.50:3002",
-        # Agregar más IPs locales comunes si es necesario
-        "http://192.168.0.50:3000",
-        "http://192.168.0.50:3001",
-        "http://192.168.0.50:3002",
-        "http://10.0.0.50:3000",
-        "http://10.0.0.50:3001",
-        "http://10.0.0.50:3002",
-    ]
-    logger.warning(f"⚠️ ALLOW_ALL_CORS enabled - permitting dev origins: {dev_origins[:3]}... (DEVELOPMENT ONLY)")
+# Simple CORS configuration for development - allow all origins
+if settings.DEBUG:
+    logger.warning("⚠️ DEBUG mode - allowing all CORS origins (DEVELOPMENT ONLY)")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=dev_origins,
-        allow_credentials=True,  # Ahora podemos usar credentials con origins específicos
+        allow_origins=["*"],
+        allow_credentials=False,  # Cannot use credentials with wildcard origins
         allow_methods=["*"],
         allow_headers=["*"],
     )

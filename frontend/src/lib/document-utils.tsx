@@ -94,10 +94,10 @@ export function formatFileSize(bytes: number | null | undefined): string {
 }
 
 /**
- * Maps numeric or string status values to proper labels
+ * Maps numeric or string status values to descriptive status keys
  */
-export function getStatusLabel(status: string | number | null | undefined): string {
-  // Map numeric status values to labels
+export function getStatusKey(status: string | number | null | undefined): string {
+  // Map numeric status values to string constants
   const statusMap: Record<string | number, string> = {
     '1': 'INDEXED',
     '2': 'PROCESSING', 
@@ -106,26 +106,74 @@ export function getStatusLabel(status: string | number | null | undefined): stri
     1: 'INDEXED',
     2: 'PROCESSING',
     3: 'INDEXING_ERROR',
-    0: 'PENDING'
+    0: 'PENDING',
+    // String versions remain as is
+    'INDEXED': 'INDEXED',
+    'PROCESSING': 'PROCESSING',
+    'INDEXING_ERROR': 'INDEXING_ERROR',
+    'PENDING': 'PENDING'
   }
   
-  // Return mapped value or original if it's already a valid status
+  // Return mapped value or default
   if (status === null || status === undefined) return 'PENDING'
-  return statusMap[status] || String(status)
+  return statusMap[status] || 'PENDING'
+}
+
+/**
+ * Returns translated status label (requires translation context)
+ */
+export function getStatusLabel(status: string | number | null | undefined, t?: (key: string) => string): string {
+  const statusKey = getStatusKey(status)
+  
+  // If translation function is provided, use it
+  if (t) {
+    return t(`documents.statusLabels.${statusKey}`)
+  }
+  
+  // Fallback to Spanish hardcoded values
+  const fallbackMap: Record<string, string> = {
+    'INDEXED': 'Procesado correctamente',
+    'PROCESSING': 'Procesando contenido',
+    'INDEXING_ERROR': 'Error en el procesamiento',
+    'PENDING': 'Pendiente de procesar'
+  }
+  
+  return fallbackMap[statusKey] || statusKey
+}
+
+/**
+ * Returns detailed status description (requires translation context)
+ */
+export function getStatusDescription(status: string | number | null | undefined, t?: (key: string) => string): string {
+  const statusKey = getStatusKey(status)
+  
+  // If translation function is provided, use it
+  if (t) {
+    return t(`documents.statusDescriptions.${statusKey}`)
+  }
+  
+  // Fallback to Spanish hardcoded descriptions
+  const fallbackMap: Record<string, string> = {
+    'INDEXED': 'El documento ha sido procesado y está disponible para búsqueda',
+    'PROCESSING': 'El documento se está analizando y extrayendo su contenido',
+    'INDEXING_ERROR': 'Hubo un problema al procesar el documento. Puede reintentarse',
+    'PENDING': 'El documento está en cola esperando a ser procesado'
+  }
+  
+  return fallbackMap[statusKey] || statusKey
 }
 
 /**
  * Returns status color classes based on indexing status
  */
 export function getStatusColor(indexed: string | number | null | undefined): string {
-  // First map the status to a label
-  const status = getStatusLabel(indexed)
+  // Get the normalized status key
+  const statusKey = getStatusKey(indexed)
   
-  switch (status) {
+  switch (statusKey) {
     case 'INDEXED':
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
     case 'PROCESSING':
-    case 'INDEXING':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
     case 'INDEXING_ERROR':
       return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'

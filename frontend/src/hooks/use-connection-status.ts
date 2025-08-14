@@ -21,7 +21,7 @@ export function useConnectionStatus(): ConnectionStatus {
     setIsChecking(true)
     try {
       // Simple health check to backend
-      // Try both /health and /docs endpoints as fallback
+      // Try both /health and /api/v1/docs endpoints as fallback
       try {
         const response = await axios.get(`${API_CONFIG.BASE_URL}/health`, {
           timeout: 5000, // 5 second timeout
@@ -31,8 +31,8 @@ export function useConnectionStatus(): ConnectionStatus {
         setIsBackendAvailable(response.status < 500)
         setLastError(null)
       } catch (healthError) {
-        // If health endpoint fails, try the docs endpoint as fallback
-        const docsResponse = await axios.get(`${API_CONFIG.BASE_URL}/docs`, {
+        // If health endpoint fails, try the API docs endpoint as fallback
+        const docsResponse = await axios.get(`${API_CONFIG.BASE_URL}/api/v1/docs`, {
           timeout: 5000,
           validateStatus: () => true
         })

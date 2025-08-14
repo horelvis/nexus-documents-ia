@@ -33,6 +33,51 @@ class ApiClient {
     options: RequestInit = {},
     retryCount = 0
   ): Promise<ApiResponse<T>> {
+    // Check for mock data in development/testing
+    if (typeof window !== 'undefined' && endpoint === '/stripe/subscription') {
+      const mockData = localStorage.getItem('mock_subscription')
+      if (mockData) {
+        try {
+          const parsed = JSON.parse(mockData)
+          const mockResponse = {
+            id: 'mock_subscription_id',
+            plan_id: parsed.plan_id,
+            status: parsed.status,
+            current_period_end: Date.now() / 1000 + 86400 * 30, // 30 days from now
+            subscription_status: {
+              plan_type: parsed.plan_id,
+              status: parsed.status,
+              is_active: parsed.status === 'active',
+              is_limited: parsed.status !== 'active',
+              current_period_end: null,
+              can_reactivate: parsed.status === 'canceled' || parsed.status === 'past_due',
+              permissions: {
+                max_documents: parsed.plan_id === 'free' ? 10 : -1,
+                max_monthly_uploads: parsed.plan_id === 'free' ? 5 : -1,
+                can_upload_documents: true,
+                can_view_documents: true,
+                can_search_documents: true,
+                can_use_chat: parsed.plan_id !== 'free',
+                can_use_agents: parsed.plan_id !== 'free',
+                can_export_documents: parsed.plan_id !== 'free',
+                can_use_api: parsed.plan_id !== 'free',
+                max_file_size_mb: parsed.plan_id === 'free' ? 10 : 100
+              },
+              message: 'Mock subscription for testing'
+            }
+          }
+          
+          console.log('🧪 Using mock subscription data:', mockResponse)
+          return {
+            data: mockResponse,
+            status: 200
+          }
+        } catch (e) {
+          console.error('Error parsing mock subscription data:', e)
+        }
+      }
+    }
+
     try {
       const token = await this.getAuthToken()
       

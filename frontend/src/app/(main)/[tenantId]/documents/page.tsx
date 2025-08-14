@@ -37,6 +37,12 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentService } from "@/lib/services/document.service"
@@ -50,12 +56,14 @@ import {
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel, getStatusDescription } from "@/lib/document-utils"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export default function DocumentsPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.tenantId as string
+  const { t } = useTranslation()
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -633,9 +641,21 @@ export default function DocumentsPage() {
                             </p>
                           )}
                         </div>
-                        <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
-                          {getStatusLabel(document.indexed)}
-                        </Badge>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
+                                {getStatusLabel(document.indexed, t)}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-sm font-medium">{getStatusLabel(document.indexed, t)}</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {getStatusDescription(document.indexed, t)}
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
                       
                       {/* Metadata and Actions */}

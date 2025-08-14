@@ -90,32 +90,24 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       console.log("Loading personalized welcome message...")
       console.log("User info:", { tenant_id: currentUser?.tenant_id, user_id: currentUser?.id })
       
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token || ''}`,
-        },
-        body: JSON.stringify({
-          message: "SYSTEM: Generate a personalized welcome message for the user",
-          conversation_id: currentConversation.id,
-          context: {
-            tenant_id: currentUser?.tenant_id,
-            user_id: currentUser?.id,
-            is_welcome: true
-          }
-        })
+      const response = await apiClient.post("/api/v1/assistant/v2/chat", {
+        message: "SYSTEM: Generate a personalized welcome message for the user",
+        conversation_id: currentConversation.id,
+        context: {
+          tenant_id: currentUser?.tenant_id,
+          user_id: currentUser?.id,
+          is_welcome: true
+        }
       })
       
       console.log("Welcome response status:", response.status)
       
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error("Welcome request failed:", response.status, errorText)
+      if (response.error) {
+        console.error("Welcome request failed:", response.status, response.error)
       }
       
-      if (response.ok) {
-        const data = await response.json()
+      if (response.data) {
+        const data = response.data
         console.log("Welcome response data:", data)
         console.log("Response content:", data.response)
         console.log("Suggestions:", data.suggestions)
@@ -246,9 +238,9 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
           }
         })
         
-        // Start SSE connection
+        // Start SSE connection  
         const token = await getToken()
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat/stream`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

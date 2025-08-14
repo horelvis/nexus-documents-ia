@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
     STRIPE_BASIC_PRICE_ID: Optional[str] = os.getenv("STRIPE_BASIC_PRICE_ID")
     STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
+    STRIPE_PRO_YEARLY_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_YEARLY_PRICE_ID")
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -36,15 +37,23 @@ class Settings(BaseSettings):
     
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
+        "http://localhost:3001",
         "http://127.0.0.1:3000", 
+        "http://127.0.0.1:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://192.168.1.47:3000",
+        "http://192.168.1.47:3001",
         "http://192.168.1.47:8000",
         "http://192.168.1.45:3000",
+        "http://192.168.1.45:3001",
         "http://192.168.1.45:8000",
         "http://192.168.1.54:3000",
-        "http://192.168.1.54:8000"
+        "http://192.168.1.54:3001",
+        "http://192.168.1.54:8000",
+        "http://192.168.1.35:3000",
+        "http://192.168.1.35:3001",
+        "http://192.168.1.35:8000"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
