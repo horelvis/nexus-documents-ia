@@ -5,15 +5,20 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"
     depends_on:
-      - db
-      - redis
-      - qdrant
-      # - langchain-service  # Deprecated - replaced by CAG service
-      - cag-service
-      - storage-service
-      - gotenberg
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      cag-service:
+        condition: service_healthy
+      storage-service:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -98,6 +103,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
 
 
   # LangChain microservice - DEPRECATED (replaced by CAG service)
@@ -237,7 +243,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
 
   # Signature microservice
   signature-service:
