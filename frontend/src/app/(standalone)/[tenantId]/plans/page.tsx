@@ -21,19 +21,24 @@ export default function TenantPlansPage() {
   const [currentSubscription, setCurrentSubscription] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Check current subscription status
+  // Check current subscription status - Single call optimization
   useEffect(() => {
     const checkSubscription = async () => {
       try {
+        // Check if we already have subscription info from user context
+        if (backendUser?.subscription_plan && backendUser?.subscription_status) {
+          setCurrentSubscription({
+            plan_id: backendUser.subscription_plan,
+            status: backendUser.subscription_status
+          })
+          setIsLoading(false)
+          return
+        }
+
+        // Only make API call if we don't have subscription info
         const response = await apiClient.get('/stripe/subscription')
         if (!response.error && response.data) {
           setCurrentSubscription(response.data)
-          
-          // If user has an active paid subscription, redirect to dashboard
-          if (response.data.plan_id && response.data.plan_id !== 'free' && response.data.status === 'active') {
-            router.push(`/${params.tenantId}/dashboard`)
-            return
-          }
         }
       } catch (error) {
         console.error('Error checking subscription:', error)
@@ -43,7 +48,7 @@ export default function TenantPlansPage() {
     }
 
     checkSubscription()
-  }, [apiClient, router, params.tenantId])
+  }, [apiClient, backendUser])
 
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
     setLoadingPlan(plan.id)
@@ -108,46 +113,22 @@ export default function TenantPlansPage() {
     )
   }
 
-  // Show current plan if user already has an active subscription
+  // Redirect automatically to dashboard if user already has an active subscription  
+  useEffect(() => {
+    if (!isLoading && currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {
+      // User has active subscription, redirect to dashboard immediately
+      router.replace(`/${params.tenantId}/dashboard`)
+    }
+  }, [isLoading, currentSubscription, params.tenantId, router])
+
+  // Show loading during redirect
   if (currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-md w-full mx-4">
-          <CardHeader className="text-center">
-            <div className="w-20 h-20 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
-            </div>
-            <CardTitle className="text-2xl">Plan Activo</CardTitle>
-            <CardDescription>
-              Ya tienes una suscripción activa
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <div>
-              <Badge className="text-lg px-4 py-2">
-                Plan {currentSubscription.plan_id === 'pro' ? 'Pro' : currentSubscription.plan_id}
-              </Badge>
-            </div>
-            <p className="text-muted-foreground">
-              Tu suscripción está activa y puedes acceder a todas las funcionalidades.
-            </p>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-2">
-            <Button 
-              className="w-full" 
-              onClick={() => router.push(`/${params.tenantId}/dashboard`)}
-            >
-              Ir al Dashboard
-            </Button>
-            <Button 
-              className="w-full" 
-              variant="outline"
-              onClick={() => router.push(`/${params.tenantId}/settings/billing`)}
-            >
-              Gestionar Suscripción
-            </Button>
-          </CardFooter>
-        </Card>
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-purple-600" />
+          <p className="text-muted-foreground">Redirigiendo al dashboard...</p>
+        </div>
       </div>
     )
   }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useApiClient } from '@/lib/api-client'
+import { useUserContext } from '@/contexts/user-context'
 
 interface SubscriptionStatus {
   plan_type: string
@@ -61,6 +62,7 @@ interface UseSubscriptionReturn {
 
 export function useSubscription(): UseSubscriptionReturn {
   const apiClient = useApiClient()
+  const { backendUser } = useUserContext()
   const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -70,6 +72,41 @@ export function useSubscription(): UseSubscriptionReturn {
       setLoading(true)
       setError(null)
       
+      // Check if we already have subscription info from user context
+      if (backendUser?.subscription_plan && backendUser?.subscription_status) {
+        const contextSubscription: SubscriptionData = {
+          id: 'from_context',
+          plan_id: backendUser.subscription_plan,
+          status: backendUser.subscription_status,
+          current_period_end: 0,
+          subscription_status: {
+            plan_type: backendUser.subscription_plan,
+            status: backendUser.subscription_status,
+            is_active: backendUser.subscription_status === 'active',
+            is_limited: backendUser.subscription_status !== 'active',
+            current_period_end: null,
+            can_reactivate: backendUser.subscription_status === 'canceled' || backendUser.subscription_status === 'past_due',
+            permissions: {
+              max_documents: backendUser.subscription_plan === 'free' ? 10 : -1,
+              max_monthly_uploads: backendUser.subscription_plan === 'free' ? 5 : -1,
+              can_upload_documents: true,
+              can_view_documents: true,
+              can_search_documents: true,
+              can_use_chat: backendUser.subscription_plan !== 'free',
+              can_use_agents: backendUser.subscription_plan !== 'free',
+              can_export_documents: backendUser.subscription_plan !== 'free',
+              can_use_api: backendUser.subscription_plan !== 'free',
+              max_file_size_mb: backendUser.subscription_plan === 'free' ? 10 : 100
+            },
+            message: ''
+          }
+        }
+        setSubscriptionData(contextSubscription)
+        setLoading(false)
+        return
+      }
+      
+      // Only make API call if we don't have subscription info
       const response = await apiClient.get('/stripe/subscription')
       
       if (response.error) {
@@ -84,7 +121,7 @@ export function useSubscription(): UseSubscriptionReturn {
     } finally {
       setLoading(false)
     }
-  }, [apiClient])
+  }, [apiClient, backendUser])
 
   useEffect(() => {
     fetchSubscriptionStatus()

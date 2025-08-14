@@ -151,9 +151,16 @@ function CheckoutSuccessContent() {
               </div>
               
               <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Monto</p>
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  {checkoutData.amount_total === 0 ? 'Precio del Plan' : 'Monto'}
+                </p>
                 <p className="text-lg font-semibold">
                   {formatAmount(checkoutData.amount_total, checkoutData.currency)}
+                  {checkoutData.amount_total === 0 && (
+                    <span className="text-sm font-normal text-green-600 dark:text-green-400 ml-2">
+                      (14 días gratis)
+                    </span>
+                  )}
                 </p>
               </div>
               
@@ -174,6 +181,13 @@ function CheckoutSuccessContent() {
 
             <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold mb-3">¿Qué sigue?</h3>
+              {checkoutData.amount_total === 0 && (
+                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg mb-4">
+                  <p className="text-sm text-green-700 dark:text-green-300">
+                    🎉 <strong>¡Tienes 14 días gratis!</strong> Tu primer cargo será el {new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
+                  </p>
+                </div>
+              )}
               <ol className="text-left space-y-2 text-sm text-gray-600 dark:text-gray-300">
                 {isSignedIn ? (
                   <>

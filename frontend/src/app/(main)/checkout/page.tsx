@@ -31,9 +31,10 @@ function CheckoutContent() {
 
     try {
       const response = await apiClient.post('/stripe/create-checkout-session', {
-        priceId: planId,
-        successUrl: `${window.location.origin}/checkout/success`,
-        cancelUrl: `${window.location.origin}/pricing`
+        planId: planId,
+        interval: interval,
+        success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${window.location.origin}/pricing`
       })
 
       if (response.data?.url) {

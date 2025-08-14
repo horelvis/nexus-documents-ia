@@ -12,6 +12,7 @@ from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.db.models import User, Tenant
@@ -110,9 +111,22 @@ class AsyncAuthService:
         )
         
         db.add(db_user)
-        await db.commit()
-        await db.refresh(db_user)
-        return db_user
+        try:
+            await db.commit()
+            await db.refresh(db_user)
+            return db_user
+        except IntegrityError as e:
+            await db.rollback()
+            logger.error(f"IntegrityError creating user: {str(e)}")
+            if "unique constraint" in str(e).lower() and "email" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered"
+                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User creation failed due to constraint violation"
+            )
 
     @staticmethod
     async def create_tenant(
@@ -279,7 +293,16 @@ class AsyncAuthService:
         user_by_email = result.scalar_one_or_none()
         
         if user_by_email:
-            # Usuario existe por email pero sin clerk_user_id, actualizar
+            # Usuario existe por email pero sin clerk_user_id
+            if user_by_email.clerk_user_id:
+                # Ya tiene un clerk_user_id diferente - posible duplicado
+                logger.error(f"🚫 Email {email} already exists with different clerk_user_id: {user_by_email.clerk_user_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email {email} is already registered with a different account"
+                )
+            
+            # Usuario existe sin clerk_user_id, vincularlo
             logger.info(f"🔗 Linking existing user by email: {user_by_email.id}")
             user_by_email.clerk_user_id = clerk_user_id
             user_by_email.full_name = full_name
@@ -377,11 +400,29 @@ class AsyncAuthService:
         )
         
         db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
-        
-        # Subscription data is now handled by Stripe webhooks
-        # No need to process it here
-        
-        logger.info(f"✅ New user created: {new_user.id}")
-        return new_user
+        try:
+            await db.commit()
+            await db.refresh(new_user)
+            
+            # Subscription data is now handled by Stripe webhooks
+            # No need to process it here
+            
+            logger.info(f"✅ New user created: {new_user.id}")
+            return new_user
+        except IntegrityError as e:
+            await db.rollback()
+            logger.error(f"IntegrityError syncing user from Clerk: {str(e)}")
+            if "unique constraint" in str(e).lower() and "email" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email {email} is already registered"
+                )
+            elif "unique constraint" in str(e).lower() and "clerk_user_id" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Clerk user ID {clerk_user_id} is already registered"
+                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User creation failed due to constraint violation"
+            )

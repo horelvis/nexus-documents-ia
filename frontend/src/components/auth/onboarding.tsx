@@ -221,7 +221,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
         {/* Step Content */}
         <div className="max-w-2xl mx-auto">
-          <Card className="shadow-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
+          <Card className="shadow-xl">
             <CardHeader className="text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-r from-purple-500 to-purple-700 rounded-full mb-4">
                 {steps[currentStep]?.icon && (
