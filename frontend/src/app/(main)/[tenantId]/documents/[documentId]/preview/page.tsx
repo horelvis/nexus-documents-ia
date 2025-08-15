@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Download, RefreshCw, Eye, Share2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,8 @@ import { Document, DocumentPreviewResponse } from '@/lib/types'
 import { useDocumentService } from '@/lib/services/document.service'
 import PDFViewer from '@/components/documents/pdf-viewer'
 import { ShareDocumentDialog } from '@/components/documents/share-document-dialog'
+import { ImagePreview } from '@/components/documents/image-preview'
+import { API_CONFIG } from '@/lib/config'
 
 export default function DocumentPreviewPage() {
   const params = useParams()
@@ -25,12 +27,24 @@ export default function DocumentPreviewPage() {
   const [document, setDocument] = useState<Document | null>(null)
   const [preview, setPreview] = useState<DocumentPreviewResponse | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [isLoadingImage, setIsLoadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
 
   const documentService = useDocumentService()
+
+  // Helper function to construct full URLs for images (used for PDF thumbnails)
+  const getFullImageUrl = (path: string) => {
+    if (path.startsWith('http')) {
+      return path // Already a full URL
+    }
+    
+    // The path already includes /api/v1, so just use the base URL
+    return `${API_CONFIG.BASE_URL}${path}`
+  }
 
   const loadDocument = async () => {
     setIsLoadingDocument(true)
@@ -107,6 +121,28 @@ export default function DocumentPreviewPage() {
       }
     } catch (err) {
       console.error('Failed to get PDF URL:', err)
+    }
+  }
+
+  const loadImageUrl = async () => {
+    if (!document) return
+    
+    setIsLoadingImage(true)
+    try {
+      // Use authenticated download service for images
+      const downloadResult = await documentService.downloadDocument(document.id)
+      if (downloadResult.blob) {
+        const localUrl = URL.createObjectURL(downloadResult.blob)
+        setImageUrl(localUrl)
+      } else {
+        console.error('Failed to fetch image:', downloadResult.error)
+        setError('Failed to load image')
+      }
+    } catch (err) {
+      console.error('Failed to get image URL:', err)
+      setError('Failed to load image')
+    } finally {
+      setIsLoadingImage(false)
     }
   }
 
@@ -203,14 +239,24 @@ export default function DocumentPreviewPage() {
     }
   }, [document])
 
-  // Cleanup PDF URL on unmount or document change
+  // Load image URL when preview indicates it's an image
+  useEffect(() => {
+    if (preview && preview.type === 'image_preview' && document && !imageUrl && !isLoadingImage) {
+      loadImageUrl()
+    }
+  }, [preview?.type, document?.id, !!imageUrl])
+
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
       if (pdfUrl && pdfUrl.startsWith('blob:')) {
         URL.revokeObjectURL(pdfUrl)
       }
+      if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl)
+      }
     }
-  }, [pdfUrl])
+  }, [])
 
   useEffect(() => {
     // Cleanup when document changes
@@ -218,10 +264,14 @@ export default function DocumentPreviewPage() {
       URL.revokeObjectURL(pdfUrl)
       setPdfUrl(null)
     }
+    if (imageUrl && imageUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(imageUrl)
+      setImageUrl(null)
+    }
   }, [documentId])
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-6 h-screen flex flex-col space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -292,11 +342,11 @@ export default function DocumentPreviewPage() {
 
       {/* Preview Content */}
       {document && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
           {/* Main Preview Area */}
-          <div className="lg:col-span-3">
-            <Card>
-              <CardHeader>
+          <div className="lg:col-span-3 flex flex-col">
+            <Card className="flex-1 flex flex-col">
+              <CardHeader className="flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <Eye className="h-5 w-5" />
@@ -305,7 +355,7 @@ export default function DocumentPreviewPage() {
                   {preview && getPreviewStatusBadge(preview)}
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1 flex flex-col min-h-0">
                 {isLoadingPreview && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
@@ -350,46 +400,66 @@ export default function DocumentPreviewPage() {
                       <div className="space-y-4">
                         <h3 className="text-lg font-semibold">PDF Page Thumbnails</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                          {preview.thumbnails.map((thumbnail, index) => (
-                            <div key={index} className="space-y-2">
-                              <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border-2 border-border hover:border-primary/50 transition-colors">
-                                <img
-                                  src={thumbnail}
-                                  alt={`Page ${index + 1}`}
-                                  className="w-full h-full object-contain cursor-pointer hover:scale-105 transition-transform"
-                                  onClick={() => {
-                                    // Open in new tab for full view
-                                    window.open(thumbnail, '_blank')
-                                  }}
-                                />
-                              </div>
+                          {preview.thumbnails.map((thumbnail, index) => {
+                            const thumbnailUrl = getFullImageUrl(thumbnail)
+                            
+                            return (
+                              <div key={index} className="space-y-2">
+                                <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border-2 border-border hover:border-primary/50 transition-colors">
+                                  <img
+                                    src={thumbnailUrl}
+                                    alt={`Page ${index + 1}`}
+                                    className="w-full h-full object-contain cursor-pointer hover:scale-105 transition-transform"
+                                    onClick={() => {
+                                      // Open in new tab for full view
+                                      window.open(thumbnailUrl, '_blank')
+                                    }}
+                                  />
+                                </div>
                               <p className="text-sm text-center text-muted-foreground">
                                 Page {index + 1}
                               </p>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     )}
 
                     {/* Image Preview */}
-                    {preview.type === 'image_preview' && preview.thumbnail_path && (
-                      <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">Image Preview</h3>
-                        <div className="flex justify-center">
-                          <div className="max-w-2xl">
-                            <img
-                              src={preview.thumbnail_path}
-                              alt="Document preview"
-                              className="w-full h-auto rounded-lg border-2 border-border"
-                            />
-                            {preview.original_dimensions && (
-                              <p className="text-sm text-center text-muted-foreground mt-2">
-                                {preview.original_dimensions[0]} × {preview.original_dimensions[1]} pixels
-                              </p>
-                            )}
-                          </div>
+                    {preview.type === 'image_preview' && document && (
+                      <div className="h-full flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-semibold">Image Preview</h3>
                         </div>
+                        {isLoadingImage && (
+                          <div className="flex-1 flex items-center justify-center">
+                            <div className="text-center">
+                              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                              <p className="text-muted-foreground">Loading image...</p>
+                            </div>
+                          </div>
+                        )}
+                        {imageUrl && !isLoadingImage && (
+                          <div className="flex-1 min-h-0">
+                            <div className="relative w-full h-full">
+                              <ImagePreview
+                                src={imageUrl}
+                                alt={document.title || document.filename}
+                                fileName={document.filename}
+                                originalDimensions={preview.original_dimensions}
+                                fileSize={document.file_size}
+                                mimeType={document.mime_type}
+                                className="h-full"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {!imageUrl && !isLoadingImage && error && (
+                          <div className="flex-1 flex items-center justify-center">
+                            <p className="text-red-600">Failed to load image</p>
+                          </div>
+                        )}
                       </div>
                     )}
 

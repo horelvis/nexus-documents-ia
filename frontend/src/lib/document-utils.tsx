@@ -230,3 +230,38 @@ export function isPreviewSupported(fileType: string | undefined | null, filename
   return previewableTypes.some(t => type.includes(t)) || 
          previewableExtensions.includes(extension)
 }
+
+/**
+ * Checks if a file is an image
+ */
+export function isImageFile(fileType: string | undefined | null, mimeType?: string | undefined | null, filename?: string): boolean {
+  const type = (fileType || '').toLowerCase()
+  const mime = (mimeType || '').toLowerCase()
+  const extension = getFileExtension(filename || '')
+  
+  // Check by MIME type (most reliable)
+  if (mime.startsWith('image/')) {
+    return true
+  }
+  
+  // Check by file type
+  if (type.includes('image')) {
+    return true
+  }
+  
+  // Check by extension
+  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'tiff', 'tif', 'ico']
+  return imageExtensions.includes(extension)
+}
+
+/**
+ * Gets the image format from MIME type or filename
+ */
+export function getImageFormat(mimeType?: string | undefined | null, filename?: string): string {
+  if (mimeType && mimeType.startsWith('image/')) {
+    return mimeType.split('/')[1]?.toUpperCase() || 'IMAGE'
+  }
+  
+  const extension = getFileExtension(filename || '')
+  return extension.toUpperCase() || 'IMAGE'
+}

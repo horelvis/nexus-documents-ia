@@ -28,15 +28,9 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       return
     }
     
-    // Si no está en ruta permitida, verificar estado
+    // Subscription redirects are now handled by middleware.ts
+    // Only handle onboarding redirects here if needed
     if (!isAllowedPath && backendUser) {
-      // Check if user needs to complete payment (has no subscription)
-      if (!backendUser.subscription_plan && !backendUser.stripe_customer_id) {
-        // User registered but hasn't selected a plan or started trial
-        router.push('/pricing')
-        return
-      }
-      
       // Check if user needs onboarding
       // Only redirect to onboarding if:
       // 1. Has not completed onboarding
@@ -47,25 +41,6 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       if (!backendUser.onboarding_completed && hasActiveSubscription) {
         const tenantId = backendUser.tenant_id || 'temp'
         router.push(`/${tenantId}/onboarding`)
-        return
-      }
-      
-      // Only redirect to pricing if subscription has actually expired/cancelled
-      // Not for temporary states or processing issues
-      if (backendUser.subscription_status === 'trialing' && backendUser.trial_ends_at) {
-        const trialEndsAt = new Date(backendUser.trial_ends_at)
-        if (trialEndsAt < new Date()) {
-          // Trial has truly expired, redirect to pricing
-          router.push('/pricing?expired=trial')
-          return
-        }
-      }
-      
-      // Only redirect for actually expired subscriptions, not temporary issues
-      if (backendUser.subscription_status === 'canceled' || 
-          backendUser.subscription_status === 'past_due' ||
-          (backendUser.subscription_status === 'inactive' && backendUser.subscription_plan !== 'free')) {
-        router.push('/pricing?expired=subscription')
         return
       }
     }

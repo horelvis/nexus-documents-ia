@@ -295,6 +295,16 @@ class SubscriptionServiceV2:
                     "Payment service not configured"
                 )
             
+            # Verify customer exists in Stripe before fetching subscriptions
+            try:
+                stripe.Customer.retrieve(user.stripe_customer_id)
+                logger.debug(f"✅ Customer {user.stripe_customer_id} verified in Stripe")
+            except stripe.error.InvalidRequestError:
+                logger.warning(f"⚠️ Customer {user.stripe_customer_id} doesn't exist in Stripe")
+                return SubscriptionServiceV2._get_free_plan_status(
+                    message="Invalid customer - please re-authenticate"
+                )
+            
             # Fetch subscriptions from Stripe
             logger.debug(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
             
@@ -330,8 +340,12 @@ class SubscriptionServiceV2:
         if not active_subs:
             return None
         
-        # Return most recent
-        return max(active_subs, key=lambda x: x.created)
+        # If multiple active subscriptions, prioritize trialing first (as they might be newer trials)
+        # then active, then past_due
+        priority_order = {'trialing': 3, 'active': 2, 'past_due': 1}
+        
+        # Sort by priority first, then by creation date
+        return max(active_subs, key=lambda x: (priority_order.get(x.status, 0), x.created))
     
     @staticmethod
     def _build_subscription_status(subscription: Any) -> Dict[str, Any]:
@@ -366,6 +380,13 @@ class SubscriptionServiceV2:
         can_use = status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]
         plan_limits = PlanLimits.get_limits(plan_id)
         
+        # Determine end date (use trial_end for trialing subscriptions, current_period_end for others)
+        period_end = None
+        if subscription.status == 'trialing' and subscription.trial_end:
+            period_end = datetime.fromtimestamp(subscription.trial_end).isoformat()
+        elif subscription.current_period_end:
+            period_end = datetime.fromtimestamp(subscription.current_period_end).isoformat()
+        
         # Build response
         result = {
             "plan": plan_id,
@@ -375,7 +396,7 @@ class SubscriptionServiceV2:
             "message": SubscriptionServiceV2._get_status_message(plan_id, status, trial_days_remaining),
             "limits": plan_limits,
             "subscription_id": subscription.id,
-            "current_period_end": datetime.fromtimestamp(subscription.current_period_end).isoformat(),
+            "current_period_end": period_end,
             "cancel_at_period_end": subscription.cancel_at_period_end,
             "created_at": datetime.fromtimestamp(subscription.created).isoformat(),
             "updated_at": datetime.utcnow().isoformat()
@@ -478,7 +499,17 @@ class SubscriptionServiceV2:
     async def _find_or_create_stripe_customer(db: AsyncSession, user: User) -> Optional[str]:
         """Find existing or create new Stripe customer"""
         try:
-            # Search for existing customer
+            # First verify if user already has a customer_id and it's valid
+            if user.stripe_customer_id:
+                try:
+                    stripe.Customer.retrieve(user.stripe_customer_id)
+                    logger.info(f"✅ Verified existing Stripe customer {user.stripe_customer_id} for {user.email}")
+                    return user.stripe_customer_id
+                except stripe.error.InvalidRequestError:
+                    logger.warning(f"⚠️ Customer {user.stripe_customer_id} doesn't exist in Stripe for {user.email}")
+                    # Continue to create new customer
+            
+            # Search for existing customer by email
             customers = stripe.Customer.list(email=user.email, limit=1)
             
             if customers.data:
@@ -497,7 +528,7 @@ class SubscriptionServiceV2:
                 customer_id = customer.id
                 logger.info(f"✅ Created new Stripe customer {customer_id} for {user.email}")
             
-            # Update user
+            # Update user with valid customer_id
             user.stripe_customer_id = customer_id
             await db.commit()
             

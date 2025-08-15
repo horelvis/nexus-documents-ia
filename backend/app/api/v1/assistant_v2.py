@@ -1,7 +1,7 @@
 """
 Virtual Assistant API v2 - Agent-based implementation
 """
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any, Optional, List
@@ -19,6 +19,48 @@ from app.services.cag_client import CAGClient
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant/v2", tags=["assistant-v2"])
+
+
+def extract_regional_context(request: Request) -> Dict[str, str]:
+    """Extraer configuración regional del request del usuario"""
+    context = {}
+    
+    # Extraer Accept-Language header
+    accept_language = request.headers.get("accept-language", "")
+    if accept_language:
+        # Formato: "es-ES,es;q=0.9,en;q=0.8"
+        languages = accept_language.split(",")
+        if languages:
+            primary_lang = languages[0].split(";")[0].strip()
+            
+            # Separar idioma y país
+            if "-" in primary_lang:
+                locale, country = primary_lang.split("-", 1)
+                context["locale"] = locale.lower()
+                context["country"] = country.lower()
+                context["accept_language"] = primary_lang.lower()
+            else:
+                context["locale"] = primary_lang.lower()
+                context["accept_language"] = primary_lang.lower()
+                # Mapear idioma a país por defecto
+                lang_to_country = {
+                    "es": "es", "en": "us", "fr": "fr", "de": "de", 
+                    "it": "it", "pt": "pt", "ca": "es", "eu": "es"
+                }
+                context["country"] = lang_to_country.get(primary_lang.lower(), "us")
+    
+    # Headers adicionales que algunos navegadores/aplicaciones envían
+    country_header = request.headers.get("cf-ipcountry") or request.headers.get("x-country")
+    if country_header:
+        context["country"] = country_header.lower()
+    
+    # Valores por defecto si no se encuentra nada
+    if not context.get("locale"):
+        context["locale"] = "es"
+    if not context.get("country"):
+        context["country"] = "es"
+        
+    return context
 
 
 class ChatMessage(BaseModel):
@@ -102,8 +144,8 @@ async def chat_with_agent(
         message_history = ConversationMemory.get_history(conversation_id)
         
         # For welcome messages, enhance the message to be more specific
-        actual_message = request.message
-        if is_welcome and "SYSTEM:" in request.message:
+        actual_message = chat_request.message
+        if is_welcome and "SYSTEM:" in chat_request.message:
             # Get basic stats for personalized welcome
             try:
                 from sqlalchemy import select, func
@@ -130,8 +172,8 @@ async def chat_with_agent(
         
         # Prepare context for CAG/CrewAI
         cag_context = {
-            "tenant_id": tenant_id,
-            "user_id": current_user.id,
+            "tenant_id": str(tenant_id),  # Convert UUID to string
+            "user_id": str(current_user.id),  # Convert UUID to string
             "conversation_id": conversation_id,
             "message_history": message_history[-5:],  # Last 5 messages
             "is_welcome": is_welcome,
@@ -167,7 +209,7 @@ async def chat_with_agent(
         # Store in conversation memory
         ConversationMemory.add_message(conversation_id, {
             "role": "user",
-            "content": request.message,
+            "content": chat_request.message,
             "timestamp": datetime.utcnow().isoformat()
         })
         ConversationMemory.add_message(conversation_id, {
@@ -199,7 +241,8 @@ async def chat_with_agent(
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(
-    request: ChatMessage,
+    chat_request: ChatMessage,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -208,8 +251,11 @@ async def chat_with_agent_stream(
     
     Returns a Server-Sent Events stream for real-time responses
     """
-    conversation_id = request.conversation_id or _generate_conversation_id()
-    tenant_id = request.context.get("tenant_id") if request.context else current_user.tenant_id
+    conversation_id = chat_request.conversation_id or _generate_conversation_id()
+    tenant_id = chat_request.context.get("tenant_id") if chat_request.context else current_user.tenant_id
+    
+    # Extraer configuración regional del request HTTP
+    regional_context = extract_regional_context(request)
     
     async def generate():
         try:
@@ -221,17 +267,19 @@ async def chat_with_agent_stream(
             
             # Prepare context for CAG/CrewAI
             cag_context = {
-                "tenant_id": tenant_id,
-                "user_id": current_user.id,
+                "tenant_id": str(tenant_id),  # Convert UUID to string
+                "user_id": str(current_user.id),  # Convert UUID to string
                 "conversation_id": conversation_id,
                 "message_history": message_history[-5:],
                 "user_email": current_user.email,
-                "user_name": current_user.full_name or "Usuario"
+                "user_name": current_user.full_name or "Usuario",
+                # Agregar configuración regional para SerperDevTool dinámico
+                **regional_context
             }
             
             # Process with CrewAI via CAG service
             cag_response = await cag_client.process_with_agent(
-                message=request.message,
+                message=chat_request.message,
                 context=cag_context,
                 agent_type="virtual_assistant",
                 tools=["search_documents", "analyze_document", "get_statistics", "signature_request"]
@@ -271,7 +319,7 @@ async def chat_with_agent_stream(
             # Store in memory
             ConversationMemory.add_message(conversation_id, {
                 "role": "user",
-                "content": request.message,
+                "content": chat_request.message,
                 "timestamp": datetime.utcnow().isoformat()
             })
             ConversationMemory.add_message(conversation_id, {

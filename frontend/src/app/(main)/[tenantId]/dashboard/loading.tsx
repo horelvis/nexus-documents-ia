@@ -1,5 +1,5 @@
-import { PageLoading } from "@/components/ui/loading"
+import { NexusPageLoader } from "@/components/ui/nexus-loader"
 
 export default function DashboardLoading() {
-  return <PageLoading text="Loading dashboard..." />
+  return <NexusPageLoader text="Cargando dashboard..." />
 }

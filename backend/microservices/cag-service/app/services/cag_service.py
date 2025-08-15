@@ -12,10 +12,9 @@ from qdrant_client.models import Distance, VectorParams
 
 from ..core.config import settings
 
-# Import CrewAI service - NO más reinventar la rueda!
-# SOLO CrewAI, sin fallbacks
-from .crewai_cag_service import crewai_cag_service
-logger.info("🚀 Using CrewAI - The complete agent framework!")
+# Import OFFICIAL CrewAI service - YAML pattern from docs!
+from .official_crewai_service import official_crewai_service
+logger.info("🚀 Using OFFICIAL CrewAI - YAML pattern from official docs!")
 
 
 class CAGService:
@@ -33,14 +32,22 @@ class CAGService:
         if self._initialized:
             return
         
-        # SOLO CrewAI, sin fallbacks
+        # Initialize embeddings for the service
+        if not self.embeddings:
+            logger.info("Initializing embeddings service...")
+            self.embeddings = OllamaEmbeddings(
+                model="all-minilm",
+                base_url=settings.ollama_base_url
+            )
+        
+        # OFFICIAL CrewAI, patrón YAML oficial
         try:
-            await crewai_cag_service.initialize()
+            await official_crewai_service.initialize()
             self._initialized = True
-            logger.info("CAG service initialized with CrewAI")
+            logger.info("CAG service initialized with OFFICIAL CrewAI and embeddings")
         except Exception as e:
-            logger.error(f"Failed to initialize CrewAI: {e}")
-            raise RuntimeError(f"CrewAI is required but failed to initialize: {e}")
+            logger.error(f"Failed to initialize OFFICIAL CrewAI: {e}")
+            raise RuntimeError(f"OFFICIAL CrewAI is required but failed to initialize: {e}")
     
     def _get_tenant_collection(self, tenant_id: str) -> str:
         """Get collection name for tenant"""
@@ -97,20 +104,17 @@ class CAGService:
             await self.initialize()
             
         try:
-            return await crewai_cag_service.process_query(
+            return await official_crewai_service.process_query(
                 query=query,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                context=context,
-                model=model,
-                temperature=temperature,
-                max_iterations=max_iterations
+                context=context
             )
         except Exception as e:
-            logger.error(f"CrewAI processing failed: {e}")
+            logger.error(f"Official CrewAI processing failed: {e}")
             return {
                 "success": False,
-                "error": f"CrewAI is required but failed: {str(e)}",
+                "error": f"Official CrewAI failed: {str(e)}",
                 "query": query,
                 "answer": None
             }
@@ -129,18 +133,19 @@ class CAGService:
             await self.initialize()
             
         try:
-            return await crewai_cag_service.analyze_document(
-                document_content=document_content,
-                document_id=document_id,
+            # Para análisis de documentos, usar el query processor simple
+            query = f"Analyze this document content: {document_content[:500]}"
+            return await official_crewai_service.process_query(
+                query=query,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                analysis_type=analysis_type
+                context={"document_id": document_id, "analysis_type": analysis_type}
             )
         except Exception as e:
-            logger.error(f"CrewAI document analysis failed: {e}")
+            logger.error(f"Official CrewAI document analysis failed: {e}")
             return {
                 "success": False,
-                "error": f"CrewAI is required but failed: {str(e)}",
+                "error": f"Official CrewAI failed: {str(e)}",
                 "document_id": document_id,
                 "analysis": None
             }
@@ -158,18 +163,36 @@ class CAGService:
             await self.initialize()
             
         try:
-            async for event in crewai_cag_service.process_query_stream(
+            # Simple streaming - just return the regular response as a single event
+            result = await official_crewai_service.process_query(
                 query=query,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 context=context
-            ):
-                yield event
+            )
+            
+            if result.get("success"):
+                yield {
+                    "type": "content",
+                    "content": result.get("response", ""),
+                    "success": True
+                }
+                yield {
+                    "type": "done",
+                    "metadata": result.get("metadata", {}),
+                    "success": True
+                }
+            else:
+                yield {
+                    "type": "error",
+                    "content": result.get("error", "Unknown error"),
+                    "success": False
+                }
         except Exception as e:
-            logger.error(f"CrewAI streaming failed: {e}")
+            logger.error(f"Official CrewAI streaming failed: {e}")
             yield {
                 "type": "error",
-                "content": f"CrewAI is required but failed: {str(e)}",
+                "content": f"Official CrewAI failed: {str(e)}",
                 "success": False
             }
     
@@ -186,17 +209,17 @@ class CAGService:
             await self.initialize()
             
         try:
-            return await crewai_cag_service.chat(
+            return await official_crewai_service.chat(
                 message=message,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                chat_history=chat_history
+                context={"history": chat_history or []}
             )
         except Exception as e:
-            logger.error(f"CrewAI chat failed: {e}")
+            logger.error(f"Official CrewAI chat failed: {e}")
             return {
                 "success": False,
-                "error": f"CrewAI is required but failed: {str(e)}",
+                "error": f"Official CrewAI failed: {str(e)}",
                 "response": None
             }
     
@@ -204,12 +227,25 @@ class CAGService:
         """Check service health"""
         # SOLO CrewAI
         try:
-            return await crewai_cag_service.health_check()
+            return await official_crewai_service.health_check()
         except Exception as e:
-            logger.error(f"CrewAI health check failed: {e}")
+            logger.error(f"Official CrewAI health check failed: {e}")
             return {
                 "status": "unhealthy",
-                "error": f"CrewAI is required but failed: {str(e)}"
+                "error": f"Official CrewAI failed: {str(e)}"
+            }
+    
+    def get_available_agents_info(self, tenant_id: str = "default") -> Dict[str, Any]:
+        """Get REAL available agents information - delegated to CrewAI"""
+        # SOLO CrewAI
+        try:
+            return official_crewai_service.get_available_agents_info(tenant_id)
+        except Exception as e:
+            logger.error(f"Official CrewAI get agents info failed: {e}")
+            return {
+                "available_types": {},
+                "total": 0,
+                "error": f"Official CrewAI failed: {str(e)}"
             }
 
 

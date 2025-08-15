@@ -28,7 +28,8 @@ import {
   IconChevronsLeft,
   IconChevronsRight,
   IconShare2,
-  IconSignature
+  IconSignature,
+  IconRefresh
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -68,6 +69,7 @@ interface DocumentsDataTableProps {
   onFullPagePreview: (document: ApiDocument) => void
   onShareDocument: (document: ApiDocument) => void
   onRequestSignature?: (document: ApiDocument) => void
+  onReindexDocument?: (document: ApiDocument) => void
 }
 
 export function DocumentsDataTable({
@@ -80,6 +82,7 @@ export function DocumentsDataTable({
   onFullPagePreview,
   onShareDocument,
   onRequestSignature,
+  onReindexDocument,
 }: DocumentsDataTableProps) {
   // Get tenant ID from URL for localStorage keys
   const tenantId = React.useMemo(() => {
@@ -324,6 +327,14 @@ export function DocumentsDataTable({
                   <IconEdit className="mr-2 h-4 w-4" />
                   Edit
                 </DropdownMenuItem>
+                
+                {/* Show reindex option for failed/error documents */}
+                {onReindexDocument && (document.indexed === 'INDEXING_ERROR' || document.indexed === 'PROCESSING') && (
+                  <DropdownMenuItem onClick={() => onReindexDocument(document)}>
+                    <IconRefresh className="mr-2 h-4 w-4" />
+                    Reindex
+                  </DropdownMenuItem>
+                )}
                 
                 <DropdownMenuSeparator />
                 

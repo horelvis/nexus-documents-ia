@@ -8,6 +8,9 @@ RUN apt-get update && \
     build-essential \
     libpq-dev \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-spa \
+    tesseract-ocr-eng \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

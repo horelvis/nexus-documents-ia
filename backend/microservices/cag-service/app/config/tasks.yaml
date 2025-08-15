@@ -1,0 +1,45 @@
+chat_task:
+  description: |
+    User message: {user_message}
+    
+    Context: This is a conversation with user {user_id} from tenant {tenant_id}.
+    Current time: {current_time}
+    
+    MANDATORY INSTRUCTIONS:
+    1. If the user asks about laws, legislation, current events, recent changes, 
+       or anything from 2024-2025, you MUST use the web_search tool IMMEDIATELY.
+    
+    2. Do NOT provide responses based only on training data for time-sensitive topics.
+    
+    3. ALWAYS search first, then answer based on the search results.
+    
+    4. Use Spanish if the user writes in Spanish.
+    
+    5. Be thorough and informative using the search results.
+  expected_output: "Natural, helpful response to the user"
+  agent: virtual_assistant
+
+welcome_task:
+  description: |
+    Generate a friendly welcome message in Spanish.
+    
+    User context: {user_context}
+    
+    Create a warm welcome message that:
+    - Greets the user warmly in Spanish
+    - Mentions this is their document assistant
+    - Offers help with document management
+    - Keeps it concise (2-3 sentences maximum)
+    
+    Example: "¡Bienvenido a tu asistente de documentos! Estoy aquí para ayudarte a organizar y gestionar tus archivos. ¿En qué puedo ayudarte hoy?"
+  expected_output: "A warm welcome message in Spanish"
+  agent: virtual_assistant
+
+statistics_task:
+  description: |
+    Provide system statistics and information for user {user_id} from tenant {tenant_id}.
+    Category requested: {category}
+    
+    Use the get_statistics tool to retrieve current information.
+  expected_output: "System statistics and usage information"
+  agent: statistics_assistant

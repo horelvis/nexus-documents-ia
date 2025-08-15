@@ -16,6 +16,21 @@ from ..services.cag_service import cag_service
 router = APIRouter(prefix="/api/v1/cag", tags=["CAG"])
 
 
+@router.get("/agents/available")
+async def get_available_agents(
+    tenant_id: str = "default",
+    _: bool = Depends(verify_api_key)
+):
+    """Get REAL available agents information from CrewAI - NO HARDCODE"""
+    try:
+        # Obtener información REAL de agentes desde CrewAI
+        agents_info = cag_service.get_available_agents_info(tenant_id)
+        return agents_info
+    except Exception as e:
+        logger.error(f"Error getting REAL agents info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get REAL agents: {str(e)}")
+
+
 @router.post("/query", response_model=CAGQueryResponse)
 async def process_query(
     request: CAGQueryRequest,
@@ -120,10 +135,10 @@ async def analyze_document(
             document_type=result.get("document_type"),  # Add document type
             confidence=result.get("confidence", 0.0),  # Add confidence
             analysis_type=request.analysis_type,
-            analysis=result["analysis"],
-            quality_score=result["quality_score"],
-            execution_time=result["execution_time"],
-            metadata=result["metadata"]
+            analysis=result.get("answer", result.get("response", "No analysis generated")),  # Use answer or response field
+            quality_score=result.get("quality_score", 0.0),
+            execution_time=result.get("execution_time", 0.0),
+            metadata=result.get("metadata", {})
         )
         
     except HTTPException:

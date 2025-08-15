@@ -47,6 +47,24 @@ export interface AskDocumentsResponse {
   context_used: boolean
 }
 
+export interface ReindexStatusResponse {
+  tenant_id: string
+  total_documents: number
+  indexed_documents: number
+  indexing_documents: number
+  error_documents: number
+  pending_documents: number
+  missing_from_vector_store: number
+  needs_reindexing: boolean
+}
+
+export interface ReindexResponse {
+  total_documents: number
+  success_count: number
+  error_count: number
+  message: string
+}
+
 export function useSearchService() {
   const apiClient = useApiClient()
 
@@ -69,8 +87,43 @@ export function useSearchService() {
     })
   }
 
+  const getReindexStatus = async () => {
+    return apiClient.get<ReindexStatusResponse>('/search/reindex/status')
+  }
+
+  const reindexAllDocuments = async () => {
+    return apiClient.post<ReindexResponse>('/search/reindex/all')
+  }
+
+  const reindexSpecificDocuments = async (documentIds: string[]) => {
+    return apiClient.post<ReindexResponse>('/search/reindex/documents', documentIds)
+  }
+
+  const fixAndReindex = async () => {
+    return apiClient.post<{ message: string; status: string; success: boolean }>('/search/fix-and-reindex')
+  }
+
+  const autoReindexFailedDocuments = async () => {
+    return apiClient.post<ReindexResponse>('/search/auto-reindex')
+  }
+
+  const runAutoReindexOnce = async () => {
+    return apiClient.post<{ message: string; tenant_id: string; result: ReindexResponse }>('/search/auto-reindex/run-once')
+  }
+
+  const startGlobalAutoReindex = async () => {
+    return apiClient.post<{ message: string; status: string; interval_seconds: number }>('/search/auto-reindex/start-global')
+  }
+
   return {
     searchDocuments,
-    askDocuments
+    askDocuments,
+    getReindexStatus,
+    reindexAllDocuments,
+    reindexSpecificDocuments,
+    fixAndReindex,
+    autoReindexFailedDocuments,
+    runAutoReindexOnce,
+    startGlobalAutoReindex
   }
 }

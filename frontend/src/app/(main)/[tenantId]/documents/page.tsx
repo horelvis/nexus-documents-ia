@@ -22,7 +22,9 @@ import {
   IconShare2,
   IconSignature,
   IconDotsVertical,
-  IconBrain
+  IconBrain,
+  IconRefresh,
+  IconAlertTriangle
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -52,7 +54,6 @@ import {
   EditDocumentDialog, 
   DocumentViewerDialog, 
   DeleteDocumentDialog,
-  DocumentPreviewDialog,
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
@@ -112,7 +113,6 @@ export default function DocumentsPage() {
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
@@ -120,6 +120,215 @@ export default function DocumentsPage() {
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
   const searchService = useSearchService()
+
+  // Reindex function
+  const handleReindexDocument = async (document: ApiDocument) => {
+    try {
+      addNotification({
+        type: 'info',
+        title: 'Reindexing Document',
+        message: `Starting reindex for ${document.filename}...`
+      })
+      
+      console.log('Attempting to reindex document:', document.id)
+      const response = await searchService.reindexSpecificDocuments([document.id])
+      console.log('Reindex response:', response)
+      
+      if (response.error) {
+        console.error('Reindex API error:', response.error)
+        addNotification({
+          type: 'error',
+          title: 'Reindex Failed',
+          message: `Error: ${response.error}. Please check if the document exists and the search service is running.`
+        })
+        return
+      }
+      
+      if (response.data) {
+        const result = response.data
+        console.log('Reindex result:', result)
+        
+        if (result.error_count > 0) {
+          addNotification({
+            type: 'warning',
+            title: 'Reindex Completed with Errors',
+            message: `${result.success_count} of ${result.total_documents} documents reindexed successfully. ${result.error_count} failed.`
+          })
+        } else {
+          addNotification({
+            type: 'success',
+            title: 'Reindex Complete',
+            message: result.message || `${result.success_count} document(s) reindexed successfully`
+          })
+        }
+      } else {
+        addNotification({
+          type: 'warning',
+          title: 'Reindex Status Unknown',
+          message: 'Reindex request was sent but no response data received'
+        })
+      }
+      
+      // Reload documents to show updated status
+      setTimeout(() => {
+        loadDocuments()
+      }, 2000) // Wait 2 seconds for backend processing
+      
+    } catch (error) {
+      console.error('Reindex exception:', error)
+      addNotification({
+        type: 'error',
+        title: 'Reindex Failed',
+        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}. Please check your connection and try again.`
+      })
+    }
+  }
+
+  // Bulk reindex function for error documents
+  const handleReindexAllErrors = async () => {
+    try {
+      // Get all documents with errors
+      const errorDocuments = filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR')
+      
+      if (errorDocuments.length === 0) {
+        addNotification({
+          type: 'info',
+          title: 'No Documents to Reindex',
+          message: 'No documents with indexing errors found'
+        })
+        return
+      }
+
+      addNotification({
+        type: 'info',
+        title: 'Bulk Reindexing Started',
+        message: `Starting reindex for ${errorDocuments.length} document(s). This may take a few minutes...`
+      })
+      
+      console.log('Attempting bulk reindex for documents:', errorDocuments.map(doc => doc.id))
+      const response = await searchService.reindexSpecificDocuments(
+        errorDocuments.map(doc => doc.id)
+      )
+      console.log('Bulk reindex response:', response)
+      
+      if (response.error) {
+        console.error('Bulk reindex API error:', response.error)
+        addNotification({
+          type: 'error',
+          title: 'Bulk Reindex Failed',
+          message: `Error: ${response.error}. Please check if documents exist and the search service is running.`
+        })
+        return
+      }
+      
+      if (response.data) {
+        const result = response.data
+        console.log('Bulk reindex result:', result)
+        
+        if (result.error_count > 0) {
+          addNotification({
+            type: 'warning',
+            title: 'Bulk Reindex Completed with Errors',
+            message: `${result.success_count} of ${result.total_documents} documents reindexed successfully. ${result.error_count} failed. Check individual document status.`
+          })
+        } else {
+          addNotification({
+            type: 'success',
+            title: 'Bulk Reindex Complete',
+            message: result.message || `All ${result.success_count} document(s) reindexed successfully`
+          })
+        }
+      } else {
+        addNotification({
+          type: 'warning',
+          title: 'Bulk Reindex Status Unknown',
+          message: 'Bulk reindex request was sent but no response data received'
+        })
+      }
+      
+      // Reload documents to show updated status
+      setTimeout(() => {
+        loadDocuments()
+      }, 3000) // Wait 3 seconds for bulk processing
+      
+    } catch (error) {
+      console.error('Bulk reindex exception:', error)
+      addNotification({
+        type: 'error',
+        title: 'Bulk Reindex Failed',
+        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}. Please check your connection and try again.`
+      })
+    }
+  }
+
+  // Auto-reindex function
+  const handleAutoReindexOnce = async () => {
+    try {
+      addNotification({
+        type: 'info',
+        title: 'Auto-Reindex Started',
+        message: 'Starting automatic reindex process for failed documents...'
+      })
+      
+      console.log('Running auto-reindex once for tenant')
+      const response = await searchService.runAutoReindexOnce()
+      console.log('Auto-reindex response:', response)
+      
+      if (response.error) {
+        console.error('Auto-reindex API error:', response.error)
+        addNotification({
+          type: 'error',
+          title: 'Auto-Reindex Failed',
+          message: `Error: ${response.error}`
+        })
+        return
+      }
+      
+      if (response.data) {
+        const result = response.data.result
+        console.log('Auto-reindex result:', result)
+        
+        if (result.error_count > 0) {
+          addNotification({
+            type: 'warning',
+            title: 'Auto-Reindex Completed with Issues',
+            message: `${result.success_count} of ${result.total_documents} documents auto-reindexed successfully. ${result.error_count} failed.`
+          })
+        } else if (result.success_count > 0) {
+          addNotification({
+            type: 'success',
+            title: 'Auto-Reindex Complete',
+            message: `${result.success_count} document(s) auto-reindexed successfully`
+          })
+        } else {
+          addNotification({
+            type: 'info',
+            title: 'No Documents to Auto-Reindex',
+            message: 'No documents with errors found for auto-reindexing'
+          })
+        }
+      } else {
+        addNotification({
+          type: 'warning',
+          title: 'Auto-Reindex Status Unknown',
+          message: 'Auto-reindex request was sent but no response data received'
+        })
+      }
+      
+      // Reload documents to show updated status
+      setTimeout(() => {
+        loadDocuments()
+      }, 3000) // Wait 3 seconds for processing
+      
+    } catch (error) {
+      console.error('Auto-reindex exception:', error)
+      addNotification({
+        type: 'error',
+        title: 'Auto-Reindex Failed',
+        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
+      })
+    }
+  }
 
   // Load documents from API - simple pattern
   const loadDocuments = async () => {
@@ -251,8 +460,7 @@ export default function DocumentsPage() {
   }
 
   const handlePreviewDocument = (document: ApiDocument) => {
-    setSelectedDocument(document)
-    setPreviewDialogOpen(true)
+    router.push(`/${tenantId}/documents/${document.id}/preview`)
   }
 
   const handleShareDocument = (document: ApiDocument) => {
@@ -566,6 +774,30 @@ export default function DocumentsPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 
+                {/* Reindex Buttons - Show only when there are error documents */}
+                {!isLoading && filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR').length > 0 && (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      onClick={handleReindexAllErrors}
+                      className="text-orange-600 border-orange-200 hover:bg-orange-50"
+                    >
+                      <IconRefresh className="mr-2 h-4 w-4" />
+                      Reindex Errors ({filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR').length})
+                    </Button>
+                    
+                    <Button 
+                      variant="outline" 
+                      onClick={handleAutoReindexOnce}
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                      title="Run automatic reindex once for this tenant"
+                    >
+                      <IconBrain className="mr-2 h-4 w-4" />
+                      Auto-Reindex
+                    </Button>
+                  </>
+                )}
+                
                 {/* View Toggle */}
                 <div className="flex items-center rounded-md border">
                   <Button
@@ -729,6 +961,14 @@ export default function DocumentsPage() {
                                 Edit
                               </DropdownMenuItem>
                               
+                              {/* Show reindex option for failed/error documents */}
+                              {(document.indexed === 'INDEXING_ERROR' || document.indexed === 'PROCESSING') && (
+                                <DropdownMenuItem onClick={() => handleReindexDocument(document)}>
+                                  <IconRefresh className="mr-2 h-4 w-4" />
+                                  Reindex
+                                </DropdownMenuItem>
+                              )}
+                              
                               <DropdownMenuSeparator />
                               
                               <DropdownMenuItem 
@@ -773,6 +1013,7 @@ export default function DocumentsPage() {
             onFullPagePreview={handleFullPagePreview}
             onShareDocument={handleShareDocument}
             onRequestSignature={handleRequestSignature}
+            onReindexDocument={handleReindexDocument}
           />
         )}
 
@@ -906,11 +1147,6 @@ export default function DocumentsPage() {
           onConfirm={handleConfirmDelete}
         />
 
-        <DocumentPreviewDialog
-          document={selectedDocument}
-          open={previewDialogOpen}
-          onOpenChange={setPreviewDialogOpen}
-        />
 
         <ShareDocumentDialog
           document={selectedDocument}

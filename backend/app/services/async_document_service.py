@@ -435,13 +435,51 @@ class AsyncDocumentService:
         return await asyncio.to_thread(self._extract_text_sync, contents, file_ext)
     
     def _extract_text_sync(self, contents: bytes, file_ext: str) -> Optional[str]:
-        """Synchronous text extraction"""
+        """Synchronous text extraction with OCR fallback for scanned PDFs"""
         try:
             if file_ext == "pdf":
+                # First try PyPDF2 for text-based PDFs
                 pdf_reader = PyPDF2.PdfReader(io.BytesIO(contents))
                 text = ""
                 for page in pdf_reader.pages:
                     text += page.extract_text() + "\n"
+                
+                # If no text extracted (likely scanned PDF), try OCR
+                if not text.strip():
+                    logger.info("No text extracted with PyPDF2, attempting OCR for scanned PDF")
+                    try:
+                        import fitz  # PyMuPDF
+                        from PIL import Image
+                        import pytesseract
+                        
+                        # Open PDF with PyMuPDF for better image handling
+                        doc = fitz.open(stream=contents, filetype="pdf")
+                        ocr_text = ""
+                        
+                        for page_num in range(len(doc)):
+                            page = doc.load_page(page_num)
+                            # Convert page to image
+                            mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
+                            pix = page.get_pixmap(matrix=mat)
+                            img_data = pix.tobytes("png")
+                            
+                            # OCR the image
+                            image = Image.open(io.BytesIO(img_data))
+                            page_text = pytesseract.image_to_string(image, lang='spa+eng')  # Spanish + English
+                            ocr_text += page_text + "\n"
+                            logger.info(f"OCR extracted {len(page_text)} chars from page {page_num + 1}")
+                        
+                        doc.close()
+                        text = ocr_text
+                        logger.info(f"OCR completed: extracted {len(text)} total characters")
+                        
+                    except ImportError:
+                        logger.warning("OCR libraries not available (fitz, PIL, pytesseract). Install: pip install PyMuPDF Pillow pytesseract")
+                        return ""
+                    except Exception as ocr_error:
+                        logger.error(f"OCR failed: {ocr_error}")
+                        return ""
+                
                 return text
             
             elif file_ext == "txt":

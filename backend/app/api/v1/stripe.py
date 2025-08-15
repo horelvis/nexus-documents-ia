@@ -83,10 +83,19 @@ async def create_checkout_session(
                 detail=f"Price not configured for plan '{request.planId}' with interval '{request.interval}'"
             )
 
-        # Si el usuario ya tiene un customer_id, usarlo
+        # Si el usuario ya tiene un customer_id, verificar que existe en Stripe
         customer_id = current_user.stripe_customer_id
         
-        # Si no tiene customer_id, crear uno nuevo
+        # Verificar si el customer_id existe en Stripe
+        if customer_id:
+            try:
+                stripe.Customer.retrieve(customer_id)
+                logger.info(f"✅ Using existing Stripe customer: {customer_id}")
+            except stripe.error.InvalidRequestError as e:
+                logger.warning(f"⚠️ Customer {customer_id} doesn't exist in Stripe, creating new one: {e}")
+                customer_id = None  # Force creation of new customer
+        
+        # Si no tiene customer_id o el existente no es válido, crear uno nuevo
         if not customer_id:
             customer = stripe.Customer.create(
                 email=current_user.email,
@@ -96,6 +105,7 @@ async def create_checkout_session(
                 }
             )
             customer_id = customer.id
+            logger.info(f"✅ Created new Stripe customer: {customer_id}")
             
             # Guardar el customer_id en la base de datos
             current_user.stripe_customer_id = customer_id

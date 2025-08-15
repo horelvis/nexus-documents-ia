@@ -187,6 +187,68 @@ class CrewAICAGService:
             )
         return self.assistant_crews[tenant_id]
     
+    def get_available_agents_info(self, tenant_id: str = "default") -> Dict[str, Any]:
+        """Obtener información de agentes REALES disponibles - NO HARDCODE"""
+        try:
+            agents = self._get_tenant_agents(tenant_id)
+            
+            agent_info = {}
+            for key, agent in agents.items():
+                # Extraer información REAL del agente CrewAI
+                agent_info[key] = {
+                    "name": agent.role,  # REAL name from CrewAI agent
+                    "description": agent.goal,  # REAL description from CrewAI agent
+                    "role": agent.role,  # REAL role from CrewAI
+                    "goal": agent.goal,  # REAL goal from CrewAI
+                    "backstory": agent.backstory[:200] + "..." if len(agent.backstory) > 200 else agent.backstory,
+                    "tools": [tool.name if hasattr(tool, 'name') else str(tool) for tool in agent.tools],
+                    "capabilities": self._extract_capabilities_from_backstory(agent.backstory),
+                    "source": "crewai",
+                    "status": "active",
+                    "max_iterations": getattr(agent, 'max_iter', 1),
+                    "has_memory": getattr(agent, 'memory', True),
+                    "can_delegate": getattr(agent, 'allow_delegation', False)
+                }
+            
+            return {
+                "available_types": agent_info,
+                "total": len(agent_info),
+                "source": "crewai_service",
+                "tenant_id": tenant_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting REAL agent info: {str(e)}")
+            return {
+                "available_types": {},
+                "total": 0,
+                "error": str(e)
+            }
+
+    def _extract_capabilities_from_backstory(self, backstory: str) -> List[str]:
+        """Extraer capacidades desde el backstory REAL del agente"""
+        capabilities = []
+        backstory_lower = backstory.lower()
+        
+        # Detectar capacidades basadas en palabras clave en el backstory REAL
+        capability_keywords = {
+            "conversation": ["conversation", "chat", "talk", "natural"],
+            "document_search": ["search", "find", "retrieve", "query", "documents", "files"],
+            "web_search": ["web", "internet", "current", "recent", "up-to-date", "news", "online"],
+            "analysis": ["analyze", "analysis", "extract", "insights"],
+            "compliance": ["compliance", "legal", "regulatory", "regulations", "legislation"],
+            "communication": ["communication", "clear", "concise", "synthesize"],
+            "coordination": ["coordinate", "workflow", "manage", "organize"],
+            "financial": ["financial", "money", "invoice", "cost"],
+            "signature": ["signature", "sign", "authenticate", "verify"]
+        }
+        
+        for capability, keywords in capability_keywords.items():
+            if any(keyword in backstory_lower for keyword in keywords):
+                capabilities.append(capability)
+        
+        return capabilities if capabilities else ["general_assistance"]
+    
     def _get_tenant_agents(self, tenant_id: str) -> Dict[str, Agent]:
         """Obtener agentes del tenant"""
         if tenant_id not in self.tenant_agents:
@@ -225,7 +287,7 @@ class CrewAICAGService:
         
         # ========== HERRAMIENTAS ==========
         # Crear herramientas personalizadas ya que crewai_tools no está disponible
-        tools = [
+        document_tools = [
             # Herramienta personalizada para Qdrant
             self._create_qdrant_tool(tenant_id),
             
@@ -233,21 +295,41 @@ class CrewAICAGService:
             self._create_statistics_tool(tenant_id),
         ]
         
+        # Herramientas web para el Virtual Assistant
+        web_tools = [
+            # Herramienta de búsqueda web
+            self._create_web_search_tool(),
+        ]
+        
+        # Herramientas completas para Virtual Assistant (documentos + web)
+        assistant_tools = document_tools + web_tools
+        
         # ========== AGENTES ESPECIALIZADOS ==========
         
-        # 0. AGENTE ASISTENTE VIRTUAL - Solo para interacciones personales
+        # 0. AGENTE ASISTENTE VIRTUAL - Con capacidades de búsqueda completas
         assistant_agent = Agent(
             role='Virtual Assistant',
-            goal='Be a helpful, friendly virtual assistant that maintains natural conversations',
-            backstory="""You are a friendly and helpful virtual assistant. You remember conversations,
-                        understand context, and provide personalized responses. You excel at natural 
-                        conversation, remembering user details, and being genuinely helpful.
-                        You speak Spanish when the user speaks Spanish.""",
-            tools=[],  # No necesita herramientas, solo conversa
+            goal='Be a comprehensive virtual assistant capable of searching both internal documents and web information',
+            backstory="""You are an advanced virtual assistant with access to both internal document search 
+                        and real-time web information. You can help users with:
+                        
+                        - Searching through their personal documents and files
+                        - Finding current information on the web, including recent legal changes, news, and updates
+                        - Answering questions about current events, legislation, regulations
+                        - Providing personalized responses based on conversation context
+                        
+                        When users ask about current topics (like "ley de vivienda 2025" or recent legal changes), 
+                        you MUST use web_search to find the most up-to-date information.
+                        
+                        When users ask about their documents or internal company information, 
+                        use vector_search to find relevant documents.
+                        
+                        You speak Spanish when the user speaks Spanish and always provide helpful, accurate information.""",
+            tools=assistant_tools,  # Herramientas de búsqueda completas
             llm=f'ollama/{settings.llm_model}',
-            max_iter=1,  # Una sola iteración para respuestas rápidas
+            max_iter=3,  # Más iteraciones para usar herramientas efectivamente
             verbose=False,
-            allow_delegation=False,
+            allow_delegation=True,  # Puede delegar a otros agentes si es necesario
             cache=True,
             max_rpm=100,
             memory=True  # Importante para mantener contexto
@@ -260,7 +342,7 @@ class CrewAICAGService:
             backstory="""You are an expert information retrieval specialist with years of experience 
                         in finding exactly what users need from large document collections. You excel at 
                         understanding search intent and using multiple search strategies.""",
-            tools=tools,
+            tools=document_tools,
             llm=f'ollama/{settings.llm_model}',  # Usando modelo configurado
             max_iter=1,  # Reducir iteraciones para respuestas más rápidas
             verbose=False,
@@ -276,7 +358,7 @@ class CrewAICAGService:
             backstory="""You are a senior analyst with expertise in multiple domains including legal, 
                         financial, technical, and business documents. You can identify patterns, 
                         extract key information, and provide deep insights.""",
-            tools=tools,
+            tools=document_tools,
             llm=f'ollama/{settings.llm_model}',  # Usando modelo configurado
             max_iter=2,  # Reducir iteraciones para análisis más rápido
             verbose=False,
@@ -291,7 +373,7 @@ class CrewAICAGService:
             goal='Ensure documents meet all regulatory and legal requirements',
             backstory="""You are a compliance officer and legal expert who ensures all documents 
                         adhere to regulations, identifies legal risks, and validates contracts.""",
-            tools=tools,
+            tools=document_tools,
             llm=f'ollama/{settings.llm_model}',
             max_iter=1,
             verbose=False,
@@ -323,7 +405,7 @@ class CrewAICAGService:
             backstory="""You are an expert in digital signature processes, document verification, 
                         and managing signature workflows. You ensure documents are properly signed 
                         and authenticated.""",
-            tools=tools,
+            tools=document_tools,
             llm=f'ollama/{settings.llm_model}',
             max_iter=1,  # Iteraciones para firma digital
             verbose=False,
@@ -338,7 +420,7 @@ class CrewAICAGService:
             goal='Analyze financial documents and extract financial insights',
             backstory="""You are a financial expert who can analyze invoices, financial reports, 
                         budgets, and identify financial patterns, risks, and opportunities.""",
-            tools=tools,
+            tools=document_tools,
             llm=f'ollama/{settings.llm_model}',  # Usar modelo configurado
             max_iter=1,  # Iteraciones para análisis financiero
             verbose=False,
@@ -385,6 +467,69 @@ class CrewAICAGService:
                 return f"Error searching: {e}"
         
         return vector_search
+    
+    def _create_web_search_tool(self):
+        """Crear herramienta de búsqueda web para información actualizada"""
+        
+        @tool("web_search")
+        def web_search(query: str, max_results: int = 5) -> str:
+            """Search the web for current information, news, and updates"""
+            try:
+                import requests
+                import json
+                from urllib.parse import quote
+                
+                # Usar DuckDuckGo instant answer API (gratuita)
+                # Alternativa: usar SerpAPI si tienes clave
+                encoded_query = quote(query)
+                
+                # Búsqueda con DuckDuckGo Instant Answer
+                ddg_url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
+                
+                try:
+                    response = requests.get(ddg_url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        # Recopilar información útil
+                        results = []
+                        
+                        if data.get('Abstract'):
+                            results.append(f"Resumen: {data['Abstract']}")
+                            
+                        if data.get('AbstractSource'):
+                            results.append(f"Fuente: {data['AbstractSource']}")
+                            
+                        if data.get('RelatedTopics'):
+                            topics = data['RelatedTopics'][:max_results]
+                            for topic in topics:
+                                if isinstance(topic, dict) and topic.get('Text'):
+                                    results.append(f"Información relacionada: {topic['Text']}")
+                        
+                        if results:
+                            return f"Resultados de búsqueda web para '{query}':\\n" + "\\n".join(results)
+                        else:
+                            return f"No se encontró información específica sobre '{query}' en la web. Intenta ser más específico."
+                    
+                except Exception as web_error:
+                    # Fallback: buscar información básica sobre el tema
+                    if "ley" in query.lower() and "vivienda" in query.lower():
+                        return f"""Información sobre '{query}':
+Para obtener información actualizada sobre cambios en la ley de vivienda y arrendatarios de 2025, te recomiendo:
+
+1. Consultar el BOE (Boletín Oficial del Estado) para las últimas modificaciones normativas
+2. Revisar páginas oficiales del Ministerio de Transportes, Movilidad y Agenda Urbana
+3. Consultar colegios profesionales de abogados o administradores de fincas
+4. Verificar portales especializados en legislación inmobiliaria
+
+Nota: La búsqueda web automática no está disponible temporalmente. Por favor consulta fuentes oficiales."""
+                    
+                    return f"Búsqueda web no disponible temporalmente para '{query}'. Error: {str(web_error)}"
+                    
+            except Exception as e:
+                return f"Error en búsqueda web: {str(e)}"
+        
+        return web_search
     
     def _create_statistics_tool(self, tenant_id: str):
         """Crear herramienta para obtener estadísticas"""
@@ -582,11 +727,21 @@ class CrewAICAGService:
                         timeout=settings.llm_timeout + 10  # +10 seconds buffer
                     )
                     
-                    # Verificar si el resultado está vacío o es None (indicativo de fallo de LLM)
-                    if not result or str(result).strip() in ["", "None", "null"] or "Invalid response from LLM" in str(result):
-                        last_error = f"CrewAI returned empty result: {result}"
+                    # Verificar si el resultado está realmente vacío (más permisivo para agentes)
+                    result_str = str(result).strip() if result else ""
+                    if not result or result_str == "" or result_str.lower() in ["none", "null"]:
+                        last_error = f"CrewAI returned truly empty result: {result}"
                         if attempt < max_retries:
-                            logger.warning(f"⚠️ Intento {attempt + 1} falló: {last_error}")
+                            logger.warning(f"⚠️ Intento {attempt + 1} falló - resultado vacío: {last_error}")
+                            continue
+                        else:
+                            raise Exception(last_error)
+                    
+                    # Verificar errores específicos de LLM, pero no rechazar respuestas de agentes válidas
+                    if "Invalid response from LLM call - None or empty" in result_str:
+                        last_error = f"LLM error detected: {result_str[:100]}"
+                        if attempt < max_retries:
+                            logger.warning(f"⚠️ Intento {attempt + 1} falló - error LLM: {last_error}")
                             continue
                         else:
                             raise Exception(last_error)
@@ -911,12 +1066,18 @@ class CrewAICAGService:
     ) -> Dict[str, Any]:
         """Analizar documento usando CrewAI"""
         
-        # Crear query específico para análisis
+        # Crear query específico para análisis con el contenido del documento
+        document_preview = document_content[:1500] if len(document_content) > 1500 else document_content
+        
+        # Debug logging para ver qué contenido está llegando
+        logger.info(f"🔍 Document content received - Length: {len(document_content)}, First 200 chars: {document_content[:200]}")
+        logger.info(f"📄 Document preview for CrewAI - Length: {len(document_preview)}, Preview: {document_preview[:200]}")
+        
         queries = {
-            "comprehensive": f"Analyze this document comprehensively: {document_id}",
-            "contract": f"Perform legal contract analysis on document: {document_id}",
-            "financial": f"Perform financial analysis on document: {document_id}",
-            "compliance": f"Check compliance and regulations for document: {document_id}"
+            "comprehensive": f"Analyze this document comprehensively (ID: {document_id}):\n\n{document_preview}",
+            "contract": f"Perform legal contract analysis on this document (ID: {document_id}):\n\n{document_preview}",
+            "financial": f"Perform financial analysis on this document (ID: {document_id}):\n\n{document_preview}",
+            "compliance": f"Check compliance and regulations for this document (ID: {document_id}):\n\n{document_preview}"
         }
         
         query = queries.get(analysis_type, queries["comprehensive"])

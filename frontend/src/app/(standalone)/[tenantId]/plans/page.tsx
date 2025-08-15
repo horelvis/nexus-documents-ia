@@ -48,7 +48,15 @@ export default function TenantPlansPage() {
     }
 
     checkSubscription()
-  }, [apiClient, backendUser])
+  }, [backendUser?.subscription_plan, backendUser?.subscription_status])
+
+  // Redirect automatically to dashboard if user already has an active subscription  
+  useEffect(() => {
+    if (!isLoading && currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {
+      // User has active subscription, redirect to dashboard immediately
+      router.replace(`/${params.tenantId}/dashboard`)
+    }
+  }, [isLoading, currentSubscription, params.tenantId, router])
 
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
     setLoadingPlan(plan.id)
@@ -112,14 +120,6 @@ export default function TenantPlansPage() {
       </div>
     )
   }
-
-  // Redirect automatically to dashboard if user already has an active subscription  
-  useEffect(() => {
-    if (!isLoading && currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {
-      // User has active subscription, redirect to dashboard immediately
-      router.replace(`/${params.tenantId}/dashboard`)
-    }
-  }, [isLoading, currentSubscription, params.tenantId, router])
 
   // Show loading during redirect
   if (currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {

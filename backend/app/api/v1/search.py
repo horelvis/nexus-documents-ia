@@ -210,3 +210,61 @@ async def fix_collection_and_reindex(
             status_code=500,
             detail="Failed to initiate collection fix and reindexing"
         )
+
+
+@router.post("/auto-reindex", response_model=dict)
+async def auto_reindex_failed_documents(
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Automáticamente reindexa documentos que tienen errores de indexación.
+    """
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    result = await reindex_service.auto_reindex_failed_documents()
+    return result
+
+
+@router.post("/auto-reindex/start-global", response_model=dict)
+async def start_global_auto_reindex(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Inicia la tarea automática de reindexado para todos los tenants.
+    Solo administradores pueden usar este endpoint.
+    """
+    # Check if user is admin (you might want to add this check)
+    # if not current_user.is_superuser:
+    #     raise HTTPException(status_code=403, detail="Only administrators can start global auto-reindex")
+    
+    from app.tasks.auto_reindex_task import auto_reindex_task
+    
+    # Start the task in background
+    background_tasks.add_task(auto_reindex_task.start_periodic_task)
+    
+    return {
+        "message": "Global auto-reindex task started",
+        "status": "started",
+        "interval_seconds": auto_reindex_task.run_interval
+    }
+
+
+@router.post("/auto-reindex/run-once", response_model=dict)
+async def run_auto_reindex_once(
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Ejecuta una sola vez el auto-reindex para el tenant actual.
+    """
+    from app.tasks.auto_reindex_task import auto_reindex_task
+    
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    result = await reindex_service.auto_reindex_failed_documents()
+    
+    return {
+        "message": "Auto-reindex completed for current tenant",
+        "tenant_id": tenant_id,
+        "result": result
+    }

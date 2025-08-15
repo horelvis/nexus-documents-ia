@@ -112,8 +112,8 @@ class ApiClient {
         // Handle 401 Unauthorized specifically for token refresh
         if (response.status === 401 && retryCount === 0) {
           console.log('Token expired, attempting to refresh...')
-          // Wait a bit for Clerk to refresh the token
-          await new Promise(resolve => setTimeout(resolve, 100))
+          // Wait longer for Clerk to properly refresh the token
+          await new Promise(resolve => setTimeout(resolve, 500))
           
           // Try the request again with retry count incremented
           return this.request<T>(endpoint, options, retryCount + 1)

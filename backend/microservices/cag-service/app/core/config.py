@@ -13,11 +13,11 @@ class Settings(BaseSettings):
     
     # Ollama configuration
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama-service:11434")
-    llm_model: str = os.getenv("LLM_MODEL", "llama3.2")  # Using llama3.2 for better stability
+    llm_model: str = os.getenv("LLM_MODEL", "gemma3:12b-it-qat")  # Using Gemma3 optimized for instructions and tools
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-minilm:latest")
     
     # LLM stability settings
-    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))  # Low temperature for consistency
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))  # Slightly higher for better tool usage
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
     llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "30"))  # 30 seconds timeout
     
@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Performance settings
     request_timeout: int = 300  # 5 minutes
     llm_timeout: int = 120  # 2 minutes
+    
+    # External APIs
+    serper_api_key: str = os.getenv("SERPER_API_KEY", "")
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

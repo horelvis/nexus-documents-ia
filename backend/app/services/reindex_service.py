@@ -77,7 +77,7 @@ class ReindexService:
     
     async def reindex_document(self, db: Session, document: Document) -> bool:
         """
-        Reindex a single document.
+        Reindex a single document with enhanced error handling.
         
         Args:
             db: Database session
@@ -87,51 +87,105 @@ class ReindexService:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Reindexing document {document.id} ({document.filename})")
+            logger.info(f"Starting reindex for document {document.id} ({document.filename})")
             
-            # Set status to indexing
-            document.indexed = IndexingStatus.INDEXING
-            db.commit()
+            # IMPORTANT: Don't set status to INDEXING immediately to avoid potential enum issues
+            # We'll set it only when we're about to start processing
             
-            # Download file content from storage
-            file_path = document.file_path or f"{self.tenant_id}/{document.id}/{document.filename}"
-            file_content = self.storage_service.download_file(file_path)
-            
-            if not file_content:
-                logger.error(f"Could not download file content for document {document.id}")
+            # First, validate the document exists and has required fields
+            if not document.filename:
+                logger.error(f"Document {document.id} has no filename")
                 document.indexed = IndexingStatus.INDEXING_ERROR
                 db.commit()
                 return False
             
-            # Create temporary document service for indexing
-            doc_service = DocumentService(tenant_id=self.tenant_id, user_id=self.user_id)
+            # Download file content from storage
+            file_path = document.file_path or f"{self.tenant_id}/{document.id}/{document.filename}"
+            logger.info(f"Attempting to download file from path: {file_path}")
+            
+            try:
+                file_content = self.storage_service.download_file(file_path)
+                if file_content:
+                    logger.info(f"File content downloaded successfully, size: {len(file_content)} bytes")
+                else:
+                    logger.error(f"Downloaded file content is empty for document {document.id}")
+                    document.indexed = IndexingStatus.INDEXING_ERROR
+                    db.commit()
+                    return False
+            except Exception as download_e:
+                logger.error(f"Failed to download file for document {document.id}: {type(download_e).__name__}: {str(download_e)}")
+                document.indexed = IndexingStatus.INDEXING_ERROR
+                db.commit()
+                return False
+            
+            # Now set status to indexing since we have the file content
+            logger.info(f"Setting document {document.id} status to INDEXING")
+            document.indexed = IndexingStatus.INDEXING
+            db.commit()
             
             # Extract file extension
             file_ext = document.filename.split('.')[-1].lower() if '.' in document.filename else ''
+            logger.info(f"Processing document {document.id} with extension: {file_ext}")
             
-            # Reindex the document
-            await doc_service._extract_and_index_text(
-                db=db,
-                db_document=document,
-                file_contents=file_content,
-                file_ext=file_ext,
-                title=document.title or document.filename
-            )
+            # Use a simplified approach for reindexing
+            try:
+                # Create a fresh document service instance
+                from app.services.document_service import DocumentService
+                doc_service = DocumentService(tenant_id=self.tenant_id, user_id=self.user_id)
+                
+                logger.info(f"Starting text extraction for document {document.id}")
+                
+                # Call the extraction and indexing method with proper error handling
+                await doc_service._extract_and_index_text(
+                    db=db,
+                    db_document=document,
+                    file_contents=file_content,
+                    file_ext=file_ext,
+                    title=document.title or document.filename
+                )
+                
+                logger.info(f"Text extraction completed for document {document.id}")
+                
+            except Exception as processing_error:
+                error_msg = f"Processing failed for document {document.id}: {type(processing_error).__name__}: {str(processing_error)}"
+                logger.error(error_msg)
+                
+                # Log the full traceback for debugging
+                import traceback
+                logger.error(f"Full traceback for document {document.id}: {traceback.format_exc()}")
+                
+                # Set error status and return
+                document.indexed = IndexingStatus.INDEXING_ERROR
+                db.commit()
+                return False
             
+            # Commit any changes made during processing
             db.commit()
             
+            # Check final status
             success = document.indexed == IndexingStatus.INDEXED
             if success:
-                logger.info(f"Successfully reindexed document {document.id}")
+                logger.info(f"✅ Successfully reindexed document {document.id}")
             else:
-                logger.error(f"Failed to reindex document {document.id}")
+                logger.error(f"❌ Reindexing failed for document {document.id} - final status: {document.indexed}")
                 
             return success
             
         except Exception as e:
-            logger.error(f"Error reindexing document {document.id}: {str(e)}")
-            document.indexed = IndexingStatus.INDEXING_ERROR
-            db.commit()
+            error_msg = f"Unexpected error reindexing document {document.id}: {type(e).__name__}: {str(e)}"
+            logger.error(error_msg)
+            
+            # Log full traceback
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Ensure document is marked as error
+            try:
+                document.indexed = IndexingStatus.INDEXING_ERROR
+                db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update document status after error: {commit_error}")
+                
             return False
     
     async def reindex_all_missing(self, max_concurrent: int = 3) -> Dict[str, Any]:
@@ -324,4 +378,72 @@ class ReindexService:
             return {
                 "error": str(e),
                 "tenant_id": self.tenant_id
+            }
+    
+    async def auto_reindex_failed_documents(self) -> Dict[str, Any]:
+        """
+        Automatically reindex documents that have been in INDEXING_ERROR state.
+        This method is meant to be called periodically by a background task.
+        
+        Returns:
+            Dictionary with auto-reindex results
+        """
+        try:
+            logger.info(f"Starting auto-reindex for tenant {self.tenant_id}")
+            
+            with SessionLocal() as db:
+                # Find documents that have been in error state
+                error_documents = db.query(Document).filter(
+                    and_(
+                        Document.tenant_id == self.tenant_id,
+                        Document.indexed == IndexingStatus.INDEXING_ERROR
+                    )
+                ).all()
+                
+                if not error_documents:
+                    logger.info(f"No documents in error state for tenant {self.tenant_id}")
+                    return {
+                        "total_documents": 0,
+                        "success_count": 0,
+                        "error_count": 0,
+                        "message": "No documents needed auto-reindexing"
+                    }
+                
+                logger.info(f"Found {len(error_documents)} documents in error state for auto-reindexing")
+                
+                success_count = 0
+                error_count = 0
+                
+                # Process each document
+                for doc in error_documents:
+                    try:
+                        # Use existing reindex method
+                        success = await self.reindex_document(db, doc)
+                        if success:
+                            success_count += 1
+                            logger.info(f"Auto-reindexed document {doc.id} successfully")
+                        else:
+                            error_count += 1
+                            logger.warning(f"Failed to auto-reindex document {doc.id}")
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"Exception during auto-reindex of document {doc.id}: {str(e)}")
+                
+                result = {
+                    "total_documents": len(error_documents),
+                    "success_count": success_count,
+                    "error_count": error_count,
+                    "message": f"Auto-reindexed {success_count} of {len(error_documents)} error documents"
+                }
+                
+                logger.info(f"Auto-reindex completed for tenant {self.tenant_id}: {result}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error in auto-reindex for tenant {self.tenant_id}: {str(e)}")
+            return {
+                "total_documents": 0,
+                "success_count": 0,
+                "error_count": 1,
+                "error": str(e)
             }

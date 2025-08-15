@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useCallback, ReactNode, useRef } f
 import { useBackendUser } from "./user-context"
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@clerk/nextjs"
+import { useAuthToken } from "@/hooks/use-auth-token"
 
 interface Message {
   id: string
@@ -52,6 +53,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
   const currentUser = useBackendUser()
   const apiClient = useApiClient()
   const { getToken } = useAuth()
+  const { getValidToken, invalidateToken } = useAuthToken()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -86,7 +88,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     setError(null)
     
     try {
-      const token = await getToken()
+      const token = await getValidToken()
       console.log("Loading personalized welcome message...")
       console.log("User info:", { tenant_id: currentUser?.tenant_id, user_id: currentUser?.id })
       
@@ -187,7 +189,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     } finally {
       setIsLoading(false)
     }
-  }, [currentConversation, currentUser, getToken])
+  }, [currentConversation, currentUser, getValidToken, apiClient])
 
   const sendMessage = useCallback(async (content: string, useStreaming: boolean = true) => {
     if (!currentConversation || !currentUser) return
@@ -238,13 +240,14 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
           }
         })
         
-        // Start SSE connection  
-        const token = await getToken()
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat/stream`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token || ''}`,
+        // Start SSE connection with token refresh retry logic
+        const makeStreamRequest = async (retryCount = 0) => {
+          const token = await getValidToken()
+          const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat/stream`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token || ''}`,
           },
           body: JSON.stringify({
             message: content,
@@ -257,7 +260,22 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
           signal: abortControllerRef.current.signal
         })
         
-        if (!response.ok) throw new Error('Stream request failed')
+        // Handle 401 Unauthorized (token expired) with retry
+        if (response.status === 401 && retryCount === 0) {
+          console.log('Token expired, invalidating cache and retrying...')
+          invalidateToken() // Clear the cached token
+          return makeStreamRequest(retryCount + 1)
+        }
+        
+        if (!response.ok) {
+          const errorData = await response.text()
+          throw new Error(`Stream request failed: ${response.status} ${errorData}`)
+        }
+        
+        return response
+        }
+        
+        const response = await makeStreamRequest()
         
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
@@ -378,7 +396,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       setIsStreaming(false)
       abortControllerRef.current = null
     }
-  }, [currentConversation, currentUser, apiClient, getToken])
+  }, [currentConversation, currentUser, apiClient, getValidToken, invalidateToken])
 
   const stopStreaming = useCallback(() => {
     if (abortControllerRef.current) {
