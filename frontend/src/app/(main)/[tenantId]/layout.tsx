@@ -4,6 +4,7 @@ import { AuthGuard, ProfileVerificationGuard } from "@/components/auth"
 import { GlobalUploadDialog } from "@/components/dashboard/global-upload-dialog"
 import { NavigationProgress } from "@/components/layout/navigation-progress"
 import { VirtualAssistant } from "@/components/virtual-assistant/virtual-assistant"
+import { ChatUIProvider } from "@/contexts/chat-ui-context"
 import {
   SidebarInset,
   SidebarProvider,
@@ -20,31 +21,33 @@ export default async function TenantLayout({
   return (
     <AuthGuard>
       <ProfileVerificationGuard>
-        <SidebarProvider
-          style={
-            {
-              "--sidebar-width": "calc(var(--spacing) * 72)",
-              "--header-height": "calc(var(--spacing) * 12)",
-            } as React.CSSProperties
-          }
-        >
-          <AppSidebar variant="inset" tenantId={tenantId} />
-          <SidebarInset>
-            <NavigationProgress />
-            <SiteHeader tenantId={tenantId} />
-            <div className="flex flex-1 flex-col">
-              <div className="@container/main flex flex-1 flex-col gap-2">
-                {children}
+        <ChatUIProvider>
+          <SidebarProvider
+            style={
+              {
+                "--sidebar-width": "calc(var(--spacing) * 72)",
+                "--header-height": "calc(var(--spacing) * 12)",
+              } as React.CSSProperties
+            }
+          >
+            <AppSidebar variant="inset" tenantId={tenantId} />
+            <SidebarInset>
+              <NavigationProgress />
+              <SiteHeader tenantId={tenantId} />
+              <div className="flex flex-1 flex-col">
+                <div className="@container/main flex flex-1 flex-col gap-2">
+                  {children}
+                </div>
               </div>
-            </div>
-          </SidebarInset>
-          
-          {/* Global Upload Dialog */}
-          <GlobalUploadDialog />
-          
-          {/* Virtual Assistant */}
-          <VirtualAssistant />
-        </SidebarProvider>
+            </SidebarInset>
+            
+            {/* Global Upload Dialog */}
+            <GlobalUploadDialog />
+            
+            {/* Virtual Assistant */}
+            <VirtualAssistant />
+          </SidebarProvider>
+        </ChatUIProvider>
       </ProfileVerificationGuard>
     </AuthGuard>
   )

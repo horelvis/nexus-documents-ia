@@ -12,13 +12,13 @@ from qdrant_client.models import Distance, VectorParams
 
 from ..core.config import settings
 
-# Import OFFICIAL CrewAI service - YAML pattern from docs!
-from .official_crewai_service import official_crewai_service
-logger.info("🚀 Using OFFICIAL CrewAI - YAML pattern from official docs!")
+# Import NATIVE Ollama service - bypasses LiteLLM bug #10499
+from .native_ollama_service import native_ollama_service as crewai_cag_service
+logger.info("🦙 Using NATIVE Ollama service - bypasses LiteLLM bug #10499!")
 
 
 class CAGService:
-    """Main CAG service implementation - SOLO CrewAI"""
+    """Main CAG service implementation - NATIVE Ollama (bypasses LiteLLM)"""
     
     def __init__(self):
         self.llm = None
@@ -40,14 +40,14 @@ class CAGService:
                 base_url=settings.ollama_base_url
             )
         
-        # OFFICIAL CrewAI, patrón YAML oficial
+        # NATIVE Ollama service - bypasses LiteLLM issues
         try:
-            await official_crewai_service.initialize()
+            await crewai_cag_service.initialize()
             self._initialized = True
-            logger.info("CAG service initialized with OFFICIAL CrewAI and embeddings")
+            logger.info("🦙 CAG service initialized with NATIVE Ollama - no LiteLLM dependency!")
         except Exception as e:
-            logger.error(f"Failed to initialize OFFICIAL CrewAI: {e}")
-            raise RuntimeError(f"OFFICIAL CrewAI is required but failed to initialize: {e}")
+            logger.error(f"Failed to initialize NATIVE Ollama: {e}")
+            raise RuntimeError(f"NATIVE Ollama is required but failed to initialize: {e}")
     
     def _get_tenant_collection(self, tenant_id: str) -> str:
         """Get collection name for tenant"""
@@ -98,23 +98,22 @@ class CAGService:
         temperature: Optional[float] = None,
         max_iterations: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Process a query using CAG"""
-        # SOLO CrewAI, sin fallbacks
+        """Process a query using NATIVE Ollama - bypasses LiteLLM"""
         if not self._initialized:
             await self.initialize()
             
         try:
-            return await official_crewai_service.process_query(
+            return await crewai_cag_service.process_query(
                 query=query,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 context=context
             )
         except Exception as e:
-            logger.error(f"Official CrewAI processing failed: {e}")
+            logger.error(f"Native Ollama processing failed: {e}")
             return {
                 "success": False,
-                "error": f"Official CrewAI failed: {str(e)}",
+                "error": f"Native Ollama failed: {str(e)}",
                 "query": query,
                 "answer": None
             }
@@ -133,19 +132,18 @@ class CAGService:
             await self.initialize()
             
         try:
-            # Para análisis de documentos, usar el query processor simple
-            query = f"Analyze this document content: {document_content[:500]}"
-            return await official_crewai_service.process_query(
-                query=query,
+            return await crewai_cag_service.analyze_document(
+                document_content=document_content,
+                document_id=document_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                context={"document_id": document_id, "analysis_type": analysis_type}
+                analysis_type=analysis_type
             )
         except Exception as e:
-            logger.error(f"Official CrewAI document analysis failed: {e}")
+            logger.error(f"Native Ollama document analysis failed: {e}")
             return {
                 "success": False,
-                "error": f"Official CrewAI failed: {str(e)}",
+                "error": f"Native Ollama failed: {str(e)}",
                 "document_id": document_id,
                 "analysis": None
             }
@@ -163,36 +161,20 @@ class CAGService:
             await self.initialize()
             
         try:
-            # Simple streaming - just return the regular response as a single event
-            result = await official_crewai_service.process_query(
+            # Use custom CrewAI streaming
+            async for chunk in crewai_cag_service.process_query_stream(
                 query=query,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 context=context
-            )
-            
-            if result.get("success"):
-                yield {
-                    "type": "content",
-                    "content": result.get("response", ""),
-                    "success": True
-                }
-                yield {
-                    "type": "done",
-                    "metadata": result.get("metadata", {}),
-                    "success": True
-                }
-            else:
-                yield {
-                    "type": "error",
-                    "content": result.get("error", "Unknown error"),
-                    "success": False
-                }
+            ):
+                yield chunk
+                
         except Exception as e:
-            logger.error(f"Official CrewAI streaming failed: {e}")
+            logger.error(f"Native Ollama streaming failed: {e}")
             yield {
                 "type": "error",
-                "content": f"Official CrewAI failed: {str(e)}",
+                "content": f"Native Ollama failed: {str(e)}",
                 "success": False
             }
     
@@ -209,17 +191,17 @@ class CAGService:
             await self.initialize()
             
         try:
-            return await official_crewai_service.chat(
+            return await crewai_cag_service.chat(
                 message=message,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                context={"history": chat_history or []}
+                chat_history=chat_history
             )
         except Exception as e:
-            logger.error(f"Official CrewAI chat failed: {e}")
+            logger.error(f"Native Ollama chat failed: {e}")
             return {
                 "success": False,
-                "error": f"Official CrewAI failed: {str(e)}",
+                "error": f"Native Ollama failed: {str(e)}",
                 "response": None
             }
     
@@ -227,25 +209,25 @@ class CAGService:
         """Check service health"""
         # SOLO CrewAI
         try:
-            return await official_crewai_service.health_check()
+            return await crewai_cag_service.health_check()
         except Exception as e:
-            logger.error(f"Official CrewAI health check failed: {e}")
+            logger.error(f"Native Ollama health check failed: {e}")
             return {
                 "status": "unhealthy",
-                "error": f"Official CrewAI failed: {str(e)}"
+                "error": f"Native Ollama failed: {str(e)}"
             }
     
     def get_available_agents_info(self, tenant_id: str = "default") -> Dict[str, Any]:
         """Get REAL available agents information - delegated to CrewAI"""
         # SOLO CrewAI
         try:
-            return official_crewai_service.get_available_agents_info(tenant_id)
+            return crewai_cag_service.get_available_agents_info(tenant_id)
         except Exception as e:
-            logger.error(f"Official CrewAI get agents info failed: {e}")
+            logger.error(f"Native Ollama get agents info failed: {e}")
             return {
                 "available_types": {},
                 "total": 0,
-                "error": f"Official CrewAI failed: {str(e)}"
+                "error": f"Native Ollama failed: {str(e)}"
             }
 
 

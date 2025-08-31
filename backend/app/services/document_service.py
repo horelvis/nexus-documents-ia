@@ -210,13 +210,19 @@ class DocumentService:
                 logger.error(f"Failed to extract entities from document {db_document.id}: {str(e)}")
                 db_document.extracted_entities = []
             
-            # Prepare metadata for the document
+            # Prepare comprehensive metadata for the document
             document_metadata = {
                 "doc_id": str(db_document.id),
                 "tenant_id": self.tenant_id,
                 "title": title,
                 "filename": db_document.filename,
+                "description": db_document.description,
                 "file_type": file_ext,
+                "created_at": db_document.created_at.isoformat() if db_document.created_at else None,
+                "updated_at": db_document.updated_at.isoformat() if db_document.updated_at else None,
+                "file_size": db_document.file_size,
+                "mime_type": db_document.mime_type,
+                "category": db_document.category,
                 "created_by": self.user_id or "system"
             }
 

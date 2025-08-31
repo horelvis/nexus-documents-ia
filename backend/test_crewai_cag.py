@@ -11,11 +11,14 @@ import json
 async def test_crewai():
     """Test CrewAI CAG implementation"""
     
-    base_url = "http://localhost:8008"
-    api_key = "test-api-key-12345"
+    base_url = "http://cag-service:8008"
+    api_key = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
     
     print("🚀 Testing CrewAI CAG Service...")
     print("=" * 50)
+    
+    # Wait for service to start
+    await asyncio.sleep(10)
     
     # 1. Health check
     print("\n1. Health Check:")
@@ -45,7 +48,7 @@ async def test_crewai():
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.post(
-                    f"{base_url}/api/v1/cag/process",
+                    f"{base_url}/api/v1/cag/query",
                     headers={"X-API-Key": api_key},
                     json={
                         "query": query,
@@ -142,7 +145,7 @@ async def test_crewai():
         try:
             async with client.stream(
                 'POST',
-                f"{base_url}/api/v1/cag/stream",
+                f"{base_url}/api/v1/cag/query/stream",
                 headers={
                     "X-API-Key": api_key,
                     "Accept": "text/event-stream"

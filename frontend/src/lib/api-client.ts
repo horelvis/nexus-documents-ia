@@ -19,6 +19,8 @@ class ApiClient {
   private baseURL: string
 
   constructor() {
+    // API_CONFIG.BASE_URL incluye la base del servidor 
+    // Agregamos el prefijo /api/v1 para todas las rutas
     this.baseURL = `${API_CONFIG.BASE_URL}${API_CONFIG.API_V1}`
   }
 

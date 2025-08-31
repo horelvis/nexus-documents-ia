@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # Ollama configuration
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama-service:11434")
-    llm_model: str = os.getenv("LLM_MODEL", "gemma3:12b-it-qat")  # Using Gemma3 optimized for instructions and tools
+    llm_model: str = os.getenv("LLM_MODEL", "llama3.2:latest")  # Using Llama 3.2 with better tool calling support
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-minilm:latest")
     
     # LLM stability settings
@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     
     # External APIs
     serper_api_key: str = os.getenv("SERPER_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

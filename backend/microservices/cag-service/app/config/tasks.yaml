@@ -1,45 +1,78 @@
 chat_task:
-  description: |
-    User message: {user_message}
+  description: >
+    Respond to the user query: {user_message}
     
-    Context: This is a conversation with user {user_id} from tenant {tenant_id}.
-    Current time: {current_time}
+    CRITICAL INSTRUCTIONS FOR TOOL USAGE:
     
-    MANDATORY INSTRUCTIONS:
-    1. If the user asks about laws, legislation, current events, recent changes, 
-       or anything from 2024-2025, you MUST use the web_search tool IMMEDIATELY.
+    1. ALWAYS identify what type of information the user is requesting
+    2. For TIME questions (¿qué hora es?, what time is it?, hora actual): USE time_tool
+    3. For CALCULATIONS (calcular, calculate, sumar, multiply, etc.): USE calculator_tool
+    4. For SEARCHES/INFORMATION (buscar, search, información sobre, tell me about): USE web_search_tool or Search the internet
+    5. For WEATHER queries (clima, weather, temperatura, forecast): USE weather_search_tool
+    6. For STATISTICS (estadísticas, stats, system info): USE statistics_tool
     
-    2. Do NOT provide responses based only on training data for time-sensitive topics.
+    MANDATORY TOOL USAGE EXAMPLES:
+    - "¿Qué hora es?" → MUST use time_tool
+    - "Calcula 25 * 8" → MUST use calculator_tool
+    - "Busca información sobre Python" → MUST use web_search_tool or Search the internet
+    - "¿Cómo está el clima en Madrid?" → MUST use weather_search_tool
+    - "Muestra estadísticas del sistema" → MUST use statistics_tool
     
-    3. ALWAYS search first, then answer based on the search results.
+    RULES:
+    - NEVER respond without using tools when current/specific information is requested
+    - Your response must include the actual results from the tools, not generic statements
+    - If a tool fails, try another similar tool before giving up
+    - Provide specific data and current information, not generic responses
+  expected_output: >
+    A complete response that MUST include:
+    1. Results from the required tool usage (search results, calculations, time, etc.)
+    2. A natural summary of the findings in the user's language
+    3. Specific data and current information, not generic responses
     
-    4. Use Spanish if the user writes in Spanish.
-    
-    5. Be thorough and informative using the search results.
-  expected_output: "Natural, helpful response to the user"
+    NEVER give generic responses like "I can help you with that" - ALWAYS provide specific information from tools.
   agent: virtual_assistant
 
 welcome_task:
-  description: |
-    Generate a friendly welcome message in Spanish.
-    
-    User context: {user_context}
-    
-    Create a warm welcome message that:
-    - Greets the user warmly in Spanish
-    - Mentions this is their document assistant
-    - Offers help with document management
-    - Keeps it concise (2-3 sentences maximum)
-    
-    Example: "¡Bienvenido a tu asistente de documentos! Estoy aquí para ayudarte a organizar y gestionar tus archivos. ¿En qué puedo ayudarte hoy?"
-  expected_output: "A warm welcome message in Spanish"
+  description: >
+    Generate a personalized welcome message for new users based on their context and preferences.
+    Mention the available capabilities and encourage them to try the tools.
+  expected_output: >
+    A warm, personalized welcome message that helps orient the user to the system capabilities
+    and mentions the available tools (time, calculations, web search, weather, statistics).
   agent: virtual_assistant
 
-statistics_task:
-  description: |
-    Provide system statistics and information for user {user_id} from tenant {tenant_id}.
-    Category requested: {category}
-    
-    Use the get_statistics tool to retrieve current information.
-  expected_output: "System statistics and usage information"
-  agent: statistics_assistant
+document_analysis_task:
+  description: >
+    Analyze the provided document content and extract key information relevant to the user's query.
+    Focus on understanding the context and identifying the most important points that address the user's needs.
+  expected_output: >
+    A comprehensive analysis of the document content with key insights and relevant information
+    formatted in a clear, structured manner.
+  agent: analyst_agent
+
+information_search_task:
+  description: >
+    Search for additional information from available sources to complement the document analysis.
+    Use search tools to find relevant data that can enhance the response quality.
+  expected_output: >
+    Additional relevant information from search results that supplements the document analysis,
+    presented in a coherent format.
+  agent: search_agent
+
+user_assistance_task:
+  description: >
+    Combine the document analysis and search results to provide a comprehensive, helpful response
+    to the user's query. Ensure the response is accurate, well-structured, and addresses all
+    aspects of the user's question.
+  expected_output: >
+    A complete, well-structured response that addresses the user's query with information from
+    documents and additional sources, formatted for optimal user experience.
+  agent: assistant_agent
+
+general_query_task:
+  description: >
+    Handle general user queries that may not require specific document analysis.
+    Provide helpful information and assistance based on the available knowledge and tools.
+  expected_output: >
+    A helpful response to the user's query with relevant information and guidance.
+  agent: assistant_agent

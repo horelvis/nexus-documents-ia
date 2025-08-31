@@ -1,0 +1,41 @@
+research_task:
+  description: >
+    Conduct a thorough research about {topic}.
+    Focus on the latest developments, key players, and significant findings.
+    If the topic requires current information, use web search tools to find
+    up-to-date data from reliable sources.
+  expected_output: >
+    A comprehensive 3 paragraphs long report on {topic}, including the latest
+    developments, key players, and significant findings. Include sources and
+    specific data when available.
+  agent: researcher
+
+reporting_task:
+  description: >
+    Using the research findings, create a detailed report on {topic}.
+    The report should be well-structured, informative, and include actionable insights.
+    Expand on the key findings and provide context for decision-making.
+  expected_output: >
+    A detailed report based on the research findings, formatted with clear
+    sections, key insights, and actionable recommendations. Include specific
+    data points and sources.
+  agent: reporting_analyst
+
+chat_task:
+  description: >
+    Respond to the user query: {user_message}
+    
+    IMPORTANT INSTRUCTIONS:
+    - Always identify what type of information the user is requesting
+    - For weather, news, current events, or real-time data: USE web search tools
+    - For calculations: Use appropriate calculation methods
+    - For general information: Provide helpful responses based on knowledge
+    - NEVER respond without using tools when current information is requested
+    
+    If the user asks for current information, weather, news, or asks you to search,
+    you MUST use the available search tools before providing an answer.
+  expected_output: >
+    A helpful, accurate response that addresses the user's query directly.
+    If tools were used, include the specific information found.
+    Provide clear, actionable information rather than generic responses.
+  agent: virtual_assistant

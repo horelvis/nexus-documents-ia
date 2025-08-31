@@ -118,9 +118,9 @@ class ReindexService:
                 db.commit()
                 return False
             
-            # Now set status to indexing since we have the file content
-            logger.info(f"Setting document {document.id} status to INDEXING")
-            document.indexed = IndexingStatus.INDEXING
+            # Now set status to processing since we have the file content
+            logger.info(f"Setting document {document.id} status to PROCESSING")
+            document.indexed = IndexingStatus.PROCESSING
             db.commit()
             
             # Extract file extension
@@ -335,10 +335,10 @@ class ReindexService:
                         Document.indexed == IndexingStatus.INDEXED
                     )
                 ).count()
-                indexing_docs = db.query(Document).filter(
+                processing_docs = db.query(Document).filter(
                     and_(
                         Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.INDEXING
+                        Document.indexed == IndexingStatus.PROCESSING
                     )
                 ).count()
                 error_docs = db.query(Document).filter(
@@ -347,10 +347,10 @@ class ReindexService:
                         Document.indexed == IndexingStatus.INDEXING_ERROR
                     )
                 ).count()
-                pending_docs = db.query(Document).filter(
+                not_indexed_docs = db.query(Document).filter(
                     and_(
                         Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.PENDING
+                        Document.indexed == IndexingStatus.NOT_INDEXED
                     )
                 ).count()
                 
@@ -362,9 +362,9 @@ class ReindexService:
                     "tenant_id": self.tenant_id,
                     "total_documents": total_docs,
                     "indexed_documents": indexed_docs,
-                    "indexing_documents": indexing_docs,
+                    "processing_documents": processing_docs,
                     "error_documents": error_docs,
-                    "pending_documents": pending_docs,
+                    "not_indexed_documents": not_indexed_docs,
                     "missing_from_vector_store": missing_from_vector_store,
                     "needs_reindexing": missing_from_vector_store > 0,
                     "vector_store_health": {

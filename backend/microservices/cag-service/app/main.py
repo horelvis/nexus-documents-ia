@@ -8,7 +8,7 @@ from loguru import logger
 import sys
 
 from .core.config import settings
-from .api import cag
+from .api import cag, vector
 from .services.cag_service import cag_service
 
 # Configure Loguru
@@ -85,6 +85,7 @@ async def health():
 
 # Include routers
 app.include_router(cag.router)
+app.include_router(vector.router)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, agent_management, signatures, webhooks, search, teams, langgraph, users, entities, dashboard,
-    simple_auth, assistant, assistant_v2
+    simple_auth, assistant
     # document_analyzer, contract_intelligence, compliance_checker
 )
 from fastapi import APIRouter
@@ -29,8 +29,7 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
-api_router.include_router(assistant.router, prefix="/assistant", tags=["assistant"])
-api_router.include_router(assistant_v2.router, tags=["assistant-v2"])
+api_router.include_router(assistant.router, tags=["assistant"])
 
 # AI Agents and Digital Signature routes
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])

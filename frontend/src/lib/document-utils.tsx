@@ -20,6 +20,7 @@ const sizeClasses = {
 
 /**
  * Returns the appropriate file icon based on file type, MIME type, or filename extension
+ * Now with colored icons matching the sidebar design
  */
 export function getFileIcon(
   fileType: string | undefined | null, 
@@ -33,51 +34,51 @@ export function getFileIcon(
   
   const className = sizeClasses[size]
   
-  // PDF files
+  // PDF files - Blue color for PDF documents
   if (type.includes('pdf') || extension === 'pdf') {
-    return <IconFileTypePdf className={`${className} text-muted-foreground`} />
+    return <IconFileTypePdf className={`${className} text-blue-600 dark:text-blue-400`} />
   }
   
-  // Word documents
+  // Word documents - Blue color for text documents
   if (type.includes('word') || type.includes('officedocument') || 
       extension.includes('doc') || extension === 'docx') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-blue-600 dark:text-blue-400`} />
   }
   
-  // Excel/Spreadsheets
+  // Excel/Spreadsheets - Green color for spreadsheets
   if (type.includes('spreadsheet') || type.includes('excel') ||
       extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-green-600 dark:text-green-400`} />
   }
   
-  // PowerPoint
+  // PowerPoint - Orange color for presentations
   if (type.includes('presentation') || type.includes('powerpoint') ||
       extension === 'pptx' || extension === 'ppt') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-orange-600 dark:text-orange-400`} />
   }
   
-  // Images
+  // Images - Purple color for visual files
   if (type.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(extension)) {
-    return <IconPhoto className={`${className} text-muted-foreground`} />
+    return <IconPhoto className={`${className} text-purple-600 dark:text-purple-400`} />
   }
   
-  // Videos
+  // Videos - Pink color for video files
   if (type.includes('video') || ['mp4', 'avi', 'mov', 'wmv', 'flv'].includes(extension)) {
-    return <IconVideo className={`${className} text-muted-foreground`} />
+    return <IconVideo className={`${className} text-pink-600 dark:text-pink-400`} />
   }
   
-  // Audio
+  // Audio - Yellow color for audio files
   if (type.includes('audio') || ['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(extension)) {
-    return <IconMusic className={`${className} text-muted-foreground`} />
+    return <IconMusic className={`${className} text-yellow-600 dark:text-yellow-400`} />
   }
   
-  // Text files
+  // Text files - Indigo color for plain text
   if (type.includes('text') || ['txt', 'md', 'rtf'].includes(extension)) {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-indigo-600 dark:text-indigo-400`} />
   }
   
-  // Default file icon
-  return <IconFile className={`${className} text-muted-foreground`} />
+  // Default file icon - Gray color for unknown types
+  return <IconFile className={`${className} text-gray-600 dark:text-gray-400`} />
 }
 
 /**

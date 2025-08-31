@@ -40,6 +40,12 @@ export const API_CONFIG = {
     
     // Dashboard
     DASHBOARD: '/dashboard',
+    
+    // Assistant
+    ASSISTANT_CHAT: '/assistant/chat',
+    ASSISTANT_CHAT_STREAM: '/assistant/chat/stream',
+    ASSISTANT_CONVERSATION: (id: string) => `/assistant/conversation/${id}`,
+    ASSISTANT_WELCOME: '/assistant/welcome',
   }
 } as const
 

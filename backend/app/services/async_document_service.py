@@ -364,12 +364,35 @@ class AsyncDocumentService:
                     raise Exception(f"Embedding generation failed: {str(e)}")
                 
                 try:
+                    # Get full document info for metadata before storing in vector DB
+                    async with AsyncSessionLocal() as db:
+                        stmt = select(Document).filter(Document.id == doc_id)
+                        result = await db.execute(stmt)
+                        doc = result.scalar_one_or_none()
+                        
+                        if not doc:
+                            raise Exception("Document not found in database")
+                    
+                    # Build comprehensive metadata for vector search
+                    metadata = {
+                        "file_type": file_ext,
+                        "tenant_id": self.tenant_id,
+                        "filename": doc.filename,
+                        "title": doc.title or doc.filename,
+                        "description": doc.description,
+                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                        "file_size": doc.file_size,
+                        "mime_type": doc.mime_type,
+                        "category": doc.category
+                    }
+                    
                     # Store in vector DB (use the same text that was used for embeddings)
-                    logger.info(f"Storing document {doc_id} in vector database")
+                    logger.info(f"Storing document {doc_id} in vector database with enhanced metadata")
                     success = await self.vector_service.add_document(
                         doc_id=doc_id,
                         text=text_for_embedding,  # Use the same text that was embedded
-                        metadata={"file_type": file_ext, "tenant_id": self.tenant_id}
+                        metadata=metadata
                     )
                     
                     if not success:

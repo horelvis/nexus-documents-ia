@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { Send, X, Bot, User, Loader2, Paperclip, Mic, MoreVertical, Trash2, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
@@ -39,7 +39,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
   
   const [input, setInput] = useState("")
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { setUploadDialogOpen } = useUpload()
   const router = useRouter()
@@ -99,10 +99,21 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
     }
   }
 
+  // Auto-resize textarea
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    
+    // Reset height to auto to get proper scrollHeight
+    e.target.style.height = 'auto'
+    // Set height based on scrollHeight, with min and max limits
+    const newHeight = Math.min(Math.max(e.target.scrollHeight, 40), 120)
+    e.target.style.height = `${newHeight}px`
+  }
+
   return (
     <div
       className={cn(
-        "fixed right-0 top-0 h-full w-96 bg-background border-l shadow-xl",
+        "fixed right-0 top-0 h-full w-[480px] bg-background border-l shadow-xl",
         "transform transition-transform duration-300 ease-in-out z-50",
         isOpen ? "translate-x-0" : "translate-x-full"
       )}
@@ -192,7 +203,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
                 </Avatar>
                 <Card
                   className={cn(
-                    "max-w-[80%] px-4 py-2",
+                    "max-w-[85%] px-4 py-2",
                     message.role === "user"
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted"
@@ -233,10 +244,24 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
                             )
                           },
                           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                          ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
-                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+                          li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+                          h1: ({ children }) => <h1 className="text-lg font-bold mb-3 text-primary">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-base font-semibold mb-2 text-primary border-b border-border pb-1">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-sm font-semibold mb-2 text-foreground">{children}</h3>,
+                          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
                           em: ({ children }) => <em className="italic">{children}</em>,
+                          code: ({ children }) => (
+                            <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono border">
+                              {children}
+                            </code>
+                          ),
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-4 border-primary pl-3 my-2 text-muted-foreground italic">
+                              {children}
+                            </blockquote>
+                          ),
                         }}
                       >
                         {message.content || (message.isStreaming ? "..." : "")}
@@ -301,14 +326,15 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
           >
             <Paperclip className="h-4 w-4" />
           </Button>
-          <Input
+          <Textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyPress={handleKeyPress}
-            placeholder="Escribe tu mensaje..."
-            className="flex-1"
+            placeholder="Escribe tu mensaje... (Shift+Enter para nueva línea)"
+            className="flex-1 min-h-[40px] max-h-[120px] resize-none"
             disabled={isLoading}
+            rows={1}
           />
           <Button variant="ghost" size="icon" className="h-10 w-10">
             <Mic className="h-4 w-4" />
@@ -327,7 +353,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-2 text-center">
-          Presiona Enter para enviar
+          Enter para enviar • Shift+Enter para nueva línea
         </p>
       </div>
     </div>

@@ -6,6 +6,7 @@ from app.db.models import User
 from app.services.search_service import SearchService
 from app.services.vector_service import VectorService
 from app.services.reindex_service import ReindexService
+from app.services.cag_client import CAGClient
 from app.schemas.document import ChatMessage
 
 router = APIRouter()
@@ -14,7 +15,7 @@ router = APIRouter()
 @router.get("/", response_model=List[dict])
 async def search_documents(
     query: str = Query(..., description="Texto de búsqueda"),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=100),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -22,25 +23,49 @@ async def search_documents(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Realiza una búsqueda semántica entre los documentos.
+    Realiza una búsqueda semántica entre los documentos usando CAG service.
     """
-    search_service = SearchService(tenant_id=tenant_id)
-    
-    # Preparar filtros
-    filters = {}
-    if tags:
-        filters["tags"] = tags
-    if date_from:
-        filters["date_from"] = date_from
-    if date_to:
-        filters["date_to"] = date_to
-    
-    results = await search_service.search_documents(
-        query=query,
-        limit=limit
-    )
-    
-    return results
+    try:
+        # Usar CAG service para búsqueda de documentos
+        cag_client = CAGClient()
+        
+        # Llamar al CAG service para realizar la búsqueda directa
+        # Usamos un query interno para obtener solo resultados estructurados
+        cag_response = await cag_client.process_query(
+            query=f"SEARCH_ONLY: {query}",  # Prefijo especial para búsqueda directa
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            context={
+                "search_mode": True,
+                "limit": limit,
+                "tags": tags,
+                "date_from": date_from,
+                "date_to": date_to
+            }
+        )
+        
+        # Si CAG devuelve resultados estructurados
+        if cag_response.get("success") and cag_response.get("documents"):
+            return cag_response["documents"]
+        
+        # Fallback al servicio original si hay problemas con CAG
+        search_service = SearchService(tenant_id=tenant_id)
+        results = await search_service.search_documents(
+            query=query,
+            limit=limit
+        )
+        
+        return results
+        
+    except Exception as e:
+        # Fallback al servicio original en caso de error
+        search_service = SearchService(tenant_id=tenant_id)
+        results = await search_service.search_documents(
+            query=query,
+            limit=limit
+        )
+        
+        return results
 
 
 @router.post("/ask", response_model=dict)
@@ -123,7 +148,7 @@ async def reindex_all_documents(
     """
     Reindexa todos los documentos que faltan en el vector store.
     """
-    reindex_service = ReindexService(tenant_id=tenant_id)
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
     result = await reindex_service.reindex_all_missing()
     return result
 
@@ -181,7 +206,7 @@ async def reindex_specific_documents(
     if not document_ids:
         raise HTTPException(status_code=400, detail="Document IDs list cannot be empty")
     
-    reindex_service = ReindexService(tenant_id=tenant_id)
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
     result = await reindex_service.reindex_specific_documents(document_ids)
     return result
 

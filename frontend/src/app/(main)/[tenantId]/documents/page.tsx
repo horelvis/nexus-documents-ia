@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { 
   IconPlus, 
@@ -30,7 +30,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { 
   DropdownMenu, 
@@ -105,9 +104,8 @@ export default function DocumentsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => 
     getStoredPreference('viewMode', 'grid')
   )
-  const [useDeepSearch, setUseDeepSearch] = useState(() => 
-    getStoredPreference('deepSearch', false)
-  )
+  // Siempre usar búsqueda semántica por contenido
+  const useDeepSearch = true
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
@@ -338,7 +336,7 @@ export default function DocumentsPage() {
     try {
       let response;
       
-      // Use deep search if enabled and there's a search query
+      // Usar búsqueda semántica por contenido cuando hay un query de búsqueda
       if (useDeepSearch && searchQuery && searchQuery.trim()) {
         // Use semantic search for content
         const searchResults = await searchService.searchDocuments({
@@ -347,9 +345,15 @@ export default function DocumentsPage() {
         })
         
         if (searchResults.error) {
-          setError(searchResults.error)
-          return
-        }
+          console.warn('Semantic search failed, falling back to regular search:', searchResults.error)
+          // Fallback to regular document search instead of showing error
+          response = await documentService.getDocuments({
+            search: searchQuery || undefined,
+            status: selectedFilter !== 'all' ? selectedFilter : undefined,
+            per_page: viewMode === 'table' ? 100 : perPage,
+            page: viewMode === 'table' ? 1 : currentPage
+          })
+        } else {
         
         // Transform search results to match document format
         const documents = searchResults.data?.map(result => ({
@@ -377,6 +381,7 @@ export default function DocumentsPage() {
             pages: 1
           }
         }
+        }
       } else {
         // Use regular document listing
         const itemsPerPage = viewMode === 'table' ? 100 : perPage
@@ -402,13 +407,12 @@ export default function DocumentsPage() {
     }
   }
 
-
-  // Reload when filters, pagination, view mode or search type changes
+  // Reload when dependencies change
   useEffect(() => {
     loadDocuments()
-  }, [selectedFilter, currentPage, viewMode, useDeepSearch])
+  }, [selectedFilter, currentPage, viewMode])
   
-  // Reset to page 1 when filter or view mode changes
+  // Reset to page 1 when filter or search query changes
   useEffect(() => {
     setCurrentPage(1)
   }, [selectedFilter, searchQuery, viewMode])
@@ -702,43 +706,24 @@ export default function DocumentsPage() {
         {/* Search and Filter */}
         <Card className="mb-6">
           <CardContent className="p-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 flex flex-col gap-3">
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                    <Input
-                      placeholder="Search documents..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
-                      className="pl-10"
-                    />
-                  </div>
-                  <Button onClick={loadDocuments} variant="outline">
+            <div className="flex flex-col gap-4">
+              {/* Search Bar Row */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                <div className="flex-1 relative">
+                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                  <Input
+                    placeholder="Search documents..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
+                    className="pl-10"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button onClick={loadDocuments} variant="outline" className="flex-shrink-0">
                     Search
                   </Button>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="deep-search"
-                    checked={useDeepSearch}
-                    onCheckedChange={(checked) => {
-                      setUseDeepSearch(checked)
-                      storePreference('deepSearch', checked)
-                    }}
-                  />
-                  <Label 
-                    htmlFor="deep-search" 
-                    className="text-sm cursor-pointer flex items-center gap-2"
-                  >
-                    <IconBrain className="h-4 w-4" />
-                    Deep Search (search in document content)
-                  </Label>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline">
@@ -823,6 +808,13 @@ export default function DocumentsPage() {
                     <IconLayoutList className="h-4 w-4" />
                   </Button>
                 </div>
+                </div>
+              </div>
+              
+              {/* Búsqueda semántica siempre habilitada */}
+              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                <IconBrain className="h-4 w-4" />
+                <span>Búsqueda inteligente por contenido activada</span>
               </div>
             </div>
           </CardContent>
@@ -852,7 +844,11 @@ export default function DocumentsPage() {
         {!isLoading && !error && viewMode === 'grid' && (
           <div className="space-y-2">
             {filteredDocuments.map((document: any) => (
-              <Card key={document.id} className="hover:shadow-lg transition-shadow">
+              <Card 
+                key={document.id} 
+                className="hover:shadow-lg transition-shadow cursor-pointer group"
+                onClick={() => handleFullPagePreview(document)}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     {/* File Icon */}
@@ -876,7 +872,12 @@ export default function DocumentsPage() {
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
+                              <Badge 
+                                className={getStatusColor(document.indexed)} 
+                                variant="secondary" 
+                                size="sm"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {getStatusLabel(document.indexed, t)}
                               </Badge>
                             </TooltipTrigger>
@@ -901,32 +902,41 @@ export default function DocumentsPage() {
                         </div>
                         
                         {/* Actions */}
-                        <div className="flex gap-0.5 flex-shrink-0">
+                        <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                           {/* 3 Main Actions */}
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleFullPagePreview(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleFullPagePreview(document)
+                            }}
                             title="Full Preview"
-                            className="h-7 w-7 p-0"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconEye className="h-3.5 w-3.5" />
                           </Button>
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleDownloadDocument(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDownloadDocument(document)
+                            }}
                             title="Download"
-                            className="h-7 w-7 p-0"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconDownload className="h-3.5 w-3.5" />
                           </Button>
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleShareDocument(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleShareDocument(document)
+                            }}
                             title="Share"
-                            className="h-7 w-7 p-0"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconShare2 className="h-3.5 w-3.5" />
                           </Button>
@@ -937,8 +947,9 @@ export default function DocumentsPage() {
                               <Button 
                                 size="sm" 
                                 variant="ghost"
+                                onClick={(e) => e.stopPropagation()}
                                 title="More actions"
-                                className="h-7 w-7 p-0"
+                                className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                               >
                                 <IconDotsVertical className="h-3.5 w-3.5" />
                               </Button>

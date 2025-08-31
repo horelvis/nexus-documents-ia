@@ -5,6 +5,7 @@ import { useBackendUser } from "./user-context"
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@clerk/nextjs"
 import { useAuthToken } from "@/hooks/use-auth-token"
+import { API_CONFIG } from "@/lib/config"
 
 interface Message {
   id: string
@@ -92,7 +93,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       console.log("Loading personalized welcome message...")
       console.log("User info:", { tenant_id: currentUser?.tenant_id, user_id: currentUser?.id })
       
-      const response = await apiClient.post("/api/v1/assistant/v2/chat", {
+      const response = await apiClient.post(API_CONFIG.ENDPOINTS.ASSISTANT_CHAT, {
         message: "SYSTEM: Generate a personalized welcome message for the user",
         conversation_id: currentConversation.id,
         context: {
@@ -117,14 +118,13 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
         // Add the personalized welcome message
         const welcomeMessage: Message = {
           id: "welcome",
-          content: data.response || "¡Hola! Soy tu asistente virtual inteligente. ¿En qué puedo ayudarte hoy?",
+          content: data.response || "⚠️ El servicio de asistente virtual no está disponible temporalmente. El backend no pudo generar un mensaje personalizado.",
           role: "assistant",
           timestamp: new Date(),
           suggestions: data.suggestions || [
-            "Buscar documentos recientes",
-            "Ver estadísticas",
-            "Analizar un documento",
-            "Solicitar una firma"
+            "Revisar documentos manualmente",
+            "Usar búsqueda básica",
+            "Contactar soporte técnico"
           ],
           metadata: data.metadata,
           confidence: data.confidence
@@ -139,17 +139,16 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
           }
         })
       } else {
-        // Fallback to default message if CAG fails
-        const defaultMessage: Message = {
-          id: "welcome",
-          content: "¡Hola! Soy tu asistente virtual. ¿En qué puedo ayudarte hoy?",
+        // Error: CAG service returned no data
+        const errorMessage: Message = {
+          id: "service-error",
+          content: "❌ Error: El servicio de asistente inteligente no está funcionando. El backend no devolvió respuesta válida.",
           role: "assistant",
           timestamp: new Date(),
           suggestions: [
-            "Buscar documentos",
-            "Ver estadísticas",
-            "Analizar documento",
-            "Gestionar firmas"
+            "Recargar la página",
+            "Usar búsqueda manual",
+            "Reportar el problema"
           ]
         }
         
@@ -157,24 +156,23 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
           if (!prev) return prev
           return {
             ...prev,
-            messages: [defaultMessage],
+            messages: [errorMessage],
             updatedAt: new Date(),
           }
         })
       }
     } catch (error) {
       console.error("Error getting welcome message:", error)
-      // Use default message on error
-      const defaultMessage: Message = {
-        id: "welcome",
-        content: "¡Hola! Soy tu asistente virtual. ¿En qué puedo ayudarte hoy?",
+      // Transparent error message - no fake functionality
+      const errorMessage: Message = {
+        id: "connection-error",
+        content: `🔌 Error de conexión: No se pudo conectar con el servicio de asistente virtual. ${error.message || 'Servicio no disponible.'}`,
         role: "assistant",
         timestamp: new Date(),
         suggestions: [
-          "Buscar documentos",
-          "Ver estadísticas",
-          "Analizar documento",
-          "Gestionar firmas"
+          "Verificar conexión de red",
+          "Recargar la aplicación",
+          "Usar funciones básicas"
         ]
       }
       
@@ -182,7 +180,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
         if (!prev) return prev
         return {
           ...prev,
-          messages: [defaultMessage],
+          messages: [errorMessage],
           updatedAt: new Date(),
         }
       })
@@ -243,7 +241,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
         // Start SSE connection with token refresh retry logic
         const makeStreamRequest = async (retryCount = 0) => {
           const token = await getValidToken()
-          const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}/api/v1/assistant/v2/chat/stream`, {
+          const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}${API_CONFIG.API_V1}${API_CONFIG.ENDPOINTS.ASSISTANT_CHAT_STREAM}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -337,7 +335,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
         setIsStreaming(false)
       } else {
         // Use regular endpoint
-        const response = await apiClient.post("/api/v1/assistant/v2/chat", {
+        const response = await apiClient.post(API_CONFIG.ENDPOINTS.ASSISTANT_CHAT, {
           message: content,
           conversation_id: currentConversation.id,
           context: {
@@ -372,12 +370,12 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       console.error("Error sending message:", err)
       
       if (err.name !== 'AbortError') {
-        setError("No pude procesar tu mensaje. Por favor, intenta de nuevo.")
+        setError(`Error del servicio: ${err.message || 'Servicio de asistente no disponible'}`)
         
-        // Add error message
+        // Add transparent error message
         const errorMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
+          content: `❌ Error real del sistema: ${err.message || 'El servicio de asistente virtual falló'}. Conexión: ${err.name || 'Desconocido'}`,
           role: "assistant",
           timestamp: new Date(),
         }
@@ -409,7 +407,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     if (!currentConversation) return
     
     try {
-      await apiClient.delete(`/api/v1/assistant/v2/conversation/${currentConversation.id}`)
+      await apiClient.delete(API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(currentConversation.id))
       
       const clearedConversation: Conversation = {
         ...currentConversation,
@@ -440,7 +438,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     setError(null)
     
     try {
-      const response = await apiClient.get(`/api/v1/assistant/v2/conversation/${id}`)
+      const response = await apiClient.get(API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(id))
       
       if (response.data) {
         const conversation: Conversation = {
@@ -457,7 +455,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       }
     } catch (err) {
       console.error("Error loading conversation:", err)
-      setError("No pude cargar la conversación.")
+      setError(`Error cargando conversación: ${err.message || 'Backend no responde'}`)
     } finally {
       setIsLoading(false)
     }
@@ -465,7 +463,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
-      await apiClient.delete(`/api/v1/assistant/v2/conversation/${id}`)
+      await apiClient.delete(API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(id))
       
       setConversations(prev => prev.filter(c => c.id !== id))
       if (currentConversation?.id === id) {

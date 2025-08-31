@@ -65,7 +65,7 @@ export function ImagePreview({
   const imageRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Reset view when image changes
+  // Reset view when image changes - consolidated to prevent multiple re-renders
   useEffect(() => {
     setZoom(100)
     setRotation(0)
@@ -73,15 +73,9 @@ export function ImagePreview({
     setImageLoaded(false)
     setImageError(false)
     setNaturalDimensions(null)
-    setHasStartedLoading(false)
+    // Start loading immediately when src changes
+    setHasStartedLoading(!!src)
   }, [src])
-
-  // Track when image starts loading
-  useEffect(() => {
-    if (src && !hasStartedLoading) {
-      setHasStartedLoading(true)
-    }
-  }, [src, hasStartedLoading])
 
   const handleImageLoad = () => {
     setImageLoaded(true)
@@ -329,8 +323,8 @@ export function ImagePreview({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {hasStartedLoading && !imageLoaded && !imageError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
+      {hasStartedLoading && !imageLoaded && !imageError && src && (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted/30 transition-opacity duration-200">
           <div className="flex flex-col items-center space-y-3">
             <div className="w-8 h-8 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
             <div className="text-sm text-muted-foreground">Loading image...</div>
@@ -353,7 +347,7 @@ export function ImagePreview({
         alt={alt}
         className={cn(
           zoom === 100 ? "max-w-full max-h-full object-contain" : "max-w-none",
-          "transition-opacity duration-500 ease-out",
+          "transition-opacity duration-300 ease-out",
           imageLoaded ? "opacity-100" : "opacity-0"
         )}
         style={{
@@ -363,7 +357,7 @@ export function ImagePreview({
             rotate(${rotation}deg)
           `,
           transformOrigin: 'center center',
-          transition: 'transform 0.2s ease-out, opacity 0.5s ease-out'
+          transition: 'transform 0.2s ease-out'
         }}
         onLoad={handleImageLoad}
         onError={handleImageError}

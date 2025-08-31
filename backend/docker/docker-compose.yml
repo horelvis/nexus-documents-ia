@@ -22,7 +22,7 @@ services:
     networks:
       - backend-network
     env_file:
-      - ../.env
+      - .env
     environment:
       # Unified API Key for all microservices
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
@@ -98,7 +98,7 @@ services:
       - backend-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -119,7 +119,7 @@ services:
     networks:
       - backend-network
     env_file:
-      - ../.env
+      - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - QDRANT_HOST=qdrant
@@ -130,6 +130,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
       - SERPER_API_KEY=${SERPER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LOG_LEVEL=INFO
       - DEBUG=${DEBUG:-true}  # Enable reload in dev
     volumes:
@@ -149,7 +150,7 @@ services:
       context: ../microservices/storage-service
       dockerfile: Dockerfile
     ports:
-      - "8003:8001"
+      - "8003:8003"
     depends_on:
       - redis
     networks:
@@ -159,7 +160,7 @@ services:
       # Mount the Python code for live reloading
       - ../microservices/storage-service/app:/app/app:rw
     env_file:
-      - ../.env
+      - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - GCS_PROJECT_ID=nexus-document-ia
@@ -174,7 +175,7 @@ services:
       - REDIS_PORT=6379
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -193,7 +194,7 @@ services:
       # Mount the Python code for live reloading
       - ../microservices/signature-service/app:/app/app:rw
     env_file:
-      - ../.env
+      - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - MAIN_API_URL=http://backend:8000

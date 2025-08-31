@@ -18,7 +18,7 @@ class CAGClient:
     
     def __init__(self):
         # Use docker service name for container-to-container communication
-        self.base_url = "http://docker-cag-service-1:8008"
+        self.base_url = "http://cag-service:8008"
         self.timeout = httpx.Timeout(30.0, connect=5.0)
         self.api_key = settings.MICROSERVICES_API_KEY
         
