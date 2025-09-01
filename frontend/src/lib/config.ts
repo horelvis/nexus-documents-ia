@@ -3,6 +3,9 @@ export const API_CONFIG = {
   API_V1: '/api/v1',
   TIMEOUT: 30000, // 30 seconds
   
+  // Microservice URLs (different ports)
+  WEAVIATE_SERVICE_URL: process.env.NEXT_PUBLIC_WEAVIATE_SERVICE_URL || 'http://192.168.1.58:8007',
+  
   // Endpoints
   ENDPOINTS: {
     // Auth
@@ -41,11 +44,15 @@ export const API_CONFIG = {
     // Dashboard
     DASHBOARD: '/dashboard',
     
-    // Assistant
+    // Assistant (Legacy)
     ASSISTANT_CHAT: '/assistant/chat',
     ASSISTANT_CHAT_STREAM: '/assistant/chat/stream',
     ASSISTANT_CONVERSATION: (id: string) => `/assistant/conversation/${id}`,
     ASSISTANT_WELCOME: '/assistant/welcome',
+    
+    // Elysia (New GAP Architecture)
+    ELYSIA_QUERY: '/elysia/query',
+    ELYSIA_TOOLS: '/elysia/tools',
   }
 } as const
 

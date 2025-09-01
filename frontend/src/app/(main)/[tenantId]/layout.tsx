@@ -5,6 +5,7 @@ import { GlobalUploadDialog } from "@/components/dashboard/global-upload-dialog"
 import { NavigationProgress } from "@/components/layout/navigation-progress"
 import { VirtualAssistant } from "@/components/virtual-assistant/virtual-assistant"
 import { ChatUIProvider } from "@/contexts/chat-ui-context"
+import { NotificationsProvider } from "@/contexts/notifications-context"
 import {
   SidebarInset,
   SidebarProvider,
@@ -21,15 +22,16 @@ export default async function TenantLayout({
   return (
     <AuthGuard>
       <ProfileVerificationGuard>
-        <ChatUIProvider>
-          <SidebarProvider
-            style={
-              {
-                "--sidebar-width": "calc(var(--spacing) * 72)",
-                "--header-height": "calc(var(--spacing) * 12)",
-              } as React.CSSProperties
-            }
-          >
+        <NotificationsProvider>
+          <ChatUIProvider>
+            <SidebarProvider
+              style={
+                {
+                  "--sidebar-width": "calc(var(--spacing) * 72)",
+                  "--header-height": "calc(var(--spacing) * 12)",
+                } as React.CSSProperties
+              }
+            >
             <AppSidebar variant="inset" tenantId={tenantId} />
             <SidebarInset>
               <NavigationProgress />
@@ -46,8 +48,9 @@ export default async function TenantLayout({
             
             {/* Virtual Assistant */}
             <VirtualAssistant />
-          </SidebarProvider>
-        </ChatUIProvider>
+            </SidebarProvider>
+          </ChatUIProvider>
+        </NotificationsProvider>
       </ProfileVerificationGuard>
     </AuthGuard>
   )

@@ -1,214 +1,311 @@
 """
-LLM Service using LangChain microservice HTTP client
+LLM Service migrado para usar directamente Ollama y Weaviate/Elysia
+Reemplaza el anterior LangChain microservice con integración directa
 """
 import logging
+import httpx
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
-from app.services.langchain_client import LangChainClient
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Servicio para generación de texto y RAG usando el microservicio LangChain"""
+    """Servicio para generación de texto y RAG usando Ollama directo + Weaviate/Elysia"""
     
     def __init__(self):
-        logger.info("LLMService initialized with LangChain microservice client")
-        # Default model for agent operations (Gemma 3)
-        self.default_model = "gemma3:12b-it-qat"
+        logger.info("LLMService initialized with direct Ollama + Weaviate integration")
+        self.ollama_base_url = settings.OLLAMA_BASE_URL
+        self.weaviate_service_url = settings.WEAVIATE_SERVICE_URL
+        self.api_key = getattr(settings, 'MICROSERVICES_API_KEY', 'unified-microservices-key-12345')
+        self.default_model = "llama3.2:latest"
     
     async def generate_response(
-        self, 
-        query: str, 
-        doc_ids: List[str] = None, 
-        tenant_id: str = None,
-        max_tokens: int = 500
+        self,
+        query: str,
+        doc_ids: Optional[List[str]] = None,
+        tenant_id: Optional[str] = None,
+        max_tokens: int = 500,
+        use_rag: bool = True
     ) -> Dict[str, Any]:
-        """
-        Genera una respuesta usando RAG o LLM directo.
-        
-        Args:
-            query: Pregunta o consulta del usuario
-            doc_ids: Lista opcional de IDs de documentos para RAG
-            tenant_id: ID del tenant para búsqueda vectorial
-            max_tokens: Máximo número de tokens en la respuesta
-            
-        Returns:
-            Diccionario con la respuesta y fuentes (si aplica)
-        """
+        """Generate LLM response with optional RAG using Weaviate/Elysia"""
         try:
-            logger.debug(f"Generating response for query: {query[:100]}...")
-            
-            # Usar cliente HTTP para generar respuesta
-            async with LangChainClient() as client:
-                response = await client.generate_response(
-                    query=query,
-                    tenant_id=tenant_id,
-                    doc_ids=doc_ids,
-                    max_tokens=max_tokens
+            if use_rag and tenant_id:
+                # Use Elysia for RAG-enabled responses
+                return await self._generate_with_elysia_rag(
+                    query, tenant_id, max_tokens, doc_ids
                 )
-            
-            return response
+            else:
+                # Direct Ollama generation
+                return await self._generate_direct_ollama(query, max_tokens)
                 
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
-            return {
-                "answer": "Lo siento, ocurrió un error al procesar tu consulta. Por favor, intenta nuevamente.",
-                "sources": [],
-                "error": str(e)
-            }
+            logger.error(f"❌ LLM generation failed: {e}")
+            raise
+    
+    async def _generate_with_elysia_rag(
+        self, 
+        query: str, 
+        tenant_id: str, 
+        max_tokens: int,
+        doc_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Generate response using Elysia RAG system"""
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                url = f"{self.weaviate_service_url}/elysia/query"
+                
+                payload = {
+                    "query": query,
+                    "tenant_id": tenant_id,
+                    "query_type": "search",
+                    "max_iterations": 3,
+                    "enable_learning": True
+                }
+                
+                if doc_ids:
+                    payload["context"] = {"doc_ids": doc_ids}
+                
+                headers = {
+                    'Authorization': f'Bearer {self.api_key}',
+                    'Content-Type': 'application/json'
+                }
+                
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                
+                elysia_result = response.json()
+                
+                return {
+                    "answer": elysia_result.get("answer", "No response generated"),
+                    "sources": elysia_result.get("data", {}).get("documents", []),
+                    "context_used": len(elysia_result.get("data", {}).get("documents", [])),
+                    "confidence_score": elysia_result.get("confidence_score", 0.8),
+                    "execution_time_ms": elysia_result.get("execution_time_ms", 0),
+                    "tools_used": elysia_result.get("tools_used", []),
+                    "decision_path": elysia_result.get("decision_path", [])
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Elysia RAG generation failed: {e}")
+            # Fallback to direct Ollama
+            return await self._generate_direct_ollama(query, max_tokens)
+    
+    async def _generate_direct_ollama(self, query: str, max_tokens: int) -> Dict[str, Any]:
+        """Generate response using direct Ollama"""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{self.ollama_base_url}/api/generate"
+                
+                payload = {
+                    "model": self.default_model,
+                    "prompt": query,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": 0.7
+                    }
+                }
+                
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                
+                return {
+                    "answer": result.get("response", "No response generated"),
+                    "sources": [],
+                    "context_used": 0,
+                    "model": self.default_model,
+                    "tokens_generated": result.get("eval_count", 0)
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Direct Ollama generation failed: {e}")
+            raise
     
     async def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
-        """
-        Sugiere tags relevantes para un texto.
-        
-        Args:
-            text: Texto para analizar
-            num_tags: Número de tags a sugerir
-            
-        Returns:
-            Lista de tags sugeridos
-        """
+        """Suggest tags for text using Ollama"""
         try:
-            logger.debug(f"Generating {num_tags} tags for text of length: {len(text)}")
-            
-            # Usar cliente HTTP para sugerir tags
-            async with LangChainClient() as client:
-                tags = await client.suggest_tags(text, num_tags)
-            
-            logger.debug(f"Generated tags: {tags}")
-            return tags
-            
+            prompt = f"""Analyze the following text and suggest {num_tags} relevant tags (keywords). 
+Return only the tags separated by commas, no explanations.
+
+Text: {text[:1000]}
+
+Tags:"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{self.ollama_base_url}/api/generate"
+                
+                payload = {
+                    "model": self.default_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 50,
+                        "temperature": 0.3
+                    }
+                }
+                
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                tags_text = result.get("response", "").strip()
+                
+                # Parse tags from response
+                tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+                return tags[:num_tags]
+                
         except Exception as e:
-            logger.error(f"Error generating tags: {str(e)}")
-            return ["documento", "texto", "contenido"]  # Tags por defecto
+            logger.error(f"❌ Tag suggestion failed: {e}")
+            return []
     
-    async def extract_metadata(self, text: str) -> Dict[str, str]:
-        """
-        Extrae metadatos relevantes de un texto.
-        
-        Args:
-            text: Texto para analizar
-            
-        Returns:
-            Diccionario con metadatos extraídos
-        """
+    async def extract_metadata(self, text: str) -> Dict[str, Any]:
+        """Extract metadata from text using Ollama"""
         try:
-            logger.debug(f"Extracting metadata from text of length: {len(text)}")
-            
-            # Usar cliente HTTP para extraer metadatos
-            async with LangChainClient() as client:
-                metadata = await client.extract_metadata(text)
-            
-            logger.debug(f"Extracted metadata: {metadata}")
-            return metadata
-            
+            prompt = f"""Extract key metadata from this text. Return a JSON object with relevant fields like title, author, date, category, language, etc.
+
+Text: {text[:1500]}
+
+JSON:"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{self.ollama_base_url}/api/generate"
+                
+                payload = {
+                    "model": self.default_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 200,
+                        "temperature": 0.1
+                    }
+                }
+                
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                metadata_text = result.get("response", "").strip()
+                
+                # Try to parse JSON response
+                try:
+                    import json
+                    metadata = json.loads(metadata_text)
+                    return metadata
+                except:
+                    # If JSON parsing fails, return basic metadata
+                    return {
+                        "extracted_text": metadata_text,
+                        "length": len(text),
+                        "word_count": len(text.split())
+                    }
+                    
         except Exception as e:
-            logger.error(f"Error extracting metadata: {str(e)}")
-            return {
-                "título": "Documento",
-                "tipo": "texto",
-                "estado": "procesado"
-            }
+            logger.error(f"❌ Metadata extraction failed: {e}")
+            return {"error": str(e)}
     
     async def summarize_text(self, text: str, max_length: int = 200) -> str:
-        """
-        Genera un resumen del texto.
-        
-        Args:
-            text: Texto a resumir
-            max_length: Longitud máxima del resumen
-            
-        Returns:
-            Resumen del texto
-        """
+        """Summarize text using Ollama"""
         try:
-            logger.debug(f"Summarizing text of length: {len(text)}")
-            
-            # Usar cliente HTTP para resumir texto
-            async with LangChainClient() as client:
-                summary = await client.summarize_text(text, max_length)
-            
-            logger.debug(f"Generated summary of length: {len(summary)}")
-            return summary
-            
-        except Exception as e:
-            logger.error(f"Error summarizing text: {str(e)}")
-            return "Resumen no disponible."
-    
-    def create_custom_prompt(self, template: str, variables: Dict[str, str]) -> str:
-        """
-        Crea un prompt personalizado con variables.
-        
-        Args:
-            template: Template del prompt con placeholders
-            variables: Variables para rellenar el template
-            
-        Returns:
-            Prompt formateado
-        """
-        try:
-            # Implementación simple de formateo de template
-            prompt = template
-            for key, value in variables.items():
-                prompt = prompt.replace(f"{{{key}}}", value)
-            return prompt
-            
-        except Exception as e:
-            logger.error(f"Error creating custom prompt: {str(e)}")
-            return template
-    
-    async def generate_completion(
-        self,
-        prompt: str,
-        temperature: float = 0.7,
-        max_tokens: int = 500,
-        model: Optional[str] = None
-    ) -> str:
-        """
-        Generate a completion for a given prompt using the agent model.
-        
-        Args:
-            prompt: The input prompt
-            temperature: Temperature for generation (0-1)
-            max_tokens: Maximum tokens to generate
-            model: Optional model name (defaults to Gemma 3)
-            
-        Returns:
-            Generated text completion
-        """
-        try:
-            model_name = model or self.default_model
-            logger.debug(f"Generating completion with model {model_name}, temp={temperature}")
-            
-            # Use Ollama directly for agent completions
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"http://docker-genai-ollama-1:11434/api/generate",
-                    json={
-                        "model": model_name,
-                        "prompt": prompt,
-                        "temperature": temperature,
-                        "options": {
-                            "num_predict": max_tokens
-                        },
-                        "stream": False
+            prompt = f"""Provide a concise summary of the following text in about {max_length} characters:
+
+Text: {text}
+
+Summary:"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{self.ollama_base_url}/api/generate"
+                
+                payload = {
+                    "model": self.default_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_length // 4,  # Rough estimate
+                        "temperature": 0.3
                     }
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("response", "")
-                    else:
-                        # Fallback to LangChain client
-                        async with LangChainClient() as client:
-                            result = await client.generate_response(
-                                query=prompt,
-                                max_tokens=max_tokens
-                            )
-                            return result.get("answer", "")
-                            
+                }
+                
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                summary = result.get("response", "").strip()
+                
+                return summary[:max_length] if len(summary) > max_length else summary
+                
         except Exception as e:
-            logger.error(f"Error generating completion: {e}")
-            # Fallback response
-            return "No pude procesar tu solicitud. Por favor, intenta de nuevo."
+            logger.error(f"❌ Text summarization failed: {e}")
+            return f"Error generating summary: {str(e)}"
+    
+    async def extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """Extract named entities from text using Ollama"""
+        try:
+            prompt = f"""Extract named entities from this text. Return a JSON list of entities with their type (PERSON, ORGANIZATION, LOCATION, etc.) and position.
+
+Text: {text[:1000]}
+
+JSON:"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{self.ollama_base_url}/api/generate"
+                
+                payload = {
+                    "model": self.default_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 300,
+                        "temperature": 0.1
+                    }
+                }
+                
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                entities_text = result.get("response", "").strip()
+                
+                # Try to parse JSON response
+                try:
+                    import json
+                    entities = json.loads(entities_text)
+                    return entities if isinstance(entities, list) else []
+                except:
+                    # If JSON parsing fails, return empty list
+                    return []
+                    
+        except Exception as e:
+            logger.error(f"❌ Entity extraction failed: {e}")
+            return []
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check health of LLM service components"""
+        health = {
+            "ollama": False,
+            "weaviate_service": False,
+            "status": "unhealthy"
+        }
+        
+        try:
+            # Check Ollama
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.ollama_base_url}/api/tags")
+                if response.status_code == 200:
+                    health["ollama"] = True
+        except:
+            pass
+        
+        try:
+            # Check Weaviate Service
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.weaviate_service_url}/health")
+                if response.status_code == 200:
+                    health["weaviate_service"] = True
+        except:
+            pass
+        
+        health["status"] = "healthy" if health["ollama"] else "partial"
+        return health

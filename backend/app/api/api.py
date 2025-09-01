@@ -2,8 +2,9 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, agent_management, signatures, webhooks, search, teams, langgraph, users, entities, dashboard,
-    simple_auth, assistant
+    agents, agent_management, signatures, webhooks, search, teams, users, entities, dashboard,
+    simple_auth, assistant, migration, weaviate
+    # REMOVED: langgraph - migrated to Weaviate/Elysia
     # document_analyzer, contract_intelligence, compliance_checker
 )
 from fastapi import APIRouter
@@ -47,20 +48,26 @@ api_router.include_router(signature_contacts.router, prefix="/signatures/contact
 # Webhooks for external integrations
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 
+# Weaviate microservice gateway (includes Elysia)
+api_router.include_router(weaviate.router, prefix="/weaviate", tags=["weaviate"])
+
 # Teams management routes
 api_router.include_router(teams.router, prefix="/teams", tags=["teams"])
 
 # User management routes
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 
-# LangGraph routes for advanced workflows
-api_router.include_router(langgraph.router, prefix="/langgraph", tags=["langgraph"])
+# REMOVED: LangGraph routes - migrated to Weaviate/Elysia
+# api_router.include_router(langgraph.router, prefix="/langgraph", tags=["langgraph"])
 
 # Entity search and management
 api_router.include_router(entities.router, tags=["entities"])
 
 # Dashboard and analytics
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+
+# NEW: Migration management for Qdrant->Weaviate transition
+api_router.include_router(migration.router, prefix="/migration", tags=["migration"])
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

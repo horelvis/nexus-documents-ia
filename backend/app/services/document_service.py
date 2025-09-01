@@ -195,9 +195,10 @@ class DocumentService:
             
             # Extract entities from the document text
             try:
-                # Get LangChain client from vector service
-                langchain_client = self.vector_service.langchain_client
-                entities = await langchain_client.extract_entities(document_text, self.tenant_id)
+                # Use LLM service for entity extraction (migrated from LangChain)
+                from app.services.llm_service import LLMService
+                llm_service = LLMService()
+                entities = await llm_service.extract_entities(document_text)
                 
                 if entities:
                     # Store extracted entities in the document

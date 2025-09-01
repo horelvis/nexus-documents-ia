@@ -53,7 +53,10 @@ class Settings(BaseSettings):
         "http://192.168.1.54:8000",
         "http://192.168.1.35:3000",
         "http://192.168.1.35:3001",
-        "http://192.168.1.35:8000"
+        "http://192.168.1.35:8000",
+        "http://192.168.1.58:3000",
+        "http://192.168.1.58:3001",
+        "http://192.168.1.58:8000"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -97,7 +100,7 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
-    # Vector DB (Qdrant)
+    # LEGACY: Vector DB (Qdrant) - DEPRECATED, use Weaviate/Elysia instead
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_COLLECTION: str = "documents"
@@ -112,12 +115,13 @@ class Settings(BaseSettings):
     # Cloud Run detection
     IS_CLOUD_RUN: bool = os.getenv("K_SERVICE", None) is not None
     
-    # LangChain Microservice
-    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
+    # REMOVED: LangChain/LangGraph services - migrated to Weaviate/Elysia
+    # LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"  # DEPRECATED
+    # LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"  # DEPRECATED
     
-    
-    # LangGraph Microservice (State-based Workflows) - DEPRECATED
-    LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    # NEW: Weaviate Service with Elysia integration (DEFAULT VECTOR ENGINE)
+    WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
+    USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
     
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")
@@ -194,6 +198,11 @@ class Settings(BaseSettings):
     
     @property
     def STORAGE_API_KEY(self) -> str:
+        return self.MICROSERVICES_API_KEY
+    
+    @property
+    def microservices_api_key(self) -> str:
+        """Compatibility property for microservices_api_key (lowercase)"""
         return self.MICROSERVICES_API_KEY
 
 

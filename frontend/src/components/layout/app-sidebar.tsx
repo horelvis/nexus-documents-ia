@@ -6,7 +6,6 @@ import {
   IconCloudUpload,
   IconSearch,
   IconBrain,
-  IconRobot,
   IconMessages,
   IconSignature,
   IconChartBar,
@@ -85,28 +84,12 @@ const data = {
           url: "/search",
         },
         {
-          title: "AI Chat",
+          title: "Elysia Assistant",
           url: "/chat",
         },
         {
           title: "Document Insights",
           url: "/insights",
-        },
-      ],
-    },
-    {
-      title: "AI Agents",
-      url: "/agents",
-      icon: IconRobot,
-      color: "indigo",
-      items: [
-        {
-          title: "Agent Library",
-          url: "/agents",
-        },
-        {
-          title: "Conversations",
-          url: "/agents/conversations",
         },
       ],
     },

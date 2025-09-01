@@ -120,7 +120,7 @@ async def create_checkout_session(
             }],
             mode='subscription',
             success_url=request.success_url or f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/plans/{current_user.tenant_id}",
+            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/{current_user.tenant_id}/plans",
             metadata={
                 'plan_id': request.planId,
                 'user_id': str(current_user.id),

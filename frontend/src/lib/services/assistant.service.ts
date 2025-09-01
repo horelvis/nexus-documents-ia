@@ -1,4 +1,4 @@
-import { apiClient } from '../api-client'
+import { useApiClient } from '../api-client'
 import { API_CONFIG } from '../config'
 
 export interface WelcomeResponse {
@@ -27,51 +27,72 @@ export interface ChatResponse {
   requires_confirmation: boolean
 }
 
-export const assistantService = {
-  /**
-   * Get personalized welcome message from CrewAI
-   */
-  async getWelcomeMessage(): Promise<WelcomeResponse> {
-    try {
-      const response = await apiClient.get<WelcomeResponse>(
-        `${API_CONFIG.ENDPOINTS.ASSISTANT_WELCOME}`
-      )
-      return response
-    } catch (error) {
-      console.error('Error fetching welcome message:', error)
-      // Fallback to default message
-      return {
-        message: "¡Estoy aquí para ayudarte!",
-        personalized: false
+export function useAssistantService() {
+  const apiClient = useApiClient()
+
+  return {
+    /**
+     * Get personalized welcome message from CrewAI
+     */
+    async getWelcomeMessage(): Promise<WelcomeResponse> {
+      try {
+        const response = await apiClient.get<WelcomeResponse>(
+          `${API_CONFIG.ENDPOINTS.ASSISTANT_WELCOME}`
+        )
+        return response.data || {
+          message: "¡Estoy aquí para ayudarte!",
+          personalized: false
+        }
+      } catch (error) {
+        console.error('Error fetching welcome message:', error)
+        // Fallback to default message
+        return {
+          message: "¡Estoy aquí para ayudarte!",
+          personalized: false
+        }
       }
+    },
+
+    /**
+     * Send chat message to assistant
+     */
+    async sendChatMessage(message: ChatMessage): Promise<ChatResponse> {
+      const response = await apiClient.post<ChatResponse>(
+        `${API_CONFIG.ENDPOINTS.ASSISTANT_CHAT}`,
+        message
+      )
+      return response.data
+    },
+
+    /**
+     * Get conversation history
+     */
+    async getConversation(conversationId: string): Promise<any> {
+      const response = await apiClient.get(
+        `${API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(conversationId)}`
+      )
+      return response.data
+    },
+
+    /**
+     * Clear conversation
+     */
+    async clearConversation(conversationId: string): Promise<any> {
+      const response = await apiClient.delete(
+        `${API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(conversationId)}`
+      )
+      return response.data
     }
-  },
+  }
+}
 
-  /**
-   * Send chat message to assistant
-   */
-  async sendChatMessage(message: ChatMessage): Promise<ChatResponse> {
-    return apiClient.post<ChatResponse>(
-      `${API_CONFIG.ENDPOINTS.ASSISTANT_CHAT}`,
-      message
-    )
-  },
-
-  /**
-   * Get conversation history
-   */
-  async getConversation(conversationId: string): Promise<any> {
-    return apiClient.get(
-      `${API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(conversationId)}`
-    )
-  },
-
-  /**
-   * Clear conversation
-   */
-  async clearConversation(conversationId: string): Promise<any> {
-    return apiClient.delete(
-      `${API_CONFIG.ENDPOINTS.ASSISTANT_CONVERSATION(conversationId)}`
-    )
+// Legacy export for backward compatibility - DO NOT USE (no authentication)
+export const assistantService = {
+  async getWelcomeMessage(): Promise<WelcomeResponse> {
+    console.warn('⚠️ assistantService.getWelcomeMessage() is deprecated and lacks authentication. Use useAssistantService() hook instead.')
+    return {
+      message: "¡Estoy aquí para ayudarte!",
+      personalized: false
+    }
   }
 }

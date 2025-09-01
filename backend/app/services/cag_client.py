@@ -208,3 +208,71 @@ class CAGClient:
         except Exception as e:
             logger.error(f"Error checking CAG service: {e}")
             return {"error": str(e)}
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check health of CAG service"""
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+                response = await client.get(
+                    f"{self.base_url}/health",
+                    headers={"X-API-Key": self.api_key}
+                )
+                
+                if response.status_code == 200:
+                    return {"status": "healthy", "service": "cag"}
+                else:
+                    return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+                    
+        except Exception as e:
+            logger.error(f"CAG health check failed: {e}")
+            return {"status": "unhealthy", "error": str(e)}
+    
+    async def search_documents(self, search_request: Dict[str, Any]) -> Dict[str, Any]:
+        """Search documents using CAG service"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/cag/search",
+                    json=search_request,
+                    headers={
+                        "X-API-Key": self.api_key,
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(f"CAG search error: {response.status_code}")
+                    return {"error": f"Search failed: {response.status_code}", "results": []}
+                    
+        except Exception as e:
+            logger.error(f"CAG search error: {e}")
+            return {"error": str(e), "results": []}
+    
+    async def add_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Add document to CAG service"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/cag/documents",
+                    json=document_data,
+                    headers={
+                        "X-API-Key": self.api_key,
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(f"CAG add document error: {response.status_code}")
+                    raise Exception(f"Failed to add document: {response.status_code}")
+                    
+        except Exception as e:
+            logger.error(f"CAG add document error: {e}")
+            raise
+
+
+# Global client instance
+cag_client = CAGClient()

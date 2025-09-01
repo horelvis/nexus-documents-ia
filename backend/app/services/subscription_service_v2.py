@@ -314,8 +314,31 @@ class SubscriptionServiceV2:
                 expand=['data.default_payment_method']
             )
             
+            logger.debug(f"🔍 Subscriptions type: {type(subscriptions)}")
+            logger.debug(f"🔍 Subscriptions dir: {[attr for attr in dir(subscriptions) if not attr.startswith('_')]}")
+            logger.debug(f"🔍 Has data attr: {hasattr(subscriptions, 'data')}")
+            if hasattr(subscriptions, 'data'):
+                logger.debug(f"🔍 Data type: {type(subscriptions.data)}")
+            else:
+                logger.debug(f"🔍 Available attrs: {list(subscriptions.__dict__.keys()) if hasattr(subscriptions, '__dict__') else 'No __dict__'}")
+            
             # Find active subscription
-            active_subscription = SubscriptionServiceV2._find_active_subscription(subscriptions.data)
+            if not hasattr(subscriptions, 'data'):
+                logger.error(f"❌ Subscriptions object has no 'data' attribute: {type(subscriptions)}")
+                return SubscriptionServiceV2._get_error_status("Invalid subscription data format")
+                
+            if not isinstance(subscriptions.data, list):
+                logger.error(f"❌ Subscriptions data is not a list: {type(subscriptions.data)}")
+                return SubscriptionServiceV2._get_error_status("Invalid subscription data type")
+                
+            logger.debug(f"🔍 Found {len(subscriptions.data)} subscriptions for customer {user.stripe_customer_id}")
+            
+            try:
+                active_subscription = SubscriptionServiceV2._find_active_subscription(subscriptions.data)
+                logger.debug(f"🔍 Active subscription found: {active_subscription is not None}")
+            except Exception as e:
+                logger.error(f"❌ Error in _find_active_subscription: {e}")
+                return SubscriptionServiceV2._get_error_status(f"Error finding active subscription: {str(e)}")
             
             if not active_subscription:
                 return SubscriptionServiceV2._get_free_plan_status(
@@ -323,7 +346,11 @@ class SubscriptionServiceV2:
                 )
             
             # Build subscription status
-            return SubscriptionServiceV2._build_subscription_status(active_subscription)
+            try:
+                return SubscriptionServiceV2._build_subscription_status(active_subscription)
+            except Exception as e:
+                logger.error(f"❌ Error in _build_subscription_status: {e}")
+                return SubscriptionServiceV2._get_error_status(f"Error building subscription status: {str(e)}")
             
         except Exception as e:
             logger.error(f"❌ Error fetching subscription for user {user.id}: {e}")
@@ -345,7 +372,10 @@ class SubscriptionServiceV2:
         priority_order = {'trialing': 3, 'active': 2, 'past_due': 1}
         
         # Sort by priority first, then by creation date
-        return max(active_subs, key=lambda x: (priority_order.get(x.status, 0), x.created))
+        return max(active_subs, key=lambda x: (
+            priority_order.get(x.status, 0), 
+            getattr(x, 'created', 0) if hasattr(x, 'created') and not callable(getattr(x, 'created', None)) else 0
+        ))
     
     @staticmethod
     def _build_subscription_status(subscription: Any) -> Dict[str, Any]:
@@ -354,7 +384,7 @@ class SubscriptionServiceV2:
         plan_id = subscription.metadata.get('plan_id', 'pro')
         
         # Check for enterprise plan
-        if hasattr(subscription.items, 'data') and subscription.items.data:
+        if hasattr(subscription, 'items') and hasattr(subscription.items, 'data') and subscription.items.data:
             price_id = subscription.items.data[0].price.id
             if price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
                 plan_id = 'enterprise'
@@ -384,8 +414,13 @@ class SubscriptionServiceV2:
         period_end = None
         if subscription.status == 'trialing' and subscription.trial_end:
             period_end = datetime.fromtimestamp(subscription.trial_end).isoformat()
-        elif subscription.current_period_end:
+        elif hasattr(subscription, 'current_period_end') and subscription.current_period_end:
             period_end = datetime.fromtimestamp(subscription.current_period_end).isoformat()
+        # Fallback: try to get period_end from subscription items
+        elif hasattr(subscription, 'items') and hasattr(subscription.items, 'data') and subscription.items.data:
+            item = subscription.items.data[0]
+            if hasattr(item, 'current_period_end') and item.current_period_end:
+                period_end = datetime.fromtimestamp(item.current_period_end).isoformat()
         
         # Build response
         result = {
@@ -397,8 +432,11 @@ class SubscriptionServiceV2:
             "limits": plan_limits,
             "subscription_id": subscription.id,
             "current_period_end": period_end,
-            "cancel_at_period_end": subscription.cancel_at_period_end,
-            "created_at": datetime.fromtimestamp(subscription.created).isoformat(),
+            "cancel_at_period_end": getattr(subscription, 'cancel_at_period_end', False),
+            "created_at": datetime.fromtimestamp(
+                getattr(subscription, 'created', 0) if hasattr(subscription, 'created') 
+                and not callable(getattr(subscription, 'created', None)) else 0
+            ).isoformat() if getattr(subscription, 'created', 0) else datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
         

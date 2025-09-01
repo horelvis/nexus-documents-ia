@@ -25,6 +25,7 @@ from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service_direct import VectorServiceDirect
+from app.services.weaviate_client import weaviate_client
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -398,6 +399,37 @@ class AsyncDocumentService:
                     if not success:
                         raise Exception("Failed to store document in vector database")
                     logger.info(f"Successfully stored document {doc_id} in vector database")
+                    
+                    # ALSO store in Weaviate (new migration path)
+                    try:
+                        from app.core.security import get_tenant_collection_name
+                        
+                        logger.info(f"Storing document {doc_id} in Weaviate for migration")
+                        
+                        # Get tenant collection name
+                        collection_name = get_tenant_collection_name(self.tenant_id, "documents")
+                        
+                        # Prepare document for Weaviate
+                        weaviate_doc = {
+                            "title": doc.title or doc.filename,
+                            "content": text_for_embedding,
+                            "tenant_id": self.tenant_id,
+                            "document_type": doc.category or "general", 
+                            "tags": [doc.category] if doc.category else [],
+                            "metadata": {}  # Simplified metadata for now
+                        }
+                        
+                        # Add to Weaviate via weaviate-service
+                        weaviate_result = await weaviate_client.add_document(collection_name, weaviate_doc)
+                        
+                        if weaviate_result and weaviate_result.get("id"):
+                            logger.info(f"✅ Document {doc_id} stored in Weaviate: {weaviate_result.get('id')}")
+                        else:
+                            logger.warning(f"⚠️ Weaviate storage returned no ID for document {doc_id}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Failed to store document {doc_id} in Weaviate: {e}")
+                        # Don't fail the whole process if Weaviate fails - it's a migration feature
                 except Exception as e:
                     logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
                     raise Exception(f"Vector storage failed: {str(e)}")
@@ -452,6 +484,29 @@ class AsyncDocumentService:
                     await db.commit()
                     logger.info(f"Document {doc_id} marked as INDEXING_ERROR: {str(e)}")
     
+    def _clean_extracted_text(self, text: str) -> str:
+        """Clean extracted text to remove problematic characters that cause UTF-8 errors"""
+        if not text:
+            return ""
+        
+        # Remove null bytes and other control characters that cause PostgreSQL UTF-8 errors
+        # Keep only printable characters and common whitespace
+        import re
+        
+        # Remove null bytes specifically
+        text = text.replace('\x00', '')
+        
+        # Remove other problematic control characters but keep tabs, newlines, and carriage returns
+        text = re.sub(r'[\x01-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+        
+        # Normalize whitespace - replace multiple spaces/tabs/newlines with single spaces
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Strip leading/trailing whitespace
+        text = text.strip()
+        
+        return text
+
     async def _extract_text_async(self, contents: bytes, file_ext: str) -> Optional[str]:
         """Extract text from document asynchronously"""
         # This is a simplified version - in production you'd want proper async extraction
@@ -465,7 +520,10 @@ class AsyncDocumentService:
                 pdf_reader = PyPDF2.PdfReader(io.BytesIO(contents))
                 text = ""
                 for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
+                    page_text = page.extract_text()
+                    # Clean text to remove null bytes and other problematic characters
+                    cleaned_page_text = self._clean_extracted_text(page_text)
+                    text += cleaned_page_text + "\n"
                 
                 # If no text extracted (likely scanned PDF), try OCR
                 if not text.strip():
@@ -489,7 +547,9 @@ class AsyncDocumentService:
                             # OCR the image
                             image = Image.open(io.BytesIO(img_data))
                             page_text = pytesseract.image_to_string(image, lang='spa+eng')  # Spanish + English
-                            ocr_text += page_text + "\n"
+                            # Clean OCR text as well
+                            cleaned_page_text = self._clean_extracted_text(page_text)
+                            ocr_text += cleaned_page_text + "\n"
                             logger.info(f"OCR extracted {len(page_text)} chars from page {page_num + 1}")
                         
                         doc.close()
