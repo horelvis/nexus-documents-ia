@@ -1,345 +1,221 @@
 "use client"
 
-import { useState, useCallback, useRef, useEffect } from "react"
-import { Card } from "@/components/ui/card"
+import { useState, useCallback, useRef, useEffect, useImperativeHandle, forwardRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Brain, MessageSquare, Settings, Trash2, RefreshCw, Zap } from "lucide-react"
+import { Brain, MessageSquare, Trash2, RefreshCw, Zap, Settings, BarChart3 } from "lucide-react"
+import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useBackendUser } from "@/contexts/user-context"
-import { useAuthToken } from "@/hooks/use-auth-token"
+import { useElysiaService } from "@/lib/services/elysia.service"
+import { useDocumentService } from "@/lib/services/document.service"
+import { useRouter } from "next/navigation"
 import { ElysiaQueryInput } from "./ElysiaQueryInput"
 import { ElysiaRenderChat } from "./ElysiaRenderChat"
 import { toast } from "sonner"
+import { ToastProvider } from "@/contexts/ToastContext"
 
-// Message interface for Elysia
-interface ElysiaMessage {
-  id: string
-  type: "user" | "result" | "text" | "error" | "warning" | "self_healing_error" | "system"
-  content: string
-  timestamp: Date
-  metadata?: {
-    confidence_score?: number
-    decision_path?: string[]
-    tools_used?: string[]
-    execution_time_ms?: number
-    citations?: Array<{
-      id: string
-      title: string
-      url?: string
-      page?: number
-      excerpt?: string
-    }>
-  }
-  suggestions?: string[]
-  isStreaming?: boolean
-}
+import { ElysiaMessage } from "./types"
 
-interface ElysiaSession {
-  session_id: string
-  messages: ElysiaMessage[]
-  created_at: Date
-}
 
 interface ElysiaChatProps {
-  tenantId?: string
+  tenantId: string
   className?: string
   initialMessage?: string
   onClose?: () => void
+  onFirstQuery?: () => void
 }
 
-export function ElysiaChat({
-  tenantId,
-  className,
-  initialMessage,
-  onClose
-}: ElysiaChatProps) {
-  const currentUser = useBackendUser()
-  const { getValidToken } = useAuthToken()
-  const [session, setSession] = useState<ElysiaSession | null>(null)
+export interface ElysiaChatRef {
+  sendQuery: (query: string) => void
+}
+
+export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function ElysiaChat({
+  tenantId, className, initialMessage, onClose, onFirstQuery
+}, ref) {
+  const { backendUser } = useBackendUser()
+  const { sendMessage } = useElysiaService()
+  const documentService = useDocumentService()
+  const router = useRouter()
+  
+  // State management
+  const [messages, setMessages] = useState<ElysiaMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [currentView, setCurrentView] = useState<"chat" | "code" | "result">("chat")
-  const [socketStatus, setSocketStatus] = useState<"connected" | "disconnected" | "connecting">("connected")
+  const [conversationId] = useState(() => `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   
-  // Use tenantId from props or current user
-  const effectiveTenantId = tenantId || currentUser?.tenant_id
 
-  // Initialize session on mount
-  useEffect(() => {
-    if (effectiveTenantId && !session) {
-      createNewSession()
+  // No initialization needed - user is already authenticated
+
+  // Handle sending queries
+  const handleSendQuery = useCallback(async (query: string) => {
+    if (!backendUser?.id || isLoading) return
+
+    // Notify parent about first query (to hide example prompts)
+    if (messages.length === 0 && onFirstQuery) {
+      onFirstQuery()
     }
-  }, [effectiveTenantId])
 
-  // Send initial message if provided
-  useEffect(() => {
-    if (initialMessage && session && session.messages.length === 0) {
-      handleSendQuery(initialMessage)
+    // Add user message immediately
+    const queryMessage: ElysiaMessage = {
+      id: Date.now().toString(),
+      type: "user", // Show as user message in the UI
+      content: query,
+      timestamp: new Date()
     }
-  }, [initialMessage, session])
 
-  const createNewSession = useCallback(() => {
-    const newSession: ElysiaSession = {
-      session_id: `elysia_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      messages: [],
-      created_at: new Date()
-    }
-    setSession(newSession)
-    setError(null)
-  }, [])
-
-  const handleSendQuery = useCallback(async (query: string, route?: string, mimick?: boolean) => {
-    if (!session || !effectiveTenantId || !query.trim()) return
-
+    setMessages(prev => [...prev, queryMessage])
     setIsLoading(true)
     setError(null)
 
     try {
-      // Add user message immediately
-      const userMessage: ElysiaMessage = {
-        id: `user_${Date.now()}`,
-        type: "user",
-        content: query.trim(),
-        timestamp: new Date()
-      }
-
-      setSession(prev => prev ? {
-        ...prev,
-        messages: [...prev.messages, userMessage]
-      } : null)
-
-      // Get auth token
-      const token = await getValidToken()
-
-      // Call our Elysia API endpoint
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL}/api/v1/weaviate/elysia/query`
+      const result = await sendMessage(query, conversationId, tenantId)
       
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token || ''}`,
-        },
-        body: JSON.stringify({
-          query: query.trim(),
-          tenant_id: effectiveTenantId,
-          session_id: session.session_id,
-          enable_learning: true,
-          context: {
-            route: route || undefined,
-            mimick: mimick || false,
-            user_id: currentUser?.id
-          }
-        })
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API Error: ${response.status} ${errorText}`)
-      }
-
-      const data = await response.json()
-      
-      // Process the response from our Elysia API
-      const assistantMessage: ElysiaMessage = {
-        id: `assistant_${Date.now()}`,
-        type: determineMessageType(data),
-        content: extractAnswer(data.answer) || "Sin respuesta del sistema",
+      // Add result message
+      const resultMessage: ElysiaMessage = {
+        id: (Date.now() + 1).toString(),
+        type: determineMessageType(result),
+        content: extractAnswer(result.answer),
         timestamp: new Date(),
         metadata: {
-          confidence_score: data.confidence_score,
-          decision_path: data.decision_path || [],
-          tools_used: data.tools_used || [],
-          execution_time_ms: data.execution_time_ms,
-          citations: parseCitations(data.citations)
-        },
-        suggestions: data.suggestions || generateSuggestions(query)
+          confidence_score: result.confidence_score,
+          sources: extractSources(result.data?.citations || []),
+          processing_time: result.execution_time_ms,
+          agent_flow: result.tools_used || [],
+          suggestions: getContextualSuggestions(result)
+        }
       }
 
-      setSession(prev => prev ? {
-        ...prev,
-        messages: [...prev.messages, assistantMessage]
-      } : null)
+      setMessages(prev => [...prev, resultMessage])
 
-      // Show success toast with execution info
-      if (data.execution_time_ms) {
-        toast.success(`Consulta procesada en ${data.execution_time_ms}ms`, {
-          description: `Herramientas: ${data.tools_used?.join(', ') || 'Ninguna'}`
-        })
-      }
-
-    } catch (err: any) {
-      console.error("Error sending Elysia query:", err)
-      setError(err.message || "Error conectando con el servicio de Elysia")
-      
-      // Add error message to chat
+    } catch (err) {
+      console.error('Query failed:', err)
       const errorMessage: ElysiaMessage = {
-        id: `error_${Date.now()}`,
+        id: (Date.now() + 1).toString(),
         type: "error",
-        content: `❌ Error: ${err.message || "No se pudo conectar con el servicio de Elysia"}`,
+        content: "Sorry, I encountered an error processing your request. Please try again.",
         timestamp: new Date()
       }
 
-      setSession(prev => prev ? {
-        ...prev,
-        messages: [...prev.messages, errorMessage]
-      } : null)
-
-      toast.error("Error en la consulta", {
-        description: err.message || "El servicio de Elysia no está disponible"
-      })
+      setMessages(prev => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
-  }, [session, effectiveTenantId, currentUser, getValidToken])
+  }, [backendUser?.id, tenantId, isLoading, sendMessage, conversationId])
 
-  const handleFeedback = useCallback((messageId: string, feedback: "positive" | "negative") => {
-    // Send feedback to our API
-    toast.success(`Feedback ${feedback} registrado`, {
-      description: "Gracias por ayudar a mejorar las respuestas"
-    })
-    console.log("Feedback:", { messageId, feedback })
+  // Expose sendQuery method via ref
+  // Handle document interactions
+  const handleDocumentClick = useCallback(async (doc: any) => {
+    if (!doc.name || !tenantId) return
+    
+    try {
+      // If document ID is already available, navigate directly
+      if (doc.id) {
+        router.push(`/${tenantId}/documents/${doc.id}/preview`)
+        return
+      }
+      
+      // Fallback: Search for document by name to get its ID
+      setIsLoading(true)
+      
+      const searchResponse = await documentService.searchDocuments(doc.name, 10)
+      
+      if (searchResponse.error || !searchResponse.data?.results) {
+        toast.error(`No se pudo encontrar el documento: ${doc.name}`)
+        return
+      }
+      
+      // Find exact match by filename
+      const exactMatch = searchResponse.data.results.find(
+        result => result.filename === doc.name || result.title === doc.name
+      )
+      
+      if (!exactMatch) {
+        toast.error(`No se encontró el documento exacto: ${doc.name}`)
+        return
+      }
+      
+      // Navigate to preview page
+      router.push(`/${tenantId}/documents/${exactMatch.id}/preview`)
+      
+    } catch (error) {
+      console.error('Error finding document:', error)
+      toast.error(`Error al buscar documento: ${error instanceof Error ? error.message : 'Error desconocido'}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [documentService, tenantId, router, setIsLoading])
+
+  const handlePreviewClick = useCallback((doc: any) => {
+    // TODO: Implement document preview (modal, iframe, etc.)
+    console.log('Preview clicked:', doc)
+    if (doc.previewUrl) {
+      window.open(doc.previewUrl, '_blank')
+    } else {
+      toast(`Vista previa de: ${doc.name}`)
+    }
   }, [])
 
-  const handleSuggestionClick = useCallback((suggestion: string) => {
-    handleSendQuery(suggestion)
-  }, [handleSendQuery])
+  useImperativeHandle(ref, () => ({
+    sendQuery: handleSendQuery
+  }), [handleSendQuery])
 
-  const clearSession = useCallback(() => {
-    if (session) {
-      setSession({
-        ...session,
-        messages: []
-      })
-      setError(null)
-      toast.info("Conversación limpiada")
-    }
-  }, [session])
 
-  if (!effectiveTenantId) {
-    return (
-      <Card className={cn("p-8 text-center", className)}>
-        <Brain className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-        <h3 className="text-lg font-semibold mb-2">Elysia Chat</h3>
-        <p className="text-muted-foreground">
-          No se pudo determinar el tenant. Inicie sesión para continuar.
-        </p>
-      </Card>
-    )
+  const clearMessages = () => {
+    setMessages([])
+    setError(null)
   }
 
-  return (
-    <Card className={cn("flex flex-col h-[600px]", className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-primary/5 to-primary/10">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-full bg-primary/10">
-            <Brain className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-lg flex items-center gap-2">
-              Elysia AI Assistant
-              <Badge variant="outline" className="text-xs">
-                <Zap className="h-3 w-3 mr-1" />
-                Agentic RAG
-              </Badge>
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {session ? `Sesión: ${session.session_id.slice(-8)}` : "Inicializando..."}
-            </p>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={clearSession}
-            title="Limpiar conversación"
-            disabled={!session || session.messages.length === 0}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={createNewSession}
-            title="Nueva sesión"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              title="Cerrar"
-            >
-              ✕
-            </Button>
-          )}
-        </div>
-      </div>
+  const startNewConversation = () => {
+    setMessages([])
+    setError(null)
+  }
 
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-hidden">
-        {session && session.messages.length > 0 ? (
-          <ElysiaRenderChat
-            messages={session.messages}
-            isLoading={isLoading}
-            error={error}
-            socketStatus={socketStatus}
-            onFeedback={handleFeedback}
-            onSuggestionClick={handleSuggestionClick}
-            currentView={currentView}
-            onViewChange={setCurrentView}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-center p-8">
-            <div>
-              <Brain className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
-              <h4 className="text-lg font-medium mb-2">¡Bienvenido a Elysia!</h4>
-              <p className="text-muted-foreground mb-4 max-w-md">
-                Soy tu asistente inteligente con capacidades agentic RAG. 
-                Puedo ayudarte a buscar y analizar información en tus documentos.
-              </p>
-              <div className="flex flex-wrap gap-2 justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSendQuery("¿Qué documentos están disponibles?")}
-                >
-                  Ver documentos
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSendQuery("¿Cómo funciona Elysia?")}
-                >
-                  ¿Cómo funciono?
-                </Button>
-              </div>
-            </div>
+  const handleFeedback = (messageId: string, feedback: 'positive' | 'negative') => {
+    // TODO: Implement feedback system
+    console.log('Feedback:', messageId, feedback)
+  }
+
+  const handleSuggestionClick = (suggestion: string) => {
+    handleSendQuery(suggestion)
+  }
+
+  const hasMessages = messages.length > 0
+
+  return (
+    <ToastProvider>
+      <div className={cn("flex flex-col h-full", className)}>
+        {hasMessages && (
+          /* Chat messages solo cuando hay mensajes */
+          <div className="flex-1 overflow-hidden min-h-0">
+            <ElysiaRenderChat
+              messages={messages}
+              isLoading={isLoading}
+              error={error}
+              onFeedback={handleFeedback}
+              onSuggestionClick={handleSuggestionClick}
+              onDocumentClick={handleDocumentClick}
+              onPreviewClick={handlePreviewClick}
+            />
           </div>
         )}
-      </div>
 
-      <Separator />
+        {/* Spacer cuando no hay mensajes */}
+        {!hasMessages && <div className="flex-1" />}
 
-      {/* Query Input */}
-      <div className="p-4">
-        <ElysiaQueryInput
-          onSendQuery={handleSendQuery}
-          isLoading={isLoading}
-          disabled={!session}
-          placeholder="Pregúntame sobre tus documentos..."
-        />
+        {/* Query Input siempre pegado al bottom */}
+        <div className="border-t bg-background p-4 pb-6">
+          <ElysiaQueryInput
+            onSendQuery={handleSendQuery}
+            isLoading={isLoading}
+            disabled={!backendUser?.id}
+            placeholder="Ask about your documents..."
+          />
+        </div>
       </div>
-    </Card>
+    </ToastProvider>
   )
-}
+})
 
 // Helper functions
 function determineMessageType(data: any): ElysiaMessage["type"] {
@@ -349,7 +225,16 @@ function determineMessageType(data: any): ElysiaMessage["type"] {
 }
 
 function extractAnswer(answer: any): string {
-  if (typeof answer === "string") return answer
+  if (typeof answer === "string") {
+    // Handle Python tuple format: "('text', [])" or "('text', [...])""
+    const tupleMatch = answer.match(/^\('([^']*)',\s*\[.*\]\)$/)
+    if (tupleMatch) {
+      return tupleMatch[1] // Extract just the text content
+    }
+    
+    // Handle other string formats
+    return answer
+  }
   if (Array.isArray(answer) && answer.length > 0) {
     return typeof answer[0] === "string" ? answer[0] : String(answer[0])
   }
@@ -359,29 +244,17 @@ function extractAnswer(answer: any): string {
   return String(answer || "")
 }
 
-function parseCitations(citations: any[]): ElysiaMessage["metadata"]["citations"] {
-  if (!Array.isArray(citations)) return []
-  
+function extractSources(citations: any[]): Array<{document: string; page?: number; relevance: number}> {
   return citations.map((citation, index) => ({
-    id: citation.id || `ref_${index}`,
-    title: citation.title || citation.name || `Referencia ${index + 1}`,
-    url: citation.url,
-    page: citation.page,
-    excerpt: citation.excerpt || citation.content?.substring(0, 100)
+    document: citation.document || citation.source || `Source ${index + 1}`,
+    page: citation.page || citation.page_number,
+    relevance: citation.relevance || citation.score || 0.8
   }))
 }
 
-function generateSuggestions(query: string): string[] {
-  // Generate contextual suggestions based on the query
-  if (query.toLowerCase().includes("documento")) {
-    return [
-      "¿Qué tipos de documentos tienes?",
-      "Buscar por fecha",
-      "Mostrar documentos recientes"
-    ]
-  }
-  
-  if (query.toLowerCase().includes("contrato")) {
+function getContextualSuggestions(result: any): string[] {
+  // Dynamic suggestions based on result context
+  if (result.document_type === "contract") {
     return [
       "Analizar términos del contrato",
       "Buscar cláusulas específicas", 

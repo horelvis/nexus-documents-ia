@@ -39,7 +39,7 @@ async def elysia_query(
                     "Authorization": f"Bearer {microservice_key}",
                     "Content-Type": "application/json"
                 },
-                timeout=60.0  # Generous timeout for Elysia processing
+                timeout=120.0  # Extended timeout for Elysia processing
             )
             
             if response.status_code == 200:

@@ -150,6 +150,11 @@ class WeaviateService:
                         description="Document content"
                     ),
                     weaviate.classes.config.Property(
+                        name="document_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="PostgreSQL document ID"
+                    ),
+                    weaviate.classes.config.Property(
                         name="tenant_id",
                         data_type=weaviate.classes.config.DataType.TEXT,
                         description="Tenant identifier"
@@ -217,6 +222,7 @@ class WeaviateService:
             doc_data = {
                 "title": document.title,
                 "content": document.content,
+                "document_id": document.id,  # Store PostgreSQL document ID as property
                 "tenant_id": document.tenant_id,
                 "document_type": document.document_type,
                 "tags": document.tags,
@@ -405,7 +411,7 @@ class WeaviateService:
                         pass
                 
                 doc = DocumentResponse(
-                    id=str(item.uuid) if item.uuid else "",
+                    id=item.properties.get("document_id", str(item.uuid) if item.uuid else ""),  # Use PostgreSQL document_id
                     title=item.properties.get("title", ""),
                     content=item.properties.get("content", ""),
                     metadata=item.properties.get("metadata", {}),
@@ -467,7 +473,7 @@ class WeaviateService:
         try:
             # List collections using v4 API
             collections_list = self.client.collections.list_all()
-            collections = [collection for collection in collections_list.keys()]
+            collections = [collection for collection in collections_list.keys() if collection is not None and isinstance(collection, str)]
             return collections
         except Exception as e:
             logger.error(f"❌ Failed to list collections: {e}")
@@ -500,6 +506,7 @@ class WeaviateService:
                 doc_data = {
                     "title": document.title,
                     "content": document.content,
+                    "document_id": document.id,  # Store PostgreSQL document ID as property
                     "metadata": document.metadata,
                     "tenant_id": document.tenant_id,
                     "document_type": document.document_type,

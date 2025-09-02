@@ -96,8 +96,8 @@ class ElysiaService:
             await weaviate_service.initialize()
             available_collections = await weaviate_service.list_collections()
             
-            # Filter only nexus collections (tenant-specific)
-            tenant_collections = [c for c in available_collections if c.lower().startswith('nexus')]
+            # Filter only nexus collections (tenant-specific) with safety checks
+            tenant_collections = [c for c in available_collections if c and isinstance(c, str) and c.lower().startswith('nexus')]
             logger.info(f"🔍 Found {len(tenant_collections)} nexus collections: {tenant_collections}")
             
             for collection_name in tenant_collections:
@@ -179,6 +179,82 @@ class ElysiaService:
                 except Exception as e:
                     return f"Error ingesting document: {str(e)}"
             
+            # Web Search Tool
+            @tool
+            async def search_web(query: str, location: str = "Spain") -> str:
+                """Search the web for current information, news, weather, and real-time data"""
+                try:
+                    import aiohttp
+                    import asyncio
+                    from urllib.parse import quote_plus
+                    
+                    # Use DuckDuckGo Instant Answers API for web search
+                    search_url = f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1&skip_disambig=1"
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(search_url, timeout=10) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                
+                                # Extract relevant information
+                                result_parts = []
+                                
+                                if data.get('AbstractText'):
+                                    result_parts.append(f"Summary: {data['AbstractText']}")
+                                
+                                if data.get('Answer'):
+                                    result_parts.append(f"Direct Answer: {data['Answer']}")
+                                
+                                if data.get('RelatedTopics'):
+                                    topics = [topic.get('Text', '') for topic in data['RelatedTopics'][:3] if isinstance(topic, dict)]
+                                    if topics:
+                                        result_parts.append(f"Related: {'; '.join(topics)}")
+                                
+                                if result_parts:
+                                    return f"Web search results for '{query}': {' | '.join(result_parts)}"
+                                else:
+                                    return f"I found some information about '{query}' but couldn't extract specific details. Please try a more specific search query."
+                            else:
+                                return f"Web search temporarily unavailable for '{query}'. Please try again later."
+                                
+                except Exception as e:
+                    return f"Web search error for '{query}': {str(e)}"
+            
+            # Weather Information Tool
+            @tool
+            async def get_weather_info(location: str) -> str:
+                """Get current weather information for any location worldwide"""
+                try:
+                    import aiohttp
+                    from urllib.parse import quote_plus
+                    
+                    # Use wttr.in API for weather information
+                    weather_url = f"https://wttr.in/{quote_plus(location)}?format=j1"
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(weather_url, timeout=10) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                
+                                if 'current_condition' in data and data['current_condition']:
+                                    current = data['current_condition'][0]
+                                    
+                                    temp_c = current.get('temp_C', 'N/A')
+                                    feels_like = current.get('FeelsLikeC', 'N/A') 
+                                    humidity = current.get('humidity', 'N/A')
+                                    desc = current.get('weatherDesc', [{}])[0].get('value', 'N/A')
+                                    wind_speed = current.get('windspeedKmph', 'N/A')
+                                    wind_dir = current.get('winddir16Point', 'N/A')
+                                    
+                                    return f"Weather in {location}: {temp_c}°C ({desc}), feels like {feels_like}°C. Humidity: {humidity}%. Wind: {wind_speed} km/h {wind_dir}."
+                                else:
+                                    return f"Weather information for '{location}' is currently unavailable."
+                            else:
+                                return f"Could not retrieve weather for '{location}'. Please check the location name."
+                                
+                except Exception as e:
+                    return f"Weather lookup error for '{location}': {str(e)}"
+            
             # Register tools with the tree
             if self.tree:
                 self.tree.add_tool(analyze_contract_risks)
@@ -187,10 +263,12 @@ class ElysiaService:
                 self.tree.add_tool(extract_signature_requirements)
                 self.tree.add_tool(create_executive_summary)
                 self.tree.add_tool(ingest_document)
+                self.tree.add_tool(search_web)
+                self.tree.add_tool(get_weather_info)
             
             self.tools_registered = True
-            logger.info("✅ Custom CrewAI tools registered in Elysia Tree")
-            logger.info("📋 Available tools: contract analysis, financial analysis, compliance, signatures, summaries")
+            logger.info("✅ Custom tools registered in Elysia Tree")
+            logger.info("📋 Available tools: contract analysis, financial analysis, compliance, signatures, summaries, web search, weather")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to register custom tools: {e}")
@@ -261,7 +339,7 @@ class ElysiaService:
                     docs_content = []
                     for i, doc in enumerate(weaviate_result.results[:3], 1):
                         docs_content.append(f"DOCUMENTO {i}: {doc.title}\n{doc.content[:1000]}...")
-                        tools_used.append(f"weaviate_search:{doc.title}")
+                        tools_used.append(f"weaviate_search:{doc.title}:{doc.id}")
                     
                     context_content = "\n\n".join(docs_content)
                     logger.info(f"✅ Found {len(weaviate_result.results)} relevant documents in Weaviate")
@@ -338,14 +416,28 @@ class ElysiaService:
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List all available tools"""
-        # Elysia Tree handles tool discovery and selection internally
-        return [
+        from app.services.elysia_tools import NexusElysiaTools
+        
+        # Get all registered tools from NexusElysiaTools
+        nexus_tools = NexusElysiaTools()
+        tools_list = [
             {
                 "name": "elysia_tree",
                 "description": "Native Elysia decision tree with dynamic tool selection",
                 "category": "agentic"
             }
         ]
+        
+        # Add all NexusDocs360 specific tools
+        for tool_id, tool_info in nexus_tools.tools_registry.items():
+            tools_list.append({
+                "name": tool_info["name"],
+                "description": tool_info["description"], 
+                "category": tool_info["category"],
+                "tool_id": tool_id
+            })
+            
+        return tools_list
     
     async def health_check(self) -> Dict[str, Any]:
         """Check Elysia service health"""

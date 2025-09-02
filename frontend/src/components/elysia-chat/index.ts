@@ -1,7 +1,7 @@
 // Elysia Chat Components
 // Based on https://github.com/weaviate/elysia-frontend
 
-export { ElysiaChat } from './ElysiaChat'
+export { ElysiaChat, type ElysiaChatRef } from './ElysiaChat'
 export { ElysiaQueryInput } from './ElysiaQueryInput'
 export { ElysiaRenderChat } from './ElysiaRenderChat'
 export { ElysiaMarkdownFormat } from './ElysiaMarkdownFormat'

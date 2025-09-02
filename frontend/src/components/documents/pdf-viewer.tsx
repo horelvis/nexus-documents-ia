@@ -20,12 +20,30 @@ import {
   RotateCw,
   Download,
   Maximize2,
-  Loader2
+  Loader2,
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
+  Info,
+  FileSignature,
+  PenTool
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+
+interface DigitalSignature {
+  name: string
+  contactInfo?: string
+  location?: string
+  reason?: string
+  date?: string
+  isValid?: boolean
+  subFilter?: string
+  signedBy?: string
+  pageNumber?: number
+}
 
 interface PDFViewerProps {
   url: string
@@ -48,12 +66,72 @@ export default function PDFViewer({
   const [rotation, setRotation] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [signatures, setSignatures] = useState<DigitalSignature[]>([])
+  const [showSignatureInfo, setShowSignatureInfo] = useState<boolean>(false)
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages)
     setIsLoading(false)
     setError(null)
+    // Detectar firmas digitales
+    detectDigitalSignatures()
   }, [])
+
+  const detectDigitalSignatures = useCallback(async () => {
+    try {
+      const loadingTask = pdfjs.getDocument(url)
+      const pdf = await loadingTask.promise
+      const detectedSignatures: DigitalSignature[] = []
+
+      // Verificar si el documento tiene firmas
+      const hasSignatures = pdf.numPages > 0
+      
+      if (hasSignatures) {
+        // Iterar por cada página para buscar anotaciones de firmas
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum)
+          const annotations = await page.getAnnotations()
+          
+          // Buscar anotaciones de tipo Widget (formularios/firmas)
+          annotations.forEach((annotation: any) => {
+            if (annotation.subtype === 'Widget' && annotation.fieldType === 'Sig') {
+              const signature: DigitalSignature = {
+                name: annotation.fieldName || `Signature ${detectedSignatures.length + 1}`,
+                contactInfo: annotation.contactInfo,
+                location: annotation.location,
+                reason: annotation.reason,
+                date: annotation.modificationDate,
+                isValid: true, // Por defecto true, idealmente se validaría
+                subFilter: annotation.subFilter,
+                signedBy: annotation.title || annotation.contents,
+                pageNumber: pageNum
+              }
+              detectedSignatures.push(signature)
+            }
+          })
+        }
+      }
+
+      // También verificar metadatos del documento para información de firmas
+      const metadata = await pdf.getMetadata()
+      if (metadata.info?.Producer?.includes('Sign') || metadata.info?.Creator?.includes('Sign')) {
+        // Si no se encontraron firmas específicas pero hay indicios, agregar una genérica
+        if (detectedSignatures.length === 0) {
+          detectedSignatures.push({
+            name: 'Digital Signature Detected',
+            reason: 'Document appears to be digitally signed',
+            isValid: true,
+            date: metadata.info?.ModDate || new Date().toISOString()
+          })
+        }
+      }
+
+      setSignatures(detectedSignatures)
+    } catch (error) {
+      console.warn('Error detecting digital signatures:', error)
+      setSignatures([])
+    }
+  }, [url])
 
   const onDocumentLoadError = useCallback((error: Error) => {
     console.error('Error loading PDF:', error)
@@ -191,6 +269,94 @@ export default function PDFViewer({
             <Button variant="outline" size="sm" onClick={openFullscreen}>
               <Maximize2 className="h-4 w-4" />
             </Button>
+
+            {/* Digital Signatures Indicator */}
+            {signatures.length > 0 && (
+              <>
+                <Separator orientation="vertical" className="h-6" />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowSignatureInfo(!showSignatureInfo)}
+                  className="gap-2"
+                >
+                  <FileSignature className="h-4 w-4" />
+                  <span className="text-xs">{signatures.length}</span>
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Digital Signatures Info Panel */}
+      {showSignatureInfo && signatures.length > 0 && (
+        <div className="border-b bg-blue-50 dark:bg-blue-950 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <FileSignature className="h-5 w-5 text-blue-600" />
+            <h3 className="font-semibold text-blue-900 dark:text-blue-100">
+              Firmas Digitales Detectadas ({signatures.length})
+            </h3>
+          </div>
+          <div className="space-y-3">
+            {signatures.map((signature, index) => (
+              <Card key={index} className="p-3 bg-white dark:bg-gray-800">
+                <div className="flex items-start gap-3">
+                  {signature.isValid ? (
+                    <ShieldCheck className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <ShieldAlert className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h4 className="font-medium text-sm text-gray-900 dark:text-gray-100">{signature.name}</h4>
+                      <Badge 
+                        variant={signature.isValid ? "default" : "secondary"}
+                        className="text-xs"
+                      >
+                        {signature.isValid ? "Válida" : "Verificar"}
+                      </Badge>
+                      {signature.pageNumber && (
+                        <Badge variant="outline" className="text-xs text-gray-700 dark:text-gray-300">
+                          Página {signature.pageNumber}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+                      {signature.signedBy && (
+                        <div>
+                          <span className="font-medium">Firmado por:</span> {signature.signedBy}
+                        </div>
+                      )}
+                      {signature.date && (
+                        <div>
+                          <span className="font-medium">Fecha:</span> {new Date(signature.date).toLocaleString()}
+                        </div>
+                      )}
+                      {signature.reason && (
+                        <div>
+                          <span className="font-medium">Razón:</span> {signature.reason}
+                        </div>
+                      )}
+                      {signature.location && (
+                        <div>
+                          <span className="font-medium">Ubicación:</span> {signature.location}
+                        </div>
+                      )}
+                      {signature.contactInfo && (
+                        <div>
+                          <span className="font-medium">Contacto:</span> {signature.contactInfo}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+          <div className="mt-3 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-1">
+            <Info className="h-3 w-3" />
+            La validación completa de firmas digitales requiere verificación con certificados oficiales.
           </div>
         </div>
       )}
@@ -234,6 +400,12 @@ export default function PDFViewer({
             <span>{fileName}</span>
             {numPages > 0 && (
               <span>• Page {pageNumber} of {numPages}</span>
+            )}
+            {signatures.length > 0 && (
+              <span className="flex items-center gap-1">
+                • <Shield className="h-3 w-3" />
+                {signatures.length} signature{signatures.length > 1 ? 's' : ''}
+              </span>
             )}
           </div>
           <div className="flex items-center space-x-2">

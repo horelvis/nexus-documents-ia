@@ -1,19 +1,19 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Send, Loader2, Settings, Paperclip } from "lucide-react"
+import { Send, Loader2, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Card } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
 interface ElysiaQueryInputProps {
-  onSendQuery: (query: string, route?: string, mimick?: boolean) => Promise<void>
+  onSendQuery: (query: string) => Promise<void>
   isLoading?: boolean
   disabled?: boolean
   className?: string
   placeholder?: string
+  addDisplacement?: (value: number) => void
+  addDistortion?: (value: number) => void
 }
 
 export function ElysiaQueryInput({
@@ -21,13 +21,11 @@ export function ElysiaQueryInput({
   isLoading = false,
   disabled = false,
   className,
-  placeholder = "Pregúntame sobre tus documentos..."
+  placeholder = "Pregúntame sobre tus documentos...",
+  addDisplacement,
+  addDistortion
 }: ElysiaQueryInputProps) {
   const [query, setQuery] = useState("")
-  const [route, setRoute] = useState("")
-  const [mimick, setMimick] = useState(false)
-  const [showRoute, setShowRoute] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Focus textarea when component mounts
@@ -41,9 +39,8 @@ export function ElysiaQueryInput({
     if (!query.trim() || isLoading) return
     
     try {
-      await onSendQuery(query, route || undefined, mimick)
+      await onSendQuery(query)
       setQuery("")
-      setRoute("")
       // Reset height after sending
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
@@ -64,6 +61,10 @@ export function ElysiaQueryInput({
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setQuery(e.target.value)
     
+    // Trigger 3D animations when typing
+    if (addDisplacement) addDisplacement(0.035)
+    if (addDistortion) addDistortion(0.02)
+    
     // Reset height to auto to get proper scrollHeight
     e.target.style.height = 'auto'
     // Set height based on scrollHeight, with min and max limits
@@ -73,64 +74,6 @@ export function ElysiaQueryInput({
 
   return (
     <div className={cn("space-y-4", className)}>
-      {/* Advanced Settings Toggle */}
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="text-muted-foreground"
-        >
-          <Settings className="h-4 w-4 mr-2" />
-          Configuración avanzada
-        </Button>
-      </div>
-
-      {/* Advanced Settings Panel */}
-      {showAdvanced && (
-        <Card className="p-4 space-y-4 bg-muted/50">
-          <div className="space-y-3">
-            {/* Route Configuration */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={showRoute}
-                onCheckedChange={setShowRoute}
-                id="route-toggle"
-              />
-              <label htmlFor="route-toggle" className="text-sm">
-                Usar ruta personalizada
-              </label>
-            </div>
-
-            {showRoute && (
-              <div>
-                <label className="text-sm text-muted-foreground">
-                  Ruta personalizada (desarrollo):
-                </label>
-                <Textarea
-                  value={route}
-                  onChange={(e) => setRoute(e.target.value)}
-                  placeholder="/api/custom-route"
-                  className="mt-1"
-                  rows={1}
-                />
-              </div>
-            )}
-
-            {/* Mimick Configuration */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={mimick}
-                onCheckedChange={setMimick}
-                id="mimick-toggle"
-              />
-              <label htmlFor="mimick-toggle" className="text-sm">
-                Modo imitación (debugging)
-              </label>
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* Query Input */}
       <div className="relative">

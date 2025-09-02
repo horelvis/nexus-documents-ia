@@ -9,11 +9,25 @@ export interface ElysiaQueryInputProps {
 }
 
 export interface Citation {
-  id: string
-  title: string
+  id?: string
+  document?: string
+  title?: string
   url?: string
   page?: number
   excerpt?: string
+  relevance?: number
+}
+
+export interface DocumentInfo {
+  name: string
+  id?: string
+  url?: string
+  previewUrl?: string
+  collection?: string
+  createdAt?: string
+  author?: string
+  fileType?: string
+  relevanceScore?: number
 }
 
 export interface ElysiaMarkdownFormatProps {
@@ -23,7 +37,7 @@ export interface ElysiaMarkdownFormatProps {
   className?: string
 }
 
-export type ElysiaMessageType = "user" | "result" | "text" | "error" | "warning" | "self_healing_error" | "system"
+export type ElysiaMessageType = "user" | "query" | "result" | "text" | "error" | "warning" | "info" | "self_healing_error" | "system"
 
 export interface ElysiaMessage {
   id: string
@@ -35,7 +49,16 @@ export interface ElysiaMessage {
     decision_path?: string[]
     tools_used?: string[]
     execution_time_ms?: number
+    processing_time?: number
+    sources?: Citation[]
     citations?: Citation[]
+    agent_flow?: Array<{
+      agent?: string
+      action?: string
+      result?: string
+    }> | string[]
+    suggestions?: string[]
+    documents?: DocumentInfo[]
   }
   suggestions?: string[]
   isStreaming?: boolean
@@ -49,9 +72,17 @@ export interface ElysiaRenderChatProps {
   socketStatus?: "connected" | "disconnected" | "connecting"
   onFeedback?: (messageId: string, feedback: "positive" | "negative") => void
   onSuggestionClick?: (suggestion: string) => void
+  onDocumentClick?: (doc: DocumentInfo) => void
+  onPreviewClick?: (doc: DocumentInfo) => void
   currentView?: "chat" | "code" | "result"
   onViewChange?: (view: "chat" | "code" | "result") => void
   className?: string
+}
+
+export interface DisplayRendererProps {
+  message: ElysiaMessage
+  onDocumentClick?: (doc: DocumentInfo) => void
+  onPreviewClick?: (doc: DocumentInfo) => void
 }
 
 export interface ElysiaSession {

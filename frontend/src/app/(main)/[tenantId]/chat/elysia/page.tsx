@@ -2,8 +2,8 @@ import { Metadata } from "next"
 import { ElysiaChat } from "@/components/elysia-chat"
 
 export const metadata: Metadata = {
-  title: "Elysia AI Assistant",
-  description: "Chat inteligente con capacidades agentic RAG powered by Elysia",
+  title: "Emma AI Assistant",
+  description: "Chat inteligente con capacidades agentic RAG powered by Emma",
 }
 
 interface ElysiaPageProps {
@@ -17,7 +17,7 @@ export default function ElysiaPage({ params }: ElysiaPageProps) {
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Elysia AI Assistant</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Emma AI Assistant</h1>
         <p className="text-muted-foreground">
           Asistente inteligente con capacidades agentic RAG para análisis de documentos
         </p>
@@ -28,7 +28,7 @@ export default function ElysiaPage({ params }: ElysiaPageProps) {
         <ElysiaChat 
           tenantId={params.tenantId}
           className="h-[800px]"
-          initialMessage="¡Hola! Soy Elysia, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+          initialMessage="¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
         />
       </div>
 

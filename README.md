@@ -11,28 +11,33 @@
 
 ### 🌟 Características Principales Potenciadas por IA
 
-- **🧠 Procesamiento Cognitivo**: IA que comprende contexto, extrae insights y genera resúmenes ejecutivos automáticamente
-- **🤖 Multi-Agente IA**: Ecosistema de agentes especializados (Legal, Financiero, Compliance, Contratos)
-- **🔍 Búsqueda Neuronal**: No solo encuentra documentos, entiende intenciones y descubre conexiones ocultas
-- **💬 Chat Inteligente**: Conversa con tus documentos en lenguaje natural, obtén respuestas instantáneas
-- **📈 Analytics Predictivo**: IA predice tendencias, identifica riesgos y sugiere optimizaciones
-- **🎯 Clasificación Automática**: Zero-touch filing - los documentos se organizan solos con 99% de precisión
-- **🔄 Workflows Autónomos**: IA que aprende patrones y automatiza procesos complejos
-- **🌐 Multimodal AI**: Procesa texto, imágenes, tablas y gráficos con igual eficacia
+- **🧠 Emma AI Assistant**: Asistente inteligente que comprende contexto, extrae insights y genera respuestas personalizadas
+- **🌐 Búsqueda Web en Tiempo Real**: Acceso a información actualizada con herramientas de búsqueda web integradas
+- **🔍 Búsqueda Semántica Avanzada**: Powered by Weaviate para encontrar documentos por significado, no solo palabras
+- **💬 Chat Conversacional**: Interactúa con tus documentos usando procesamiento de lenguaje natural
+- **📊 Análisis Automático**: Extrae automáticamente datos clave de contratos, facturas y documentos legales
+- **🎯 Clasificación Inteligente**: Organización automática de documentos con IA de alta precisión
+- **🔄 Workflows Adaptativos**: Sistema de decisión inteligente que selecciona las mejores herramientas para cada tarea
+- **🌐 Capacidades Multimodales**: Procesa texto, PDFs con firmas digitales y metadatos complejos
 
-## 🤖 Capacidades de IA Revolucionarias
+## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
-### Agentes IA Especializados
-- **📑 Agente de Contratos**: Analiza cláusulas, detecta riesgos, sugiere mejoras
-- **💰 Agente Financiero**: Extrae KPIs, genera reportes, identifica anomalías
-- **⚖️ Agente Legal**: Verifica compliance, encuentra precedentes, redacta documentos
-- **✍️ Agente de Firmas**: Gestiona flujos de firma con predicción de tiempos
+### Emma AI Assistant
+**Emma** es nuestro asistente de IA avanzado powered by **Elysia Framework**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma.
 
-### Modelos de IA Integrados
-- **GPT-4 & Claude**: Para comprensión profunda y generación de contenido
-- **Llama 3.2 Local**: Procesamiento privado on-premise vía Ollama
-- **Vision AI**: OCR inteligente que entiende layouts complejos
-- **Embeddings Multilingües**: Soporte para 50+ idiomas
+#### Capacidades Principales de Emma:
+- **🧠 Procesamiento Contextual**: Comprende el contexto completo de tus documentos
+- **🔍 Búsqueda Inteligente**: Encuentra información relevante usando Weaviate vector search
+- **🌐 Información en Tiempo Real**: Accede a datos actualizados via búsqueda web
+- **🌤️ Consultas Meteorológicas**: Información climática para cualquier ubicación
+- **📄 Análisis de Documentos**: Extrae insights de contratos, facturas y reportes
+- **✨ Respuestas Adaptativas**: Sistema de decisión que selecciona las mejores herramientas
+
+#### Tecnología Subyacente:
+- **Elysia Framework**: Sistema de decisión inteligente y orquestación de herramientas
+- **Weaviate**: Base de datos vectorial para búsqueda semántica avanzada
+- **Ollama Integration**: Modelos locales (gpt-oss:20b) para privacidad y rendimiento
+- **Multi-Tool Architecture**: 12+ herramientas especializadas para diferentes tareas
 
 ### Casos de Uso con IA
 1. **Due Diligence Automático**: Analiza 1000+ documentos en minutos
@@ -46,14 +51,14 @@
 NexusDocs360 está construido con una arquitectura de microservicios optimizada para IA:
 
 ### Stack de IA (Python + LLMs)
-- **🧠 Orquestador IA Principal**: FastAPI coordinando todos los servicios de IA
-- **Microservicios de IA Especializados**:
-  - 🤖 **LangChain Service**: Cadenas de IA y RAG avanzado
-  - 🤖 **Langroid Service**: Agentes autónomos multi-tarea
-  - 🧮 **Ollama Service**: LLMs privados on-premise (Llama, Mistral, Phi)
-  - 🔍 **Qdrant Service**: Búsqueda vectorial neuronal
-  - 👁️ **Vision AI Service**: Procesamiento inteligente de imágenes
-  - 📊 **Analytics AI**: Generación automática de insights
+- **🧠 API Principal**: FastAPI coordinando todos los servicios
+- **🤖 Emma AI Service**: Weaviate + Elysia para asistente inteligente
+- **Microservicios Especializados**:
+  - 🧮 **Ollama Service**: LLMs privados on-premise (gpt-oss:20b, llama3.2)
+  - 📁 **Storage Service**: Google Cloud Storage con gestión inteligente
+  - ✍️ **Signature Service**: Detección y validación de firmas digitales
+  - 🔍 **CAG Service**: Análisis de contenido y generación de metadatos
+  - 📊 **LangExtract Service**: Extracción inteligente de datos estructurados
 
 ### Frontend (Next.js 15)
 - **Next.js App Router**: Última tecnología de React
@@ -64,8 +69,9 @@ NexusDocs360 está construido con una arquitectura de microservicios optimizada 
 ### Infraestructura
 - **PostgreSQL 15**: Base de datos relacional principal
 - **Redis**: Cache y gestión de sesiones
-- **Qdrant**: Base de datos vectorial para búsqueda semántica
-- **Docker**: Contenerización completa
+- **Weaviate**: Base de datos vectorial para Emma AI y búsqueda semántica
+- **Google Cloud Storage**: Almacenamiento de archivos con buckets multi-tenant
+- **Docker**: Contenerización completa con desarrollo hot-reload
 - **Nginx**: Proxy reverso con SSL automático
 
 ## 🚀 Inicio Rápido

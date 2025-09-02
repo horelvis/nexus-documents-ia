@@ -84,7 +84,7 @@ const data = {
           url: "/search",
         },
         {
-          title: "Elysia Assistant",
+          title: "Emma Assistant",
           url: "/chat",
         },
         {

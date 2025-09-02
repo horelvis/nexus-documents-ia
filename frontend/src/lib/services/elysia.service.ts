@@ -39,8 +39,8 @@ export function useElysiaService() {
   async function queryElysia(query: ElysiaQuery): Promise<ElysiaResponse> {
     const token = await getToken()
     
-    // Direct call to weaviate-service:8007
-    const response = await fetch(`${API_CONFIG.WEAVIATE_SERVICE_URL}/elysia/query`, {
+    // Call through main API
+    const response = await fetch(`/api/v1/weaviate/elysia/query`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -62,7 +62,7 @@ export function useElysiaService() {
   async function getAvailableAgents(): Promise<ElysiaAgent[]> {
     try {
       const token = await getToken()
-      const response = await fetch(`${API_CONFIG.WEAVIATE_SERVICE_URL}/elysia/tools`, {
+      const response = await fetch(`/api/v1/weaviate/elysia/tools`, {
         headers: {
           'Authorization': `Bearer ${token || ''}`
         }

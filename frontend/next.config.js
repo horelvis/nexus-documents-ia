@@ -12,7 +12,20 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    domains: ['storage.googleapis.com', 'lh3.googleusercontent.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'storage.googleapis.com',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+        port: '',
+        pathname: '/**',
+      },
+    ],
   },
   async headers() {
     return [
@@ -50,6 +63,43 @@ const nextConfig = {
         destination: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}/api/:path*`,
       },
     ]
+  },
+  webpack: (config, { isServer }) => {
+    // Add a rule to handle .glsl files
+    config.module.rules.push({
+      test: /\.(glsl|vs|fs|vert|frag)$/,
+      exclude: /node_modules/,
+      use: [
+        {
+          loader: "raw-loader",
+        },
+        {
+          loader: "glslify-loader",
+        },
+      ],
+    });
+
+    // Fix for react-pdf and webpack compatibility
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false,
+    };
+
+    // Handle external imports that webpack can't resolve
+    config.externals = {
+      ...config.externals,
+      canvas: 'canvas',
+    };
+
+    // Ignore certain dynamic imports that cause issues
+    config.plugins.push(
+      new (require('webpack').IgnorePlugin)({
+        resourceRegExp: /^\.\/locale$/,
+        contextRegExp: /moment$/,
+      })
+    );
+
+    return config;
   },
 }
 

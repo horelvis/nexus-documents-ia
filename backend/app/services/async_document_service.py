@@ -402,33 +402,42 @@ class AsyncDocumentService:
                     
                     # ALSO store in Weaviate (new migration path)
                     try:
-                        from app.core.security import get_tenant_collection_name
+                        import httpx
+                        from app.core.config import settings
                         
-                        logger.info(f"Storing document {doc_id} in Weaviate for migration")
+                        logger.info(f"Storing document {doc_id} in Weaviate via microservice")
                         
-                        # Get tenant collection name
-                        collection_name = get_tenant_collection_name(self.tenant_id, "documents")
+                        # Get collection name with proper format
+                        collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
                         
-                        # Prepare document for Weaviate
+                        # Prepare document for Weaviate microservice with correct schema
                         weaviate_doc = {
+                            "id": doc_id,  # Use PostgreSQL document ID
                             "title": doc.title or doc.filename,
                             "content": text_for_embedding,
                             "tenant_id": self.tenant_id,
                             "document_type": doc.category or "general", 
-                            "tags": [doc.category] if doc.category else [],
-                            "metadata": {}  # Simplified metadata for now
+                            "tags": [doc.category] if doc.category else []
                         }
                         
-                        # Add to Weaviate via weaviate-service
-                        weaviate_result = await weaviate_client.add_document(collection_name, weaviate_doc)
+                        # Call Weaviate microservice
+                        microservice_url = f"{settings.WEAVIATE_SERVICE_URL}/weaviate/collections/{collection_name}/documents"
+                        headers = {
+                            "Authorization": f"Bearer {settings.microservices_api_key}",
+                            "Content-Type": "application/json"
+                        }
                         
-                        if weaviate_result and weaviate_result.get("id"):
-                            logger.info(f"✅ Document {doc_id} stored in Weaviate: {weaviate_result.get('id')}")
-                        else:
-                            logger.warning(f"⚠️ Weaviate storage returned no ID for document {doc_id}")
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            response = await client.post(microservice_url, json=weaviate_doc, headers=headers)
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                logger.info(f"✅ Document {doc_id} stored in Weaviate: {result.get('id', 'no_id')}")
+                            else:
+                                logger.error(f"❌ Weaviate microservice error {response.status_code}: {response.text}")
                             
                     except Exception as e:
-                        logger.error(f"❌ Failed to store document {doc_id} in Weaviate: {e}")
+                        logger.error(f"❌ Failed to store document {doc_id} in Weaviate microservice: {e}")
                         # Don't fail the whole process if Weaviate fails - it's a migration feature
                 except Exception as e:
                     logger.error(f"Failed to store in vector DB for {doc_id}: {e}")

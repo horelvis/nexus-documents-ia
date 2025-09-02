@@ -81,6 +81,18 @@ class NexusElysiaTools:
                 "description": "Processes and translates multi-language documents",
                 "function": self.process_multilingual,
                 "category": "processing"
+            },
+            "web_search": {
+                "name": "Web Search",
+                "description": "Searches the web for current information, news, weather, and real-time data",
+                "function": self.search_web,
+                "category": "search"
+            },
+            "weather_info": {
+                "name": "Weather Information",
+                "description": "Gets current weather information for any location worldwide",
+                "function": self.get_weather_info,
+                "category": "information"
             }
         }
         
@@ -682,6 +694,110 @@ class NexusElysiaTools:
             return "german"
         else:
             return "english"
+    
+    async def search_web(self, query: str, max_results: int = 5) -> Dict[str, Any]:
+        """Search the web for current information"""
+        try:
+            import httpx
+            from bs4 import BeautifulSoup
+            import re
+            
+            logger.info(f"🔍 Performing web search for: {query}")
+            
+            # Use DuckDuckGo instant answer API (no API key required)
+            search_url = "https://api.duckduckgo.com/"
+            params = {
+                "q": query,
+                "format": "json",
+                "no_redirect": "1",
+                "no_html": "1",
+                "skip_disambig": "1"
+            }
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(search_url, params=params)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    result = {
+                        "query": query,
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "DuckDuckGo",
+                        "instant_answer": data.get("Answer", ""),
+                        "abstract": data.get("Abstract", ""),
+                        "definition": data.get("Definition", ""),
+                        "related_topics": [topic.get("Text", "") for topic in data.get("RelatedTopics", [])[:3]]
+                    }
+                    
+                    # If we got useful information, return it
+                    if result["instant_answer"] or result["abstract"] or result["definition"]:
+                        logger.info(f"✅ Web search successful for: {query}")
+                        return result
+                    else:
+                        return {
+                            "query": query,
+                            "error": "No instant results found",
+                            "suggestion": "Try a more specific search query"
+                        }
+                else:
+                    return {
+                        "query": query,
+                        "error": f"Search service unavailable (HTTP {response.status_code})"
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ Web search failed: {e}")
+            return {
+                "query": query,
+                "error": f"Search failed: {str(e)}"
+            }
+    
+    async def get_weather_info(self, location: str) -> Dict[str, Any]:
+        """Get current weather information for a location"""
+        try:
+            import httpx
+            
+            logger.info(f"🌤️ Getting weather info for: {location}")
+            
+            # Use OpenWeatherMap-like free service (wttr.in)
+            weather_url = f"https://wttr.in/{location}?format=j1"
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(weather_url)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    current = data.get("current_condition", [{}])[0]
+                    
+                    weather_info = {
+                        "location": location,
+                        "timestamp": datetime.now().isoformat(),
+                        "temperature": f"{current.get('temp_C', 'N/A')}°C",
+                        "feels_like": f"{current.get('FeelsLikeC', 'N/A')}°C",
+                        "condition": current.get('weatherDesc', [{}])[0].get('value', 'Unknown'),
+                        "humidity": f"{current.get('humidity', 'N/A')}%",
+                        "wind": f"{current.get('windspeedKmph', 'N/A')} km/h {current.get('winddir16Point', '')}",
+                        "visibility": f"{current.get('visibility', 'N/A')} km",
+                        "uv_index": current.get('uvIndex', 'N/A'),
+                        "source": "wttr.in"
+                    }
+                    
+                    logger.info(f"✅ Weather info retrieved for: {location}")
+                    return weather_info
+                else:
+                    return {
+                        "location": location,
+                        "error": f"Weather service unavailable (HTTP {response.status_code})",
+                        "suggestion": "Try with a more specific location (city, country)"
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ Weather info failed: {e}")
+            return {
+                "location": location,
+                "error": f"Weather request failed: {str(e)}"
+            }
 
 
 # Global tools instance

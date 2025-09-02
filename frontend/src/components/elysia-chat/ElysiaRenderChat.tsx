@@ -10,56 +10,27 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { ElysiaMarkdownFormat } from "./ElysiaMarkdownFormat"
+import { DisplayRenderer } from "./displays/DisplayRenderer"
+import { ElysiaRenderChatProps, ElysiaMessage } from "./types"
 
-// Message types from Elysia
-type ElysiaMessageType = "user" | "result" | "text" | "error" | "warning" | "self_healing_error" | "system"
-
-interface ElysiaMessage {
-  id: string
-  type: ElysiaMessageType
-  content: string
-  timestamp: Date
-  metadata?: {
-    confidence_score?: number
-    decision_path?: string[]
-    tools_used?: string[]
-    execution_time_ms?: number
-    citations?: Array<{
-      id: string
-      title: string
-      url?: string
-      page?: number
-      excerpt?: string
-    }>
-  }
-  suggestions?: string[]
-  isStreaming?: boolean
-  isCollapsed?: boolean
-}
-
-interface ElysiaRenderChatProps {
-  messages: ElysiaMessage[]
-  isLoading?: boolean
-  error?: string | null
-  socketStatus?: "connected" | "disconnected" | "connecting"
-  onFeedback?: (messageId: string, feedback: "positive" | "negative") => void
-  onSuggestionClick?: (suggestion: string) => void
-  currentView?: "chat" | "code" | "result"
-  onViewChange?: (view: "chat" | "code" | "result") => void
-  className?: string
-}
-
-export function ElysiaRenderChat({
-  messages,
-  isLoading = false,
-  error = null,
-  socketStatus = "connected",
-  onFeedback,
-  onSuggestionClick,
-  currentView = "chat",
-  onViewChange,
-  className
-}: ElysiaRenderChatProps) {
+export function ElysiaRenderChat(props: ElysiaRenderChatProps) {
+  const {
+    messages,
+    isLoading = false,
+    error = null,
+    socketStatus = "connected",
+    onFeedback,
+    onSuggestionClick,
+    onDocumentClick,
+    onPreviewClick,
+    currentView = "chat",
+    onViewChange,
+    className
+  } = props
+  
+  // Defensive handlers - ensure they're always functions
+  const safeOnDocumentClick = typeof onDocumentClick === 'function' ? onDocumentClick : () => {}
+  const safeOnPreviewClick = typeof onPreviewClick === 'function' ? onPreviewClick : () => {}
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
@@ -150,6 +121,8 @@ export function ElysiaRenderChat({
               onToggleCollapse={toggleMessageCollapse}
               onFeedback={onFeedback}
               onSuggestionClick={onSuggestionClick}
+              onDocumentClick={safeOnDocumentClick}
+              onPreviewClick={safeOnPreviewClick}
             />
           ))}
           
@@ -174,6 +147,8 @@ interface MessageDisplayProps {
   onToggleCollapse: (messageId: string) => void
   onFeedback?: (messageId: string, feedback: "positive" | "negative") => void
   onSuggestionClick?: (suggestion: string) => void
+  onDocumentClick?: (doc: any) => void
+  onPreviewClick?: (doc: any) => void
 }
 
 function MessageDisplay({
@@ -181,7 +156,9 @@ function MessageDisplay({
   isCollapsed,
   onToggleCollapse,
   onFeedback,
-  onSuggestionClick
+  onSuggestionClick,
+  onDocumentClick,
+  onPreviewClick
 }: MessageDisplayProps) {
   const getMessageIcon = () => {
     switch (message.type) {
@@ -203,14 +180,14 @@ function MessageDisplay({
   const getMessageColor = () => {
     switch (message.type) {
       case "user":
-        return "bg-primary text-primary-foreground"
+        return "bg-muted text-foreground"
       case "error":
       case "self_healing_error":
-        return "bg-red-100 dark:bg-red-900/20 text-red-900 dark:text-red-100 border-red-200"
+        return "bg-red-50 dark:bg-red-950/50 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800"
       case "warning":
-        return "bg-yellow-100 dark:bg-yellow-900/20 text-yellow-900 dark:text-yellow-100 border-yellow-200"
+        return "bg-yellow-50 dark:bg-yellow-950/50 text-yellow-800 dark:text-yellow-200 border border-yellow-200 dark:border-yellow-800"
       default:
-        return "bg-muted border"
+        return "bg-background border"
     }
   }
 
@@ -226,12 +203,9 @@ function MessageDisplay({
             {getMessageIcon()}
           </AvatarFallback>
         ) : (
-          <>
-            <AvatarImage src="/elysia-avatar.png" />
-            <AvatarFallback className="bg-primary text-primary-foreground">
-              {getMessageIcon()}
-            </AvatarFallback>
-          </>
+          <AvatarFallback className="bg-primary text-primary-foreground">
+            {getMessageIcon()}
+          </AvatarFallback>
         )}
       </Avatar>
 
@@ -269,10 +243,10 @@ function MessageDisplay({
           {/* Message Content */}
           {!isCollapsed && (
             <div className="space-y-3">
-              <ElysiaMarkdownFormat
-                content={message.content}
-                citations={message.metadata?.citations}
-                variant={message.type === "user" ? "secondary" : "primary"}
+              <DisplayRenderer
+                message={message}
+                onDocumentClick={onDocumentClick}
+                onPreviewClick={onPreviewClick}
               />
 
               {/* Decision Path */}
@@ -369,11 +343,20 @@ function LoadingMessage() {
   return (
     <div className="flex gap-3">
       <Avatar className="h-8 w-8">
+        <AvatarImage src="/elysia-avatar.png" />
         <AvatarFallback className="bg-primary text-primary-foreground">
           <Bot className="h-4 w-4" />
         </AvatarFallback>
       </Avatar>
       <Card className="p-4 bg-muted border max-w-[85%]">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex space-x-1">
+            <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+          </div>
+          <span className="text-sm text-muted-foreground">Emma is thinking...</span>
+        </div>
         <div className="space-y-2">
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-3/4" />
@@ -393,7 +376,7 @@ function ErrorMessage({ error }: { error: string }) {
           <AlertCircle className="h-4 w-4" />
         </AvatarFallback>
       </Avatar>
-      <Card className="p-4 bg-red-100 dark:bg-red-900/20 text-red-900 dark:text-red-100 border-red-200 max-w-[85%]">
+      <Card className="p-4 bg-red-50 dark:bg-red-950/50 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800 max-w-[85%]">
         <div className="flex items-center gap-2">
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm font-medium">Error</span>

@@ -53,7 +53,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: 'AI Chat',
       description: 'Ask AI',
       icon: IconRobot,
-      action: () => router.push(`/${tenantId}/agents`),
+      action: () => router.push(`/${tenantId}/chat`),
       color: 'purple'
     },
     {

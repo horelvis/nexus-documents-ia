@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { 
   MessageSquare, 
   Settings, 
@@ -18,13 +18,13 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
 // Usar nuestros componentes de Elysia existentes
-import { ElysiaChat } from "@/components/elysia-chat"
+import { ElysiaChat, type ElysiaChatRef } from "@/components/elysia-chat"
 import { useBackendUser } from "@/contexts/user-context"
 
 interface ChatPageProps {
-  params: {
+  params: Promise<{
     tenantId: string
-  }
+  }>
 }
 
 // Prompts de ejemplo para comenzar
@@ -45,10 +45,14 @@ function getRandomPrompts(count: number = 4): string[] {
 }
 
 export default function ChatPage({ params }: ChatPageProps) {
+  // Unwrap params Promise using React.use()
+  const { tenantId } = React.use(params)
+  
   const { backendUser } = useBackendUser()
   const [mode, setMode] = useState<"chat" | "settings">("chat")
   const [randomPrompts, setRandomPrompts] = useState<string[]>([])
   const [hasStartedChat, setHasStartedChat] = useState(false)
+  const elysiaChatRef = useRef<ElysiaChatRef>(null)
 
   // Generar prompts aleatorios al cargar
   useEffect(() => {
@@ -61,17 +65,20 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   const handlePromptClick = (prompt: string) => {
     setHasStartedChat(true)
-    // TODO: Enviar el prompt al componente de chat
+    // Enviar el prompt al componente de chat usando la referencia
+    if (elysiaChatRef.current) {
+      elysiaChatRef.current.sendQuery(prompt)
+    }
   }
 
   return (
-    <div className="flex flex-col w-full h-full min-h-screen">
+    <div className="flex flex-col w-full h-screen overflow-hidden">
       {/* Header */}
       <div className="flex w-full justify-between items-center sticky top-0 z-20 p-4 bg-background border-b">
         <div className="flex items-center gap-4">
           <Brain className="h-6 w-6 text-primary" />
           <div>
-            <h1 className="text-xl font-semibold">Elysia Assistant</h1>
+            <h1 className="text-xl font-semibold">Emma Assistant</h1>
             <p className="text-sm text-muted-foreground">
               AI-powered document intelligence
             </p>
@@ -116,12 +123,12 @@ export default function ChatPage({ params }: ChatPageProps) {
       </div>
 
       {mode === "chat" ? (
-        <div className="flex flex-col w-full h-full">
+        <div className="flex flex-col w-full flex-1 min-h-0">
           {!hasStartedChat ? (
             // Landing screen con prompts sugeridos
-            <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)] p-6">
+            <div className="flex flex-col items-center justify-center flex-1 p-6 overflow-y-auto">
               <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold mb-2">Ask Elysia</h2>
+                <h2 className="text-3xl font-bold mb-2">Ask Emma</h2>
                 <p className="text-muted-foreground">
                   Start a conversation about your documents
                 </p>
@@ -164,17 +171,19 @@ export default function ChatPage({ params }: ChatPageProps) {
           ) : null}
 
           {/* Chat Component */}
-          <div className="flex-1">
+          <div className="flex-1 min-h-0 pb-4">
             <ElysiaChat 
-              tenantId={params.tenantId}
+              ref={elysiaChatRef}
+              tenantId={tenantId}
               className="h-full"
-              initialMessage="¡Hola! Soy Elysia, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+              initialMessage="¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+              onFirstQuery={() => setHasStartedChat(true)}
             />
           </div>
         </div>
       ) : mode === "settings" ? (
-        <div className="flex flex-col w-full max-w-4xl mx-auto p-6">
-          <h2 className="text-2xl font-bold mb-6">Configuración de Elysia</h2>
+        <div className="flex flex-col w-full max-w-4xl mx-auto p-6 flex-1 overflow-y-auto">
+          <h2 className="text-2xl font-bold mb-6">Configuración de Emma</h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Model Settings */}
@@ -224,7 +233,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                 Información del Usuario
               </h3>
               <div className="space-y-2">
-                <p className="text-sm"><strong>Tenant:</strong> {params.tenantId}</p>
+                <p className="text-sm"><strong>Tenant:</strong> {tenantId}</p>
                 <p className="text-sm"><strong>Usuario:</strong> {backendUser?.email || 'No disponible'}</p>
                 <p className="text-sm"><strong>Rol:</strong> {backendUser?.is_team_member ? 'Miembro del equipo' : 'Administrador'}</p>
               </div>

@@ -1,70 +1,79 @@
-# 🧠 NexusDocs360 - Características de IA Detalladas
+# 🧠 NexusDocs360 - Emma AI: Asistente Inteligente de Nueva Generación
 
 ## 🚀 Visión General
 
-NexusDocs360 representa un salto cuántico en la gestión documental, donde la IA no es un añadido, sino el motor central que impulsa cada interacción. Nuestra plataforma utiliza las técnicas más avanzadas de Machine Learning, Deep Learning y Procesamiento de Lenguaje Natural para crear una experiencia verdaderamente inteligente.
+NexusDocs360 ha evolucionado hacia **Emma AI**, un asistente inteligente powered by Elysia que representa la próxima generación de interacción con documentos. Emma utiliza técnicas avanzadas de IA para proporcionar respuestas contextuales, ejecutar tareas complejas y acceder a información en tiempo real.
 
-## 🤖 Stack Tecnológico de IA
+## 🤖 Emma AI: Arquitectura y Capacidades
 
-### Modelos de Lenguaje (LLMs)
-- **GPT-4**: Para tareas complejas de comprensión y generación
-- **Claude 3**: Análisis profundo y razonamiento contextual
-- **Llama 3.2**: Procesamiento local y privado vía Ollama
-- **Mistral**: Tareas especializadas de alto rendimiento
-- **Phi-3**: Modelo eficiente para edge computing
+### Elysia Framework
+Emma está construida sobre **Elysia**, un framework avanzado para sistemas de decisión inteligente que:
+- **🧠 Selecciona herramientas automáticamente** basándose en el contexto
+- **🔄 Ejecuta flujos adaptativos** según la complejidad de la tarea
+- **📊 Proporciona transparencia completa** del proceso de decisión
+- **⚡ Optimiza rendimiento** con tree caching y paralelización
 
-### Frameworks de IA
-- **LangChain**: Orquestación de cadenas de IA complejas
-- **Langroid**: Framework de agentes autónomos
-- **LangGraph**: Flujos de trabajo con estado para agentes
-- **CrewAI**: Colaboración multi-agente
-- **Transformers**: Modelos de última generación
+### Stack Tecnológico Actualizado
 
-### Infraestructura de IA
-- **Qdrant**: Base de datos vectorial para búsqueda semántica
-- **Ollama**: Servidor de LLMs locales
-- **CUDA**: Aceleración GPU para procesamiento intensivo
-- **TensorRT**: Optimización de inferencia
+#### Modelos de IA Integrados
+- **gpt-oss:20b**: Modelo principal via Ollama para procesamiento local
+- **llama3.2**: Modelo alternativo para tareas específicas
+- **nomic-embed-text**: Embeddings para búsqueda semántica en Weaviate
+- **Modelos de Vision**: Para procesamiento de PDFs y detección de firmas
 
-## 📊 Características de IA por Categoría
+#### Frameworks y Servicios
+- **Weaviate**: Base de datos vectorial de nueva generación (reemplaza Qdrant)
+- **Ollama**: Servidor de LLMs locales optimizado
+- **FastAPI**: API principal con arquitectura asíncrona
+- **Docker**: Desarrollo con hot-reload y contenerización
 
-### 1. 🧠 Comprensión Profunda de Documentos
+### Infraestructura Emma AI
+- **Weaviate Vector DB**: Búsqueda semántica avanzada con soporte multi-tenant
+- **PostgreSQL**: Metadatos y relaciones de documentos
+- **Google Cloud Storage**: Almacenamiento distribuido con buckets por tenant
+- **Redis**: Cache inteligente para respuestas frecuentes
 
-#### Extracción Inteligente de Información
-- **Precisión**: 99.5% en documentos estructurados
-- **Campos Automáticos**: Detecta y extrae automáticamente fechas, montos, nombres, direcciones
-- **Contexto Empresarial**: Entiende jerga específica de industrias
-- **Multi-idioma**: Soporte para 50+ idiomas con traducción contextual
+## 📊 Emma AI: Características y Capacidades Actuales
 
-#### Análisis de Contenido
-- **Sentimiento**: Evalúa tono y sentimiento en comunicaciones
-- **Intención**: Identifica el propósito del documento
-- **Entidades**: Reconoce personas, organizaciones, lugares
-- **Relaciones**: Mapea conexiones entre documentos
+### 1. 🧠 Procesamiento Inteligente de Documentos
 
-### 2. 🔍 Búsqueda Neuronal Avanzada
+#### Sistema de Decisión Elysia
+- **12+ Herramientas Especializadas**: Análisis de contratos, finanzas, compliance, firmas digitales
+- **Selección Automática**: Emma elige la herramienta óptima según el contexto
+- **Flujos Adaptativos**: Combina múltiples herramientas para tareas complejas
+- **Transparencia Total**: Visibilidad completa del proceso de decisión
 
-#### Búsqueda Semántica
-- **Vector Embeddings**: Representación matemática del significado
-- **Similitud Conceptual**: Encuentra documentos relacionados por contexto
-- **Cross-lingual**: Busca en un idioma, encuentra en cualquier otro
-- **Fuzzy Matching**: Tolerante a errores y variaciones
+#### Análisis Especializado
+- **Detección de Firmas Digitales**: Validación automática de firmas en PDFs
+- **Extracción de Contratos**: Identifica partes, fechas, montos y términos clave
+- **Análisis Financiero**: Procesa facturas, presupuestos y reportes
+- **Verificación de Compliance**: Revisa documentos contra regulaciones
 
-#### Búsqueda Conversacional
-- **Natural Language Queries**: "Muéstrame contratos de más de $1M firmados el año pasado"
-- **Contextual Refinement**: La IA entiende y refina búsquedas ambiguas
-- **Multi-hop Reasoning**: Conecta información de múltiples documentos
+### 2. 🔍 Búsqueda Semántica con Weaviate
 
-### 3. 💬 Interacción Conversacional
+#### Vector Search Avanzado
+- **Búsqueda por Significado**: Encuentra documentos relacionados conceptualmente
+- **Multi-tenant**: Cada organización tiene su espacio vectorial aislado
+- **Indexación Automática**: Los documentos se indexan automáticamente al subir
+- **Embeddings Contextuales**: Usando modelo nomic-embed-text optimizado
 
-#### Chat con Documentos
-- **Respuestas Contextuales**: Basadas en el contenido real de tus documentos
-- **Memoria de Conversación**: Recuerda el contexto de la charla
-- **Citas y Referencias**: Muestra exactamente de dónde viene la información
-- **Multimodal**: Analiza texto, tablas e imágenes en las respuestas
+#### Integración con PostgreSQL
+- **Metadatos Relacionales**: Combina búsqueda vectorial con datos estructurados
+- **Document IDs Consistentes**: Enlaces directos entre Weaviate y PostgreSQL
+- **Gestión de Colecciones**: Organización automática por tenant
 
-#### Asistente Virtual Empresarial
-- **Conocimiento Específico**: Entrenado en tu dominio empresarial
+### 3. 💬 Emma AI: Chat Inteligente
+
+#### Capacidades Conversacionales
+- **Respuestas Contextuales**: Basadas en documentos específicos de tu organización
+- **Información en Tiempo Real**: Acceso a búsqueda web y datos meteorológicos
+- **Preview de Documentos**: Enlaces directos al visor de PDFs con firmas digitales
+- **Sugerencias Inteligentes**: Recomendaciones basadas en el contexto
+
+#### Tecnología Subyacente
+- **Modelo Local gpt-oss:20b**: Procesamiento privado vía Ollama
+- **Arquitectura Híbrida**: Combina búsqueda local con información externa
+- **Sistema de Confianza**: Puntuaciones de confianza en las respuestas
 - **Acciones Proactivas**: Sugiere siguientes pasos
 - **Integración con Workflows**: Ejecuta acciones directamente
 
