@@ -39,6 +39,22 @@ export interface ElysiaMarkdownFormatProps {
 
 export type ElysiaMessageType = "user" | "query" | "result" | "text" | "error" | "warning" | "info" | "self_healing_error" | "system"
 
+export interface ChainOfThoughtData {
+  decision_trace: Array<{
+    step: number
+    node_id: string
+    reasoning: string
+    tools_considered: string[]
+    tools_selected: string[]
+    confidence: number
+    execution_time_ms: number
+  }>
+  reasoning_steps: string[]
+  tools_selected: string[]
+  enhanced_query?: string
+  documents_context: number
+}
+
 export interface ElysiaMessage {
   id: string
   type: ElysiaMessageType
@@ -59,6 +75,7 @@ export interface ElysiaMessage {
     }> | string[]
     suggestions?: string[]
     documents?: DocumentInfo[]
+    debug_data?: ChainOfThoughtData
   }
   suggestions?: string[]
   isStreaming?: boolean
@@ -77,12 +94,14 @@ export interface ElysiaRenderChatProps {
   currentView?: "chat" | "code" | "result"
   onViewChange?: (view: "chat" | "code" | "result") => void
   className?: string
+  isAdmin?: boolean
 }
 
 export interface DisplayRendererProps {
   message: ElysiaMessage
   onDocumentClick?: (doc: DocumentInfo) => void
   onPreviewClick?: (doc: DocumentInfo) => void
+  isAdmin?: boolean
 }
 
 export interface ElysiaSession {
@@ -96,6 +115,7 @@ export interface ElysiaChatProps {
   className?: string
   initialMessage?: string
   onClose?: () => void
+  isAdmin?: boolean
 }
 
 // API Response types

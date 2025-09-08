@@ -1,6 +1,7 @@
 {
   "plans": {
     "free": "Gratuit",
+    "trial": "Essai",
     "professional": "Professionnel",
     "enterprise": "Entreprise",
     "currentPlan": "Plan actuel",

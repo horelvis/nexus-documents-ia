@@ -3,7 +3,7 @@
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, agent_management, signatures, webhooks, search, teams, users, entities, dashboard,
-    simple_auth, assistant, migration, weaviate
+    simple_auth, assistant, migration, weaviate, bpmn_ai
     # REMOVED: langgraph - migrated to Weaviate/Elysia
     # document_analyzer, contract_intelligence, compliance_checker
 )
@@ -68,6 +68,9 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 
 # NEW: Migration management for Qdrant->Weaviate transition
 api_router.include_router(migration.router, prefix="/migration", tags=["migration"])
+
+# NEW: BPM AI - Business Process Management with AI
+api_router.include_router(bpmn_ai.router, tags=["bpmn-ai"])
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

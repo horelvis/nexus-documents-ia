@@ -26,6 +26,7 @@ export interface SearchResult {
 export interface SearchParams {
   query: string
   limit?: number
+  search_type?: 'semantic' | 'hybrid' | 'keyword'
   tags?: string[]
   date_from?: string
   date_to?: string
@@ -72,6 +73,7 @@ export function useSearchService() {
     const queryParams = new URLSearchParams({
       query: params.query,
       ...(params.limit && { limit: params.limit.toString() }),
+      ...(params.search_type && { search_type: params.search_type }),
       ...(params.tags && params.tags.length > 0 && { tags: params.tags.join(',') }),
       ...(params.date_from && { date_from: params.date_from }),
       ...(params.date_to && { date_to: params.date_to })
@@ -115,6 +117,38 @@ export function useSearchService() {
     return apiClient.post<{ message: string; status: string; interval_seconds: number }>('/search/auto-reindex/start-global')
   }
 
+  const getSearchAnalytics = async (dateFrom?: string, dateTo?: string) => {
+    const queryParams = new URLSearchParams()
+    if (dateFrom) queryParams.append('date_from', dateFrom)
+    if (dateTo) queryParams.append('date_to', dateTo)
+    
+    return apiClient.get<{
+      success: boolean
+      analytics: {
+        total_documents: number
+        by_file_type: Array<{ key: string; count: number }>
+        by_category: Array<{ key: string; count: number }>
+        popular_tags: Array<{ tag: string; count: number }>
+        documents_timeline: Array<{ date: string; count: number }>
+        search_engines: {
+          weaviate: { status: string; role: string }
+          elasticsearch: { status: string; role: string }
+        }
+      }
+      error?: string
+    }>(`/search/analytics?${queryParams.toString()}`)
+  }
+
+  const suggestSearchType = async (query: string) => {
+    return apiClient.get<{
+      success: boolean
+      query: string
+      suggested_type: 'semantic' | 'hybrid' | 'keyword'
+      description: string
+      error?: string
+    }>(`/search/suggest-type?query=${encodeURIComponent(query)}`)
+  }
+
   return {
     searchDocuments,
     askDocuments,
@@ -124,6 +158,8 @@ export function useSearchService() {
     fixAndReindex,
     autoReindexFailedDocuments,
     runAutoReindexOnce,
-    startGlobalAutoReindex
+    startGlobalAutoReindex,
+    getSearchAnalytics,
+    suggestSearchType
   }
 }

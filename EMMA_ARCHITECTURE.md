@@ -59,11 +59,34 @@ async def get_weather_info(location: str) -> str:
     """Get current weather information"""
 ```
 
+#### Chain of Thought Reasoning (Cadenas de Pensamiento):
+Elysia implementa un sistema avanzado de razonamiento paso a paso que hace transparente el proceso de toma de decisiones de Emma AI:
+
+**🧠 Decision Tree Architecture**:
+- **Decision Agents**: Cada nodo del árbol incluye un agente con contexto global
+- **Reasoning Propagation**: Los agentes generan razonamiento que se pasa entre nodos
+- **Context Awareness**: Evaluación continua de entorno, acciones pasadas y futuras
+
+**👁️ Transparencia Completa**:
+- **Real-time Visibility**: Frontend muestra el árbol de decisión conforme se ejecuta
+- **Step-by-Step Reasoning**: Razonamiento visible en cada nodo de decisión
+- **Error Handling**: Flags de "impossible" para prevenir bucles infinitos
+- **Decision Path**: Trazabilidad completa del camino tomado
+
+**🔄 Proceso de Razonamiento**:
+```
+Query Input → Context Analysis → Tool Selection Logic → Execution Plan
+     ↓              ↓                    ↓                  ↓
+Reasoning 1 → Reasoning 2 → Reasoning 3 → Final Synthesis
+```
+
 #### Flujo de Decisión:
-1. **Análisis de Query**: Emma analiza la intención del usuario
-2. **Selección de Herramientas**: Elysia decide qué herramientas usar
-3. **Ejecución**: Las herramientas se ejecutan en paralelo/secuencia
-4. **Síntesis**: Emma combina resultados en respuesta coherente
+1. **Análisis de Query**: Emma analiza la intención del usuario con reasoning detallado
+2. **Context Evaluation**: Evaluación de documentos disponibles y herramientas
+3. **Decision Tree**: Navegación inteligente por nodos con razonamiento visible
+4. **Tool Selection**: Selección de herramientas basada en contexto y objetivos
+5. **Execution**: Las herramientas se ejecutan con feedback continuo
+6. **Síntesis**: Emma combina resultados manteniendo trazabilidad del proceso
 
 ### 3. Weaviate Vector Database
 
@@ -91,6 +114,7 @@ async def get_weather_info(location: str) -> str:
 - **Contract Extractor**: Partes, fechas, términos
 - **Financial Analyzer**: KPIs y métricas
 - **Compliance Checker**: Verificación regulatoria
+- **Document Comparator**: Comparación inteligente entre documentos
 
 #### Información Externa:
 - **Web Search**: DuckDuckGo API para información actualizada
@@ -167,7 +191,7 @@ grep "Available tools" docker logs
 ```
 
 ### Métricas Clave
-- **Herramientas Registradas**: 12+ tools (contract analysis, web search, weather, etc.)
+- **Herramientas Registradas**: 13+ tools (contract analysis, document comparison, web search, weather, etc.)
 - **Tiempo de Respuesta**: < 60 segundos para queries complejas
 - **Precisión**: Puntuaciones de confianza en respuestas
 - **Cobertura**: Multi-tenant con colecciones isoladas

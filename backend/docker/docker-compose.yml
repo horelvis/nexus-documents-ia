@@ -11,13 +11,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      qdrant:
+      weaviate:
         condition: service_healthy
       cag-service:
         condition: service_healthy
       storage-service:
         condition: service_healthy
       gotenberg:
+        condition: service_healthy
+      langextract-service:
         condition: service_healthy
     networks:
       - backend-network
@@ -30,12 +32,16 @@ services:
       - STORAGE_SERVICE_URL=http://storage-service:8003
       - CAG_SERVICE_URL=http://cag-service:8008
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8007  # NEW: Weaviate service
+      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8009  # NEW: LangExtract service
+      - TEMPORALIO_SERVICE_URL=http://temporalio-service:8010  # NEW: Temporalio service
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
-      - REDIS_HOST=redis
-      - QDRANT_HOST=qdrant  # DEPRECATED: Will be phased out
-      - WEAVIATE_URL=http://weaviate:8080  # NEW: Weaviate database
+      - REDIS_HOST=redis  # Cache is essential for performance
+      - WEAVIATE_URL=http://weaviate:8080  # Primary Weaviate database
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
       # Migration settings
       - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}  # Feature flag for Weaviate
       - MIGRATION_MODE=${MIGRATION_MODE:-parallel}  # parallel, weaviate_only, qdrant_only
@@ -93,26 +99,7 @@ services:
       timeout: 30s
       retries: 50
 
-  # Qdrant para vectores
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - backend-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/6333' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-
-  # CAG microservice - DEVELOPMENT MODE
+  # CAG microservice - DEVELOPMENT MODE (Updated: removed Qdrant dependency)
   cag-service:
     build:
       context: ../microservices/cag-service
@@ -120,17 +107,19 @@ services:
     ports:
       - "8008:8008"
     depends_on:
-      - qdrant
-      - redis
-      - db
+      weaviate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db:
+          condition: service_healthy
     networks:
       - backend-network
     env_file:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
+      - WEAVIATE_URL=http://weaviate:8080
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - LLM_MODEL=${LLM_MODEL:-gpt-oss:20b}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
@@ -291,7 +280,7 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # NEW: Weaviate vector database (parallel to Qdrant during migration)
+  # Primary Weaviate vector database
   weaviate:
     image: semitechnologies/weaviate:latest
     ports:
@@ -308,11 +297,59 @@ services:
       - backend-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/v1/.well-known/ready || exit 1"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/meta"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # NEW: Elasticsearch for hybrid search and analytics
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"  # Optimized memory usage
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - backend-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 60s
+
+  # NEW: Kibana for Elasticsearch analytics (optional)
+  kibana:
+    image: kibana:8.11.0
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=nexus-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - backend-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
   # NEW: Weaviate Service with Elysia (Advanced RAG)
   weaviate-service:
@@ -327,7 +364,7 @@ services:
       redis:
         condition: service_healthy
       genai-ollama:
-        condition: service_healthy
+        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -356,6 +393,78 @@ services:
       retries: 3
       start_period: 60s
 
+  # NEW: Temporalio Server for durable workflows
+  temporalio-server:
+    image: temporalio/auto-setup:1.24.2
+    ports:
+      - "7233:7233"   # gRPC
+      - "8233:8233"   # Web UI
+    environment:
+      - DB=postgres12_pgx
+      - DB_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_SEEDS=db
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    volumes:
+      - temporalio_data:/etc/temporalio/config/dynamicconfig
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8233/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # NEW: Temporalio Workflows Service
+  temporalio-service:
+    build:
+      context: ../microservices/temporalio-service
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8010"
+    depends_on:
+      temporalio-server:
+        condition: service_healthy
+      weaviate-service:
+        condition: service_healthy
+      genai-ollama:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TEMPORALIO_HOST=temporalio-server
+      - TEMPORALIO_PORT=7233
+      - TEMPORALIO_NAMESPACE=nexus-workflows
+      - TEMPORALIO_TASK_QUEUE=nexus-workflow-tasks
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_CORE_URL=http://api:8000
+      - WEAVIATE_SERVICE_URL=http://weaviate-service:8007
+      - OLLAMA_BASE_URL=http://genai-ollama:11434
+      - STORAGE_SERVICE_URL=http://storage-service:8003
+      - DEBUG=${DEBUG:-true}
+    volumes:
+      # Mount the Python code for live reloading
+      - ../microservices/temporalio-service/app:/app/app:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
 networks:
   backend-network:
     driver: bridge
@@ -363,7 +472,8 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  qdrant_data:
-  weaviate_data:  # NEW: Weaviate data volume
+  weaviate_data:  # Primary Weaviate data volume
+  elasticsearch_data:  # NEW: Elasticsearch data volume
+  temporalio_data:  # NEW: Temporalio configuration data volume
   langgraph_checkpoints:
   genai_ollama_data:

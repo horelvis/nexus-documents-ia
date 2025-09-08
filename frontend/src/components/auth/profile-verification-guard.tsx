@@ -3,6 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
+import { TenantNotFound } from '@/components/errors/tenant-not-found'
 import { Loader2 } from 'lucide-react'
 
 interface ProfileVerificationGuardProps {
@@ -11,7 +12,7 @@ interface ProfileVerificationGuardProps {
 }
 
 export function ProfileVerificationGuard({ children, fallback }: ProfileVerificationGuardProps) {
-  const { isClerkLoaded, isSignedIn, backendUser, userLoading } = useUserContext()
+  const { isClerkLoaded, isSignedIn, backendUser, userLoading, onboarding, refetchUser } = useUserContext()
   const router = useRouter()
   const pathname = usePathname()
   
@@ -58,6 +59,12 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
   // No autenticado
   if (!isSignedIn) {
     return null
+  }
+  
+  // Check for invalid tenant ID
+  if (onboarding.error === 'INVALID_TENANT') {
+    const tenantId = backendUser?.tenant_id || 'default'
+    return <TenantNotFound tenantId={tenantId} onRetry={refetchUser} />
   }
   
   // Rutas permitidas o verificación pasada

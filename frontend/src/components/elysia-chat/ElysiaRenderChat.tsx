@@ -25,7 +25,8 @@ export function ElysiaRenderChat(props: ElysiaRenderChatProps) {
     onPreviewClick,
     currentView = "chat",
     onViewChange,
-    className
+    className,
+    isAdmin = false
   } = props
   
   // Defensive handlers - ensure they're always functions
@@ -123,6 +124,7 @@ export function ElysiaRenderChat(props: ElysiaRenderChatProps) {
               onSuggestionClick={onSuggestionClick}
               onDocumentClick={safeOnDocumentClick}
               onPreviewClick={safeOnPreviewClick}
+              isAdmin={isAdmin}
             />
           ))}
           
@@ -149,6 +151,7 @@ interface MessageDisplayProps {
   onSuggestionClick?: (suggestion: string) => void
   onDocumentClick?: (doc: any) => void
   onPreviewClick?: (doc: any) => void
+  isAdmin?: boolean
 }
 
 function MessageDisplay({
@@ -158,7 +161,8 @@ function MessageDisplay({
   onFeedback,
   onSuggestionClick,
   onDocumentClick,
-  onPreviewClick
+  onPreviewClick,
+  isAdmin = false
 }: MessageDisplayProps) {
   const getMessageIcon = () => {
     switch (message.type) {
@@ -247,6 +251,7 @@ function MessageDisplay({
                 message={message}
                 onDocumentClick={onDocumentClick}
                 onPreviewClick={onPreviewClick}
+                isAdmin={isAdmin}
               />
 
               {/* Decision Path */}

@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react"
 import { Send, Loader2, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { TextareaWithMentions } from "@/components/ui/input-with-mentions"
+import { RichTextInput } from "@/components/ui/rich-text-input"
 import { cn } from "@/lib/utils"
 
 interface ElysiaQueryInputProps {
@@ -14,6 +16,8 @@ interface ElysiaQueryInputProps {
   placeholder?: string
   addDisplacement?: (value: number) => void
   addDistortion?: (value: number) => void
+  documentId?: string // For entity search context
+  enableMentions?: boolean
 }
 
 export function ElysiaQueryInput({
@@ -21,9 +25,11 @@ export function ElysiaQueryInput({
   isLoading = false,
   disabled = false,
   className,
-  placeholder = "Pregúntame sobre tus documentos...",
+  placeholder = "Pregúntame sobre tus documentos... (usa @ para mencionar entidades)",
   addDisplacement,
-  addDistortion
+  addDistortion,
+  documentId,
+  enableMentions = true
 }: ElysiaQueryInputProps) {
   const [query, setQuery] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -57,19 +63,38 @@ export function ElysiaQueryInput({
     }
   }
 
-  // Auto-resize textarea
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setQuery(e.target.value)
+  // Handle input change for both regular textarea and mentions textarea
+  const handleInputChange = (value: string, element?: HTMLTextAreaElement) => {
+    setQuery(value)
     
     // Trigger 3D animations when typing
     if (addDisplacement) addDisplacement(0.035)
     if (addDistortion) addDistortion(0.02)
     
-    // Reset height to auto to get proper scrollHeight
-    e.target.style.height = 'auto'
-    // Set height based on scrollHeight, with min and max limits
-    const newHeight = Math.min(Math.max(e.target.scrollHeight, 60), 200)
-    e.target.style.height = `${newHeight}px`
+    // Auto-resize functionality
+    if (element) {
+      // Reset height to auto to get proper scrollHeight
+      element.style.height = 'auto'
+      // Set height based on scrollHeight, with min and max limits
+      const newHeight = Math.min(Math.max(element.scrollHeight, 60), 200)
+      element.style.height = `${newHeight}px`
+    }
+  }
+
+  // Legacy handler for regular textarea (when mentions disabled)
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    handleInputChange(e.target.value, e.target)
+  }
+
+  // Handler for mentions component
+  const handleMentionsChange = (value: string) => {
+    handleInputChange(value, textareaRef.current || undefined)
+  }
+
+  // Handle entity selection
+  const handleEntitySelect = (entity: any) => {
+    console.log("Entity selected in chat:", entity)
+    // Optional: Add additional logic when entity is selected
   }
 
   return (
@@ -77,16 +102,29 @@ export function ElysiaQueryInput({
 
       {/* Query Input */}
       <div className="relative">
-        <Textarea
-          ref={textareaRef}
-          value={query}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={disabled || isLoading}
-          className="pr-24 min-h-[60px] resize-none border-2 focus:border-primary/50"
-          rows={1}
-        />
+        {enableMentions && documentId ? (
+          <RichTextInput
+            value={query}
+            onChange={setQuery}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled || isLoading}
+            className="pr-24 min-h-[60px] border-2 focus:border-primary/50"
+            documentId={documentId}
+            onEntitySelect={handleEntitySelect}
+          />
+        ) : (
+          <Textarea
+            ref={textareaRef}
+            value={query}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled || isLoading}
+            className="pr-24 min-h-[60px] resize-none border-2 focus:border-primary/50"
+            rows={1}
+          />
+        )}
         
         {/* Action Buttons */}
         <div className="absolute right-2 bottom-2 flex gap-1">

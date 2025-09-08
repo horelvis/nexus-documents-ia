@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, RefreshCw, Eye, Share2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,14 +13,17 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
 import { useDocumentService } from '@/lib/services/document.service'
+import { useDocumentInsightsService } from '@/lib/services/document-insights.service'
 import PDFViewer from '@/components/documents/pdf-viewer'
 import { ShareDocumentDialog } from '@/components/documents/share-document-dialog'
 import { ImagePreview } from '@/components/documents/image-preview'
 import { API_CONFIG } from '@/lib/config'
+import { DocumentStatusIndicator } from '@/components/documents/document-status-indicator'
 
 export default function DocumentPreviewPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const documentId = params.documentId as string
   const tenantId = params.tenantId as string
 
@@ -33,8 +36,10 @@ export default function DocumentPreviewPage() {
   const [isLoadingImage, setIsLoadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [viewStartTime, setViewStartTime] = useState<number | null>(null)
 
   const documentService = useDocumentService()
+  const insightsService = useDocumentInsightsService()
 
   // Helper function to construct full URLs for images (used for PDF thumbnails)
   const getFullImageUrl = (path: string) => {
@@ -239,6 +244,13 @@ export default function DocumentPreviewPage() {
     }
   }, [document])
 
+  // Track view start time for potential future metrics
+  useEffect(() => {
+    if (document?.id) {
+      setViewStartTime(Date.now())
+    }
+  }, [document?.id])
+
   // Load image URL when preview indicates it's an image
   useEffect(() => {
     if (preview && preview.type === 'image_preview' && document && !imageUrl && !isLoadingImage) {
@@ -278,10 +290,29 @@ export default function DocumentPreviewPage() {
           <Button 
             variant="outline" 
             size="sm"
-            onClick={() => router.push(`/${tenantId}/documents`)}
+            onClick={() => {
+              const returnTo = searchParams.get('returnTo')
+              if (returnTo === 'search') {
+                // Return to search with preserved context
+                const query = searchParams.get('query') || ''
+                const tags = searchParams.get('tags') || ''
+                const dateFrom = searchParams.get('dateFrom') || ''
+                const dateTo = searchParams.get('dateTo') || ''
+                
+                const searchUrl = new URLSearchParams()
+                if (query) searchUrl.set('q', query)
+                if (tags) searchUrl.set('tags', tags)
+                if (dateFrom) searchUrl.set('dateFrom', dateFrom)
+                if (dateTo) searchUrl.set('dateTo', dateTo)
+                
+                router.push(`/${tenantId}/search?${searchUrl.toString()}`)
+              } else {
+                router.push(`/${tenantId}/documents`)
+              }
+            }}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Documents
+            {searchParams.get('returnTo') === 'search' ? 'Back to Search' : 'Back to Documents'}
           </Button>
           
           {document && (
@@ -528,10 +559,12 @@ export default function DocumentPreviewPage() {
                       <span>{formatFileSize(document.file_size)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Status:</span>
-                      <Badge variant={document.indexed === 'INDEXED' ? 'default' : 'secondary'}>
-                        {document.indexed}
-                      </Badge>
+                      <span className="text-muted-foreground">Estado:</span>
+                      <DocumentStatusIndicator 
+                        status={document.indexed}
+                        showDescription={true}
+                        size="md"
+                      />
                     </div>
                   </div>
                 </div>

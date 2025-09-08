@@ -28,6 +28,7 @@ except Exception as e:
 from app.core.config import settings
 from app.core.security import verify_api_key
 from app.api import weaviate_router, elysia_router
+from app.api.bpmn_ai import router as bpmn_ai_router
 
 # Configure logging
 logging.basicConfig(
@@ -111,6 +112,7 @@ async def log_requests(request: Request, call_next):
 # Include routers
 app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
 app.include_router(elysia_router, prefix="/elysia", tags=["elysia"])
+app.include_router(bpmn_ai_router, prefix="/bpmn-ai", tags=["BPM AI"])
 
 # Health check
 @app.get("/health")

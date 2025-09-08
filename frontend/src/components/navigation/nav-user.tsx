@@ -138,6 +138,7 @@ export function NavUser({
     const planType = backendUser?.subscription_plan || 'free'
     const planConfigs: Record<string, { nameKey: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
       'free': { nameKey: 'plans.free', variant: 'secondary' },
+      'trial': { nameKey: 'plans.trial', variant: 'outline' },
       'pro': { nameKey: 'plans.professional', variant: 'default' },
       'professional': { nameKey: 'plans.professional', variant: 'default' },
       'enterprise': { nameKey: 'plans.enterprise', variant: 'destructive' }

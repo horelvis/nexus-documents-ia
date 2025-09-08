@@ -38,24 +38,31 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3002",
         "http://127.0.0.1:3000", 
         "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://192.168.1.47:3000",
         "http://192.168.1.47:3001",
+        "http://192.168.1.47:3002",
         "http://192.168.1.47:8000",
         "http://192.168.1.45:3000",
         "http://192.168.1.45:3001",
+        "http://192.168.1.45:3002",
         "http://192.168.1.45:8000",
         "http://192.168.1.54:3000",
         "http://192.168.1.54:3001",
+        "http://192.168.1.54:3002",
         "http://192.168.1.54:8000",
         "http://192.168.1.35:3000",
         "http://192.168.1.35:3001",
+        "http://192.168.1.35:3002",
         "http://192.168.1.35:8000",
         "http://192.168.1.58:3000",
         "http://192.168.1.58:3001",
+        "http://192.168.1.58:3002",
         "http://192.168.1.58:8000"
     ]
 
@@ -100,10 +107,10 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
-    # LEGACY: Vector DB (Qdrant) - DEPRECATED, use Weaviate/Elysia instead
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "documents"
+    # NEW: Elasticsearch for hybrid search and analytics
+    ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "localhost")
+    ELASTICSEARCH_PORT: int = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+    ELASTICSEARCH_URL: str = f"http://{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
     
     # Google Cloud Storage
     GCS_BUCKET_NAME: str
@@ -123,8 +130,14 @@ class Settings(BaseSettings):
     WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
     USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
     
+    # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
+    ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+    
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")
+    
+    # LangExtract Service (Entity Extraction)
+    LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"

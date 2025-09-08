@@ -16,9 +16,11 @@
 - **🔍 Búsqueda Semántica Avanzada**: Powered by Weaviate para encontrar documentos por significado, no solo palabras
 - **💬 Chat Conversacional**: Interactúa con tus documentos usando procesamiento de lenguaje natural
 - **📊 Análisis Automático**: Extrae automáticamente datos clave de contratos, facturas y documentos legales
+- **🧠 Extracción de Entidades**: Sistema LangExtract que identifica automáticamente personas, organizaciones, fechas, importes y relaciones
 - **🎯 Clasificación Inteligente**: Organización automática de documentos con IA de alta precisión
 - **🔄 Workflows Adaptativos**: Sistema de decisión inteligente que selecciona las mejores herramientas para cada tarea
 - **🌐 Capacidades Multimodales**: Procesa texto, PDFs con firmas digitales y metadatos complejos
+- **⚖️ Chain of Thought**: Visualización transparente del proceso de razonamiento de la IA (solo para administradores)
 
 ## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
@@ -31,20 +33,26 @@
 - **🌐 Información en Tiempo Real**: Accede a datos actualizados via búsqueda web
 - **🌤️ Consultas Meteorológicas**: Información climática para cualquier ubicación
 - **📄 Análisis de Documentos**: Extrae insights de contratos, facturas y reportes
+- **🏷️ Extracción de Entidades**: Identifica automáticamente personas, organizaciones, fechas e importes
+- **🔄 Comparación de Documentos**: Análisis comparativo inteligente entre documentos
+- **⚖️ Chain of Thought**: Transparencia completa del proceso de razonamiento (admin)
 - **✨ Respuestas Adaptativas**: Sistema de decisión que selecciona las mejores herramientas
 
 #### Tecnología Subyacente:
 - **Elysia Framework**: Sistema de decisión inteligente y orquestación de herramientas
 - **Weaviate**: Base de datos vectorial para búsqueda semántica avanzada
 - **Ollama Integration**: Modelos locales (gpt-oss:20b) para privacidad y rendimiento
-- **Multi-Tool Architecture**: 12+ herramientas especializadas para diferentes tareas
+- **LangExtract Integration**: Extracción automática de entidades en upload de documentos
+- **Multi-Tool Architecture**: 13+ herramientas especializadas para diferentes tareas
 
 ### Casos de Uso con IA
-1. **Due Diligence Automático**: Analiza 1000+ documentos en minutos
-2. **Extracción de Datos**: 99% precisión en facturas, contratos, formularios
+1. **Due Diligence Automático**: Analiza 1000+ documentos en minutos con extracción de entidades
+2. **Extracción de Datos**: 99% precisión en facturas, contratos, formularios con LangExtract
 3. **Generación de Resúmenes**: Dashboards ejecutivos instantáneos
 4. **Detección de Anomalías**: Identifica inconsistencias y riesgos ocultos
-5. **Recomendaciones Proactivas**: Sugiere acciones basadas en patrones
+5. **Comparación de Contratos**: Análisis diferencial automático entre versiones
+6. **Búsqueda por Entidades**: Encuentra documentos por personas, organizaciones o importes
+7. **Recomendaciones Proactivas**: Sugiere acciones basadas en patrones
 
 ## 🏗️ Arquitectura Orientada a IA
 
@@ -58,7 +66,8 @@ NexusDocs360 está construido con una arquitectura de microservicios optimizada 
   - 📁 **Storage Service**: Google Cloud Storage con gestión inteligente
   - ✍️ **Signature Service**: Detección y validación de firmas digitales
   - 🔍 **CAG Service**: Análisis de contenido y generación de metadatos
-  - 📊 **LangExtract Service**: Extracción inteligente de datos estructurados
+  - 🏷️ **LangExtract Service**: Extracción automática de entidades en upload de documentos
+  - 🧠 **Weaviate Service**: Motor de búsqueda semántica con Elysia Framework
 
 ### Frontend (Next.js 15)
 - **Next.js App Router**: Última tecnología de React
@@ -146,6 +155,10 @@ cd frontend && npm run lint              # Linting
 # Base de datos
 cd backend && alembic upgrade head       # Migraciones
 cd backend && python -m scripts.init_db  # Inicializar DB
+
+# 🆕 Extracción de Entidades
+cd backend && python test_langextract_integration.py              # Test integración LangExtract
+cd backend && python scripts/migrate_extract_entities_langextract.py --dry-run  # Migrar documentos existentes
 ```
 
 ## 📦 Despliegue
@@ -166,6 +179,12 @@ gcloud builds submit --config=cloudbuild.yaml
 
 Consulta [DEPLOYMENT.md](DEPLOYMENT.md) para guía completa de despliegue.
 
+## 📚 Documentación Adicional
+
+- **[LANGEXTRACT_INTEGRATION.md](LANGEXTRACT_INTEGRATION.md)**: Guía completa de extracción automática de entidades
+- **[EMMA_ARCHITECTURE.md](EMMA_ARCHITECTURE.md)**: Arquitectura técnica de Emma AI y Chain of Thought
+- **[CLAUDE.md](CLAUDE.md)**: Guía para desarrollo con Claude Code
+
 ## 🔐 Seguridad
 
 - Autenticación multi-factor con Clerk
@@ -173,6 +192,31 @@ Consulta [DEPLOYMENT.md](DEPLOYMENT.md) para guía completa de despliegue.
 - Auditoría completa de acciones
 - Cumplimiento GDPR/HIPAA ready
 - Aislamiento total multi-tenant
+
+## 🆕 Últimas Mejoras y Características
+
+### 🧠 Extracción Automática de Entidades (NUEVO)
+**Integración completa de LangExtract en el flujo de upload**:
+- ✅ **Automático**: Cada documento extrae entidades al subir
+- ✅ **Múltiples tipos**: Contratos, facturas, reportes, documentos generales  
+- ✅ **Entidades detectadas**: Personas, organizaciones, fechas, importes, términos legales
+- ✅ **API de búsqueda**: Búsqueda por entidades extraídas
+- ✅ **Migración**: Script para extraer entidades de documentos existentes
+
+### ⚖️ Chain of Thought Visualization (NUEVO)
+**Para administradores del sistema**:
+- ✅ **Transparencia total**: Visualiza el proceso de razonamiento de Emma AI
+- ✅ **Decision Tree**: Árbol de decisiones con contexto global
+- ✅ **Tool Selection**: Ve qué herramientas considera y selecciona
+- ✅ **Reasoning Steps**: Pasos detallados del análisis
+- ✅ **Performance Metrics**: Tiempo de ejecución y confianza
+
+### 🔄 Comparación de Documentos (NUEVO)
+**Emma AI puede comparar documentos**:
+- ✅ **Análisis de contenido**: Similitudes y diferencias
+- ✅ **Comparación estructural**: Formato y organización
+- ✅ **Metadatos**: Fechas, autores, versiones
+- ✅ **Recomendaciones**: Acciones sugeridas basadas en diferencias
 
 ## 📊 Características Empresariales
 

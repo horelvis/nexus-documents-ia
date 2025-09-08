@@ -127,6 +127,27 @@ export function UserProvider({ children }: UserProviderProps) {
 
       // User exists, update state
       const userData: BackendUser = response.data
+      
+      // Check for invalid/default tenant ID
+      const isInvalidTenantId = !userData.tenant_id || 
+        userData.tenant_id === 'default' || 
+        userData.tenant_id === '00000000-0000-0000-0000-000000000000' ||
+        userData.tenant_id === 'undefined' ||
+        userData.tenant_id === 'null'
+      
+      if (isInvalidTenantId) {
+        console.error('Invalid tenant ID detected:', userData.tenant_id)
+        setOnboarding({
+          needsOnboarding: false,
+          isNewUser: false,
+          hasCompletedSync: false,
+          loading: false,
+          error: 'INVALID_TENANT'
+        })
+        setUserLoading(false)
+        return
+      }
+      
       setBackendUser(userData)
       
       // Check if user needs onboarding (only after first payment or trial start)

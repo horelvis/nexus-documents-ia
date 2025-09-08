@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Popover, PopoverContent } from "@/components/ui/popover"
 import { IconUser, IconBuilding, IconMail, IconRobot, IconLoader2 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { useEntityService } from "@/lib/services/entity.service"
@@ -137,22 +136,39 @@ export function EntitySearchMenu({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [open, entities, selectedIndex, onSelect, onClose])
 
-  if (!anchorRef) return null
+  if (!anchorRef || !open) return null
 
+  // Calculate positioning for the dropdown
   const rect = anchorRef.getBoundingClientRect()
+  const viewportHeight = window.innerHeight
+  
+  // Calculate available space above and below
+  const spaceBelow = viewportHeight - rect.bottom
+  const spaceAbove = rect.top
+  
+  // Estimate dropdown height (max 6 items * ~48px per item + padding)
+  const estimatedDropdownHeight = Math.min(entities.length, 6) * 48 + 60
+  
+  // Decide if dropdown should open upward or downward
+  const shouldOpenUpward = spaceBelow < estimatedDropdownHeight && spaceAbove > spaceBelow
 
   return (
     <div
       className="fixed z-50"
       style={{
-        top: rect.bottom + window.scrollY + 4,
+        top: shouldOpenUpward 
+          ? rect.top + window.scrollY - estimatedDropdownHeight - 4
+          : rect.bottom + window.scrollY + 4,
         left: rect.left + window.scrollX,
-        width: rect.width
+        width: rect.width,
+        maxHeight: shouldOpenUpward 
+          ? Math.min(spaceAbove - 8, 300)
+          : Math.min(spaceBelow - 8, 300)
       }}
     >
       {open && (
         <Command className="rounded-lg border shadow-md bg-popover">
-          <CommandList>
+          <CommandList className="max-h-full overflow-y-auto">
             {loading ? (
               <CommandEmpty>
                 <div className="flex items-center justify-center gap-2">
@@ -161,7 +177,7 @@ export function EntitySearchMenu({
                 </div>
               </CommandEmpty>
             ) : entities.length === 0 ? (
-              <CommandEmpty>No entities found</CommandEmpty>
+              <CommandEmpty>No entities found for "{searchQuery}"</CommandEmpty>
             ) : (
               <CommandGroup heading="Suggested Entities">
                 {entities.map((entity, index) => {

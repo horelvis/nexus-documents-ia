@@ -22,8 +22,12 @@ interface ElysiaChatProps {
   tenantId: string
   className?: string
   initialMessage?: string
+  initialQuery?: string // Auto-execute this query on load
   onClose?: () => void
   onFirstQuery?: () => void
+  isAdmin?: boolean
+  documentId?: string // Optional document context
+  enableMentions?: boolean
 }
 
 export interface ElysiaChatRef {
@@ -31,7 +35,7 @@ export interface ElysiaChatRef {
 }
 
 export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function ElysiaChat({
-  tenantId, className, initialMessage, onClose, onFirstQuery
+  tenantId, className, initialMessage, initialQuery, onClose, onFirstQuery, isAdmin = false, documentId, enableMentions = true
 }, ref) {
   const { backendUser } = useBackendUser()
   const { sendMessage } = useElysiaService()
@@ -69,7 +73,9 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
     setError(null)
 
     try {
-      const result = await sendMessage(query, conversationId, tenantId)
+      // Enable debug mode for admin users
+      const debugEnabled = isAdmin
+      const result = await sendMessage(query, conversationId, tenantId, debugEnabled)
       
       // Add result message
       const resultMessage: ElysiaMessage = {
@@ -81,8 +87,10 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
           confidence_score: result.confidence_score,
           sources: extractSources(result.data?.citations || []),
           processing_time: result.execution_time_ms,
+          execution_time_ms: result.execution_time_ms,
           agent_flow: result.tools_used || [],
-          suggestions: getContextualSuggestions(result)
+          suggestions: getContextualSuggestions(result),
+          debug_data: isAdmin && result.data ? result.data : undefined
         }
       }
 
@@ -160,6 +168,17 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
     sendQuery: handleSendQuery
   }), [handleSendQuery])
 
+  // Execute initial query if provided
+  useEffect(() => {
+    if (initialQuery && backendUser?.id && messages.length === 0) {
+      // Small delay to ensure component is fully mounted
+      const timer = setTimeout(() => {
+        handleSendQuery(initialQuery)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [initialQuery, backendUser?.id, messages.length, handleSendQuery])
+
 
   const clearMessages = () => {
     setMessages([])
@@ -196,6 +215,7 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
               onSuggestionClick={handleSuggestionClick}
               onDocumentClick={handleDocumentClick}
               onPreviewClick={handlePreviewClick}
+              isAdmin={isAdmin}
             />
           </div>
         )}
@@ -209,7 +229,9 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
             onSendQuery={handleSendQuery}
             isLoading={isLoading}
             disabled={!backendUser?.id}
-            placeholder="Ask about your documents..."
+            placeholder="Pregúntame sobre tus documentos... (usa @ para mencionar entidades)"
+            documentId={documentId || "general"}
+            enableMentions={enableMentions}
           />
         </div>
       </div>

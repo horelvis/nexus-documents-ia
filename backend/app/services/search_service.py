@@ -1,5 +1,7 @@
 """
-LangChain-based Search Service with simplified RAG
+Hybrid Search Service combining Weaviate and Elasticsearch
+- Weaviate: Fast semantic search (80% cases)
+- Elasticsearch: Complex hybrid search + analytics (20% cases)
 """
 import logging
 from typing import List, Dict, Any, Optional
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService
+from app.services.elasticsearch_service import ElasticsearchService
 from app.db.database import SessionLocal
 from app.db.models import Document
 
@@ -15,14 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 class SearchService:
-    """Servicio de búsqueda simplificado usando LangChain"""
+    """Hybrid Search Service: Weaviate (primary) + Elasticsearch (specialized)"""
     
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
         self.llm_service = LLMService()
-        self.vector_service = VectorService(tenant_id)
+        self.vector_service = VectorService(tenant_id)  # Weaviate - Primary
+        self.elasticsearch_service = ElasticsearchService(tenant_id)  # Elasticsearch - Specialized
         
         logger.info(f"SearchService initialized for tenant: {tenant_id}")
+        logger.info("Using hybrid architecture: Weaviate (primary) + Elasticsearch (specialized)")
     
     async def chat_with_documents(
         self, 
@@ -64,46 +69,59 @@ class SearchService:
         self, 
         query: str, 
         limit: int = 10,
-        doc_ids: List[str] = None
+        doc_ids: List[str] = None,
+        search_type: str = "semantic",  # "semantic", "hybrid", "keyword"
+        filters: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Busca documentos similares a la consulta.
+        Smart hybrid search: routes to optimal engine based on query complexity
         
         Args:
-            query: Consulta de búsqueda
-            limit: Número máximo de resultados
-            doc_ids: Lista opcional de IDs de documentos para filtrar
+            query: Search query
+            limit: Maximum results
+            doc_ids: Optional document ID filter
+            search_type: "semantic" (Weaviate), "hybrid" (Elasticsearch), "keyword" (Elasticsearch)
+            filters: Additional filters (tags, dates, etc.)
             
         Returns:
-            Lista de documentos similares con datos completos
+            List of documents with complete data
         """
         try:
-            logger.debug(f"Searching documents for query: {query[:100]}...")
+            logger.debug(f"Hybrid search - Type: {search_type}, Query: {query[:100]}...")
             
-            if doc_ids:
-                # Búsqueda filtrada por documentos específicos
-                vector_results = await self.vector_service.search_by_document_ids(
-                    doc_ids=doc_ids,
+            # Route to appropriate search engine
+            if search_type == "hybrid" or search_type == "keyword":
+                # Use Elasticsearch for hybrid/keyword search
+                logger.info("🔍 Using Elasticsearch for hybrid/keyword search")
+                results = await self.elasticsearch_service.hybrid_search(
                     query=query,
-                    limit=limit
+                    limit=limit,
+                    filters=filters or {}
                 )
+                
             else:
-                # Búsqueda general
-                vector_results = await self.vector_service.search_similar(
-                    query=query,
-                    limit=limit
-                )
+                # Use Weaviate for semantic search (default, faster)
+                logger.info("🚀 Using Weaviate for semantic search")
+                if doc_ids:
+                    vector_results = await self.vector_service.search_by_document_ids(
+                        doc_ids=doc_ids,
+                        query=query,
+                        limit=limit
+                    )
+                else:
+                    vector_results = await self.vector_service.search_similar(
+                        query=query,
+                        limit=limit
+                    )
+                
+                # Enrich with complete document data
+                results = await self._enrich_search_results(vector_results)
             
-            logger.debug(f"Found {len(vector_results)} vector results")
-            
-            # Enrich with complete document data from database
-            enriched_results = await self._enrich_search_results(vector_results)
-            
-            logger.debug(f"Returning {len(enriched_results)} enriched search results")
-            return enriched_results
+            logger.info(f"✅ {search_type.capitalize()} search returned {len(results)} results")
+            return results
             
         except Exception as e:
-            logger.error(f"Error searching documents: {str(e)}")
+            logger.error(f"❌ Hybrid search failed: {str(e)}")
             return []
     
     async def _enrich_search_results(self, vector_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -389,3 +407,71 @@ class SearchService:
         except Exception as e:
             logger.error(f"Error getting vector store info: {str(e)}")
             return {}
+    
+    async def get_search_analytics(
+        self, 
+        date_from: str = None, 
+        date_to: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get comprehensive search and document analytics from Elasticsearch
+        
+        Args:
+            date_from: Start date for analytics
+            date_to: End date for analytics
+            
+        Returns:
+            Analytics data with insights
+        """
+        try:
+            logger.info("📊 Fetching search analytics from Elasticsearch")
+            analytics = await self.elasticsearch_service.get_analytics(date_from, date_to)
+            
+            # Add some computed metrics
+            analytics["search_engines"] = {
+                "weaviate": {"status": "active", "role": "primary_semantic"},
+                "elasticsearch": {"status": "active", "role": "hybrid_analytics"}
+            }
+            
+            return analytics
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get search analytics: {str(e)}")
+            return {"error": str(e)}
+    
+    async def suggest_search_type(self, query: str) -> str:
+        """
+        Intelligently suggest optimal search type based on query characteristics
+        
+        Args:
+            query: User search query
+            
+        Returns:
+            Suggested search type: "semantic", "hybrid", or "keyword"
+        """
+        query_lower = query.lower()
+        
+        # Keyword search indicators
+        keyword_indicators = [
+            "type:", "category:", "tag:", "file:", "size:", 
+            "before:", "after:", "author:", "created:",
+            "AND", "OR", "NOT", '"'  # Boolean operators, exact phrases
+        ]
+        
+        # Complex filter indicators (suggest hybrid)
+        complex_indicators = [
+            "recent", "latest", "last week", "last month",
+            "large files", "small files", "pdf only", "documents about",
+            "similar to", "related to", "contains exact"
+        ]
+        
+        # Check for keyword search
+        if any(indicator in query_lower for indicator in keyword_indicators):
+            return "keyword"
+            
+        # Check for complex hybrid search
+        if any(indicator in query_lower for indicator in complex_indicators):
+            return "hybrid"
+            
+        # Default to semantic (fastest, best for most queries)
+        return "semantic"

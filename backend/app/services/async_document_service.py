@@ -19,14 +19,15 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, Tag, Tenant
+from app.db.models import Document, Tag, Tenant, DocumentView
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
-from app.services.vector_service_direct import VectorServiceDirect
+from app.services.vector_service import VectorService
 from app.services.weaviate_client import weaviate_client
 from app.services.llm_service import LLMService
+from app.services.elasticsearch_service import ElasticsearchService
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class AsyncDocumentService:
         self.embedding_service = None
         self.vector_service = None
         self.llm_service = None
+        self.elasticsearch_service = None  # NEW: Elasticsearch for hybrid search
         self._initialized = False
     
     @classmethod
@@ -103,8 +105,13 @@ class AsyncDocumentService:
                     )
         
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorServiceDirect(self.tenant_id, self.user_id)
+        self.vector_service = VectorService(self.tenant_id)
         self.llm_service = LLMService()
+        self.elasticsearch_service = ElasticsearchService(self.tenant_id)
+        
+        # Initialize Elasticsearch index if not exists
+        self.elasticsearch_service.create_index_if_not_exists()
+        
         self._initialized = True
     
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -457,8 +464,75 @@ class AsyncDocumentService:
                         await db.commit()
                         logger.info(f"Document {doc_id} marked as INDEXED with summary")
                         
+                        # NEW: Index document in Elasticsearch for hybrid search
+                        try:
+                            logger.info(f"🔍 Indexing document {doc_id} in Elasticsearch")
+                            
+                            # Prepare metadata for Elasticsearch
+                            es_metadata = {
+                                "file_type": doc.file_type,
+                                "category": doc.category,
+                                "tags": [tag.name for tag in doc.tags] if doc.tags else [],
+                                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                                "file_size": doc.file_size,
+                                "tenant_id": doc.tenant_id
+                            }
+                            
+                            # Index in Elasticsearch with content and metadata
+                            es_success = await self.elasticsearch_service.index_document(
+                                doc_id=str(doc_id),
+                                title=doc.title,
+                                content=text[:5000],  # Index more content for better search
+                                metadata=es_metadata
+                            )
+                            
+                            if es_success:
+                                logger.info(f"✅ Document {doc_id} indexed in Elasticsearch")
+                            else:
+                                logger.warning(f"⚠️ Document {doc_id} failed to index in Elasticsearch")
+                                
+                        except Exception as es_error:
+                            logger.error(f"❌ Elasticsearch indexing failed for {doc_id}: {es_error}")
+                            # Don't fail the whole process if ES fails
+                        
                         # Perform routing analysis in the same session
                         await self._perform_routing_analysis(db, doc_info, text, file_ext)
+                        
+                        # NEW: Extract entities with LangExtract
+                        try:
+                            logger.info(f"🧠 Starting entity extraction for document {doc_id}")
+                            entities_result = await self._extract_entities_langextract(
+                                text=text,
+                                doc_type=doc.category or "general",
+                                filename=doc.filename
+                            )
+                            
+                            if entities_result.get("success"):
+                                doc.extracted_entities = entities_result.get("extractions", [])
+                                await db.commit()
+                                logger.info(
+                                    f"✅ Entities extracted for {doc_id}: "
+                                    f"{entities_result.get('total_extractions', 0)} entities found "
+                                    f"(type: {entities_result.get('extraction_type', 'unknown')})"
+                                )
+                            else:
+                                # Store empty array to indicate extraction was attempted
+                                doc.extracted_entities = []
+                                await db.commit()
+                                logger.warning(
+                                    f"⚠️ Entity extraction failed for {doc_id}: "
+                                    f"{entities_result.get('error', 'Unknown error')}"
+                                )
+                        except Exception as entity_error:
+                            logger.error(f"❌ Entity extraction exception for {doc_id}: {entity_error}")
+                            # Don't fail the whole process if entity extraction fails
+                            # Just mark with empty array to show it was attempted
+                            try:
+                                doc.extracted_entities = []
+                                await db.commit()
+                            except:
+                                pass  # If even this fails, continue without entities
                 
                 # Queue document for auto-categorization
                 try:
@@ -874,6 +948,116 @@ class AsyncDocumentService:
             logger.error(f"Error removing tag from document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="Error removing tag")
     
+    async def mark_document_viewed(
+        self, 
+        document_id: str, 
+        view_duration_seconds: int = None,
+        scroll_percentage: float = None
+    ) -> str:
+        """
+        Mark document as viewed by current user
+        
+        Args:
+            document_id: ID of the document being viewed
+            view_duration_seconds: Optional duration of view in seconds
+            scroll_percentage: Optional percentage of document scrolled
+            
+        Returns:
+            view_id: ID of the created view record
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                # Check if document exists and belongs to tenant
+                stmt = select(Document).filter(
+                    Document.id == document_id,
+                    Document.tenant_id == self.tenant_id
+                )
+                result = await db.execute(stmt)
+                document = result.scalar_one_or_none()
+                
+                if not document:
+                    raise HTTPException(status_code=404, detail="Document not found")
+                
+                # Create or update document view record
+                view_record = DocumentView(
+                    user_id=self.user_id,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id,
+                    viewed_at=func.now(),
+                    view_duration_seconds=view_duration_seconds,
+                    scroll_percentage=scroll_percentage
+                )
+                
+                db.add(view_record)
+                await db.commit()
+                await db.refresh(view_record)
+                
+                logger.info(f"Document {document_id} marked as viewed by user {self.user_id}")
+                return str(view_record.id)
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error marking document {document_id} as viewed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error marking document as viewed")
+    
+    async def get_recently_viewed_documents(
+        self, 
+        limit: int = 10, 
+        user_specific: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get recently viewed documents for the user or tenant"""
+        try:
+            async with AsyncSessionLocal() as db:
+                # Base query with Document and DocumentView joined
+                query = select(
+                    Document,
+                    func.max(DocumentView.viewed_at).label("last_viewed_at")
+                ).join(
+                    DocumentView, Document.id == DocumentView.document_id
+                ).filter(
+                    Document.tenant_id == self.tenant_id
+                )
+                
+                # Filter by user if specified
+                if user_specific and self.user_id:
+                    query = query.filter(DocumentView.user_id == self.user_id)
+                
+                # Group by document, order by most recent view, limit results
+                query = query.group_by(Document.id).order_by(
+                    func.max(DocumentView.viewed_at).desc()
+                ).limit(limit)
+                
+                result = await db.execute(query)
+                documents = result.fetchall()
+                
+                # Format results
+                results = []
+                for doc, last_viewed_at in documents:
+                    results.append({
+                        "id": str(doc.id),
+                        "filename": doc.filename,
+                        "title": doc.title,
+                        "description": doc.description,
+                        "file_type": doc.file_type,
+                        "mime_type": doc.mime_type,
+                        "file_size": doc.file_size,
+                        "tags": doc.tags or [],
+                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                        "indexed": doc.indexed,
+                        "category": doc.category,
+                        "tenant_id": str(doc.tenant_id),
+                        "created_by": str(doc.created_by)
+                    })
+                
+                logger.info(f"Retrieved {len(results)} recently viewed documents")
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error getting recently viewed documents: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error retrieving recently viewed documents")
+    
     async def _generate_document_summary(self, text: str, filename: str) -> str:
         """Generate a concise summary of the document"""
         try:
@@ -992,3 +1176,128 @@ class AsyncDocumentService:
         except Exception as e:
             logger.warning(f"Failed to route document {doc_info['id']} with Agent Router: {e}")
             # Don't fail the whole process if routing fails
+    
+    async def _extract_entities_langextract(
+        self, 
+        text: str, 
+        doc_type: str = "general", 
+        filename: str = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities using LangExtract microservice
+        
+        Args:
+            text: Document text to analyze
+            doc_type: Type of document (contract, invoice, report, general)
+            filename: Optional filename for context
+            
+        Returns:
+            Dictionary with extraction results
+        """
+        try:
+            import httpx
+            from app.core.config import settings
+            
+            logger.info(f"🧠 Extracting entities with LangExtract for {doc_type} document")
+            
+            # Map document categories to LangExtract types
+            langextract_type_mapping = {
+                "contract": "contract",
+                "legal": "contract", 
+                "invoice": "invoice",
+                "financial": "invoice",
+                "report": "report",
+                "compliance": "report",
+                "technical": "report",
+                "correspondence": "general",
+                "hr": "general",
+                "general": "general"
+            }
+            
+            extraction_type = langextract_type_mapping.get(doc_type, "general")
+            
+            # Prepare request payload
+            request_payload = {
+                "text": text[:50000],  # Limit text size to avoid timeouts
+                "document_type": extraction_type,
+                "filename": filename,
+                "provider": "ollama"  # Use Ollama by default
+            }
+            
+            # Call LangExtract microservice
+            microservice_url = f"{settings.LANGEXTRACT_SERVICE_URL}/api/v1/extraction/extract"
+            headers = {
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(f"📞 Calling LangExtract service at {microservice_url}")
+                response = await client.post(microservice_url, json=request_payload, headers=headers)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Process and structure the result
+                    if result.get("success", False):
+                        extractions = result.get("extractions", [])
+                        entities_summary = result.get("summary", {})
+                        metadata = result.get("metadata", {})
+                        
+                        logger.info(f"✅ LangExtract completed: {len(extractions)} extractions found")
+                        logger.info(f"🔍 Entity types: {list(result.get('entities', {}).keys())}")
+                        
+                        # Format entities for storage in DB
+                        formatted_entities = []
+                        for extraction in extractions:
+                            formatted_entities.append({
+                                "name": extraction.get("text", ""),
+                                "type": extraction.get("class", "other"),
+                                "role": extraction.get("attributes", {}).get("role", ""),
+                                "context": extraction.get("attributes", {}).get("type", ""),
+                                "metadata": {
+                                    "extraction_method": "langextract",
+                                    "provider": metadata.get("provider", "ollama"),
+                                    "model": metadata.get("model", "unknown"),
+                                    "confidence": extraction.get("attributes", {}).get("confidence", 0.8),
+                                    "source_indices": extraction.get("source_indices"),
+                                    "document_type": extraction_type
+                                }
+                            })
+                        
+                        return {
+                            "success": True,
+                            "extractions": formatted_entities,
+                            "summary": entities_summary,
+                            "total_extractions": len(extractions),
+                            "extraction_type": extraction_type,
+                            "provider": metadata.get("provider", "ollama"),
+                            "visualization_html": result.get("visualization_html")
+                        }
+                    else:
+                        error_msg = result.get("error", "Unknown extraction error")
+                        logger.error(f"❌ LangExtract service returned error: {error_msg}")
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "extractions": [],
+                            "extraction_type": extraction_type
+                        }
+                else:
+                    error_msg = f"LangExtract service returned {response.status_code}: {response.text}"
+                    logger.error(f"❌ LangExtract service HTTP error: {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "extractions": [],
+                        "extraction_type": extraction_type
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ LangExtract entity extraction failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "extractions": [],
+                "extraction_type": "general"
+            }

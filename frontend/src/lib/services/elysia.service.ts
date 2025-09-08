@@ -6,6 +6,7 @@ export interface ElysiaQuery {
   session_id: string
   tenant_id: string
   context?: Record<string, any>
+  enable_debug?: boolean
 }
 
 export interface ElysiaResponse {
@@ -95,12 +96,14 @@ export function useElysiaService() {
     message: string, 
     sessionId: string,
     tenantId: string,
+    enableDebug: boolean = false,
     context?: Record<string, any>
   ): Promise<ElysiaResponse> {
     return queryElysia({
       query: message,
       session_id: sessionId,
       tenant_id: tenantId,
+      enable_debug: enableDebug,
       context
     })
   }

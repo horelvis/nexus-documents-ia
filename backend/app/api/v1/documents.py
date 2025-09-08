@@ -481,6 +481,17 @@ async def get_document_preview(
             force_regenerate=force_regenerate
         )
         
+        # Marcar documento como visualizado cuando se obtiene preview por primera vez
+        if not force_regenerate:
+            try:
+                await document_service.mark_document_viewed(
+                    document_id=doc_id,
+                    view_duration_seconds=0,
+                    scroll_percentage=0.0
+                )
+            except Exception as e:
+                logger.warning(f"Failed to mark document {doc_id} as viewed: {e}")
+        
         return preview_result
         
     except HTTPException:

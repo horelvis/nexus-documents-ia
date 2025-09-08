@@ -1,6 +1,7 @@
 {
   "plans": {
     "free": "Free",
+    "trial": "Trial",
     "professional": "Professional",
     "enterprise": "Enterprise",
     "currentPlan": "Current Plan",

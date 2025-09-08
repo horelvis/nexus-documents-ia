@@ -57,7 +57,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Document as ApiDocument } from "@/lib/types"
-import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 
 interface DocumentsDataTableProps {
   data: ApiDocument[]
@@ -69,7 +69,6 @@ interface DocumentsDataTableProps {
   onFullPagePreview: (document: ApiDocument) => void
   onShareDocument: (document: ApiDocument) => void
   onRequestSignature?: (document: ApiDocument) => void
-  onReindexDocument?: (document: ApiDocument) => void
 }
 
 export function DocumentsDataTable({
@@ -82,7 +81,6 @@ export function DocumentsDataTable({
   onFullPagePreview,
   onShareDocument,
   onRequestSignature,
-  onReindexDocument,
 }: DocumentsDataTableProps) {
   // Get tenant ID from URL for localStorage keys
   const tenantId = React.useMemo(() => {
@@ -182,7 +180,12 @@ export function DocumentsDataTable({
         const document = row.original
         return (
           <div>
-            <div className="font-medium">{document.title || document.filename}</div>
+            <div 
+              className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+              onClick={() => onViewDocument(document)}
+            >
+              {document.title || document.filename}
+            </div>
             {document.description && (
               <div className="text-xs text-muted-foreground line-clamp-1">
                 {document.description}
@@ -227,15 +230,6 @@ export function DocumentsDataTable({
       accessorKey: "category",
       header: "Category",
       cell: ({ row }) => row.original.category || "Sin Categoría",
-    },
-    {
-      accessorKey: "indexed",
-      header: "Status",
-      cell: ({ row }) => (
-        <Badge className={getStatusColor(row.original.indexed)} variant="secondary" size="sm">
-          {getStatusLabel(row.original.indexed)}
-        </Badge>
-      ),
     },
     {
       accessorKey: "tags",
@@ -328,13 +322,6 @@ export function DocumentsDataTable({
                   Edit
                 </DropdownMenuItem>
                 
-                {/* Show reindex option for failed/error documents */}
-                {onReindexDocument && (document.indexed === 'INDEXING_ERROR' || document.indexed === 'PROCESSING') && (
-                  <DropdownMenuItem onClick={() => onReindexDocument(document)}>
-                    <IconRefresh className="mr-2 h-4 w-4" />
-                    Reindex
-                  </DropdownMenuItem>
-                )}
                 
                 <DropdownMenuSeparator />
                 

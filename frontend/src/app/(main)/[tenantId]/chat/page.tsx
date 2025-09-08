@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useState, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { 
   MessageSquare, 
   Settings, 
@@ -49,10 +50,21 @@ export default function ChatPage({ params }: ChatPageProps) {
   const { tenantId } = React.use(params)
   
   const { backendUser } = useBackendUser()
+  const searchParams = useSearchParams()
   const [mode, setMode] = useState<"chat" | "settings">("chat")
   const [randomPrompts, setRandomPrompts] = useState<string[]>([])
   const [hasStartedChat, setHasStartedChat] = useState(false)
+  const [initialQuery, setInitialQuery] = useState<string | null>(null)
   const elysiaChatRef = useRef<ElysiaChatRef>(null)
+
+  // Check for initial query parameter
+  useEffect(() => {
+    const queryParam = searchParams.get('q')
+    if (queryParam) {
+      setInitialQuery(queryParam)
+      setHasStartedChat(true)
+    }
+  }, [searchParams])
 
   // Generar prompts aleatorios al cargar
   useEffect(() => {
@@ -177,7 +189,13 @@ export default function ChatPage({ params }: ChatPageProps) {
               tenantId={tenantId}
               className="h-full"
               initialMessage="¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+              initialQuery={initialQuery || undefined}
               onFirstQuery={() => setHasStartedChat(true)}
+              isAdmin={backendUser ? (
+                backendUser.is_superuser || 
+                backendUser.roles?.some((role: any) => role.name === 'admin') ||
+                !backendUser.is_team_member
+              ) : false}
             />
           </div>
         </div>

@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { RichTextInput } from "@/components/ui/rich-text-input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { 
@@ -38,12 +39,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentService } from "@/lib/services/document.service"
@@ -56,7 +51,7 @@ import {
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel, getStatusDescription } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 import { useTranslation } from "@/lib/i18n/hooks"
 
 export default function DocumentsPage() {
@@ -119,214 +114,8 @@ export default function DocumentsPage() {
   const documentService = useDocumentService()
   const searchService = useSearchService()
 
-  // Reindex function
-  const handleReindexDocument = async (document: ApiDocument) => {
-    try {
-      addNotification({
-        type: 'info',
-        title: 'Reindexing Document',
-        message: `Starting reindex for ${document.filename}...`
-      })
-      
-      console.log('Attempting to reindex document:', document.id)
-      const response = await searchService.reindexSpecificDocuments([document.id])
-      console.log('Reindex response:', response)
-      
-      if (response.error) {
-        console.error('Reindex API error:', response.error)
-        addNotification({
-          type: 'error',
-          title: 'Reindex Failed',
-          message: `Error: ${response.error}. Please check if the document exists and the search service is running.`
-        })
-        return
-      }
-      
-      if (response.data) {
-        const result = response.data
-        console.log('Reindex result:', result)
-        
-        if (result.error_count > 0) {
-          addNotification({
-            type: 'warning',
-            title: 'Reindex Completed with Errors',
-            message: `${result.success_count} of ${result.total_documents} documents reindexed successfully. ${result.error_count} failed.`
-          })
-        } else {
-          addNotification({
-            type: 'success',
-            title: 'Reindex Complete',
-            message: result.message || `${result.success_count} document(s) reindexed successfully`
-          })
-        }
-      } else {
-        addNotification({
-          type: 'warning',
-          title: 'Reindex Status Unknown',
-          message: 'Reindex request was sent but no response data received'
-        })
-      }
-      
-      // Reload documents to show updated status
-      setTimeout(() => {
-        loadDocuments()
-      }, 2000) // Wait 2 seconds for backend processing
-      
-    } catch (error) {
-      console.error('Reindex exception:', error)
-      addNotification({
-        type: 'error',
-        title: 'Reindex Failed',
-        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}. Please check your connection and try again.`
-      })
-    }
-  }
 
-  // Bulk reindex function for error documents
-  const handleReindexAllErrors = async () => {
-    try {
-      // Get all documents with errors
-      const errorDocuments = filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR')
-      
-      if (errorDocuments.length === 0) {
-        addNotification({
-          type: 'info',
-          title: 'No Documents to Reindex',
-          message: 'No documents with indexing errors found'
-        })
-        return
-      }
 
-      addNotification({
-        type: 'info',
-        title: 'Bulk Reindexing Started',
-        message: `Starting reindex for ${errorDocuments.length} document(s). This may take a few minutes...`
-      })
-      
-      console.log('Attempting bulk reindex for documents:', errorDocuments.map(doc => doc.id))
-      const response = await searchService.reindexSpecificDocuments(
-        errorDocuments.map(doc => doc.id)
-      )
-      console.log('Bulk reindex response:', response)
-      
-      if (response.error) {
-        console.error('Bulk reindex API error:', response.error)
-        addNotification({
-          type: 'error',
-          title: 'Bulk Reindex Failed',
-          message: `Error: ${response.error}. Please check if documents exist and the search service is running.`
-        })
-        return
-      }
-      
-      if (response.data) {
-        const result = response.data
-        console.log('Bulk reindex result:', result)
-        
-        if (result.error_count > 0) {
-          addNotification({
-            type: 'warning',
-            title: 'Bulk Reindex Completed with Errors',
-            message: `${result.success_count} of ${result.total_documents} documents reindexed successfully. ${result.error_count} failed. Check individual document status.`
-          })
-        } else {
-          addNotification({
-            type: 'success',
-            title: 'Bulk Reindex Complete',
-            message: result.message || `All ${result.success_count} document(s) reindexed successfully`
-          })
-        }
-      } else {
-        addNotification({
-          type: 'warning',
-          title: 'Bulk Reindex Status Unknown',
-          message: 'Bulk reindex request was sent but no response data received'
-        })
-      }
-      
-      // Reload documents to show updated status
-      setTimeout(() => {
-        loadDocuments()
-      }, 3000) // Wait 3 seconds for bulk processing
-      
-    } catch (error) {
-      console.error('Bulk reindex exception:', error)
-      addNotification({
-        type: 'error',
-        title: 'Bulk Reindex Failed',
-        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}. Please check your connection and try again.`
-      })
-    }
-  }
-
-  // Auto-reindex function
-  const handleAutoReindexOnce = async () => {
-    try {
-      addNotification({
-        type: 'info',
-        title: 'Auto-Reindex Started',
-        message: 'Starting automatic reindex process for failed documents...'
-      })
-      
-      console.log('Running auto-reindex once for tenant')
-      const response = await searchService.runAutoReindexOnce()
-      console.log('Auto-reindex response:', response)
-      
-      if (response.error) {
-        console.error('Auto-reindex API error:', response.error)
-        addNotification({
-          type: 'error',
-          title: 'Auto-Reindex Failed',
-          message: `Error: ${response.error}`
-        })
-        return
-      }
-      
-      if (response.data) {
-        const result = response.data.result
-        console.log('Auto-reindex result:', result)
-        
-        if (result.error_count > 0) {
-          addNotification({
-            type: 'warning',
-            title: 'Auto-Reindex Completed with Issues',
-            message: `${result.success_count} of ${result.total_documents} documents auto-reindexed successfully. ${result.error_count} failed.`
-          })
-        } else if (result.success_count > 0) {
-          addNotification({
-            type: 'success',
-            title: 'Auto-Reindex Complete',
-            message: `${result.success_count} document(s) auto-reindexed successfully`
-          })
-        } else {
-          addNotification({
-            type: 'info',
-            title: 'No Documents to Auto-Reindex',
-            message: 'No documents with errors found for auto-reindexing'
-          })
-        }
-      } else {
-        addNotification({
-          type: 'warning',
-          title: 'Auto-Reindex Status Unknown',
-          message: 'Auto-reindex request was sent but no response data received'
-        })
-      }
-      
-      // Reload documents to show updated status
-      setTimeout(() => {
-        loadDocuments()
-      }, 3000) // Wait 3 seconds for processing
-      
-    } catch (error) {
-      console.error('Auto-reindex exception:', error)
-      addNotification({
-        type: 'error',
-        title: 'Auto-Reindex Failed',
-        message: `Technical error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
-      })
-    }
-  }
 
   // Load documents from API - simple pattern
   const loadDocuments = async () => {
@@ -361,7 +150,7 @@ export default function DocumentsPage() {
           status: 'active' as const,
           created_by: {},
           tenant_id: tenantId,
-          indexing_status: result.document.indexed as any,
+          indexed: result.document.indexed || 'INDEXED',
           file_hash: '',
           version: 1,
           category: '',
@@ -644,79 +433,29 @@ export default function DocumentsPage() {
           </Button>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconFile className="h-8 w-8 text-blue-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Total Documents</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconClock className="h-8 w-8 text-green-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Processed</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'INDEXED').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconEye className="h-8 w-8 text-purple-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Recently Viewed</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'INDEXED').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconDownload className="h-8 w-8 text-orange-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Processing</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'PROCESSING').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
-        {/* Search and Filter */}
-        <Card className="mb-6">
+        {/* Main content */}
+        <div className="mb-6">
+            {/* Search and Filter */}
+            <Card className="mb-6">
           <CardContent className="p-6">
             <div className="flex flex-col gap-4">
               {/* Search Bar Row */}
               <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                 <div className="flex-1 relative">
-                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                  <Input
-                    placeholder="Search documents..."
+                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
+                  <RichTextInput
+                    placeholder="Search documents... (usa @ para mencionar entidades)"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={setSearchQuery}
                     onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
                     className="pl-10"
+                    documentId="general"
+                    onEntitySelect={(entity) => {
+                      console.log("Entity selected in document search:", entity)
+                      // Optionally trigger search when entity is selected
+                      loadDocuments()
+                    }}
                   />
                 </div>
                 
@@ -739,18 +478,6 @@ export default function DocumentsPage() {
                       All Documents
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('INDEXED')
-                      storePreference('filter', 'INDEXED')
-                    }}>
-                      Indexed
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('PROCESSING')
-                      storePreference('filter', 'PROCESSING')
-                    }}>
-                      Processing
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
                       setSelectedFilter('INDEXING_ERROR')
                       storePreference('filter', 'INDEXING_ERROR')
                     }}>
@@ -759,29 +486,6 @@ export default function DocumentsPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 
-                {/* Reindex Buttons - Show only when there are error documents */}
-                {!isLoading && filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR').length > 0 && (
-                  <>
-                    <Button 
-                      variant="outline" 
-                      onClick={handleReindexAllErrors}
-                      className="text-orange-600 border-orange-200 hover:bg-orange-50"
-                    >
-                      <IconRefresh className="mr-2 h-4 w-4" />
-                      Reindex Errors ({filteredDocuments.filter(doc => doc.indexed === 'INDEXING_ERROR').length})
-                    </Button>
-                    
-                    <Button 
-                      variant="outline" 
-                      onClick={handleAutoReindexOnce}
-                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                      title="Run automatic reindex once for this tenant"
-                    >
-                      <IconBrain className="mr-2 h-4 w-4" />
-                      Auto-Reindex
-                    </Button>
-                  </>
-                )}
                 
                 {/* View Toggle */}
                 <div className="flex items-center rounded-md border">
@@ -860,7 +564,11 @@ export default function DocumentsPage() {
                     <div className="flex-grow min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <div className="min-w-0 flex-1">
-                          <h3 className="text-base font-medium truncate" title={document.title || document.filename}>
+                          <h3 
+                            className="text-base font-medium truncate cursor-pointer hover:text-blue-600 transition-colors" 
+                            title={document.title || document.filename}
+                            onClick={() => handleViewDocument(document)}
+                          >
                             {document.title || document.filename}
                           </h3>
                           {document.description && (
@@ -869,26 +577,6 @@ export default function DocumentsPage() {
                             </p>
                           )}
                         </div>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Badge 
-                                className={getStatusColor(document.indexed)} 
-                                variant="secondary" 
-                                size="sm"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {getStatusLabel(document.indexed, t)}
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="text-sm font-medium">{getStatusLabel(document.indexed, t)}</p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {getStatusDescription(document.indexed, t)}
-                              </p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
                       </div>
                       
                       {/* Metadata and Actions */}
@@ -972,13 +660,6 @@ export default function DocumentsPage() {
                                 Edit
                               </DropdownMenuItem>
                               
-                              {/* Show reindex option for failed/error documents */}
-                              {(document.indexed === 'INDEXING_ERROR' || document.indexed === 'PROCESSING') && (
-                                <DropdownMenuItem onClick={() => handleReindexDocument(document)}>
-                                  <IconRefresh className="mr-2 h-4 w-4" />
-                                  Reindex
-                                </DropdownMenuItem>
-                              )}
                               
                               <DropdownMenuSeparator />
                               
@@ -1024,7 +705,6 @@ export default function DocumentsPage() {
             onFullPagePreview={handleFullPagePreview}
             onShareDocument={handleShareDocument}
             onRequestSignature={handleRequestSignature}
-            onReindexDocument={handleReindexDocument}
           />
         )}
 
@@ -1164,6 +844,8 @@ export default function DocumentsPage() {
           open={shareDialogOpen}
           onOpenChange={setShareDialogOpen}
         />
+
+        </div> {/* End main content */}
 
       </div>
     </div>

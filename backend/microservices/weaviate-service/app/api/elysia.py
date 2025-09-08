@@ -20,7 +20,16 @@ async def elysia_query(
 ):
     """Execute Elysia agentic query with decision trees"""
     try:
+        # Enhanced logging for debug mode
+        if query.enable_debug:
+            logger.info(f"🧠 DEBUG MODE ENABLED for query: {query.query[:100]}...")
+            logger.info(f"📊 Debug parameters: tenant_id={query.tenant_id}, session_id={query.session_id}")
+        
         response = await elysia_service.execute_query(query)
+        
+        if query.enable_debug and response.data:
+            logger.info(f"🔍 Chain of thought data generated: {len(response.data.get('decision_trace', []))} decision steps")
+        
         return response
     except Exception as e:
         logger.error(f"❌ Elysia query failed: {e}")

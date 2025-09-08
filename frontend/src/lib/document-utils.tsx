@@ -121,7 +121,7 @@ export function getStatusKey(status: string | number | null | undefined): string
 }
 
 /**
- * Returns translated status label (requires translation context)
+ * Returns user-friendly status label for document state
  */
 export function getStatusLabel(status: string | number | null | undefined, t?: (key: string) => string): string {
   const statusKey = getStatusKey(status)
@@ -131,19 +131,19 @@ export function getStatusLabel(status: string | number | null | undefined, t?: (
     return t(`documents.statusLabels.${statusKey}`)
   }
   
-  // Fallback to Spanish hardcoded values
-  const fallbackMap: Record<string, string> = {
-    'INDEXED': 'Procesado correctamente',
-    'PROCESSING': 'Procesando contenido',
-    'INDEXING_ERROR': 'Error en el procesamiento',
-    'PENDING': 'Pendiente de procesar'
+  // User-friendly labels (no technical jargon)
+  const friendlyLabels: Record<string, string> = {
+    'INDEXED': 'Disponible',           // Simple and positive
+    'PROCESSING': 'Preparando...',     // Less technical, more friendly
+    'INDEXING_ERROR': 'Revisar',       // Non-alarming, actionable
+    'PENDING': 'En cola'               // Simple queue concept
   }
   
-  return fallbackMap[statusKey] || statusKey
+  return friendlyLabels[statusKey] || 'En cola'
 }
 
 /**
- * Returns detailed status description (requires translation context)
+ * Returns user-friendly status description
  */
 export function getStatusDescription(status: string | number | null | undefined, t?: (key: string) => string): string {
   const statusKey = getStatusKey(status)
@@ -153,19 +153,19 @@ export function getStatusDescription(status: string | number | null | undefined,
     return t(`documents.statusDescriptions.${statusKey}`)
   }
   
-  // Fallback to Spanish hardcoded descriptions
-  const fallbackMap: Record<string, string> = {
-    'INDEXED': 'El documento ha sido procesado y está disponible para búsqueda',
-    'PROCESSING': 'El documento se está analizando y extrayendo su contenido',
-    'INDEXING_ERROR': 'Hubo un problema al procesar el documento. Puede reintentarse',
-    'PENDING': 'El documento está en cola esperando a ser procesado'
+  // User-friendly descriptions (focus on what user can do)
+  const friendlyDescriptions: Record<string, string> = {
+    'INDEXED': 'Listo para búsqueda y análisis',
+    'PROCESSING': 'Analizando contenido del documento',
+    'INDEXING_ERROR': 'Necesita ser reprocesado',
+    'PENDING': 'Esperando turno para ser procesado'
   }
   
-  return fallbackMap[statusKey] || statusKey
+  return friendlyDescriptions[statusKey] || 'Esperando turno para ser procesado'
 }
 
 /**
- * Returns status color classes based on indexing status
+ * Returns status color classes - more subtle and less alarming
  */
 export function getStatusColor(indexed: string | number | null | undefined): string {
   // Get the normalized status key
@@ -173,16 +173,77 @@ export function getStatusColor(indexed: string | number | null | undefined): str
   
   switch (statusKey) {
     case 'INDEXED':
-      return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+      return 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'  // Professional blue instead of green
     case 'PROCESSING':
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+      return 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'  // Softer amber
     case 'INDEXING_ERROR':
-      return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+      return 'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300'  // Orange instead of alarming red
     case 'PENDING':
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+      return 'bg-slate-50 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400'  // Subtle gray
     default:
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+      return 'bg-slate-50 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400'
   }
+}
+
+/**
+ * Returns whether document status should show as "ready to use" 
+ */
+export function isDocumentReady(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'INDEXED'
+}
+
+/**
+ * Returns whether document is currently being processed
+ */
+export function isDocumentProcessing(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'PROCESSING'
+}
+
+/**
+ * Returns whether document needs user attention
+ */
+export function needsAttention(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'INDEXING_ERROR'
+}
+
+/**
+ * Returns user-friendly status badge variant for UI components
+ */
+export function getStatusVariant(indexed: string | number | null | undefined): 'default' | 'secondary' | 'outline' | 'destructive' {
+  const statusKey = getStatusKey(indexed)
+  
+  switch (statusKey) {
+    case 'INDEXED':
+      return 'default'      // Normal blue badge - "ready"
+    case 'PROCESSING':
+      return 'secondary'    // Muted badge for processing
+    case 'INDEXING_ERROR':
+      return 'outline'      // Outline badge - less alarming than destructive
+    case 'PENDING':
+      return 'secondary'    // Muted badge for pending
+    default:
+      return 'secondary'
+  }
+}
+
+/**
+ * Returns status icon component for different states
+ */
+export function getStatusIcon(indexed: string | number | null | undefined) {
+  const statusKey = getStatusKey(indexed)
+  
+  // Import icons lazily to avoid bundle issues
+  const icons = {
+    'INDEXED': () => import('@tabler/icons-react').then(m => m.IconCheck),
+    'PROCESSING': () => import('@tabler/icons-react').then(m => m.IconLoader2),
+    'INDEXING_ERROR': () => import('@tabler/icons-react').then(m => m.IconAlertCircle),
+    'PENDING': () => import('@tabler/icons-react').then(m => m.IconClock)
+  }
+  
+  return icons[statusKey] || icons['PENDING']
 }
 
 /**
