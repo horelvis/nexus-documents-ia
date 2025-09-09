@@ -6,6 +6,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Request
 
 from app.core.config import settings
+from app.core.metrics import get_performance_report, get_metrics_summary
 
 # Create router for basic endpoints
 basic_router = APIRouter()
@@ -49,3 +50,15 @@ async def test_connection(request: Request) -> Dict[str, Any]:
         "api_prefix": settings.API_PREFIX,
         "server_host": str(settings.SERVER_HOST)
     }
+
+
+@basic_router.get("/metrics", tags=["monitoring"])
+async def get_metrics() -> Dict[str, Any]:
+    """Get application performance metrics"""
+    return get_metrics_summary()
+
+
+@basic_router.get("/performance-report", tags=["monitoring"])
+async def get_performance() -> Dict[str, Any]:
+    """Get detailed performance report"""
+    return get_performance_report()

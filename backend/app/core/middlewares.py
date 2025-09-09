@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.security_config import get_cors_origins, SECURITY_HEADERS
 from app.core.rate_limiting import rate_limit_middleware
+from app.core.compression import CompressionMiddleware
+from app.core.metrics import performance_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -102,20 +104,30 @@ async def log_requests_middleware(request: Request, call_next: Callable) -> Resp
         logger.debug(f"📋 All headers: {dict(request.headers)}")
 
     try:
-        # Process request
+        # Procesar la solicitud
         response = await call_next(request)
 
-        # Calculate processing time
+        # Calcular tiempo de procesamiento
         process_time = time.time() - start_time
 
-        # Add processing time header
+        # Añadir cabecera de tiempo de procesamiento
         response.headers["X-Process-Time"] = str(process_time)
 
-        # Log successful response (skip health checks)
+        # Monitorear rendimiento HTTP
+        response_size = len(response.body) if hasattr(response, 'body') else 0
+        performance_monitor.monitor_http_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration=process_time,
+            response_size=response_size
+        )
+
+        # Log de respuesta exitosa (skip health checks)
         if not is_health_check:
             logger.info(f"✅ {response.status_code} {request.method} {request.url.path} ({process_time:.3f}s)")
 
-        # Log additional info for auth endpoints with errors
+        # Log adicional para endpoints de auth con errores
         if request.url.path.startswith("/api/v1/auth") and response.status_code >= 400:
             if response.status_code == 401:
                 logger.error("🚫 Unauthorized - token validation failed")
@@ -169,6 +181,9 @@ def configure_middlewares(app) -> None:
 
     # Configure trusted hosts (production only)
     configure_trusted_hosts(app)
+
+    # Add compression middleware (must be first for response compression)
+    app.add_middleware(CompressionMiddleware)
 
     # Add security headers middleware
     app.middleware("http")(security_headers_middleware)
