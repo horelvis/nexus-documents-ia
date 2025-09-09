@@ -109,8 +109,14 @@ class AsyncDocumentService:
         self.llm_service = LLMService()
         self.elasticsearch_service = ElasticsearchService(self.tenant_id)
         
-        # Initialize Elasticsearch index if not exists
-        self.elasticsearch_service.create_index_if_not_exists()
+        # MANDATORY: Initialize Elasticsearch index 
+        index_created = self.elasticsearch_service.create_index_if_not_exists()
+        if not index_created:
+            error_msg = f"❌ CRITICAL: Elasticsearch index creation failed for tenant {self.tenant_id}"
+            logger.error(error_msg)
+            raise Exception(f"Elasticsearch is required for document management: {error_msg}")
+        
+        logger.info(f"✅ Elasticsearch index ready for tenant {self.tenant_id}")
         
         self._initialized = True
     
@@ -153,8 +159,115 @@ class AsyncDocumentService:
         date_to: Optional[str] = None,
         category: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get paginated list of documents with filters"""
+        """Get paginated list of documents with filters using hybrid search when applicable"""
         try:
+            # If we have a search term, REQUIRE Elasticsearch to work
+            if search and search.strip():
+                if not self.elasticsearch_service:
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="Search functionality unavailable: Elasticsearch service not initialized"
+                    )
+                
+                logger.info(f"🔍 Using Elasticsearch hybrid search for query: '{search}' (NO FALLBACK)")
+                
+                # Prepare filters for Elasticsearch
+                es_filters = {}
+                if category:
+                    es_filters["category"] = category
+                if tags:
+                    es_filters["tags"] = tags
+                if date_from:
+                    es_filters["date_from"] = date_from
+                if date_to:
+                    es_filters["date_to"] = date_to
+                
+                # Perform hybrid search - LET IT FAIL if broken
+                es_results = await self.elasticsearch_service.hybrid_search(
+                    query=search,
+                    limit=per_page * 2,  # Get more results to account for filtering
+                    filters=es_filters
+                )
+                
+                logger.info(f"✅ Elasticsearch returned {len(es_results)} results")
+                
+                # Extract document IDs from ES results
+                doc_ids = [result["document"]["id"] for result in es_results]
+                
+                # Get full document objects from database in the same order
+                if doc_ids:
+                    # Create case statement to preserve ES ranking order
+                    when_clauses = []
+                    for i, doc_id in enumerate(doc_ids):
+                        when_clauses.append((Document.id == doc_id, i))
+                    
+                    order_case = func.case(
+                        *when_clauses,
+                        else_=len(doc_ids)
+                    )
+                    
+                    # Apply pagination to the ordered ES results
+                    offset = (page - 1) * per_page
+                    paginated_doc_ids = doc_ids[offset:offset + per_page]
+                    
+                    if paginated_doc_ids:
+                        query = select(Document).filter(
+                            Document.id.in_(paginated_doc_ids),
+                            Document.tenant_id == self.tenant_id
+                        ).options(
+                            selectinload(Document.tags),
+                            selectinload(Document.creator)
+                        ).order_by(order_case)
+                        
+                        result = await db.execute(query)
+                        documents = result.scalars().all()
+                        
+                        # Build response with ES scores
+                        items = []
+                        es_scores = {res["document"]["id"]: res["score"] for res in es_results}
+                        
+                        for doc in documents:
+                            doc_dict = self._document_to_dict(doc)
+                            doc_dict["search_score"] = es_scores.get(str(doc.id), 0.0)
+                            doc_dict["search_matches"] = [
+                                match for res in es_results 
+                                if res["document"]["id"] == str(doc.id)
+                                for match in res.get("matches", [])
+                            ]
+                            items.append(doc_dict)
+                        
+                        return {
+                            "items": items,
+                            "total": len(doc_ids),
+                            "page": page,
+                            "per_page": per_page,
+                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
+                            "search_engine": "elasticsearch_hybrid"
+                        }
+                    else:
+                        # No results for this page
+                        return {
+                            "items": [],
+                            "total": len(doc_ids),
+                            "page": page,
+                            "per_page": per_page,
+                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
+                            "search_engine": "elasticsearch_hybrid"
+                        }
+                else:
+                    # No documents found - this is a valid result, not an error
+                    return {
+                        "items": [],
+                        "total": 0,
+                        "page": page,
+                        "per_page": per_page,
+                        "total_pages": 0,
+                        "search_engine": "elasticsearch_hybrid"
+                    }
+            
+            # Fallback to SQL search or when no search term provided
+            logger.info("Using SQL-based document search")
+            
             # Base query
             query = select(Document).filter(
                 Document.tenant_id == self.tenant_id
@@ -232,12 +345,35 @@ class AsyncDocumentService:
                 "total": total,
                 "page": page,
                 "per_page": per_page,
-                "pages": (total + per_page - 1) // per_page
+                "pages": (total + per_page - 1) // per_page,
+                "search_engine": "sql"
             }
             
         except Exception as e:
             logger.error(f"Error getting documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+    
+    def _document_to_dict(self, doc: Document) -> Dict[str, Any]:
+        """Convert Document model to dictionary"""
+        return {
+            "id": str(doc.id),
+            "title": doc.title,
+            "description": doc.description,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "mime_type": doc.mime_type,
+            "indexed": self._get_indexed_status_string(doc.indexed),
+            "category": doc.category if hasattr(doc, 'category') else None,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+            "tags": [{"id": str(tag.id), "name": tag.name} for tag in doc.tags],
+            "created_by": {
+                "id": str(doc.creator.id),
+                "email": doc.creator.email,
+                "full_name": doc.creator.full_name
+            } if doc.creator else None
+        }
     
     async def upload_document(
         self,
@@ -464,37 +600,44 @@ class AsyncDocumentService:
                         await db.commit()
                         logger.info(f"Document {doc_id} marked as INDEXED with summary")
                         
-                        # NEW: Index document in Elasticsearch for hybrid search
-                        try:
-                            logger.info(f"🔍 Indexing document {doc_id} in Elasticsearch")
-                            
-                            # Prepare metadata for Elasticsearch
-                            es_metadata = {
-                                "file_type": doc.file_type,
-                                "category": doc.category,
-                                "tags": [tag.name for tag in doc.tags] if doc.tags else [],
-                                "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                                "file_size": doc.file_size,
-                                "tenant_id": doc.tenant_id
-                            }
-                            
-                            # Index in Elasticsearch with content and metadata
-                            es_success = await self.elasticsearch_service.index_document(
-                                doc_id=str(doc_id),
-                                title=doc.title,
-                                content=text[:5000],  # Index more content for better search
-                                metadata=es_metadata
-                            )
-                            
-                            if es_success:
-                                logger.info(f"✅ Document {doc_id} indexed in Elasticsearch")
-                            else:
-                                logger.warning(f"⚠️ Document {doc_id} failed to index in Elasticsearch")
-                                
-                        except Exception as es_error:
-                            logger.error(f"❌ Elasticsearch indexing failed for {doc_id}: {es_error}")
-                            # Don't fail the whole process if ES fails
+                        # MANDATORY: Index document in Elasticsearch for hybrid search
+                        if not self.elasticsearch_service:
+                            # FAIL EXPLICITLY - search depends on Elasticsearch
+                            error_msg = f"❌ CRITICAL: Elasticsearch service not initialized - cannot index document {doc_id}"
+                            logger.error(error_msg)
+                            raise Exception(f"Elasticsearch service required for document indexing: {error_msg}")
+                        
+                        logger.info(f"🔍 MANDATORY Elasticsearch indexing for document {doc_id} (title: {doc.title})")
+                        
+                        # Prepare metadata for Elasticsearch
+                        es_metadata = {
+                            "file_type": doc.file_type,
+                            "category": doc.category,
+                            "tags": [tag.name for tag in doc.tags] if doc.tags else [],
+                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            "file_size": doc.file_size,
+                            "tenant_id": doc.tenant_id
+                        }
+                        
+                        logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
+                        
+                        # Index in Elasticsearch - MUST SUCCEED
+                        es_success = await self.elasticsearch_service.index_document(
+                            doc_id=str(doc_id),
+                            title=doc.title,
+                            content=text[:5000],  # Index more content for better search
+                            description=doc.description,
+                            metadata=es_metadata
+                        )
+                        
+                        if not es_success:
+                            # FAIL EXPLICITLY - indexing is mandatory
+                            error_msg = f"❌ CRITICAL: Document {doc_id} failed to index in Elasticsearch"
+                            logger.error(error_msg)
+                            raise Exception(f"Elasticsearch indexing required for search functionality: {error_msg}")
+                        
+                        logger.info(f"✅ Document {doc_id} successfully indexed in Elasticsearch")
                         
                         # Perform routing analysis in the same session
                         await self._perform_routing_analysis(db, doc_info, text, file_ext)

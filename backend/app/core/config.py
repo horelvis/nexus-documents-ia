@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
     
     # Legacy API Key (for backward compatibility)
-    API_KEY: str = "your-secret-api-key-here" # Default value, should be overridden by env var
+    API_KEY: str = os.getenv("API_KEY", "your-secret-api-key-here") # Default value, should be overridden by env var
     
     # Clerk Configuration
     CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")

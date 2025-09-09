@@ -69,7 +69,7 @@ export default function DocumentsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalDocuments, setTotalDocuments] = useState(0)
-  const [perPage] = useState(10)
+  const [perPage] = useState(50)
   
   // Load user preferences from localStorage
   const getStoredPreference = (key: string, defaultValue: any) => {
@@ -572,7 +572,7 @@ export default function DocumentsPage() {
         )}
 
         {/* Documents List */}
-        {!isLoading && !error && viewMode === 'grid' && (
+        {!isLoading && !error && viewMode === 'grid' && filteredDocuments.length > 0 && (
           <div className="space-y-2">
             {filteredDocuments.map((document: any) => (
               <Card 
@@ -721,7 +721,7 @@ export default function DocumentsPage() {
         )}
 
         {/* Documents Table */}
-        {!isLoading && !error && viewMode === 'table' && (
+        {!isLoading && !error && viewMode === 'table' && filteredDocuments.length > 0 && (
           <DocumentsDataTable
             data={filteredDocuments}
             onViewDocument={handleViewDocument}

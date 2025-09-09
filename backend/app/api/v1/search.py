@@ -12,11 +12,11 @@ from app.schemas.document import ChatMessage
 router = APIRouter()
 
 
-@router.get("/", response_model=List[dict])
-async def search_documents(
+@router.get("/elasticsearch", response_model=List[dict])
+async def search_elasticsearch(
     query: str = Query(..., description="Texto de búsqueda"),
     limit: int = Query(10, ge=1, le=100),
-    search_type: Optional[str] = Query("semantic", description="Tipo de búsqueda: semantic, hybrid, keyword"),
+    search_type: Optional[str] = Query("hybrid", description="Tipo de búsqueda: hybrid, keyword"),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -24,22 +24,124 @@ async def search_documents(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Hybrid search: routes to optimal engine based on search type
-    - semantic: Weaviate (default, fast)
-    - hybrid: Elasticsearch (keyword + semantic)
+    SIMPLE Elasticsearch search - no fallbacks
+    - hybrid: Elasticsearch (keyword + semantic) 
     - keyword: Elasticsearch (traditional search)
     """
-    try:
-        # Initialize hybrid search service
-        search_service = SearchService(tenant_id)
+    from app.services.elasticsearch_service import ElasticsearchService
+    
+    es_service = ElasticsearchService(tenant_id)
+    
+    # Prepare filters
+    filters = {}
+    if tags:
+        filters["tags"] = tags
+    if date_from:
+        filters["date_from"] = date_from  
+    if date_to:
+        filters["date_to"] = date_to
+    
+    # Direct Elasticsearch search - NO FALLBACKS
+    results = await es_service.hybrid_search(
+        query=query,
+        limit=limit,
+        filters=filters
+    )
+    
+    return results
+
+
+@router.get("/database", response_model=List[dict])
+async def search_database(
+    query: str = Query(..., description="Texto de búsqueda"),
+    limit: int = Query(10, ge=1, le=100),
+    tags: Optional[List[str]] = Query(None),
+    category: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    SIMPLE database search - no fallbacks
+    Searches in title, description, content in PostgreSQL
+    """
+    from sqlalchemy.future import select
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import or_
+    from app.db.database import SessionLocal
+    
+    with SessionLocal() as db:
+        stmt = select(Document).options(
+            selectinload(Document.tags)
+        ).filter(
+            Document.tenant_id == tenant_id
+        )
         
-        # Auto-suggest search type if not specified appropriately
-        if search_type == "semantic":
-            suggested_type = await search_service.suggest_search_type(query)
-            if suggested_type != "semantic":
-                search_type = suggested_type
-                # Log the smart routing decision
-                print(f"🤖 Smart routing: '{query}' → {search_type} search")
+        # Apply search filter - METADATA ONLY (no content search in DB)
+        if query:
+            stmt = stmt.filter(
+                or_(
+                    Document.title.ilike(f"%{query}%"),
+                    Document.description.ilike(f"%{query}%"),
+                    Document.filename.ilike(f"%{query}%")
+                )
+            )
+        
+        # Apply other filters
+        if category:
+            stmt = stmt.filter(Document.category == category)
+            
+        stmt = stmt.limit(limit)
+        
+        result = db.execute(stmt)
+        documents = result.scalars().all()
+        
+        # Format results to match expected structure
+        formatted_results = []
+        for doc in documents:
+            formatted_results.append({
+                "document": {
+                    "id": str(doc.id),
+                    "title": doc.title,
+                    "description": doc.description,
+                    "filename": doc.filename,
+                    "file_type": doc.file_type,
+                    "file_size": doc.file_size,
+                    "mime_type": doc.mime_type,
+                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                    "indexed": str(doc.indexed),
+                    "tenant_id": str(doc.tenant_id),
+                    "tags": [tag.name for tag in doc.tags] if doc.tags else []
+                },
+                "score": 1.0,  # Database doesn't provide relevance scoring
+                "matches": []
+            })
+        
+        return formatted_results
+
+
+@router.get("/", response_model=List[dict])
+async def search_documents(
+    query: str = Query(..., description="Texto de búsqueda"),
+    limit: int = Query(10, ge=1, le=100),
+    search_type: Optional[str] = Query("auto", description="Tipo de búsqueda: auto, elasticsearch, database"),
+    tags: Optional[List[str]] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    OPTIMIZED search - Elasticsearch primary, Database fallback only if ES is down
+    - auto: Try Elasticsearch first, fallback to Database only if ES fails
+    - elasticsearch: Force Elasticsearch search
+    - database: Force database search (metadata only)
+    """
+    from app.services.elasticsearch_service import ElasticsearchService
+    
+    # Always try Elasticsearch first (has the content)
+    try:
+        es_service = ElasticsearchService(tenant_id)
         
         # Prepare filters
         filters = {}
@@ -50,64 +152,33 @@ async def search_documents(
         if date_to:
             filters["date_to"] = date_to
         
-        # Perform hybrid search
-        results = await search_service.search_documents(
+        # Try Elasticsearch search
+        results = await es_service.hybrid_search(
             query=query,
             limit=limit,
-            search_type=search_type,
             filters=filters
         )
         
-        # Return results with search engine info
-        response_data = {
-            "results": results,
-            "search_engine": "weaviate" if search_type == "semantic" else "elasticsearch",
-            "search_type": search_type,
-            "total_results": len(results)
-        }
-        
-        return results  # For compatibility, return just results
-        
-    except Exception as e:
-        # Fallback to CAG service if hybrid search fails
-        try:
-            cag_client = CAGClient()
-            cag_response = await cag_client.process_query(
-                query=f"SEARCH_ONLY: {query}",
-                tenant_id=tenant_id,
-                user_id=str(current_user.id),
-                context={
-                    "search_mode": True,
-                    "limit": limit,
-                    "tags": tags,
-                    "date_from": date_from,
-                    "date_to": date_to
-                }
-            )
+        if results:
+            return results
             
-            if cag_response.get("success") and cag_response.get("documents"):
-                return cag_response["documents"]
-        except Exception as fallback_error:
-            print(f"❌ Both hybrid search and CAG fallback failed: {e}, {fallback_error}")
-            
-        # Final fallback to original search service
-        search_service = SearchService(tenant_id=tenant_id)
-        results = await search_service.search_documents(
-            query=query,
-            limit=limit
-        )
+    except Exception as es_error:
+        print(f"⚠️ Elasticsearch failed: {es_error}")
         
-        return results
-        
-    except Exception as e:
-        # Fallback al servicio original en caso de error
-        search_service = SearchService(tenant_id=tenant_id)
-        results = await search_service.search_documents(
-            query=query,
-            limit=limit
-        )
-        
-        return results
+        # Only if search_type explicitly requests database, OR if ES completely failed
+        if search_type == "database" or "connection" in str(es_error).lower():
+            print("🔄 Falling back to database search (metadata only)")
+            return await search_database(query, limit, tags, None, current_user, tenant_id)
+        else:
+            # Re-raise ES error if it's not a connection issue
+            raise es_error
+    
+    # If ES returned empty results but worked, still try database for metadata-only search
+    if search_type == "database":
+        return await search_database(query, limit, tags, None, current_user, tenant_id)
+    
+    # Default: return empty results if ES worked but found nothing
+    return []
 
 
 @router.get("/analytics", response_model=dict)

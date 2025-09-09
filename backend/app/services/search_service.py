@@ -451,6 +451,10 @@ class SearchService:
         """
         query_lower = query.lower()
         
+        # Check for wildcards first (highest priority)
+        if '*' in query or '?' in query:
+            return "hybrid"  # Use hybrid for wildcard patterns
+        
         # Keyword search indicators
         keyword_indicators = [
             "type:", "category:", "tag:", "file:", "size:", 

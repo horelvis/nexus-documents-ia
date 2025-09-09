@@ -82,6 +82,29 @@ export function useSearchService() {
     return apiClient.get<SearchResult[]>(`/search/?${queryParams.toString()}`)
   }
 
+  const searchElasticsearch = async (params: SearchParams) => {
+    const queryParams = new URLSearchParams({
+      query: params.query,
+      ...(params.limit && { limit: params.limit.toString() }),
+      search_type: params.search_type || 'hybrid',
+      ...(params.tags && params.tags.length > 0 && { tags: params.tags.join(',') }),
+      ...(params.date_from && { date_from: params.date_from }),
+      ...(params.date_to && { date_to: params.date_to })
+    })
+
+    return apiClient.get<SearchResult[]>(`/search/elasticsearch?${queryParams.toString()}`)
+  }
+
+  const searchDatabase = async (params: SearchParams) => {
+    const queryParams = new URLSearchParams({
+      query: params.query,
+      ...(params.limit && { limit: params.limit.toString() }),
+      ...(params.tags && params.tags.length > 0 && { tags: params.tags.join(',') })
+    })
+
+    return apiClient.get<SearchResult[]>(`/search/database?${queryParams.toString()}`)
+  }
+
   const askDocuments = async (params: AskDocumentsParams) => {
     return apiClient.post<AskDocumentsResponse>('/search/ask', {
       question: params.question,
@@ -151,6 +174,8 @@ export function useSearchService() {
 
   return {
     searchDocuments,
+    searchElasticsearch,
+    searchDatabase,
     askDocuments,
     getReindexStatus,
     reindexAllDocuments,

@@ -43,14 +43,18 @@ class ElasticsearchService:
                         "doc_id": {"type": "keyword"},
                         "title": {
                             "type": "text",
-                            "analyzer": "standard",
+                            "analyzer": "filename_analyzer",
                             "fields": {
                                 "keyword": {"type": "keyword"}
                             }
                         },
                         "content": {
                             "type": "text",
-                            "analyzer": "standard"
+                            "analyzer": "content_analyzer"
+                        },
+                        "description": {
+                            "type": "text", 
+                            "analyzer": "content_analyzer"
                         },
                         "content_vector": {
                             "type": "dense_vector",
@@ -74,10 +78,22 @@ class ElasticsearchService:
                     "index.mapping.total_fields.limit": 2000,
                     "analysis": {
                         "analyzer": {
-                            "custom_analyzer": {
+                            "filename_analyzer": {
                                 "type": "custom",
+                                "tokenizer": "keyword",
+                                "filter": ["lowercase", "filename_filter"]
+                            },
+                            "content_analyzer": {
+                                "type": "custom", 
                                 "tokenizer": "standard",
                                 "filter": ["lowercase", "stop"]
+                            }
+                        },
+                        "filter": {
+                            "filename_filter": {
+                                "type": "pattern_replace",
+                                "pattern": "[_.-]",
+                                "replacement": " "
                             }
                         }
                     }
@@ -97,6 +113,7 @@ class ElasticsearchService:
         doc_id: str, 
         title: str, 
         content: str,
+        description: str = None,
         content_vector: List[float] = None,
         metadata: Dict[str, Any] = None
     ) -> bool:
@@ -108,6 +125,7 @@ class ElasticsearchService:
                 "doc_id": doc_id,
                 "title": title,
                 "content": content,
+                "description": description or "",
                 "tenant_id": self.tenant_id,
                 "file_type": metadata.get("file_type", "unknown"),
                 "category": metadata.get("category"),
@@ -150,16 +168,52 @@ class ElasticsearchService:
             # Build the search query
             must_clauses = []
             
-            # Keyword search
+            # Keyword search with wildcard support
             if query:
-                must_clauses.append({
-                    "multi_match": {
-                        "query": query,
-                        "fields": ["title^2", "content"],
-                        "type": "best_fields",
-                        "boost": boost_keyword
-                    }
-                })
+                # Check if query contains wildcards
+                if '*' in query or '?' in query:
+                    # Use wildcard query for patterns with * or ?
+                    must_clauses.append({
+                        "bool": {
+                            "should": [
+                                {
+                                    "wildcard": {
+                                        "title": {
+                                            "value": query.lower(),
+                                            "boost": boost_keyword * 2
+                                        }
+                                    }
+                                },
+                                {
+                                    "wildcard": {
+                                        "description": {
+                                            "value": query.lower(),
+                                            "boost": boost_keyword * 1.5
+                                        }
+                                    }
+                                },
+                                {
+                                    "wildcard": {
+                                        "content": {
+                                            "value": query.lower(),
+                                            "boost": boost_keyword
+                                        }
+                                    }
+                                }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    })
+                else:
+                    # Use normal multi_match for regular queries
+                    must_clauses.append({
+                        "multi_match": {
+                            "query": query,
+                            "fields": ["title^2", "description^1.5", "content"],
+                            "type": "best_fields",
+                            "boost": boost_keyword
+                        }
+                    })
             
             # Add filters
             filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]

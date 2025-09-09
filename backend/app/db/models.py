@@ -310,7 +310,7 @@ class Document(Base):
     category = Column(String(50), nullable=True)
     tags_array = Column(JSONB, nullable=True)  # Array of tags stored as JSONB
     document_metadata = Column(JSONB, nullable=True, default={})
-    content = Column(Text, nullable=True)
+    # content field removed - stored in Elasticsearch, Vector DB, and GCP only
     extracted_entities = Column(JSONB, nullable=True)
     
     indexed = Column(Integer, default=0, nullable=False)
@@ -872,3 +872,40 @@ class SignaturePlacementPattern(Base):
     
     # Relationships
     tenant = relationship("Tenant")
+
+
+class LGPDDeletionAudit(Base):
+    """LGPD User Deletion Audit Trail for compliance"""
+    __tablename__ = "lgpd_deletion_audits"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # Don't FK since user will be deleted
+    user_email = Column(String(255), nullable=False)  # Keep for audit
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    
+    reason = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default="pending")  # pending, in_progress, completed, failed
+    
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Deletion results
+    deletion_summary = Column(JSONB, nullable=True)
+    total_records_deleted = Column(Integer, nullable=True, default=0)
+    anonymized_records = Column(Integer, nullable=True, default=0)
+    
+    # LGPD compliance fields
+    lgpd_article = Column(String(50), nullable=False, default="Article 18")
+    deletion_method = Column(String(100), nullable=False, default="complete_data_destruction")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    requested_by_user = relationship("User")
+    tenant = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_lgpd_deletions_tenant_status', 'tenant_id', 'status'),
+        Index('idx_lgpd_deletions_user_date', 'user_id', 'created_at'),
+    )
