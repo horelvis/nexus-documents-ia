@@ -22,6 +22,7 @@ import {
   IconUserCheck,
   IconGitBranch,
   IconRobot,
+  IconFileText,
 } from "@tabler/icons-react"
 
 import { NavDocuments } from "@/components/navigation/nav-documents"
@@ -106,6 +107,26 @@ const data = {
         {
           title: "Analytics",
           url: "/workflows/analytics",
+        },
+      ],
+    },
+    {
+      title: "Document Templates",
+      url: "/templates",
+      icon: IconFileText,
+      color: "orange",
+      items: [
+        {
+          title: "Template Library",
+          url: "/templates",
+        },
+        {
+          title: "Create Template",
+          url: "/templates/create",
+        },
+        {
+          title: "Edit Sessions",
+          url: "/templates/sessions",
         },
       ],
     },

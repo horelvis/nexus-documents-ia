@@ -34,6 +34,7 @@ services:
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8007  # NEW: Weaviate service
       - LANGEXTRACT_SERVICE_URL=http://langextract-service:8009  # NEW: LangExtract service
       - TEMPORALIO_SERVICE_URL=http://temporalio-service:8010  # NEW: Temporalio service
+      - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8011  # NEW: Template Editor service
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
@@ -124,7 +125,7 @@ services:
       - LLM_MODEL=${LLM_MODEL:-gpt-oss:20b}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/nexus_db
       - SERPER_API_KEY=${SERPER_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LOG_LEVEL=INFO
@@ -375,7 +376,7 @@ services:
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/nexus_db
       - ELYSIA_ENABLED=${ELYSIA_ENABLED:-true}
       - ELYSIA_MODEL_PROVIDER=ollama
       - ELYSIA_MODEL_NAME=${LLM_MODEL:-gpt-oss:20b}
@@ -446,7 +447,7 @@ services:
       - TEMPORALIO_PORT=7233
       - TEMPORALIO_NAMESPACE=nexus-workflows
       - TEMPORALIO_TASK_QUEUE=nexus-workflow-tasks
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/nexus_db
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/nexus_db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - API_CORE_URL=http://api:8000
@@ -464,6 +465,45 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
+
+  # NEW: Template Editor Service for Google Docs integration (Alfresco pattern)
+  template-editor-service:
+    build:
+      context: ../microservices/template-editor-service
+      dockerfile: Dockerfile
+    ports:
+      - "8011:8011"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/nexus_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=2
+      - GOOGLE_CREDENTIALS_PATH=${GCS_CREDENTIALS}
+      - STORAGE_SERVICE_URL=http://storage-service:8003
+      - MAIN_API_URL=http://api:8000
+      - DEBUG=${DEBUG:-true}
+    volumes:
+      # Mount Google credentials
+      - ../../credentials:/app/credentials:ro
+      # Mount the Python code for live reloading
+      - ../microservices/template-editor-service/app:/app/app:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   backend-network:

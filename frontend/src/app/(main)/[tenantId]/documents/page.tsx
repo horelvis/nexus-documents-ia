@@ -145,22 +145,35 @@ export default function DocumentsPage() {
         } else {
         
         // Transform search results to match document format
-        const documents = searchResults.data?.map(result => ({
-          ...result.document,
-          status: 'active' as const,
-          created_by: {},
-          tenant_id: tenantId,
-          indexed: result.document.indexed || 'INDEXED',
-          file_hash: '',
-          version: 1,
-          category: '',
-          document_metadata: {},
-          content: '',
-          extracted_entities: null,
-          ocr_status: null,
-          ocr_completed_at: null,
-          signature_fields: null
-        })) || []
+        const documents = searchResults.data?.map(result => {
+          const doc = result.document || result || {}
+          return {
+            ...doc,
+            id: doc.id || '',
+            title: doc.title || doc.filename || 'Untitled',
+            filename: doc.filename || 'unknown',
+            status: 'active' as const,
+            created_by: doc.created_by || {},
+            tenant_id: tenantId,
+            indexed: doc.indexed || 'INDEXED',
+            file_hash: doc.file_hash || '',
+            version: doc.version || 1,
+            category: doc.category || '',
+            document_metadata: doc.document_metadata || {},
+            content: doc.content || '',
+            extracted_entities: doc.extracted_entities || null,
+            ocr_status: doc.ocr_status || null,
+            ocr_completed_at: doc.ocr_completed_at || null,
+            signature_fields: doc.signature_fields || null,
+            file_type: doc.file_type || 'unknown',
+            mime_type: doc.mime_type || 'application/octet-stream',
+            file_size: doc.file_size || 0,
+            created_at: doc.created_at || new Date().toISOString(),
+            updated_at: doc.updated_at || new Date().toISOString(),
+            tags: doc.tags || [],
+            description: doc.description || ''
+          }
+        }) || []
         response = {
           data: {
             items: documents,
@@ -182,12 +195,26 @@ export default function DocumentsPage() {
         })
       }
       
-      if (response.error) {
+      if (response?.error) {
         setError(response.error)
+      } else if (response?.data) {
+        // Ensure all documents have required fields to prevent undefined errors
+        const safeDocuments = (response.data.items || []).map(doc => ({
+          ...doc,
+          indexed: doc.indexed || 'INDEXED',
+          status: doc.status || 'active',
+          created_by: doc.created_by || {},
+          tags: doc.tags || [],
+          file_type: doc.file_type || 'unknown',
+          mime_type: doc.mime_type || 'application/octet-stream',
+          file_size: doc.file_size || 0
+        }))
+        
+        setDocuments(safeDocuments)
+        setTotalPages(response.data.pages || 1)
+        setTotalDocuments(response.data.total || 0)
       } else {
-        setDocuments(response.data?.items || [])
-        setTotalPages(response.data?.pages || 1)
-        setTotalDocuments(response.data?.total || 0)
+        setError('Invalid response from server')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents')
