@@ -12,6 +12,9 @@ import os
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.security_validator import validate_security_on_startup
+from app.core.structured_logging import setup_structured_logging
+from app.core.alerting import initialize_alerting, start_alert_evaluation
+from app.core.health_checks import initialize_health_checks, start_health_check_monitoring
 from app.db.base_class import Base
 from app.db.database import engine
 from app.db.migrations import auto_upgrade_database
@@ -29,6 +32,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🔒 Running security validation...")
     security_result = validate_security_on_startup()
 
+    # Initialize monitoring systems
+    logger.info("📊 Initializing monitoring systems...")
+    setup_structured_logging()
+    initialize_alerting()
+    initialize_health_checks()
+
     logger.info(f"📍 Server URL: {settings.SERVER_HOST}:{settings.SERVER_PORT if hasattr(settings, 'SERVER_PORT') else '8000'}")
     logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
@@ -37,12 +46,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Database initialization
     await _initialize_database()
 
+    # Start background monitoring tasks
+    logger.info("🔄 Starting background monitoring tasks...")
+    alert_task = asyncio.create_task(start_alert_evaluation())
+    health_task = asyncio.create_task(start_health_check_monitoring())
+
     logger.info(f"📝 Documentation available at: {settings.API_PREFIX}/docs")
     logger.info(f"🔒 Security Score: {security_result['security_score']}/100")
+    logger.info("✅ All systems initialized and monitoring active")
 
     yield
     # Shutdown
     logger.info("🛑 Application shutdown...")
+
+    # Cancel background tasks
+    alert_task.cancel()
+    health_task.cancel()
+
+    try:
+        await alert_task
+        await health_task
+    except asyncio.CancelledError:
+        pass
+
+    logger.info("🔄 Background monitoring tasks stopped")
 
 
 async def _initialize_database() -> None:

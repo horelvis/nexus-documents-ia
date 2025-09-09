@@ -15,6 +15,8 @@ from app.core.security_config import get_cors_origins, SECURITY_HEADERS
 from app.core.rate_limiting import rate_limit_middleware
 from app.core.compression import CompressionMiddleware
 from app.core.metrics import performance_monitor
+from app.core.prometheus_metrics import MetricsMiddleware
+from app.core.structured_logging import RequestContextMiddleware, structured_logger
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,12 @@ def configure_middlewares(app) -> None:
 
     # Add compression middleware (must be first for response compression)
     app.add_middleware(CompressionMiddleware)
+
+    # Add Prometheus metrics middleware
+    app.add_middleware(MetricsMiddleware)
+
+    # Add structured logging middleware
+    app.add_middleware(RequestContextMiddleware, logger=structured_logger)
 
     # Add security headers middleware
     app.middleware("http")(security_headers_middleware)
