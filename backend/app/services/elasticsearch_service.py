@@ -1,6 +1,14 @@
 """
-Elasticsearch Service for hybrid search and analytics
+LEGACY: Elasticsearch Service for hybrid search and analytics
 Complementary to Weaviate for specialized use cases
+
+⚠️  DEPRECATED: This service has been migrated to elasticsearch-service microservice
+   Use app.services.elasticsearch_client.elasticsearch_client instead
+
+This file is kept for:
+- Migration scripts
+- Legacy compatibility
+- Reference implementation
 """
 import logging
 import json
