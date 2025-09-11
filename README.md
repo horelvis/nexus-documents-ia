@@ -108,7 +108,7 @@ graph TB
     %% Capa de Datos
     subgraph "💾 Data Layer"
         PostgreSQL[(📊 PostgreSQL 15<br/>Main Database<br/>Multi-tenant)]
-        Qdrant[(🔍 Qdrant<br/>Vector Database<br/>Semantic Search)]
+        Weaviate[(🔍 Weaviate<br/>Vector Database<br/>Semantic Search)]
         Redis[(⚡ Redis<br/>Cache + Sessions)]
         Elasticsearch[(🔎 Elasticsearch<br/>Advanced Search<br/>Optional)]
     end
@@ -160,9 +160,9 @@ graph TB
     AuthSvc --> PostgreSQL
     TeamSvc --> PostgreSQL
 
-    EmmaAI --> Qdrant
-    LangChainSvc --> Qdrant
-    SearchSvc --> Qdrant
+    EmmaAI --> Weaviate
+    LangChainSvc --> Weaviate
+    SearchSvc --> Weaviate
 
     DocumentSvc --> Redis
     SearchSvc --> Redis
@@ -191,7 +191,7 @@ graph TB
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
     class EmmaAI,LangChainSvc,LangroidSvc,OllamaSvc,CAG_Svc,LangExtractSvc microservice
-    class PostgreSQL,Qdrant,Redis,Elasticsearch database
+    class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
 
@@ -231,7 +231,7 @@ graph TB
 
 #### 💾 **Capa de Datos**
 - **PostgreSQL 15**: Base de datos relacional multi-tenant
-- **Qdrant**: Base de datos vectorial para búsqueda semántica
+- **Weaviate**: Base de datos vectorial para búsqueda semántica
 - **Redis**: Cache de alto rendimiento y gestión de sesiones
 - **Elasticsearch**: Búsqueda avanzada y analytics (opcional)
 
@@ -252,7 +252,7 @@ sequenceDiagram
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
     participant E as 🤖 Emma AI
-    participant Q as 🔍 Qdrant
+    participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
 
@@ -262,15 +262,15 @@ sequenceDiagram
     D->>G: Store File
     D->>P: Save Metadata
     D->>E: Generate Embeddings
-    E->>Q: Store Vectors
+    E->>W: Store Vectors
     D->>A: Document Processed
     A->>F: Success Response
 
     U->>F: Search Query
     F->>A: GET /api/v1/search
     A->>E: Semantic Search
-    E->>Q: Vector Search
-    Q->>E: Similar Documents
+    E->>W: Vector Search
+    W->>E: Similar Documents
     E->>A: Search Results
     A->>F: Results + Metadata
 ```
@@ -307,7 +307,7 @@ sequenceDiagram
     participant CAG as 📊 CAG Service
     participant E as 🤖 Emma AI Service
     participant O as 🦙 Ollama Service
-    participant Q as 🔍 Qdrant
+    participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
 
@@ -336,7 +336,7 @@ sequenceDiagram
     D->>E: 🧮 Generate Embeddings
     E->>O: 🤖 Create Vector Embeddings
     O->>E: 🔢 Return Embeddings
-    E->>Q: 💾 Store in Qdrant
+    E->>W: 💾 Store in Weaviate
     E->>P: 🔗 Link Document ID
 
     %% Respuesta Final
@@ -347,8 +347,8 @@ sequenceDiagram
     U->>F: 🔍 Search Query
     F->>A: GET /api/v1/search
     A->>E: 🔍 Semantic Search
-    E->>Q: 🔍 Vector Similarity Search
-    Q->>E: 📄 Return Similar Documents
+    E->>W: 🔍 Vector Similarity Search
+    W->>E: 📄 Return Similar Documents
     E->>P: 📊 Enrich with Metadata
     E->>A: 📋 Search Results
     A->>F: 🎯 Results + Highlights
@@ -357,7 +357,7 @@ sequenceDiagram
     U->>F: 💬 Ask Question
     F->>A: POST /api/v1/search/ask
     A->>E: 🤖 Process Question with Context
-    E->>Q: 🔍 Find Relevant Document Chunks
+    E->>W: 🔍 Find Relevant Document Chunks
     E->>O: 🤖 Generate Answer with RAG
     O->>E: 💡 Return Contextual Answer
     E->>A: 💬 Answer + Sources
@@ -460,8 +460,8 @@ graph TB
     API --> CAG
     API --> LangExtract
 
-    Emma --> Qdrant
-    LangChain --> Qdrant
+    Emma --> Weaviate
+    LangChain --> Weaviate
     API --> Postgres
     API --> Redis
 
@@ -471,7 +471,7 @@ graph TB
 
     class NextJS,Admin frontend
     class API,Emma,LangChain,Langroid,Storage,Ollama,CAG,LangExtract backend
-    class Postgres,Qdrant,Redis,Nginx infra
+    class Postgres,Weaviate,Redis,Nginx infra
 ```
 
 ## 🚀 Inicio Rápido
