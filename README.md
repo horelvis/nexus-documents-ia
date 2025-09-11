@@ -58,7 +58,16 @@
 
 NexusDocs360 está construido con una arquitectura de microservicios moderna y orientada a IA, diseñada para máxima escalabilidad, seguridad y rendimiento.
 
-### 📊 Diagrama de Arquitectura
+### 📊 Diagramas de Arquitectura
+
+#### 🎨 **Diagrama Interactivo de Arquitectura**
+Para una experiencia visual más detallada, consulta nuestro **[diagrama interactivo de arquitectura](backend/architecture/architecture_diagram.html)** que incluye:
+- Vista detallada por capas del sistema
+- Flujo de procesamiento de documentos paso a paso
+- Conexiones y comunicación entre servicios
+- Resumen visual de la arquitectura completa
+
+#### 📈 **Diagrama General del Sistema**
 
 ```mermaid
 graph TB
@@ -422,6 +431,19 @@ flowchart TD
 | **Admin** | `3001` | Next.js | `/admin` | Panel de administración |
 
 ### 🐳 **Arquitectura Docker**
+
+### 📚 **Documentación de Arquitectura Adicional**
+
+Para diagramas más detallados y específicos:
+
+- **[Diagrama Interactivo HTML](backend/architecture/architecture_diagram.html)** - Vista completa e interactiva de la arquitectura
+- **[Sistema General](backend/architecture/system-overview.md)** - Diagrama general del sistema
+- **[Flujo de Datos](backend/architecture/data-flow.md)** - Secuencia de procesamiento de datos
+- **[Procesamiento de Documentos](backend/architecture/document-processing.md)** - Pipeline completo de IA
+- **[Pipeline de IA](backend/architecture/ai-pipeline.md)** - Arquitectura del procesamiento con IA
+- **[Arquitectura Docker](backend/architecture/docker-architecture.md)** - Configuración de contenedores
+
+### 🔄 **Arquitectura Docker**
 
 ```mermaid
 graph TB
