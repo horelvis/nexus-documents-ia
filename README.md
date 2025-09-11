@@ -25,11 +25,11 @@
 ## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
 ### Emma AI Assistant
-**Emma** es nuestro asistente de IA avanzado powered by **Elysia Framework**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma.
+**Emma** es nuestro asistente de IA avanzado **construido sobre Elysia Framework**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma.
 
 #### Capacidades Principales de Emma:
 - **🧠 Procesamiento Contextual**: Comprende el contexto completo de tus documentos
-- **🔍 Búsqueda Inteligente**: Encuentra información relevante usando Weaviate vector search
+- **🔍 Búsqueda Inteligente**: Encuentra información relevante usando Elysia Framework con Weaviate vector search
 - **🌐 Información en Tiempo Real**: Accede a datos actualizados via búsqueda web
 - **🌤️ Consultas Meteorológicas**: Información climática para cualquier ubicación
 - **📄 Análisis de Documentos**: Extrae insights de contratos, facturas y reportes
@@ -39,7 +39,7 @@
 - **✨ Respuestas Adaptativas**: Sistema de decisión que selecciona las mejores herramientas
 
 #### Tecnología Subyacente:
-- **Elysia Framework**: Sistema de decisión inteligente y orquestación de herramientas
+- **Elysia Framework**: Sistema de decisión inteligente y orquestación de herramientas (core de Emma AI)
 - **Weaviate**: Base de datos vectorial para búsqueda semántica avanzada
 - **Ollama Integration**: Modelos locales (gpt-oss:20b) para privacidad y rendimiento
 - **LangExtract Integration**: Extracción automática de entidades en upload de documentos
@@ -97,7 +97,7 @@ graph TB
 
     %% Microservicios de IA
     subgraph "🧠 AI Microservices"
-        EmmaAI[🤖 Emma AI Service<br/>Weaviate + Elysia<br/>Port: 8007]
+        EmmaAI[🤖 Emma AI Service<br/>Elysia Framework + Weaviate<br/>Port: 8007]
         LangChainSvc[🔗 LangChain Service<br/>LLM Processing<br/>Port: 8001]
         LangroidSvc[🎯 Langroid Service<br/>Multi-agent<br/>Port: 8002]
         OllamaSvc[🦙 Ollama Service<br/>Local LLMs<br/>Port: 8004]
@@ -222,7 +222,7 @@ graph TB
 - **Notification Service**: Sistema de notificaciones y webhooks
 
 #### 🧠 **Microservicios de IA**
-- **Emma AI Service** (Port 8007): Asistente inteligente con Weaviate + Elysia
+- **Emma AI Service** (Port 8007): Asistente inteligente con Elysia Framework + Weaviate
 - **LangChain Service** (Port 8001): Procesamiento avanzado con LLMs
 - **Langroid Service** (Port 8002): Arquitectura multi-agente
 - **Ollama Service** (Port 8004): Modelos LLM locales (Llama 3.1, GPT-OSS)
@@ -251,7 +251,7 @@ sequenceDiagram
     participant F as 🖥️ Frontend
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
-    participant E as 🤖 Emma AI
+    participant E as 🤖 Emma AI (Elysia)
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
@@ -305,7 +305,7 @@ sequenceDiagram
     participant D as 📄 Document Service
     participant LE as 🏷️ LangExtract Service
     participant CAG as 📊 CAG Service
-    participant E as 🤖 Emma AI Service
+    participant E as 🤖 Emma AI (Elysia)
     participant O as 🦙 Ollama Service
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
@@ -409,7 +409,7 @@ flowchart TD
 | Servicio | Puerto | Tecnología | Endpoint Principal | Descripción |
 |----------|--------|------------|-------------------|-------------|
 | **Main API** | `8000` | FastAPI | `/api/v1/` | API principal del sistema |
-| **Emma AI** | `8007` | FastAPI + Weaviate | `/elysia/` | Asistente inteligente |
+| **Emma AI** | `8007` | FastAPI + Elysia + Weaviate | `/elysia/` | Asistente inteligente con Elysia Framework |
 | **LangChain** | `8001` | FastAPI + LangChain | `/langchain/` | Procesamiento LLM |
 | **Langroid** | `8002` | FastAPI + Langroid | `/langroid/` | Multi-agente |
 | **Storage** | `8003` | FastAPI | `/storage/` | Google Cloud Storage |
