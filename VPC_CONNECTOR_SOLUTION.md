@@ -14,7 +14,7 @@ The VPC connector `nexus-connector-pre` was failing in the PRE environment, prev
 ### 1. Complete VPC Cleanup
 Before recreating the VPC, all dependencies had to be removed:
 - VPC connectors (stuck in DELETING state)
-- Compute Engine instances (nginx-proxy-pre, qdrant-pre)
+- Compute Engine instances (nginx-proxy-pre, weaviate-pre)
 - Redis instance and its peering connection
 - Firewall rules
 - Cloud Router

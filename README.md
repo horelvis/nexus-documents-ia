@@ -442,7 +442,7 @@ graph TB
 
         subgraph "Infrastructure"
             Postgres[(📊 postgres<br/>Port: 5432)]
-            Qdrant[(🔍 qdrant<br/>Port: 6333)]
+            Weaviate[(🔍 weaviate<br/>Port: 8080)]
             Redis[(⚡ redis<br/>Port: 6379)]
             Nginx[🔀 nginx<br/>Port: 80/443]
         end

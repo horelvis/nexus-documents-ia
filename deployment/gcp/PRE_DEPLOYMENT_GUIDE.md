@@ -36,7 +36,7 @@ Select option 1 for full deployment or choose specific steps as needed.
 | VPC | nexus-vpc-pre | Custom VPC | 10.1.0.0/24 |
 | Database | nexus-db-pre | Cloud SQL PostgreSQL | db-f1-micro |
 | Cache | nexus-redis-pre | Memorystore Redis | 1GB |
-| Vector DB | qdrant-pre | Compute Engine | e2-small |
+| Vector DB | weaviate-pre | Compute Engine | e2-small |
 | Proxy | nginx-proxy-pre | Compute Engine | e2-small, IP: 34.78.30.77 |
 | Registry | nexusdocs360-pre | Artifact Registry | Docker images |
 

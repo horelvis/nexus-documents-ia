@@ -16,9 +16,9 @@
   - Connection: Via public IP (authorized IPs only)
 
 ### ✅ Vector Database
-- **Qdrant Instance**: qdrant-pre
+- **Weaviate Instance**: weaviate-pre
   - Internal IP: 10.1.0.4
-  - Port: 6333 (HTTP), 6334 (gRPC)
+  - Port: 8080 (HTTP)
   - Access: VPC internal only
   - Status: RUNNING
 
@@ -76,7 +76,7 @@
 
 ## Scripts Created
 - `setup-vpc-complete-pre.sh` - Complete VPC setup
-- `create-qdrant-instance.sh` - Qdrant VM creation
+- `create-weaviate-instance.sh` - Weaviate VM creation
 - `create-redis-instance.sh` - Redis Memorystore creation
 - `test-database-connection.sh` - Database connectivity test
 - `setup-cloudsql-proxy.sh` - Local development database access
@@ -86,5 +86,5 @@ All configured in Google Secret Manager:
 - database-url-pre ✅
 - async-database-url-pre ✅
 - redis-url-pre ⏳ (updating after creation)
-- qdrant-url-pre ✅
+- weaviate-url-pre ✅
 - Other application secrets ✅
