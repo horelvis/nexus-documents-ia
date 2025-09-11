@@ -110,7 +110,7 @@ graph TB
         PostgreSQL[(📊 PostgreSQL 15<br/>Main Database<br/>Multi-tenant)]
         Weaviate[(🔍 Weaviate<br/>Vector Database<br/>Semantic Search)]
         Redis[(⚡ Redis<br/>Cache + Sessions)]
-        Elasticsearch[(🔎 Elasticsearch<br/>Advanced Search<br/>Optional)]
+        Elasticsearch[(🔎 Elasticsearch<br/>Hybrid Search<br/>Microservice)]
     end
 
     %% Servicios Externos
@@ -228,12 +228,13 @@ graph TB
 - **Ollama Service** (Port 8004): Modelos LLM locales (Llama 3.1, GPT-OSS)
 - **CAG Service** (Port 8005): Análisis de contenido y metadatos
 - **LangExtract Service** (Port 8006): Extracción automática de entidades
+- **Elasticsearch Service** (Port 8008): Búsqueda híbrida y analytics
 
 #### 💾 **Capa de Datos**
 - **PostgreSQL 15**: Base de datos relacional multi-tenant
 - **Weaviate**: Base de datos vectorial para búsqueda semántica
 - **Redis**: Cache de alto rendimiento y gestión de sesiones
-- **Elasticsearch**: Búsqueda avanzada y analytics (opcional)
+- **Elasticsearch**: Búsqueda híbrida y analytics (microservicio)
 
 #### 🌍 **Servicios Externos**
 - **Google Cloud Storage**: Almacenamiento seguro y escalable
@@ -416,6 +417,7 @@ flowchart TD
 | **Ollama** | `8004` | FastAPI | `/ollama/` | Modelos LLM locales |
 | **CAG** | `8005` | FastAPI | `/cag/` | Análisis de contenido |
 | **LangExtract** | `8006` | FastAPI | `/langextract/` | Extracción de entidades |
+| **Elasticsearch** | `8008` | FastAPI | `/api/v1/elasticsearch/` | Búsqueda híbrida |
 | **Frontend** | `3000` | Next.js | `/` | Interfaz de usuario |
 | **Admin** | `3001` | Next.js | `/admin` | Panel de administración |
 
@@ -437,7 +439,8 @@ graph TB
             Storage[☁️ storage-service<br/>Port: 8003]
             Ollama[🦙 ollama-service<br/>Port: 8004]
             CAG[📊 cag-service<br/>Port: 8005]
-            LangExtract[🏷️ langextract-service<br/>Port: 8006]
+             LangExtract[🏷️ langextract-service<br/>Port: 8006]
+             Elasticsearch[🔍 elasticsearch-service<br/>Port: 8008]
         end
 
         subgraph "Infrastructure"
@@ -452,13 +455,14 @@ graph TB
     Admin --> Nginx
     Nginx --> API
 
-    API --> Emma
-    API --> LangChain
-    API --> Langroid
-    API --> Storage
-    API --> Ollama
-    API --> CAG
-    API --> LangExtract
+     API --> Emma
+     API --> LangChain
+     API --> Langroid
+     API --> Storage
+     API --> Ollama
+     API --> CAG
+     API --> LangExtract
+     API --> Elasticsearch
 
     Emma --> Weaviate
     LangChain --> Weaviate
@@ -470,7 +474,7 @@ graph TB
     classDef infra fill:#efebe9,stroke:#3e2723
 
     class NextJS,Admin frontend
-    class API,Emma,LangChain,Langroid,Storage,Ollama,CAG,LangExtract backend
+    class API,Emma,LangChain,Langroid,Storage,Ollama,CAG,LangExtract,Elasticsearch backend
     class Postgres,Weaviate,Redis,Nginx infra
 ```
 

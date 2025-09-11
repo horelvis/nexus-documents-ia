@@ -27,7 +27,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.weaviate_client import weaviate_client
 from app.services.llm_service import LLMService
-from app.services.elasticsearch_service import ElasticsearchService
+from app.services.elasticsearch_client import elasticsearch_client
 
 logger = logging.getLogger(__name__)
 
@@ -107,16 +107,8 @@ class AsyncDocumentService:
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.vector_service = VectorService(self.tenant_id)
         self.llm_service = LLMService()
-        self.elasticsearch_service = ElasticsearchService(self.tenant_id)
-        
-        # MANDATORY: Initialize Elasticsearch index 
-        index_created = self.elasticsearch_service.create_index_if_not_exists()
-        if not index_created:
-            error_msg = f"❌ CRITICAL: Elasticsearch index creation failed for tenant {self.tenant_id}"
-            logger.error(error_msg)
-            raise Exception(f"Elasticsearch is required for document management: {error_msg}")
-        
-        logger.info(f"✅ Elasticsearch index ready for tenant {self.tenant_id}")
+        # Elasticsearch service is now a microservice - no local initialization needed
+        logger.info(f"✅ Elasticsearch microservice ready for tenant {self.tenant_id}")
         
         self._initialized = True
     
@@ -182,8 +174,9 @@ class AsyncDocumentService:
                 if date_to:
                     es_filters["date_to"] = date_to
                 
-                # Perform hybrid search - LET IT FAIL if broken
-                es_results = await self.elasticsearch_service.hybrid_search(
+                # Perform hybrid search via microservice - LET IT FAIL if broken
+                es_results = await elasticsearch_client.hybrid_search(
+                    tenant_id=self.tenant_id,
                     query=search,
                     limit=per_page * 2,  # Get more results to account for filtering
                     filters=es_filters
@@ -622,8 +615,9 @@ class AsyncDocumentService:
                         
                         logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
                         
-                        # Index in Elasticsearch - MUST SUCCEED
-                        es_success = await self.elasticsearch_service.index_document(
+                        # Index in Elasticsearch via microservice - MUST SUCCEED
+                        es_success = await elasticsearch_client.index_document(
+                            tenant_id=self.tenant_id,
                             doc_id=str(doc_id),
                             title=doc.title,
                             content=text[:5000],  # Index more content for better search

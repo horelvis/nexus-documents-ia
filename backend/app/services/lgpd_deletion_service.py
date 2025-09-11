@@ -27,7 +27,7 @@ from app.db.models import (
 )
 from app.db.agent_models import AgentExecution, AgentExecutionLog, AgentDefinition
 from app.services.async_storage_service import AsyncStorageService
-from app.services.elasticsearch_service import ElasticsearchService
+from app.services.elasticsearch_client import elasticsearch_client
 from app.services.vector_service import VectorService
 from app.core.config import settings
 
@@ -362,13 +362,11 @@ class LGPDDeletionService:
         deletion_results = {}
         
         try:
-            es_service = ElasticsearchService(str(user.tenant_id))
-            
-            # Delete documents created by user
-            # This would require implementing user-based deletion in ElasticsearchService
+            # Note: Elasticsearch microservice doesn't have user-based deletion yet
+            # This would require implementing user-based deletion in elasticsearch-service
             deletion_results["elasticsearch"] = {
-                "status": "manual_cleanup_required", 
-                "note": "Elasticsearch documents need manual cleanup by user filter"
+                "status": "manual_cleanup_required",
+                "note": "Elasticsearch documents need manual cleanup by user filter via microservice"
             }
             
             logger.warning(f"Elasticsearch cleanup required for user {user.id}")

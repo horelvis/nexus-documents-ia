@@ -31,9 +31,7 @@ async def search_elasticsearch(
     - hybrid: Elasticsearch (keyword + semantic) 
     - keyword: Elasticsearch (traditional search)
     """
-    from app.services.elasticsearch_service import ElasticsearchService
-    
-    es_service = ElasticsearchService(tenant_id)
+    from app.services.elasticsearch_client import elasticsearch_client
     
     # Prepare filters
     filters = {}
@@ -44,8 +42,9 @@ async def search_elasticsearch(
     if date_to:
         filters["date_to"] = date_to
     
-    # Direct Elasticsearch search - NO FALLBACKS
-    results = await es_service.hybrid_search(
+    # Direct Elasticsearch microservice search - NO FALLBACKS
+    results = await elasticsearch_client.hybrid_search(
+        tenant_id=tenant_id,
         query=query,
         limit=limit,
         filters=filters
@@ -149,13 +148,12 @@ async def search_documents(
     - elasticsearch: Force Elasticsearch search
     - database: Force database search (metadata only)
     """
-    from app.services.elasticsearch_service import ElasticsearchService
+    from app.services.elasticsearch_client import elasticsearch_client
 
     try:
         # Always try Elasticsearch first (has the content)
         if search_type in ["auto", "elasticsearch"]:
             try:
-                es_service = ElasticsearchService(tenant_id)
 
                 # Prepare filters
                 filters = {}
@@ -166,8 +164,9 @@ async def search_documents(
                 if date_to:
                     filters["date_to"] = date_to
 
-                # Try Elasticsearch search
-                results = await es_service.hybrid_search(
+                # Try Elasticsearch microservice search
+                results = await elasticsearch_client.hybrid_search(
+                    tenant_id=tenant_id,
                     query=query,
                     limit=limit,
                     filters=filters

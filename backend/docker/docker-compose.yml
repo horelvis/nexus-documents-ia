@@ -6,21 +6,23 @@ services:
       dockerfile: docker/Dockerfile
     ports:
       - "0.0.0.0:8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      weaviate:
-        condition: service_healthy
-      cag-service:
-        condition: service_healthy
-      storage-service:
-        condition: service_healthy
-      gotenberg:
-        condition: service_healthy
-      langextract-service:
-        condition: service_healthy
+     depends_on:
+       db:
+         condition: service_healthy
+       redis:
+         condition: service_healthy
+       weaviate:
+         condition: service_healthy
+       cag-service:
+         condition: service_healthy
+       storage-service:
+         condition: service_healthy
+       gotenberg:
+         condition: service_healthy
+       langextract-service:
+         condition: service_healthy
+       elasticsearch-service:
+         condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -28,13 +30,14 @@ services:
     environment:
       # Unified API Key for all microservices
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # Services URLs
-      - STORAGE_SERVICE_URL=http://storage-service:8003
-      - CAG_SERVICE_URL=http://cag-service:8008
-      - WEAVIATE_SERVICE_URL=http://weaviate-service:8007  # NEW: Weaviate service
-      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8009  # NEW: LangExtract service
-      - TEMPORALIO_SERVICE_URL=http://temporalio-service:8010  # NEW: Temporalio service
-      - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8011  # NEW: Template Editor service
+       # Services URLs
+       - STORAGE_SERVICE_URL=http://storage-service:8003
+       - CAG_SERVICE_URL=http://cag-service:8008
+       - WEAVIATE_SERVICE_URL=http://weaviate-service:8007  # NEW: Weaviate service
+       - LANGEXTRACT_SERVICE_URL=http://langextract-service:8009  # NEW: LangExtract service
+       - ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8008  # NEW: Elasticsearch service
+       - TEMPORALIO_SERVICE_URL=http://temporalio-service:8010  # NEW: Temporalio service
+       - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8011  # NEW: Template Editor service
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
@@ -387,14 +390,45 @@ services:
       # Mount the Python code for live reloading
       - ../microservices/weaviate-service/app:/app/app:rw
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+     healthcheck:
+       test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+       interval: 30s
+       timeout: 10s
+       retries: 3
+       start_period: 60s
 
-  # NEW: Temporalio Server for durable workflows
+   # NEW: Elasticsearch Service for hybrid search and analytics
+   elasticsearch-service:
+     build:
+       context: ../microservices/elasticsearch-service
+       dockerfile: Dockerfile
+     ports:
+       - "8008:8008"
+     depends_on:
+       elasticsearch:
+         condition: service_healthy
+       redis:
+         condition: service_healthy
+     networks:
+       - backend-network
+     env_file:
+       - .env
+     environment:
+       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+       - ELASTICSEARCH_URL=http://elasticsearch:9200
+       - DEBUG=${DEBUG:-true}
+     volumes:
+       # Mount the Python code for live reloading
+       - ../microservices/elasticsearch-service/app:/app/app:rw
+     restart: unless-stopped
+     healthcheck:
+       test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+       interval: 30s
+       timeout: 10s
+       retries: 3
+       start_period: 60s
+
+   # NEW: Temporalio Server for durable workflows
   temporalio-server:
     image: temporalio/auto-setup:1.24.2
     ports:

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService
-from app.services.elasticsearch_service import ElasticsearchService
+from app.services.elasticsearch_client import elasticsearch_client
 from app.db.database import SessionLocal
 from app.db.models import Document
 
@@ -24,7 +24,7 @@ class SearchService:
         self.tenant_id = tenant_id
         self.llm_service = LLMService()
         self.vector_service = VectorService(tenant_id)  # Weaviate - Primary
-        self.elasticsearch_service = ElasticsearchService(tenant_id)  # Elasticsearch - Specialized
+        # Elasticsearch is now a microservice - no local initialization needed
         
         logger.info(f"SearchService initialized for tenant: {tenant_id}")
         logger.info("Using hybrid architecture: Weaviate (primary) + Elasticsearch (specialized)")
@@ -93,7 +93,8 @@ class SearchService:
             if search_type == "hybrid" or search_type == "keyword":
                 # Use Elasticsearch for hybrid/keyword search
                 logger.info("🔍 Using Elasticsearch for hybrid/keyword search")
-                results = await self.elasticsearch_service.hybrid_search(
+                results = await elasticsearch_client.hybrid_search(
+                    tenant_id=self.tenant_id,
                     query=query,
                     limit=limit,
                     filters=filters or {}
@@ -425,7 +426,11 @@ class SearchService:
         """
         try:
             logger.info("📊 Fetching search analytics from Elasticsearch")
-            analytics = await self.elasticsearch_service.get_analytics(date_from, date_to)
+            analytics = await elasticsearch_client.get_analytics(
+                tenant_id=self.tenant_id,
+                date_from=date_from,
+                date_to=date_to
+            )
             
             # Add some computed metrics
             analytics["search_engines"] = {
