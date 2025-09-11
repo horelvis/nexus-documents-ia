@@ -3,11 +3,56 @@ Prometheus metrics integration for NexusDocs360
 """
 import time
 from typing import Dict, Any, Optional
-from prometheus_client import (
-    Counter, Histogram, Gauge, Summary,
-    generate_latest, CONTENT_TYPE_LATEST
-)
-from prometheus_client.core import CollectorRegistry
+try:
+    from prometheus_client import (
+        Counter, Histogram, Gauge, Summary,
+        generate_latest, CONTENT_TYPE_LATEST
+    )
+    from prometheus_client.core import CollectorRegistry
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    # Fallback when prometheus_client is not available
+    PROMETHEUS_AVAILABLE = False
+
+    class Counter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            pass
+        def labels(self, *args, **kwargs):
+            return self
+
+    class Histogram:
+        def __init__(self, *args, **kwargs):
+            pass
+        def observe(self, *args, **kwargs):
+            pass
+        def labels(self, *args, **kwargs):
+            return self
+
+    class Gauge:
+        def __init__(self, *args, **kwargs):
+            pass
+        def set(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            pass
+        def dec(self, *args, **kwargs):
+            pass
+
+    class Summary:
+        def __init__(self, *args, **kwargs):
+            pass
+        def observe(self, *args, **kwargs):
+            pass
+
+    def generate_latest(*args, **kwargs):
+        return b""
+
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+
+    class CollectorRegistry:
+        pass
 from fastapi import Response
 import logging
 
@@ -367,23 +412,31 @@ def update_system_metrics():
 def update_business_metrics():
     """Update business-level metrics"""
     try:
-        from app.db.database import get_db_context
-        from app.db.models import Tenant, User, Document
+        from app.db.database import engine
+        from sqlalchemy import text
 
-        with get_db_context() as db:
+        with engine.connect() as conn:
             # Tenant count
-            tenant_count.set(db.query(Tenant).count())
+            result = conn.execute(text("SELECT COUNT(*) FROM tenants"))
+            tenant_count_val = result.fetchone()[0]
+            tenant_count.set(tenant_count_val)
 
             # User count by status
-            users_active = db.query(User).filter(User.is_active == True).count()
-            users_inactive = db.query(User).filter(User.is_active == False).count()
+            result = conn.execute(text("SELECT COUNT(*) FROM users WHERE is_active = true"))
+            users_active = result.fetchone()[0]
+
+            result = conn.execute(text("SELECT COUNT(*) FROM users WHERE is_active = false"))
+            users_inactive = result.fetchone()[0]
 
             user_count_total.labels(tenant_id="all", status="active").set(users_active)
             user_count_total.labels(tenant_id="all", status="inactive").set(users_inactive)
 
             # Document count by status
-            docs_indexed = db.query(Document).filter(Document.indexed == 1).count()
-            docs_not_indexed = db.query(Document).filter(Document.indexed == 0).count()
+            result = conn.execute(text("SELECT COUNT(*) FROM documents WHERE indexed = 1"))
+            docs_indexed = result.fetchone()[0]
+
+            result = conn.execute(text("SELECT COUNT(*) FROM documents WHERE indexed = 0"))
+            docs_not_indexed = result.fetchone()[0]
 
             document_count_total.labels(tenant_id="all", status="indexed").set(docs_indexed)
             document_count_total.labels(tenant_id="all", status="not_indexed").set(docs_not_indexed)
@@ -467,8 +520,8 @@ def start_metrics_collection():
                 collect_all_metrics()
             except Exception as e:
                 logger.error(f"Error in metrics collection: {str(e)}")
-            time.sleep(30)  # Collect every 30 seconds
+            time.sleep(60)  # Collect every 60 seconds to reduce database load
 
     thread = threading.Thread(target=metrics_collector, daemon=True)
     thread.start()
-    logger.info("Started background metrics collection")
+    logger.info("Started background metrics collection (60s interval)")

@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  allowedDevOrigins: ['192.168.1.58'],
   eslint: {
     // Warning: This allows production builds to successfully complete even if
     // your project has ESLint errors.
@@ -50,7 +51,7 @@ const nextConfig = {
           },
           {
             key: 'Referrer-Policy',
-            value: 'origin-when-cross-origin'
+            value: 'strict-origin-when-cross-origin'
           }
         ]
       }
@@ -60,7 +61,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}/api/:path*`,
+        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://192.168.1.58:8000'}/api/:path*`,
       },
     ]
   },
@@ -86,10 +87,15 @@ const nextConfig = {
     };
 
     // Handle external imports that webpack can't resolve
-    config.externals = {
-      ...config.externals,
-      canvas: 'canvas',
-    };
+    if (config.externals) {
+      config.externals.push({
+        canvas: 'canvas'
+      });
+    } else {
+      config.externals = [{
+        canvas: 'canvas'
+      }];
+    }
 
     // Ignore certain dynamic imports that cause issues
     config.plugins.push(

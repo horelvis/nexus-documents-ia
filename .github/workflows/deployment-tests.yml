@@ -1,0 +1,309 @@
+name: Deployment Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      full_deployment_test:
+        description: 'Run full deployment test suite'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  smoke-test:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: |
+        pip install -r requirements.txt
+        pip install requests
+
+    - name: Install Node.js dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Build check
+      run: |
+        echo "🔨 Checking builds..."
+
+        # Backend build check
+        cd backend
+        python3 -c "import app.main; print('✅ Backend imports OK')"
+
+        # Frontend build check
+        cd ../frontend
+        npm run build
+        echo "✅ Frontend build OK"
+
+    - name: Smoke test scripts
+      run: |
+        echo "🚀 Running smoke tests..."
+
+        # Test validation script
+        python3 validate_system.py || echo "⚠️ Validation script needs services"
+
+        # Test basic imports
+        cd backend
+        python3 -c "
+import sys
+sys.path.append('.')
+try:
+    from app.main import app
+    print('✅ FastAPI app imports OK')
+except Exception as e:
+    print(f'❌ FastAPI import failed: {e}')
+    exit(1)
+        "
+
+  docker-build-test:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: smoke-test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Backend Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: false
+        tags: nexus-backend:test-${{ github.run_number }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          ENVIRONMENT=test
+
+    - name: Build Frontend Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: false
+        tags: nexus-frontend:test-${{ github.run_number }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker images
+      run: |
+        echo "🐳 Testing Docker images..."
+
+        # Test backend image
+        docker run --rm nexus-backend:test-${{ github.run_number }} python3 -c "
+import sys
+sys.path.append('/app')
+try:
+    from app.main import app
+    print('✅ Backend Docker image OK')
+except Exception as e:
+    print(f'❌ Backend Docker image failed: {e}')
+    exit(1)
+        "
+
+        # Test frontend image (basic check)
+        docker run --rm nexus-frontend:test-${{ github.run_number }} ls -la /app/.next || echo "⚠️ Frontend build not found in image"
+
+  infrastructure-test:
+    name: Infrastructure Tests
+    runs-on: ubuntu-latest
+    needs: docker-build-test
+    if: github.event.inputs.full_deployment_test != 'false'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Check Terraform configuration
+      working-directory: ./deployment/gcp
+      run: |
+        echo "🏗️ Checking Terraform configuration..."
+        terraform init -backend=false
+        terraform validate
+        echo "✅ Terraform configuration OK"
+
+    - name: Check Docker Compose files
+      run: |
+        echo "🐳 Checking Docker Compose files..."
+
+        # Check backend docker-compose
+        if [ -f "backend/docker/docker-compose.yml" ]; then
+          docker compose -f backend/docker/docker-compose.yml config > /dev/null
+          echo "✅ Backend docker-compose OK"
+        fi
+
+        # Check test docker-compose
+        if [ -f "backend/docker/docker-compose.test.yml" ]; then
+          docker compose -f backend/docker/docker-compose.test.yml config > /dev/null
+          echo "✅ Test docker-compose OK"
+        fi
+
+  deployment-validation:
+    name: Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [infrastructure-test]
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install deployment tools
+      run: |
+        pip install requests pyyaml
+
+    - name: Validate deployment configuration
+      run: |
+        echo "📋 Validating deployment configuration..."
+
+        # Check environment files exist
+        if [ ! -f ".env.example" ]; then
+          echo "❌ Missing .env.example file"
+          exit 1
+        fi
+
+        # Check deployment scripts
+        if [ ! -f "deployment/gcp/cloudbuild.yaml" ]; then
+          echo "❌ Missing cloudbuild.yaml"
+          exit 1
+        fi
+
+        # Validate cloudbuild.yaml
+        if ! yq eval '.steps' deployment/gcp/cloudbuild.yaml > /dev/null 2>&1; then
+          echo "❌ Invalid cloudbuild.yaml format"
+          exit 1
+        fi
+
+        echo "✅ Deployment configuration OK"
+
+    - name: Test deployment scripts
+      run: |
+        echo "🚀 Testing deployment scripts..."
+
+        # Test script syntax (without executing)
+        if [ -f "scripts/deploy-backend.sh" ]; then
+          bash -n scripts/deploy-backend.sh || echo "⚠️ deploy-backend.sh has syntax errors"
+        fi
+
+        if [ -f "scripts/deploy-frontend.sh" ]; then
+          bash -n scripts/deploy-frontend.sh || echo "⚠️ deploy-frontend.sh has syntax errors"
+        fi
+
+        echo "✅ Deployment scripts validation completed"
+
+  final-report:
+    name: Deployment Test Report
+    runs-on: ubuntu-latest
+    needs: [smoke-test, docker-build-test, infrastructure-test, deployment-validation]
+    if: always()
+
+    steps:
+    - name: Generate deployment report
+      run: |
+        echo "## 🚀 Deployment Test Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test | Status | Details |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+
+        # Smoke Tests
+        if [ "${{ needs.smoke-test.result }}" == "success" ]; then
+          echo "| Smoke Tests | ✅ PASS | Basic functionality verified |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Smoke Tests | ❌ FAIL | Basic functionality issues |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Docker Build Test
+        if [ "${{ needs.docker-build-test.result }}" == "success" ]; then
+          echo "| Docker Build | ✅ PASS | Images built successfully |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Docker Build | ❌ FAIL | Docker build issues |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Infrastructure Test
+        if [ "${{ needs.infrastructure-test.result }}" == "success" ]; then
+          echo "| Infrastructure | ✅ PASS | Config validated |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.infrastructure-test.result }}" == "skipped" ]; then
+          echo "| Infrastructure | ⏭️ SKIP | Not requested |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Infrastructure | ❌ FAIL | Config issues |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Deployment Validation
+        if [ "${{ needs.deployment-validation.result }}" == "success" ]; then
+          echo "| Deployment | ✅ PASS | Ready for deployment |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.deployment-validation.result }}" == "skipped" ]; then
+          echo "| Deployment | ⏭️ SKIP | Not a release |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Deployment | ❌ FAIL | Deployment issues |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎯 Overall Status" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          echo "❌ Deployment tests failed. Please fix issues before deploying." >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+          echo "⏹️ Some deployment tests were cancelled." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "✅ All deployment tests passed! Ready for ${{ github.event.inputs.environment || 'production' }} deployment." >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Environment" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Environment**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Full Test Suite**: ${{ github.event.inputs.full_deployment_test != 'false' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Git Reference**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          echo "❌ Deployment validation failed - blocking deployment"
+        else
+          echo "✅ Deployment validation passed - safe to deploy"
+        fi

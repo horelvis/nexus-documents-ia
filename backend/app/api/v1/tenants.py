@@ -174,6 +174,47 @@ async def delete_tenant(
     return {"message": f"Tenant {tenant_id} eliminado exitosamente"}
 
 
+@router.get("/validate/{tenant_id}")
+async def validate_tenant_exists(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Valida si un tenant existe (endpoint público para middleware).
+    Retorna solo información básica sin datos sensibles.
+    """
+    try:
+        # Convertir string a UUID
+        from uuid import UUID
+        tenant_uuid = UUID(tenant_id)
+
+        result = await db.execute(
+            select(Tenant.id, Tenant.name, Tenant.is_active)
+            .where(Tenant.id == tenant_uuid)
+        )
+        tenant = result.first()
+
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+        if not tenant.is_active:
+            raise HTTPException(status_code=404, detail="Tenant inactivo")
+
+        # Retornar solo información básica
+        return {
+            "id": str(tenant.id),
+            "name": tenant.name,
+            "is_active": tenant.is_active
+        }
+
+    except ValueError:
+        # Invalid UUID format
+        raise HTTPException(status_code=404, detail="Formato de tenant ID inválido")
+    except Exception as e:
+        logger.error(f"Error validating tenant {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+
 @router.get("/current", response_model=TenantResponse)
 async def get_current_tenant(
     db: AsyncSession = Depends(get_async_db),
@@ -186,10 +227,10 @@ async def get_current_tenant(
         select(Tenant).where(Tenant.id == current_user.tenant_id)
     )
     tenant = result.scalar_one_or_none()
-    
+
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
-    
+
     return tenant
 
 

@@ -358,9 +358,13 @@ nexus-document-backend/
    - Install and run Redis
    - Install and run Qdrant
 
-4. **Run database migrations**
+4. **Run database migrations safely**
    ```bash
-   alembic upgrade head
+   # Check for potential conflicts
+   python scripts/alembic_safe_migrate.py --check
+
+   # Apply migrations with safety checks
+   python scripts/alembic_safe_migrate.py
    ```
 
 5. **Start the API server**
@@ -423,9 +427,13 @@ python scripts/alembic_utils.py check
 python scripts/alembic_utils.py visualize
 ```
 
-**Apply migrations:**
+**Apply migrations safely:**
 ```bash
-alembic upgrade head
+# Check for conflicts first
+python scripts/alembic_safe_migrate.py --check
+
+# Apply migrations with safety checks
+python scripts/alembic_safe_migrate.py
 ```
 
 #### 3. **Frontend Development**

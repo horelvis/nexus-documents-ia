@@ -26,15 +26,26 @@ def configure_cors(app) -> None:
     cors_origins = get_cors_origins()
 
     if settings.DEBUG:
-        logger.warning("⚠️ DEBUG mode - allowing specific development origins only")
-        logger.warning("🚨 SECURITY: Never use wildcard (*) origins in production!")
+        logger.info("🔧 DEBUG mode - allowing flexible development origins")
+        logger.info(f"🌐 Configured origins: {len(cors_origins)} total")
+
+        # Log a sample of origins for debugging
+        if len(cors_origins) > 10:
+            logger.info(f"📋 Sample origins: {cors_origins[:5]} ... and {len(cors_origins)-5} more")
+        else:
+            logger.info(f"📋 All origins: {cors_origins}")
+
+        # In development, also allow localhost with any port as fallback
+        if settings.ALLOW_ALL_CORS:
+            logger.warning("🚨 ALLOW_ALL_CORS is enabled - allowing all origins!")
+            cors_origins = ["*"]
     else:
         if not cors_origins:
             logger.error("❌ CRITICAL: No CORS origins configured for production!")
             logger.error("🔧 Set BACKEND_CORS_ORIGINS environment variable")
             cors_origins = []  # Fail securely
 
-    logger.info(f"🌐 Configuring CORS with origins: {cors_origins}")
+    logger.info(f"🌐 Final CORS configuration: {len(cors_origins)} origins")
 
     app.add_middleware(
         CORSMiddleware,
@@ -49,7 +60,9 @@ def configure_cors(app) -> None:
             "Authorization",
             "X-Requested-With",
             "X-User-Id",
-            "X-Tenant-Id"
+            "X-Tenant-Id",
+            "X-Requested-With",
+            "X-CSRF-Token"
         ],
     )
     logger.info("✅ CORS middleware configured with secure settings")

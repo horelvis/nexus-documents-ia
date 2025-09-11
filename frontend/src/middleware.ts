@@ -4,9 +4,10 @@ import { NextResponse } from 'next/server'
 const isPublicRoute = createRouteMatcher([
   '/',
   '/pricing',
-  '/auth/sign-in(.*)', 
+  '/auth/sign-in(.*)',
   '/auth/sign-up(.*)',
   '/auth/sign-out(.*)',
+  '/auth/redirect',
   '/shared/(.*)'  // Public share links
 ])
 
@@ -15,7 +16,8 @@ const isSubscriptionRoute = createRouteMatcher([
   '/(.*)/plans',
   '/(.*)/checkout(.*)',
   '/auth/(.*)',
-  '/(.*)/onboarding(.*)'
+  '/(.*)/onboarding(.*)',
+  '/auth/redirect'
 ])
 
 export default clerkMiddleware(async (auth, req) => {
@@ -26,43 +28,59 @@ export default clerkMiddleware(async (auth, req) => {
 
   // Get the authenticated user
   const { userId } = await auth()
-  
-  // If user is authenticated and on a protected route, check subscription status
+
+  // If user is authenticated and on a protected route, validate tenant and check subscription
   if (userId && !isPublicRoute(req) && !isSubscriptionRoute(req)) {
     try {
       // Extract tenant ID from URL path like /:tenantId/dashboard
       const url = req.nextUrl.clone()
       const pathSegments = url.pathname.split('/').filter(Boolean)
       const tenantId = pathSegments[0]
-      
-      // Only check subscription if we have a tenant ID in the path
+
+      // Only proceed if we have a tenant ID in the path
       if (tenantId && tenantId.length > 10) { // Basic UUID-like length check
-        // Make a request to our backend to check user subscription status
         const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-        
+
         try {
           // Get the session token for API calls
           const { getToken } = await auth()
           const token = await getToken()
-          
-          const response = await fetch(`${backendUrl}/api/v1/auth/me`, {
+
+          // First, validate that the tenant exists
+          const tenantResponse = await fetch(`${backendUrl}/api/v1/tenants/validate/${tenantId}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          })
+
+          if (!tenantResponse.ok) {
+            // Tenant doesn't exist, redirect to error page
+            console.log('[Middleware] Tenant not found, redirecting to error page:', tenantId)
+            const errorUrl = new URL('/tenant-not-found', req.url)
+            errorUrl.searchParams.set('tenantId', tenantId)
+            return NextResponse.redirect(errorUrl)
+          }
+
+          // Tenant exists, now check user subscription status
+          const userResponse = await fetch(`${backendUrl}/api/v1/auth/me`, {
             headers: {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
           })
-          
-          if (response.ok) {
-            const userData = await response.json()
-            
+
+          if (userResponse.ok) {
+            const userData = await userResponse.json()
+
             // Check if user has valid subscription or trial
-            const hasValidTrial = userData?.trial_ends_at && 
+            const hasValidTrial = userData?.trial_ends_at &&
               new Date(userData.trial_ends_at) > new Date()
-            const hasPaidSubscription = userData?.subscription_plan && 
+            const hasPaidSubscription = userData?.subscription_plan &&
               ['basic', 'pro', 'professional', 'enterprise'].includes(userData.subscription_plan)
-            const hasActiveStatus = userData?.subscription_status && 
+            const hasActiveStatus = userData?.subscription_status &&
               ['active', 'trialing'].includes(userData.subscription_status)
-            
+
             // If no valid subscription/trial, redirect to plans
             if (!hasValidTrial && !hasPaidSubscription && !hasActiveStatus) {
               console.log('[Middleware] No valid subscription, redirecting to plans')
@@ -76,7 +94,7 @@ export default clerkMiddleware(async (auth, req) => {
       }
     } catch (error) {
       // If any error occurs, log it but don't break the request
-      console.error('[Middleware] Error checking subscription:', error)
+      console.error('[Middleware] Error in middleware:', error)
     }
   }
 })

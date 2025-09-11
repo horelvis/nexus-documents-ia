@@ -57,6 +57,15 @@ class CompressionMiddleware:
                         # Only use compressed version if it's actually smaller
                         if len(compressed_body) < len(body):
                             message["body"] = compressed_body
+                            # Update Content-Length header to match compressed size
+                            message["headers"] = message.get("headers", [])
+                            # Remove existing content-length header
+                            message["headers"] = [
+                                [k, v] for k, v in message["headers"]
+                                if k != b"content-length"
+                            ]
+                            # Add new content-length header
+                            message["headers"].append([b"content-length", str(len(compressed_body)).encode("utf-8")])
                             logger.debug(f"Compressed response from {len(body)} to {len(compressed_body)} bytes")
                         else:
                             logger.debug(f"Compression not beneficial, keeping original size: {len(body)} bytes")

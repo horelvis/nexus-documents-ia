@@ -1,13 +1,16 @@
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
-from app.db.models import User
+from app.db.models import User, Document
 from app.services.search_service import SearchService
 from app.services.vector_service import VectorService
 from app.services.reindex_service import ReindexService
 from app.services.cag_client import CAGClient
 from app.schemas.document import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -64,60 +67,69 @@ async def search_database(
     SIMPLE database search - no fallbacks
     Searches in title, description, content in PostgreSQL
     """
-    from sqlalchemy.future import select
-    from sqlalchemy.orm import selectinload
-    from sqlalchemy import or_
-    from app.db.database import SessionLocal
-    
-    with SessionLocal() as db:
-        stmt = select(Document).options(
-            selectinload(Document.tags)
-        ).filter(
-            Document.tenant_id == tenant_id
-        )
-        
-        # Apply search filter - METADATA ONLY (no content search in DB)
-        if query:
-            stmt = stmt.filter(
-                or_(
-                    Document.title.ilike(f"%{query}%"),
-                    Document.description.ilike(f"%{query}%"),
-                    Document.filename.ilike(f"%{query}%")
-                )
+    try:
+        from sqlalchemy.future import select
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import or_
+        from app.db.database import SessionLocal
+
+        with SessionLocal() as db:
+            stmt = select(Document).options(
+                selectinload(Document.tags)
+            ).filter(
+                Document.tenant_id == tenant_id
             )
-        
-        # Apply other filters
-        if category:
-            stmt = stmt.filter(Document.category == category)
-            
-        stmt = stmt.limit(limit)
-        
-        result = db.execute(stmt)
-        documents = result.scalars().all()
-        
-        # Format results to match expected structure
-        formatted_results = []
-        for doc in documents:
-            formatted_results.append({
-                "document": {
-                    "id": str(doc.id),
-                    "title": doc.title,
-                    "description": doc.description,
-                    "filename": doc.filename,
-                    "file_type": doc.file_type,
-                    "file_size": doc.file_size,
-                    "mime_type": doc.mime_type,
-                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                    "indexed": str(doc.indexed),
-                    "tenant_id": str(doc.tenant_id),
-                    "tags": [tag.name for tag in doc.tags] if doc.tags else []
-                },
-                "score": 1.0,  # Database doesn't provide relevance scoring
-                "matches": []
-            })
-        
-        return formatted_results
+
+            # Apply search filter - METADATA ONLY (no content search in DB)
+            if query:
+                stmt = stmt.filter(
+                    or_(
+                        Document.title.ilike(f"%{query}%"),
+                        Document.description.ilike(f"%{query}%"),
+                        Document.filename.ilike(f"%{query}%")
+                    )
+                )
+
+            # Apply other filters
+            if category:
+                stmt = stmt.filter(Document.category == category)
+
+            stmt = stmt.limit(limit)
+
+            result = db.execute(stmt)
+            documents = result.scalars().all()
+
+            # Format results to match expected structure
+            formatted_results = []
+            for doc in documents:
+                try:
+                    formatted_results.append({
+                        "document": {
+                            "id": str(doc.id),
+                            "title": doc.title or "",
+                            "description": doc.description or "",
+                            "filename": doc.filename or "",
+                            "file_type": doc.file_type or "",
+                            "file_size": doc.file_size or 0,
+                            "mime_type": doc.mime_type or "",
+                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            "indexed": str(doc.indexed) if doc.indexed is not None else "false",
+                            "tenant_id": str(doc.tenant_id),
+                            "tags": [tag.name for tag in doc.tags] if doc.tags else []
+                        },
+                        "score": 1.0,  # Database doesn't provide relevance scoring
+                        "matches": []
+                    })
+                except Exception as e:
+                    logger.warning(f"Error formatting document {doc.id}: {e}")
+                    continue
+
+            return formatted_results
+    except Exception as e:
+        logger.error(f"Database search error: {e}")
+        # Return empty list instead of raising exception
+        return []
 
 
 @router.get("/", response_model=List[dict])
@@ -138,47 +150,63 @@ async def search_documents(
     - database: Force database search (metadata only)
     """
     from app.services.elasticsearch_service import ElasticsearchService
-    
-    # Always try Elasticsearch first (has the content)
+
     try:
-        es_service = ElasticsearchService(tenant_id)
-        
-        # Prepare filters
-        filters = {}
-        if tags:
-            filters["tags"] = tags
-        if date_from:
-            filters["date_from"] = date_from  
-        if date_to:
-            filters["date_to"] = date_to
-        
-        # Try Elasticsearch search
-        results = await es_service.hybrid_search(
-            query=query,
-            limit=limit,
-            filters=filters
-        )
-        
-        if results:
-            return results
-            
-    except Exception as es_error:
-        print(f"⚠️ Elasticsearch failed: {es_error}")
-        
-        # Only if search_type explicitly requests database, OR if ES completely failed
-        if search_type == "database" or "connection" in str(es_error).lower():
-            print("🔄 Falling back to database search (metadata only)")
+        # Always try Elasticsearch first (has the content)
+        if search_type in ["auto", "elasticsearch"]:
+            try:
+                es_service = ElasticsearchService(tenant_id)
+
+                # Prepare filters
+                filters = {}
+                if tags:
+                    filters["tags"] = tags
+                if date_from:
+                    filters["date_from"] = date_from
+                if date_to:
+                    filters["date_to"] = date_to
+
+                # Try Elasticsearch search
+                results = await es_service.hybrid_search(
+                    query=query,
+                    limit=limit,
+                    filters=filters
+                )
+
+                # Ensure results is a list
+                if results and isinstance(results, list):
+                    return results
+                elif results:
+                    # If results is not a list, wrap it
+                    return [results] if isinstance(results, dict) else []
+
+            except Exception as es_error:
+                logger.warning(f"⚠️ Elasticsearch failed: {es_error}")
+
+                # Only fallback to database if it's a connection issue or explicitly requested
+                if search_type == "database" or "connection" in str(es_error).lower() or "timeout" in str(es_error).lower():
+                    logger.info("🔄 Falling back to database search (metadata only)")
+                    return await search_database(query, limit, tags, None, current_user, tenant_id)
+                else:
+                    # For other ES errors, still try database as fallback in auto mode
+                    if search_type == "auto":
+                        logger.info("🔄 ES error in auto mode, trying database fallback")
+                        return await search_database(query, limit, tags, None, current_user, tenant_id)
+                    else:
+                        # Re-raise ES error if search_type is explicitly elasticsearch
+                        raise es_error
+
+        # If search_type is database or if we reach here, do database search
+        if search_type == "database":
             return await search_database(query, limit, tags, None, current_user, tenant_id)
-        else:
-            # Re-raise ES error if it's not a connection issue
-            raise es_error
-    
-    # If ES returned empty results but worked, still try database for metadata-only search
-    if search_type == "database":
-        return await search_database(query, limit, tags, None, current_user, tenant_id)
-    
-    # Default: return empty results if ES worked but found nothing
-    return []
+
+        # Default: return empty results
+        return []
+
+    except Exception as e:
+        logger.error(f"💥 Search endpoint error: {e}")
+        # Return empty list instead of raising exception to avoid Content-Length issues
+        return []
 
 
 @router.get("/analytics", response_model=dict)

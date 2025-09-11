@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo",
+    "dev": "next dev --turbo --hostname 0.0.0.0",
     "dev:stable": "next dev",
     "dev:https": "node server.js",
     "build": "next build",

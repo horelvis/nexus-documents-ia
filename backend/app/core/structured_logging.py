@@ -9,7 +9,20 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import uuid
 
-from pythonjsonlogger import jsonlogger
+try:
+    from pythonjsonlogger.jsonlogger import JsonFormatter
+except ImportError:
+    # Fallback for different package versions
+    try:
+        from pythonjsonlogger import jsonlogger
+        JsonFormatter = jsonlogger.JsonFormatter
+    except ImportError:
+        # Simple fallback formatter
+        class JsonFormatter:
+            def __init__(self, **kwargs):
+                pass
+            def format(self, record):
+                return f"{record.levelname}: {record.getMessage()}"
 
 from app.core.config import settings
 
@@ -26,7 +39,7 @@ class StructuredLogger:
             self.logger.removeHandler(handler)
 
         # Create JSON formatter
-        formatter = jsonlogger.JsonFormatter(
+        formatter = JsonFormatter(
             fmt='%(asctime)s %(name)s %(levelname)s %(message)s',
             datefmt='%Y-%m-%dT%H:%M:%S%z'
         )

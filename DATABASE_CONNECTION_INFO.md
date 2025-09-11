@@ -83,6 +83,6 @@ export DATABASE_URL="postgresql://nexus_user_pre:<password>@146.148.14.195:5432/
 ```
 
 ## Next Steps
-1. Run database migrations: `cd backend && alembic upgrade head`
+1. Run database migrations safely: `cd backend && python scripts/alembic_safe_migrate.py`
 2. Set up Cloud SQL Proxy for local development
 3. Configure backend .env file with correct credentials

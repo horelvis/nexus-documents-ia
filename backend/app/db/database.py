@@ -51,12 +51,12 @@ def connect_event(connection, connection_record):
     logger.debug("🔗 Database connection established")
 
 @event.listens_for(engine, "checkout")
-def checkout_event(connection, connection_record, connection_proxy):
+def checkout_event(dbapi_connection, connection_record, connection_proxy):
     """Log connection checkout from pool"""
     logger.debug("📤 Connection checked out from pool")
 
 @event.listens_for(engine, "checkin")
-def checkin_event(connection, connection_record, connection_proxy):
+def checkin_event(dbapi_connection, connection_record):
     """Log connection checkin to pool"""
     logger.debug("📥 Connection checked in to pool")
 
@@ -160,7 +160,6 @@ def get_connection_stats():
         "pool_size": pool.size(),
         "checkedin": pool.checkedin(),
         "checkedout": pool.checkedout(),
-        "invalid": pool.invalid(),
         "overflow": pool.overflow(),
         "timeout": pool.timeout(),
     }

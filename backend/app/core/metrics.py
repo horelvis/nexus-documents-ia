@@ -235,7 +235,7 @@ class PerformanceMonitor:
         # Check for slow queries
         db_metrics = metrics_summary.get('histograms', {}).get('db_query_duration', {})
         if db_metrics.get('avg', 0) > self.slow_query_threshold:
-            alerts.append(".2f"
+            alerts.append(f"Slow database queries detected: {db_metrics.get('avg', 0):.2f}s average")
         # Check for high error rates
         error_count = metrics_summary.get('counters', {}).get('http_requests_total{status_class=5xx}', 0)
         total_requests = sum([

@@ -62,7 +62,15 @@ class HealthChecker:
                 timeout=self.timeout
             )
             response_time = time.time() - start_time
-            return result._replace(response_time=response_time)
+            # Create new HealthCheckResult with updated response_time
+            return HealthCheckResult(
+                name=result.name,
+                status=result.status,
+                response_time=response_time,
+                message=result.message,
+                details=result.details,
+                timestamp=result.timestamp
+            )
 
         except asyncio.TimeoutError:
             response_time = time.time() - start_time
@@ -91,17 +99,18 @@ class DatabaseHealthCheck(HealthChecker):
     """Database health check"""
 
     async def _check_impl(self) -> HealthCheckResult:
-        from app.db.database import get_db_context
+        from app.db.database import engine, get_connection_stats
 
         try:
-            with get_db_context() as db:
+            # Use engine directly to avoid creating new sessions
+            with engine.connect() as conn:
                 # Test basic connectivity
-                result = db.execute("SELECT 1 as test")
+                from sqlalchemy import text
+                result = conn.execute(text("SELECT 1 as test"))
                 row = result.fetchone()
 
                 if row and row[0] == 1:
                     # Get connection stats
-                    from app.db.database import get_connection_stats
                     stats = get_connection_stats()
 
                     return HealthCheckResult(
@@ -112,7 +121,8 @@ class DatabaseHealthCheck(HealthChecker):
                         details={
                             'active_connections': stats.get('checkedout', 0),
                             'idle_connections': stats.get('checkedin', 0),
-                            'connection_pool_size': stats.get('size', 0)
+                            'connection_pool_size': stats.get('size', 0),
+                            'overflow': stats.get('overflow', 0)
                         }
                     )
                 else:
@@ -139,12 +149,20 @@ class RedisHealthCheck(HealthChecker):
         try:
             from app.core.cache import cache
 
-            # Test basic connectivity
-            result = await cache.get("health_check_test")
+            if cache is None:
+                return HealthCheckResult(
+                    name="redis",
+                    status=HealthStatus.UNHEALTHY,
+                    response_time=0,
+                    message="Redis cache not initialized"
+                )
+
+            # Test basic connectivity (cache is synchronous)
+            result = cache.get("health_check_test")
             if result is None:
                 # Set a test value
-                await cache.set("health_check_test", "ok", ttl=10)
-                result = await cache.get("health_check_test")
+                cache.set("health_check_test", "ok", ttl=10)
+                result = cache.get("health_check_test")
 
             if result == "ok":
                 # Get cache stats
@@ -375,7 +393,7 @@ class HealthCheckManager:
         if hasattr(settings, 'WEAVIATE_SERVICE_URL'):
             self.add_check(ExternalServiceHealthCheck(
                 "weaviate",
-                f"{settings.WEAVIATE_SERVICE_URL}/v1/meta"
+                f"{settings.WEAVIATE_SERVICE_URL}/health"
             ))
 
         if hasattr(settings, 'ELASTICSEARCH_URL'):
@@ -483,10 +501,13 @@ health_manager = HealthCheckManager()
 def initialize_health_checks():
     """Initialize health check system"""
     health_manager.add_default_checks()
+    # Increase check interval to reduce database load
+    health_manager.check_interval = 60  # Check every 60 seconds instead of 30
     structured_logger.info("Health check system initialized", {
         'event_type': 'system_init',
         'component': 'health_checks',
-        'checks_count': len(health_manager.checks)
+        'checks_count': len(health_manager.checks),
+        'check_interval_seconds': health_manager.check_interval
     })
 
 

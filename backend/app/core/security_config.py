@@ -2,9 +2,12 @@
 Security configuration and constants
 """
 import os
+import logging
 from typing import List
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Security headers
@@ -49,6 +52,8 @@ PRODUCTION_CORS_ORIGINS = [
 ]
 
 # Development CORS origins (more permissive but still secure)
+# NOTE: In DEBUG mode, we now use "*" (allow all) for maximum flexibility
+# with dynamic ports. This can be changed back to specific origins if needed.
 DEVELOPMENT_CORS_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -56,6 +61,7 @@ DEVELOPMENT_CORS_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
     "http://127.0.0.1:3002",
+    "http://192.168.1.58:3000",  # Frontend IP
     "http://localhost:5173",  # Vite
     "http://localhost:4000",  # Common dev port
     "http://localhost:8080",  # Common dev port
@@ -64,11 +70,40 @@ DEVELOPMENT_CORS_ORIGINS = [
 def get_cors_origins() -> List[str]:
     """Get appropriate CORS origins based on environment"""
     if settings.DEBUG:
-        return DEVELOPMENT_CORS_ORIGINS
+        # In development, allow all origins for flexibility with dynamic ports
+        # This solves the "origin-when-cross-origin" issue when frontend ports change
+        logger.info("🔧 DEBUG mode - allowing ALL origins (*) for development flexibility")
+        logger.info("💡 This allows any localhost port to connect (solves dynamic port issues)")
+        return ["*"]
     else:
         # In production, use configured origins or fallback to secure defaults
         configured_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
         return configured_origins if configured_origins else PRODUCTION_CORS_ORIGINS
+
+
+def get_dynamic_cors_origins() -> List[str]:
+    """Alternative: Get CORS origins with dynamic localhost port detection"""
+    if not settings.DEBUG:
+        return get_cors_origins()
+
+    # For development, detect and allow localhost with any port
+    base_origins = DEVELOPMENT_CORS_ORIGINS.copy()
+
+    # Add localhost with a wide range of ports
+    for port in range(3000, 3010):  # 3000-3009
+        base_origins.extend([
+            f"http://localhost:{port}",
+            f"http://127.0.0.1:{port}",
+        ])
+
+    for port in [4000, 5000, 8000, 8080, 5173, 5174]:  # Common dev ports
+        base_origins.extend([
+            f"http://localhost:{port}",
+            f"http://127.0.0.1:{port}",
+        ])
+
+    # Remove duplicates
+    return list(set(base_origins))
 
 def is_secure_environment() -> bool:
     """Check if running in a secure environment"""
