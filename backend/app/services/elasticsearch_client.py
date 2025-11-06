@@ -81,7 +81,7 @@ class ElasticsearchClient:
         boost_semantic: float = 1.0,
         boost_keyword: float = 1.0
     ) -> List[Dict[str, Any]]:
-        """Perform hybrid search via microservice"""
+        """Perform hybrid search via microservice with fallback to direct ES"""
         try:
             payload = {
                 "query": query,
@@ -100,8 +100,89 @@ class ElasticsearchClient:
             return response.get("results", [])
 
         except Exception as e:
-            logger.error(f"Failed to perform hybrid search via microservice: {e}")
-            return []
+            logger.warning(f"Microservice unavailable, falling back to direct Elasticsearch: {e}")
+
+            # Fallback to direct Elasticsearch search
+            try:
+                from elasticsearch import Elasticsearch
+                from app.core.config import settings
+
+                client = Elasticsearch([settings.ELASTICSEARCH_URL])
+
+                # Enhanced search query with better matching
+                search_body = {
+                    "query": {
+                        "bool": {
+                            "should": [
+                                # Exact match with boost
+                                {
+                                    "multi_match": {
+                                        "query": query,
+                                        "fields": ["title^3", "description^2", "content"],
+                                        "type": "best_fields",
+                                        "boost": 2
+                                    }
+                                },
+                                # Wildcard match for partial matches (like propuesta in propuesta_signed.pdf)
+                                {
+                                    "wildcard": {
+                                        "title": {
+                                            "value": f"*{query}*",
+                                            "boost": 1.5
+                                        }
+                                    }
+                                },
+                                {
+                                    "wildcard": {
+                                        "content": {
+                                            "value": f"*{query}*",
+                                            "boost": 1.0
+                                        }
+                                    }
+                                }
+                            ],
+                            "minimum_should_match": 1,
+                            "filter": {
+                                "term": {"tenant_id": tenant_id}
+                            }
+                        }
+                    },
+                    "size": limit,
+                    "sort": ["_score"]
+                }
+
+                # Format index name (replace hyphens with underscores)
+                index_name = f"nexus_{tenant_id.replace('-', '_')}_documents"
+
+                response = client.search(
+                    index=index_name,
+                    body=search_body
+                )
+
+                results = []
+                for hit in response["hits"]["hits"]:
+                    result = {
+                        "document": {
+                            "id": hit["_source"]["doc_id"],
+                            "title": hit["_source"]["title"],
+                            "content": hit["_source"]["content"][:500] + "..." if hit["_source"].get("content") else "",
+                            "file_type": hit["_source"]["file_type"],
+                            "category": hit["_source"].get("category"),
+                            "tags": hit["_source"].get("tags", []),
+                            "created_at": hit["_source"].get("created_at"),
+                            "tenant_id": hit["_source"]["tenant_id"]
+                        },
+                        "score": hit["_score"],
+                        "matches": [{"text": hit["_source"]["content"][:200] + "..." if hit["_source"].get("content") else "", "score": hit["_score"]}]
+                    }
+                    results.append(result)
+
+                logger.info(f"✅ Direct Elasticsearch fallback returned {len(results)} results")
+                return results
+
+            except Exception as fallback_error:
+                logger.error(f"❌ Direct Elasticsearch fallback also failed: {fallback_error}")
+                return []
 
     async def semantic_search(
         self,
@@ -131,6 +212,35 @@ class ElasticsearchClient:
         except Exception as e:
             logger.error(f"Failed to perform semantic search via microservice: {e}")
             return []
+
+    async def get_facets(
+        self,
+        tenant_id: str,
+        query: str = None,
+        filters: Dict[str, Any] = None,
+        facet_fields: List[str] = None,
+        max_facet_values: int = 10
+    ) -> Dict[str, Any]:
+        """Get facets via microservice"""
+        try:
+            payload = {
+                "query": query,
+                "filters": filters,
+                "facet_fields": facet_fields or ["file_type", "category", "tags"],
+                "max_facet_values": max_facet_values
+            }
+
+            response = await self._make_request(
+                "POST",
+                f"/facets/{tenant_id}",
+                json=payload
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to get facets via microservice: {e}")
+            return {"facets": [], "total_documents": 0}
 
     async def get_analytics(
         self,

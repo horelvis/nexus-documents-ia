@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
     ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+    ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
     
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")

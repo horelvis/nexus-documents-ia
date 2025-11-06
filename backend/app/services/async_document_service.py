@@ -275,7 +275,7 @@ class AsyncDocumentService:
                     or_(
                         Document.title.ilike(f"%{search}%"),
                         Document.description.ilike(f"%{search}%"),
-                        Document.content.ilike(f"%{search}%")
+                        Document.filename.ilike(f"%{search}%")
                     )
                 )
             

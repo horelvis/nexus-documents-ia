@@ -51,6 +51,30 @@ class AnalyticsRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
 
+class FacetRequest(BaseModel):
+    """Request for faceting"""
+    query: Optional[str] = None
+    filters: Optional[SearchFilters] = None
+    facet_fields: List[str] = ["file_type", "category", "tags"]
+    max_facet_values: int = 10
+
+class FacetBucket(BaseModel):
+    """Individual facet bucket"""
+    key: str
+    count: int
+    selected: bool = False
+
+class FacetResult(BaseModel):
+    """Result for a single facet field"""
+    field: str
+    buckets: List[FacetBucket]
+    total_count: int
+
+class FacetResponse(BaseModel):
+    """Response for faceting"""
+    facets: List[FacetResult]
+    total_documents: int
+
 class AnalyticsResponse(BaseModel):
     """Response for analytics"""
     total_documents: int

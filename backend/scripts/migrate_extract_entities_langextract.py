@@ -147,8 +147,7 @@ async def migrate_entities_for_tenant(
             query = select(Document).where(
                 and_(
                     Document.indexed == IndexingStatus.INDEXED,  # Only indexed documents
-                    Document.content.isnot(None),  # Has content
-                    Document.content != "",  # Content not empty
+                    Document.indexed > 0,  # Has been indexed (content processed)
                     or_(
                         Document.extracted_entities.is_(None),  # No entities extracted yet
                         Document.extracted_entities == []  # Or empty array

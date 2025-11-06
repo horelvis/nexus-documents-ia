@@ -21,9 +21,20 @@ fi
 echo "🛑 Stopping any existing containers..."
 docker compose down
 
-# Build images (only rebuilds if Dockerfile or requirements.txt changed)
-echo "🔨 Building development images..."
-docker compose build
+# Check if images need to be built (only if Dockerfile or requirements.txt changed)
+echo "🔍 Checking if images need to be rebuilt..."
+DOCKERFILE_CHANGED=$(find .. -name "Dockerfile" -newer .docker_built 2>/dev/null | wc -l)
+REQUIREMENTS_CHANGED=$(find .. -name "requirements.txt" -newer .docker_built 2>/dev/null | wc -l)
+PYPROJECT_CHANGED=$(find .. -name "pyproject.toml" -newer .docker_built 2>/dev/null | wc -l)
+
+if [ ! -f .docker_built ] || [ "$DOCKERFILE_CHANGED" -gt 0 ] || [ "$REQUIREMENTS_CHANGED" -gt 0 ] || [ "$PYPROJECT_CHANGED" -gt 0 ]; then
+    echo "🔨 Building development images (changes detected)..."
+    docker compose build
+    touch .docker_built
+    echo "✅ Images built and timestamp updated"
+else
+    echo "✅ Images are up to date, skipping build"
+fi
 
 # Start services
 echo "🎯 Starting services in development mode..."

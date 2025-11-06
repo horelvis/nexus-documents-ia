@@ -413,10 +413,9 @@ async def get_ai_insights(
                 Document.tenant_id == tenant_uuid,
                 Document.mime_type == 'application/pdf',
                 or_(
-                    Document.description == None, 
+                    Document.description == None,
                     Document.description == '',
-                    Document.content == None,
-                    Document.content == ''
+                    Document.indexed == 0  # Document not indexed (no content extracted)
                 )
             )
         )

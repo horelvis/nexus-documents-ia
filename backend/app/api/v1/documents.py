@@ -721,7 +721,7 @@ async def recategorize_all_documents(
     # Get documents to recategorize
     query = select(DBDocument.id).filter(
         DBDocument.tenant_id == tenant_id,
-        DBDocument.content.isnot(None)  # Only documents with content
+        DBDocument.indexed > 0  # Only documents that have been indexed
     )
     
     if only_uncategorized:
@@ -905,3 +905,57 @@ async def queue_batch_preview_generation(
             "status": "failed",
             "error": "Failed to queue batch preview generation"
         }
+
+
+@router.post("/facets", response_model=dict)
+async def get_document_facets(
+    query: Optional[str] = Body(None, description="Search query to filter facets"),
+    filters: Optional[dict] = Body(None, description="Current filters to apply"),
+    facet_fields: Optional[List[str]] = Body(["file_type", "category", "tags"], description="Fields to facet on"),
+    max_facet_values: int = Body(10, ge=1, le=50, description="Maximum values per facet"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Get facets for document search results
+    Returns aggregated counts for filtering options
+    """
+    try:
+        from app.services.elasticsearch_client import elasticsearch_client
+
+        # Get facets from Elasticsearch
+        facets_data = await elasticsearch_client.get_facets(
+            tenant_id=tenant_id,
+            query=query,
+            filters=filters,
+            facet_fields=facet_fields,
+            max_facet_values=max_facet_values
+        )
+
+        # Mark selected facets based on current filters
+        if filters and facets_data.get("facets"):
+            for facet in facets_data["facets"]:
+                field_name = facet["field"]
+                if field_name in filters:
+                    current_filter_values = filters[field_name]
+                    if isinstance(current_filter_values, list):
+                        for bucket in facet["buckets"]:
+                            bucket["selected"] = bucket["key"] in current_filter_values
+                    else:
+                        for bucket in facet["buckets"]:
+                            bucket["selected"] = bucket["key"] == current_filter_values
+
+        return {
+            "facets": facets_data.get("facets", []),
+            "total_documents": facets_data.get("total_documents", 0),
+            "query": query,
+            "applied_filters": filters
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get document facets: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve facets: {str(e)}"
+        )

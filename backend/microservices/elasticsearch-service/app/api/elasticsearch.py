@@ -7,7 +7,7 @@ from app.core.security import verify_api_key
 from app.services.elasticsearch_service import ElasticsearchService
 from app.schemas.elasticsearch import (
     DocumentIndexRequest, HybridSearchRequest, SemanticSearchRequest,
-    SearchResponse, AnalyticsRequest, AnalyticsResponse, HealthResponse
+    SearchResponse, AnalyticsRequest, AnalyticsResponse, FacetRequest, FacetResponse, HealthResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -115,6 +115,28 @@ async def get_analytics(
 
     except Exception as e:
         logger.error(f"❌ Analytics failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/facets/{tenant_id}", response_model=FacetResponse)
+async def get_facets(
+    tenant_id: str,
+    request: FacetRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """Get facets for search results"""
+    try:
+        service = ElasticsearchService(tenant_id)
+        facets = await service.get_facets(
+            query=request.query,
+            filters=request.filters.dict() if request.filters else None,
+            facet_fields=request.facet_fields,
+            max_facet_values=request.max_facet_values
+        )
+
+        return FacetResponse(**facets)
+
+    except Exception as e:
+        logger.error(f"❌ Facets failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/document/{tenant_id}/{doc_id}")

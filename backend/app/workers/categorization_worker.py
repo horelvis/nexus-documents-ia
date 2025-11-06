@@ -175,7 +175,7 @@ async def auto_categorize_pending_documents(ctx: Dict[str, Any]) -> Dict[str, An
                     Document.category == "",
                     Document.category == "general"
                 ),
-                Document.content.isnot(None)
+                Document.indexed > 0
             ).distinct()
             
             result = await db.execute(stmt)
@@ -192,7 +192,7 @@ async def auto_categorize_pending_documents(ctx: Dict[str, Any]) -> Dict[str, An
                         Document.category == "",
                         Document.category == "general"
                     ),
-                    Document.content.isnot(None)
+                    Document.indexed > 0
                 ).limit(50)  # Process up to 50 per tenant
                 
                 doc_result = await db.execute(doc_stmt)

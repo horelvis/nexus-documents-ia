@@ -338,6 +338,116 @@ class ElasticsearchService:
             logger.error(f"❌ Semantic search failed: {e}")
             return []
 
+    async def get_facets(
+        self,
+        query: str = None,
+        filters: Dict[str, Any] = None,
+        facet_fields: List[str] = None,
+        max_facet_values: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get facets for search results with optional query and filters
+        """
+        try:
+            # Build base query
+            must_clauses = []
+            filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]
+
+            # Add search query if provided
+            if query:
+                must_clauses.append({
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["title^2", "description^1.5", "content"],
+                        "type": "best_fields"
+                    }
+                })
+
+            # Add filters
+            if filters:
+                if filters.get("file_type"):
+                    filter_clauses.append({"term": {"file_type": filters["file_type"]}})
+                if filters.get("category"):
+                    filter_clauses.append({"term": {"category": filters["category"]}})
+                if filters.get("tags"):
+                    filter_clauses.append({"terms": {"tags": filters["tags"]}})
+                if filters.get("date_from") or filters.get("date_to"):
+                    date_filter = {"range": {"created_at": {}}}
+                    if filters.get("date_from"):
+                        date_filter["range"]["created_at"]["gte"] = filters["date_from"]
+                    if filters.get("date_to"):
+                        date_filter["range"]["created_at"]["lte"] = filters["date_to"]
+                    filter_clauses.append(date_filter)
+
+            # Default facet fields if not specified
+            if not facet_fields:
+                facet_fields = ["file_type", "category", "tags"]
+
+            # Build aggregations
+            aggs = {}
+            for field in facet_fields:
+                if field == "tags":
+                    aggs[f"facet_{field}"] = {
+                        "terms": {
+                            "field": field,
+                            "size": max_facet_values
+                        }
+                    }
+                else:
+                    aggs[f"facet_{field}"] = {
+                        "terms": {
+                            "field": field,
+                            "size": max_facet_values
+                        }
+                    }
+
+            # Add total count aggregation
+            aggs["total_count"] = {"value_count": {"field": "doc_id"}}
+
+            search_body = {
+                "query": {
+                    "bool": {
+                        "must": must_clauses,
+                        "filter": filter_clauses
+                    }
+                },
+                "size": 0,
+                "aggs": aggs
+            }
+
+            response = await self.async_client.search(
+                index=self.index_name,
+                body=search_body
+            )
+
+            # Process facet results
+            facets = []
+            for field in facet_fields:
+                agg_key = f"facet_{field}"
+                if agg_key in response["aggregations"]:
+                    buckets = []
+                    for bucket in response["aggregations"][agg_key]["buckets"]:
+                        buckets.append({
+                            "key": bucket["key"],
+                            "count": bucket["doc_count"],
+                            "selected": False  # Will be set by frontend based on current filters
+                        })
+
+                    facets.append({
+                        "field": field,
+                        "buckets": buckets,
+                        "total_count": len(buckets)
+                    })
+
+            return {
+                "facets": facets,
+                "total_documents": response["aggregations"]["total_count"]["value"]
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Facets query failed: {e}")
+            return {"facets": [], "total_documents": 0}
+
     async def get_analytics(self, date_from: str = None, date_to: str = None) -> Dict[str, Any]:
         """
         Get search and document analytics

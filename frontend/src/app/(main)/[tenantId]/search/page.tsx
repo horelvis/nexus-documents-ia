@@ -18,6 +18,8 @@ import {
 } from "@tabler/icons-react"
 import { useSearchService } from "@/lib/services/search.service"
 import { SearchResults } from "@/components/search/search-results"
+import { FacetPanel } from "@/components/search/facet-panel"
+import { useSearchFacets } from "@/lib/hooks/use-search-facets"
 import { toast } from "sonner"
 
 // Helper function to normalize search results from CAG/backend
@@ -63,19 +65,25 @@ export default function SimpleSearchPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
-  
-  // Search state - initialize from URL params if coming back from preview
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || "")
+
+  // Search state
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [searchType, setSearchType] = useState<'semantic' | 'hybrid' | 'keyword'>('semantic')
-  
-  // Advanced filters (collapsed by default) - also initialize from URL
-  const [showFilters, setShowFilters] = useState(false)
-  const [tags, setTags] = useState(() => searchParams.get('tags') || "")
-  const [dateFrom, setDateFrom] = useState(() => searchParams.get('dateFrom') || "")
-  const [dateTo, setDateTo] = useState(() => searchParams.get('dateTo') || "")
+
+  // Use the faceting hook
+  const {
+    facets,
+    isLoadingFacets,
+    currentFilters,
+    searchQuery,
+    handleFacetChange,
+    clearAllFilters,
+    updateSearchQuery,
+    getActiveFilterCount,
+    getFilterSummary
+  } = useSearchFacets(tenantId)
   
   const searchService = useSearchService()
 
@@ -100,18 +108,15 @@ export default function SimpleSearchPage() {
       console.log('Starting search with params:', {
         query: searchQuery,
         limit: 20,
-        tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined
+        search_type: searchType,
+        filters: currentFilters
       })
-      
+
       const response = await searchService.searchDocuments({
         query: searchQuery,
         limit: 20,
         search_type: searchType,
-        tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined
+        ...currentFilters
       })
 
       console.log('Search response:', response)
@@ -121,7 +126,7 @@ export default function SimpleSearchPage() {
         setSearchError(response.error)
       } else {
         console.log('Search results raw:', response.data)
-        
+
         if (response.data && response.data.length > 0) {
           console.log('First result sample:', response.data[0])
           console.log('Search results structure check:', response.data?.map(r => ({
@@ -131,7 +136,7 @@ export default function SimpleSearchPage() {
             resultKeys: r ? Object.keys(r) : []
           })))
         }
-        
+
         setSearchResults(response.data || [])
         if (!response.data || response.data.length === 0) {
           toast.info("No documents found matching your search")
@@ -143,7 +148,7 @@ export default function SimpleSearchPage() {
     } finally {
       setIsSearching(false)
     }
-  }, [searchQuery, tags, dateFrom, dateTo, searchService])
+  }, [searchQuery, searchType, currentFilters, searchService])
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isSearching) {
@@ -163,12 +168,10 @@ export default function SimpleSearchPage() {
   }
 
   const clearSearch = () => {
-    setSearchQuery("")
+    updateSearchQuery("")
     setSearchResults([])
     setSearchError(null)
-    setTags("")
-    setDateFrom("")
-    setDateTo("")
+    clearAllFilters()
   }
 
   const handleDocumentDownload = (document: any) => {
@@ -194,19 +197,37 @@ export default function SimpleSearchPage() {
       <div className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">Document Search</h1>
         <p className="text-muted-foreground">
-          Quickly find documents using semantic search. For complex queries and analysis, try Emma Assistant.
+          Quickly find documents using semantic search with dynamic filters. For complex queries and analysis, try Emma Assistant.
         </p>
       </div>
 
       {/* Search Interface */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <IconSearch className="h-5 w-5" />
-            Quick Search
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Facet Panel - Sidebar */}
+        <div className="lg:col-span-1">
+          <FacetPanel
+            facets={facets}
+            onFacetChange={handleFacetChange}
+            onClearAll={clearAllFilters}
+            isLoading={isLoadingFacets}
+          />
+        </div>
+
+        {/* Main Search Area */}
+        <div className="lg:col-span-3 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <IconSearch className="h-5 w-5" />
+                Quick Search
+                {getActiveFilterCount() > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''} active
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
           {/* Main search */}
           <div className="space-y-3">
             {/* Search input and type selector */}
@@ -216,7 +237,7 @@ export default function SimpleSearchPage() {
                 <Input
                   placeholder="Search documents..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
                   onKeyPress={handleKeyPress}
                   className="pl-10"
                 />
@@ -376,9 +397,9 @@ export default function SimpleSearchPage() {
               const searchParams = new URLSearchParams({
                 returnTo: 'search',
                 query: searchQuery,
-                ...(tags && { tags }),
-                ...(dateFrom && { dateFrom }),
-                ...(dateTo && { dateTo })
+                ...(currentFilters.tags && { tags: currentFilters.tags.join(',') }),
+                ...(currentFilters.date_from && { dateFrom: currentFilters.date_from }),
+                ...(currentFilters.date_to && { dateTo: currentFilters.date_to })
               })
               router.push(`/${tenantId}/documents/${doc.id}/preview?${searchParams.toString()}`)
             }}
@@ -390,6 +411,23 @@ export default function SimpleSearchPage() {
         </div>
       )}
 
+      {/* Active Filters Summary */}
+      {getActiveFilterCount() > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Active Filters</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {getFilterSummary().map((filter, index) => (
+                <Badge key={index} variant="outline" className="text-xs">
+                  {filter}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Getting started */}
       {!searchQuery && searchResults.length === 0 && (
@@ -400,7 +438,7 @@ export default function SimpleSearchPage() {
               <div>
                 <h3 className="text-lg font-medium">Quick Document Search</h3>
                 <p className="text-muted-foreground mt-2">
-                  Search for specific documents using keywords. For complex analysis and conversations, use Emma Assistant.
+                  Search for specific documents using keywords. Use the filters on the left to narrow down results. For complex analysis and conversations, use Emma Assistant.
                 </p>
               </div>
               <div className="flex items-center justify-center gap-4">
@@ -413,6 +451,9 @@ export default function SimpleSearchPage() {
           </CardContent>
         </Card>
       )}
+    </div>
+  </div>
+
     </div>
   )
 }
