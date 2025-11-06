@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback } 
 import { useUser } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
 import { useApiClient } from '@/lib/api-client'
+import { ConnectionError } from '@/components/errors/connection-error'
 
 import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
 
@@ -20,6 +21,7 @@ export function UserProvider({ children }: UserProviderProps) {
   const [userLoading, setUserLoading] = useState(true)
   const [userError] = useState<string | null>(null)
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const [connectionError, setConnectionError] = useState<Error | null>(null)
   
   // Onboarding state
   const [onboarding, setOnboarding] = useState<OnboardingStatus>({
@@ -187,16 +189,16 @@ export function UserProvider({ children }: UserProviderProps) {
         error?.message?.includes('Unable to connect') ||
         error?.message?.includes('Failed to fetch')
       
-      // For connection errors, silently fail without setting error state
-      // The ConnectionProvider will handle showing the error page
+      // For connection errors, show ConnectionError overlay
       if (isConnectionError) {
+        setConnectionError(error)
         setBackendUser(null)
         setOnboarding({
           needsOnboarding: false,
           isNewUser: false,
           hasCompletedSync: false,
           loading: false,
-          error: null // Don't set error for connection issues
+          error: null
         })
       } else {
         // For other errors, set the error state
@@ -294,6 +296,14 @@ export function UserProvider({ children }: UserProviderProps) {
     hasPaidSubscription,
     needsPayment
   ])
+
+  if (connectionError) {
+    const handleRetry = async () => {
+      setConnectionError(null)
+      await checkOnboardingStatus()
+    }
+    return <ConnectionError error={connectionError} onRetry={handleRetry} />
+  }
 
   return (
     <UserContext.Provider value={contextValue}>

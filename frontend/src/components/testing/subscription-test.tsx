@@ -81,7 +81,12 @@ export function SubscriptionTestPanel() {
             <strong>Estado actual:</strong><br />
             Plan: {testUser?.subscription_plan || 'N/A'}<br />
             Status: {testUser?.subscription_status || 'N/A'}
-            {testingState && <br /><em className="text-orange-600">⚠️ Modo Testing Activo</em>}
+            {testingState && (
+              <>
+                <br />
+                <em className="text-orange-600">⚠️ Modo Testing Activo</em>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -1,9 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { useConnectionStatus } from '@/hooks/use-connection-status'
-import { ConnectionError } from '@/components/errors/connection-error'
-import { usePathname } from 'next/navigation'
+import React, { createContext, useContext, useState, ReactNode } from 'react'
 
 // Notification types
 interface Notification {
@@ -23,11 +20,6 @@ interface Notification {
 
 // App State Context type combining notifications and connection
 interface AppStateContextType {
-  // Connection status
-  isOnline: boolean
-  isBackendAvailable: boolean
-  checkConnection: () => Promise<void>
-  
   // Notifications
   notifications: Notification[]
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void
@@ -41,45 +33,8 @@ interface AppStateContextType {
 const AppStateContext = createContext<AppStateContextType | undefined>(undefined)
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  // Connection management
-  const { isOnline, isBackendAvailable, isChecking, lastError, checkConnection } = useConnectionStatus()
-  const [showError, setShowError] = useState(false)
-  const [hasChecked, setHasChecked] = useState(false)
-  const pathname = usePathname()
-
   // Notifications management
   const [notifications, setNotifications] = useState<Notification[]>([])
-
-  // Connection error handling
-  useEffect(() => {
-    if (!hasChecked && !isChecking) {
-      setHasChecked(true)
-    }
-    
-    // Don't show connection error on caps-copy page
-    if (pathname === '/caps-copy') {
-      setShowError(false)
-      return
-    }
-    
-    if (hasChecked && isOnline && !isBackendAvailable && !isChecking) {
-      // Add a small delay to prevent flash of error on initial load
-      const timer = setTimeout(() => {
-        setShowError(true)
-      }, 1000)
-      return () => clearTimeout(timer)
-    } else {
-      setShowError(false)
-    }
-  }, [isOnline, isBackendAvailable, isChecking, hasChecked, pathname])
-
-  const handleRetry = async () => {
-    setShowError(false)
-    await checkConnection()
-    if (isBackendAvailable) {
-      window.location.reload()
-    }
-  }
 
   // Notification functions
   const addNotification = (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
@@ -121,29 +76,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const unreadCount = notifications.filter(n => !n.read).length
 
-  // Auto-add connection restored notification
-  useEffect(() => {
-    let wasOffline = false
-    
-    if (!isBackendAvailable) {
-      wasOffline = true
-    } else if (wasOffline && isBackendAvailable) {
-      addNotification({
-        type: 'success',
-        title: 'Connection Restored',
-        message: 'Backend connection has been restored',
-        autoHide: true
-      })
-      wasOffline = false
-    }
-  }, [isBackendAvailable])
-
   const contextValue: AppStateContextType = {
-    // Connection
-    isOnline,
-    isBackendAvailable,
-    checkConnection,
-    
     // Notifications
     notifications,
     addNotification,
@@ -152,15 +85,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     removeNotification,
     clearAllNotifications,
     unreadCount
-  }
-
-  // Render connection error as an overlay if needed
-  if (showError) {
-    return (
-      <AppStateContext.Provider value={contextValue}>
-        <ConnectionError error={lastError} onRetry={handleRetry} />
-      </AppStateContext.Provider>
-    )
   }
 
   return (
@@ -180,10 +104,7 @@ export function useAppState() {
 }
 
 // Convenience hooks
-export function useConnection() {
-  const { isOnline, isBackendAvailable, checkConnection } = useAppState()
-  return { isOnline, isBackendAvailable, checkConnection }
-}
+// useConnection removed. Show ConnectionError only on real API failures.
 
 export function useNotifications() {
   const { 
