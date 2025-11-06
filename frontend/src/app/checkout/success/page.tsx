@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/nextjs'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,9 +20,10 @@ interface CheckoutSession {
   currency: string
 }
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const { isSignedIn, isLoaded } = useAuth()
   const sessionId = searchParams.get('session_id')
   
   const [checkoutData, setCheckoutData] = useState<CheckoutSession | null>(null)
@@ -58,9 +60,14 @@ export default function CheckoutSuccessPage() {
 
   const handleContinueToSignup = () => {
     if (checkoutData) {
-      // Redirect to sign-up with session data
-      // The backend will create the user with the subscription when they sign up
-      router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
+      // Check if user is already signed in
+      if (isSignedIn) {
+        // User is already authenticated, go to dashboard
+        router.push('/dashboard?upgraded=true&sync=true')
+      } else {
+        // User needs to sign up with the session data
+        router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
+      }
     }
   }
 
@@ -81,7 +88,7 @@ export default function CheckoutSuccessPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+      <div className="min-h-screen flex items-center justify-center">
         <UnifiedLoader 
           variant="initial"
           size="lg"
@@ -94,7 +101,7 @@ export default function CheckoutSuccessPage() {
 
   if (error || !checkoutData) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Card className="max-w-md w-full mx-4">
           <CardHeader className="text-center">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -118,7 +125,7 @@ export default function CheckoutSuccessPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="max-w-2xl w-full mx-4 space-y-8">
         {/* Success Message */}
         <Card className="text-center">
@@ -144,9 +151,16 @@ export default function CheckoutSuccessPage() {
               </div>
               
               <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Monto</p>
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  {checkoutData.amount_total === 0 ? 'Precio del Plan' : 'Monto'}
+                </p>
                 <p className="text-lg font-semibold">
                   {formatAmount(checkoutData.amount_total, checkoutData.currency)}
+                  {checkoutData.amount_total === 0 && (
+                    <span className="text-sm font-normal text-green-600 dark:text-green-400 ml-2">
+                      (14 días gratis)
+                    </span>
+                  )}
                 </p>
               </div>
               
@@ -167,19 +181,45 @@ export default function CheckoutSuccessPage() {
 
             <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
               <h3 className="text-lg font-semibold mb-3">¿Qué sigue?</h3>
+              {checkoutData.amount_total === 0 && (
+                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg mb-4">
+                  <p className="text-sm text-green-700 dark:text-green-300">
+                    🎉 <strong>¡Tienes 14 días gratis!</strong> Tu primer cargo será el {new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
+                  </p>
+                </div>
+              )}
               <ol className="text-left space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
-                  Completa tu registro con los datos de tu empresa
-                </li>
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
-                  Configura tu workspace y agrega tu equipo
-                </li>
-                <li className="flex items-start">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
-                  ¡Empieza a usar todas las funcionalidades premium!
-                </li>
+                {isSignedIn ? (
+                  <>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
+                      Tu suscripción está activa y lista
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
+                      Accede a todas las funcionalidades premium
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
+                      ¡Comienza a trabajar con tus documentos!
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">1</span>
+                      Completa tu registro con los datos de tu empresa
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">2</span>
+                      Configura tu workspace y agrega tu equipo
+                    </li>
+                    <li className="flex items-start">
+                      <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5">3</span>
+                      ¡Empieza a usar todas las funcionalidades premium!
+                    </li>
+                  </>
+                )}
               </ol>
             </div>
           </CardContent>
@@ -190,9 +230,9 @@ export default function CheckoutSuccessPage() {
           <Button 
             onClick={handleContinueToSignup}
             size="lg"
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3"
+            className="bg-gradient-to-r from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white px-8 py-3"
           >
-            Completar Registro
+            {isSignedIn ? 'Ir al Dashboard' : 'Completar Registro'}
           </Button>
         </div>
 
@@ -202,5 +242,25 @@ export default function CheckoutSuccessPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Force dynamic rendering to avoid static generation issues with useSearchParams
+export const dynamic = 'force-dynamic'
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <UnifiedLoader 
+          variant="initial"
+          size="lg"
+          text="Cargando..."
+          showLogo={true}
+        />
+      </div>
+    }>
+      <CheckoutSuccessContent />
+    </Suspense>
   )
 }

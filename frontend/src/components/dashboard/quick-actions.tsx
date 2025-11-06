@@ -53,7 +53,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: 'AI Chat',
       description: 'Ask AI',
       icon: IconRobot,
-      action: () => router.push(`/${tenantId}/agents`),
+      action: () => router.push(`/${tenantId}/chat`),
       color: 'purple'
     },
     {
@@ -99,14 +99,14 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
   ]
 
   const colorClasses = {
-    blue: 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 text-blue-700 dark:text-blue-400',
-    green: 'bg-green-50 hover:bg-green-100 dark:bg-green-950/20 dark:hover:bg-green-950/40 text-green-700 dark:text-green-400',
-    purple: 'bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/20 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-400',
-    orange: 'bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/20 dark:hover:bg-orange-950/40 text-orange-700 dark:text-orange-400',
-    pink: 'bg-pink-50 hover:bg-pink-100 dark:bg-pink-950/20 dark:hover:bg-pink-950/40 text-pink-700 dark:text-pink-400',
-    yellow: 'bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-950/20 dark:hover:bg-yellow-950/40 text-yellow-700 dark:text-yellow-400',
-    indigo: 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400',
-    gray: 'bg-gray-50 hover:bg-gray-100 dark:bg-gray-950/20 dark:hover:bg-gray-950/40 text-gray-700 dark:text-gray-400'
+    blue: 'bg-blue-500/10 hover:bg-blue-500/20 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 text-blue-700 dark:text-blue-400',
+    green: 'bg-green-500/10 hover:bg-green-500/20 dark:bg-green-500/10 dark:hover:bg-green-500/20 text-green-700 dark:text-green-400',
+    purple: 'bg-purple-500/10 hover:bg-purple-500/20 dark:bg-purple-500/10 dark:hover:bg-purple-500/20 text-purple-700 dark:text-purple-400',
+    orange: 'bg-orange-500/10 hover:bg-orange-500/20 dark:bg-orange-500/10 dark:hover:bg-orange-500/20 text-orange-700 dark:text-orange-400',
+    pink: 'bg-pink-500/10 hover:bg-pink-500/20 dark:bg-pink-500/10 dark:hover:bg-pink-500/20 text-pink-700 dark:text-pink-400',
+    yellow: 'bg-yellow-500/10 hover:bg-yellow-500/20 dark:bg-yellow-500/10 dark:hover:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400',
+    indigo: 'bg-indigo-500/10 hover:bg-indigo-500/20 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400',
+    gray: 'bg-gray-500/10 hover:bg-gray-500/20 dark:bg-gray-500/10 dark:hover:bg-gray-500/20 text-gray-700 dark:text-gray-400'
   }
 
   return (
@@ -127,14 +127,14 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
                 onClick={action.action}
                 className={cn(
                   "group relative flex items-center gap-3 p-3 rounded-lg transition-all duration-200",
-                  "border border-transparent hover:border-border/50",
+                  "border border-border/40 hover:border-border/60",
                   colorClass,
-                  action.primary && "ring-2 ring-primary/20"
+                  action.primary && "ring-1 ring-primary/30"
                 )}
               >
                 <div className={cn(
                   "flex h-10 w-10 items-center justify-center rounded-lg",
-                  "bg-background/80 shadow-sm"
+                  "bg-background/50 dark:bg-background/30"
                 )}>
                   <Icon className="h-5 w-5" />
                 </div>

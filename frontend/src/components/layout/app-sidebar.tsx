@@ -6,7 +6,6 @@ import {
   IconCloudUpload,
   IconSearch,
   IconBrain,
-  IconRobot,
   IconMessages,
   IconSignature,
   IconChartBar,
@@ -21,6 +20,9 @@ import {
   IconHelp,
   IconInnerShadowTop,
   IconUserCheck,
+  IconGitBranch,
+  IconRobot,
+  IconFileText,
 } from "@tabler/icons-react"
 
 import { NavDocuments } from "@/components/navigation/nav-documents"
@@ -79,34 +81,52 @@ const data = {
       url: "/search",
       icon: IconBrain,
       color: "purple",
+    },
+    {
+      title: "WorkFlow AI",
+      url: "/workflows",
+      icon: IconGitBranch,
+      color: "cyan",
       items: [
         {
-          title: "Semantic Search",
-          url: "/search",
+          title: "AI Agents Workflows",
+          url: "/workflows/ai-agents",
         },
         {
-          title: "AI Chat",
-          url: "/chat",
+          title: "Process Builder",
+          url: "/workflows/builder",
         },
         {
-          title: "Document Insights",
-          url: "/insights",
+          title: "Contract Renewals",
+          url: "/workflows/contract-renewal",
+        },
+        {
+          title: "Process Library",
+          url: "/workflows/library",
+        },
+        {
+          title: "Analytics",
+          url: "/workflows/analytics",
         },
       ],
     },
     {
-      title: "AI Agents",
-      url: "/agents",
-      icon: IconRobot,
-      color: "indigo",
+      title: "Document Templates",
+      url: "/templates",
+      icon: IconFileText,
+      color: "orange",
       items: [
         {
-          title: "Agent Library",
-          url: "/agents",
+          title: "Template Library",
+          url: "/templates",
         },
         {
-          title: "Conversations",
-          url: "/agents/conversations",
+          title: "Create Template",
+          url: "/templates/create",
+        },
+        {
+          title: "Edit Sessions",
+          url: "/templates/sessions",
         },
       ],
     },
@@ -141,16 +161,22 @@ const data = {
       color: "blue",
     },
     {
-      name: "Search",
-      url: "/search",
-      icon: IconSearch,
-      color: "green",
+      name: "Ask Emma",
+      url: "/chat",
+      icon: IconBrain,
+      color: "purple",
     },
     {
-      name: "Start AI Chat",
-      url: "/chat",
-      icon: IconMessages,
-      color: "purple",
+      name: "Create Workflow",
+      url: "/workflows/builder",
+      icon: IconRobot,
+      color: "cyan",
+    },
+    {
+      name: "Firmar Documento",
+      url: "/signatures/requests",
+      icon: IconSignature,
+      color: "pink",
     },
   ],
   adminActions: [
@@ -215,14 +241,20 @@ const data = {
 export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
   const { backendUser } = useBackendUser()
   
-  // Check if user is a tenant admin (not a team member)
-  const isTenantAdmin = backendUser && !backendUser.is_team_member
+  // Check if user is admin (superuser, has admin role, or is not a team member)
+  const isTenantAdmin = backendUser && (
+    backendUser.is_superuser || 
+    backendUser.roles?.some((role: any) => role.name === 'admin') ||
+    !backendUser.is_team_member
+  )
   
   // Debug log
   React.useEffect(() => {
     console.log('Sidebar - Backend user:', backendUser)
     console.log('Sidebar - Is tenant admin:', isTenantAdmin)
-  }, [backendUser, isTenantAdmin])
+    console.log('Sidebar - TenantId:', tenantId)
+    console.log('Sidebar - QuickActions URLs:', getNavData().quickActions.map(a => a.url))
+  }, [backendUser, isTenantAdmin, tenantId])
   
   // Generate tenant-aware navigation data
   const getNavData = () => {
@@ -239,7 +271,10 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
           url: `${basePath}${subItem.url}`
         }))
       })),
-      quickActions: data.quickActions,
+      quickActions: data.quickActions.map(item => ({
+        ...item,
+        url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`
+      })),
       adminActions: isTenantAdmin ? data.adminActions.map(item => ({
         ...item,
         url: `${basePath}${item.url}`,

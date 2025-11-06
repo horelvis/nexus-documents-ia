@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApiClient } from '@/lib/api-client'
+import { useUserContext } from '@/contexts/user-context'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -47,6 +48,7 @@ export function SubscriptionStatusBanner({
   onReactivate 
 }: SubscriptionStatusBannerProps) {
   const apiClient = useApiClient()
+  const { backendUser } = useUserContext()
   const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +56,32 @@ export function SubscriptionStatusBanner({
   const fetchSubscriptionStatus = async () => {
     try {
       setLoading(true)
+      
+      // Check if we already have subscription info from user context
+      if (backendUser?.subscription_plan && backendUser?.subscription_status) {
+        const contextSubscription = {
+          id: 'from_context',
+          plan_id: backendUser.subscription_plan,
+          status: backendUser.subscription_status,
+          current_period_end: 0,
+          subscription_status: {
+            plan_type: backendUser.subscription_plan,
+            status: backendUser.subscription_status,
+            is_active: backendUser.subscription_status === 'active',
+            is_limited: backendUser.subscription_status !== 'active',
+            current_period_end: null,
+            can_reactivate: backendUser.subscription_status === 'canceled' || backendUser.subscription_status === 'past_due',
+            permissions: {},
+            message: ''
+          }
+        }
+        setSubscriptionData(contextSubscription)
+        setError(null)
+        setLoading(false)
+        return
+      }
+      
+      // Only make API call if we don't have subscription info
       const response = await apiClient.get('/stripe/subscription')
       
       if (response.error) {
@@ -73,15 +101,20 @@ export function SubscriptionStatusBanner({
 
   useEffect(() => {
     fetchSubscriptionStatus()
-  }, [])
+  }, [backendUser])
 
   const handleReactivate = () => {
     if (onReactivate) {
       onReactivate()
     } else {
-      // Redirigir a página de planes
+      // Redirigir a página de planes para renovar o iniciar nueva suscripción
       window.location.href = '/pricing'
     }
+  }
+
+  const handleNewSubscription = () => {
+    // Ir a planes para iniciar nueva suscripción
+    window.location.href = '/pricing?new=true'
   }
 
   if (loading) {
@@ -104,8 +137,18 @@ export function SubscriptionStatusBanner({
 
   const { subscription_status } = subscriptionData
   
-  // No mostrar nada si la suscripción está activa y no limitada
-  if (subscription_status.is_active && !subscription_status.is_limited && compact) {
+  // Solo mostrar si la suscripción ha caducado (is_limited = true significa caducada)
+  // No mostrar para estados activos o de procesamiento
+  if (subscription_status.is_active && !subscription_status.is_limited) {
+    return null
+  }
+  
+  // Solo mostrar si realmente ha caducado, no para estados temporales
+  const hasExpired = subscription_status.is_limited || 
+    subscription_status.status === 'canceled' || 
+    subscription_status.status === 'past_due'
+  
+  if (!hasExpired) {
     return null
   }
 
@@ -147,20 +190,28 @@ export function SubscriptionStatusBanner({
 
   if (compact) {
     return (
-      <Alert variant={getStatusVariant()} className="mb-4">
-        {getStatusIcon()}
+      <Alert variant="destructive" className="mb-4">
+        <AlertTriangle className="h-4 w-4" />
         <AlertDescription className="flex items-center justify-between w-full">
-          <span>{subscription_status.message}</span>
-          {subscription_status.can_reactivate && (
+          <span>Tu suscripción ha caducado. Renueva tu plan para continuar.</span>
+          <div className="flex gap-2 ml-4">
+            {subscription_status.can_reactivate && (
+              <Button 
+                size="sm" 
+                onClick={handleReactivate}
+                variant="outline"
+              >
+                Renovar
+              </Button>
+            )}
             <Button 
               size="sm" 
-              onClick={handleReactivate}
-              className="ml-4"
+              onClick={handleNewSubscription}
             >
-              Reactivar
+              Nueva suscripción
               <ArrowRight className="h-3 w-3 ml-1" />
             </Button>
-          )}
+          </div>
         </AlertDescription>
       </Alert>
     )
@@ -168,51 +219,58 @@ export function SubscriptionStatusBanner({
 
   // Vista completa (no compacta)
   return (
-    <Card className={`mb-6 ${getStatusColor()}`}>
+    <Card className="mb-6 bg-red-50 border-red-200">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            {getStatusIcon()}
-            <CardTitle className="text-lg">
-              Estado de Suscripción
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            <CardTitle className="text-lg text-red-800">
+              Suscripción Caducada
             </CardTitle>
-            <Badge variant="outline" className="ml-2">
+            <Badge variant="destructive" className="ml-2">
               {subscription_status.plan_type.toUpperCase()}
             </Badge>
           </div>
-          {subscription_status.can_reactivate && (
-            <Button onClick={handleReactivate}>
+          <div className="flex gap-2">
+            {subscription_status.can_reactivate && (
+              <Button onClick={handleReactivate} variant="outline">
+                <CreditCard className="h-4 w-4 mr-2" />
+                Renovar Plan
+              </Button>
+            )}
+            <Button onClick={handleNewSubscription}>
               <CreditCard className="h-4 w-4 mr-2" />
-              Reactivar Suscripción
+              Nueva Suscripción
             </Button>
-          )}
+          </div>
         </div>
       </CardHeader>
       
       <CardContent>
-        <CardDescription className="text-base mb-4">
-          {subscription_status.message}
+        <CardDescription className="text-base mb-4 text-red-700">
+          Tu suscripción ha caducado y necesitas renovarla para continuar usando todas las funcionalidades. 
+          Puedes renovar tu plan actual o iniciar una nueva suscripción.
         </CardDescription>
         
         {subscription_status.current_period_end && (
-          <div className="text-sm text-muted-foreground mb-4">
-            Período actual termina: {new Date(subscription_status.current_period_end).toLocaleDateString('es-ES')}
+          <div className="text-sm text-red-600 mb-4">
+            Caducó el: {new Date(subscription_status.current_period_end).toLocaleDateString('es-ES')}
           </div>
         )}
         
-        {subscription_status.is_limited && (
-          <div className="bg-white/50 rounded-lg p-4 mt-4">
-            <h4 className="font-semibold mb-2">Funciones disponibles en modo limitado:</h4>
-            <ul className="text-sm space-y-1">
-              <li>✅ Ver documentos existentes</li>
-              <li>✅ Buscar en documentos existentes</li>
-              <li>❌ Subir nuevos documentos</li>
-              <li>❌ Usar chat con IA</li>
-              <li>❌ Usar agentes especializados</li>
-              <li>❌ Exportar documentos</li>
-            </ul>
+        <div className="bg-white rounded-lg p-4 mt-4 border-l-4 border-red-500">
+          <h4 className="font-semibold mb-3 text-red-800">Acceso Limitado - Renueva para restaurar:</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+            <div className="text-green-700">✅ Ver documentos existentes</div>
+            <div className="text-red-700">❌ Subir nuevos documentos</div>
+            <div className="text-green-700">✅ Buscar documentos</div>
+            <div className="text-red-700">❌ Chat con IA</div>
+            <div className="text-green-700">✅ Descargar documentos</div>
+            <div className="text-red-700">❌ Agentes especializados</div>
+            <div className="text-red-700">❌ Exportar documentos</div>
+            <div className="text-red-700">❌ Acceso API</div>
           </div>
-        )}
+        </div>
         
         {!subscription_status.is_limited && subscription_status.permissions && (
           <div className="bg-white/50 rounded-lg p-4 mt-4">

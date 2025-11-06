@@ -1,5 +1,5 @@
 # backend/app/services/auth_service.py
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Union, Any
 from uuid import uuid4
 
@@ -288,6 +288,10 @@ class AuthService:
         )
         
         # Crear usuario con password temporal (no se usará con Clerk)
+        # Establecer trial de 30 días
+        from datetime import datetime, timedelta
+        trial_end_date = datetime.now(timezone.utc) + timedelta(days=30)
+        
         new_user = User(
             id=uuid4(),
             email=email,
@@ -297,7 +301,10 @@ class AuthService:
             tenant_id=user_tenant.id,
             clerk_user_id=clerk_user_id,
             stripe_customer_id=stripe_customer_id,
-            is_active=True
+            is_active=True,
+            subscription_plan="trial",
+            subscription_status="trialing",
+            trial_ends_at=trial_end_date
         )
         
         db.add(new_user)

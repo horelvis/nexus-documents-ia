@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  nginx:
+    build:
+      context: ../..
+      dockerfile: nginx/Dockerfile
+    container_name: nexus-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-nexusdocs.com}
+      - APP_SUBDOMAIN=${APP_SUBDOMAIN:-app}
+      - API_SUBDOMAIN=${API_SUBDOMAIN:-api}
+      - WWW_SUBDOMAIN=${WWW_SUBDOMAIN:-www}
+      - SSL_EMAIL=${SSL_EMAIL:-admin@${DOMAIN}}
+      - SSL_STAGING=${SSL_STAGING:-false}
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+      - nginx_logs:/var/log/nginx
+    networks:
+      - backend
+      - frontend
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend service (if running separately from Cloud Run)
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        - NEXT_PUBLIC_API_URL=https://api.nexusdocs.com
+        - CLERK_PUBLISHABLE_KEY=${CLERK_PUBLISHABLE_KEY}
+    container_name: nexus-frontend
+    networks:
+      - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Override API service to not expose ports directly
+  api:
+    ports: []  # Remove direct port exposure
+    networks:
+      - backend
+
+  # Override other services similarly
+  langchain-service:
+    ports: []
+    networks:
+      - backend
+
+  storage-service:
+    ports: []
+    networks:
+      - backend
+
+  signature-service:
+    ports: []
+    networks:
+      - backend
+
+volumes:
+  nginx_logs:
+    driver: local
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge

@@ -1,19 +1,21 @@
-# Production Dockerfile for Frontend
-FROM node:18-alpine AS base
+# Frontend Dockerfile for production deployment
+FROM node:20-alpine AS base
+
+# Update npm to latest version
+RUN npm install -g npm@latest
 
 # Install dependencies only when needed
 FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
-COPY package.json ./
-RUN npm install && npm cache clean --force
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev
 
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
+<<<<<<< HEAD
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -40,6 +42,25 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build Next.js application
+=======
+COPY package.json package-lock.json* ./
+RUN npm ci
+COPY . .
+
+# Build arguments for environment variables
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_API_BASE_URL
+ARG NEXT_PUBLIC_FRONTEND_URL
+ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+# Set environment variables
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_FRONTEND_URL=$NEXT_PUBLIC_FRONTEND_URL
+ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+# Build the Next.js application
+>>>>>>> feature/architecture-improvements
 RUN npm run build
 
 # Production image, copy all the files and run next
@@ -52,6 +73,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+<<<<<<< HEAD
 COPY --from=builder /app/public ./public
 
 # Set the correct permission for prerender cache
@@ -60,6 +82,12 @@ RUN chown nextjs:nodejs .next
 
 # Automatically leverage output traces to reduce image size
 # https://nextjs.org/docs/advanced-features/output-file-tracing
+=======
+# Copy the public folder
+COPY --from=builder /app/public ./public
+
+# Copy the build output
+>>>>>>> feature/architecture-improvements
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
@@ -70,8 +98,12 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+<<<<<<< HEAD
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
+=======
+# server.js is created by next build from the standalone output
+>>>>>>> feature/architecture-improvements
 CMD ["node", "server.js"]

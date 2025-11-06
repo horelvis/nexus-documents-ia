@@ -50,6 +50,7 @@ class UserSync(BaseModel):
     # Stripe integration fields (optional)
     stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
     stripe_session_id: Optional[str] = Field(None, example="cs_1234567890")
+    selected_plan: Optional[str] = Field(None, example="free")
 
 # Schema for completing onboarding with simplified data
 class OnboardingComplete(BaseModel):

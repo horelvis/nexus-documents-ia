@@ -131,33 +131,36 @@ export function AgentDashboard({ className }: { className?: string }) {
         // Handle the response structure from /list endpoint
         const agentTypes = agentsResponse.data.available_types || agentsResponse.data
         
-        // Transform agent types to AgentMetrics
+        // Transform agent types to AgentMetrics - show real CAG agent status
         agentMetrics = Object.entries(agentTypes).map(([key, value]: [string, any]) => ({
           id: key,
           name: value.name || key,
           description: value.description || '',
           agent_type: key,
           type: key,
-          status: 'active', // Default status since types don't have runtime status
+          status: value.source === 'cag' ? 'active' : 'idle',
           icon: getAgentIcon(key),
           color: getAgentColor(key),
-          // TODO: Connect to real agent statistics from API
-          tasksCompleted: 0, // Placeholder - needs API endpoint for agent stats
-          avgResponseTime: 0, // Placeholder - needs API endpoint for agent metrics
-          successRate: 0, // Placeholder - needs API endpoint for agent performance
+          // Real metrics - set to 0 until we have actual API endpoints for stats
+          tasksCompleted: 0,
+          avgResponseTime: 0,
+          successRate: 0,
           currentLoad: 0,
-          last_activity: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          last_activity: null,
+          updated_at: new Date().toISOString(),
+          capabilities: value.capabilities || []
         }))
         setAgents(agentMetrics)
         
-        // Update system health
-        const activeAgents = agentMetrics.filter(a => a.status !== 'inactive')
+        // Update system health with real CAG service status
+        const activeAgents = agentMetrics.filter(a => a.status === 'active')
+        const cagHealthy = statusResponse.data?.status === 'operational'
+        
         setSystemHealth({
           totalAgents: agentMetrics.length,
-          activeAgents: activeAgents.length,
-          averageSuccessRate: agentMetrics.reduce((acc, a) => acc + a.successRate, 0) / agentMetrics.length || 0,
-          totalTasksToday: agentMetrics.reduce((acc, a) => acc + a.tasksCompleted, 0),
+          activeAgents: cagHealthy ? activeAgents.length : 0,
+          averageSuccessRate: 0, // Will be updated when we have real metrics
+          totalTasksToday: 0, // Will be updated when we have real metrics
           systemLoad: statusResponse.data?.system_resources?.cpu_percent || 0
         })
       }
@@ -165,18 +168,8 @@ export function AgentDashboard({ className }: { className?: string }) {
       if (statusResponse.data) {
         setServiceStatus(statusResponse.data)
         
-        // TODO: Connect to real agent activity endpoint
-        // Currently using agent metrics data as placeholder
-        const activities: AgentActivity[] = agentMetrics.slice(0, 5).map((agent, index) => ({
-          id: `activity-${index}`,
-          agentId: agent.id,
-          agentName: agent.name,
-          action: 'Agent initialized',
-          timestamp: agent.last_activity || agent.updated_at,
-          status: 'success' as const,
-          duration: 0 // Placeholder - needs real execution time from API
-        }))
-        setActivities(activities)
+        // Only show real activities - empty for now until we have activity tracking
+        setActivities([])
       }
     } catch (err) {
       console.error('Failed to load agent data:', err)
@@ -362,25 +355,38 @@ export function AgentDashboard({ className }: { className?: string }) {
         
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Success Rate</CardDescription>
+            <CardDescription>CAG Status</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {systemHealth.averageSuccessRate.toFixed(1)}%
+              {serviceStatus?.cag_health?.status === 'healthy' ? 'Healthy' : 'Unknown'}
             </div>
-            <Progress value={systemHealth.averageSuccessRate} className="h-1 mt-2" />
+            <div className="flex items-center gap-1 mt-1">
+              {serviceStatus?.cag_health?.status === 'healthy' ? (
+                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+              ) : (
+                <div className="h-2 w-2 bg-gray-400 rounded-full" />
+              )}
+              <span className="text-xs text-muted-foreground">
+                CAG Engine {serviceStatus?.cag_health?.status || 'checking...'}
+              </span>
+            </div>
           </CardContent>
         </Card>
         
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Tasks Today</CardDescription>
+            <CardDescription>Available Services</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{systemHealth.totalTasksToday}</div>
-            <div className="flex items-center gap-1 mt-1 text-green-600">
-              <IconTrendingUp className="h-3 w-3" />
-              <span className="text-xs">+12% from yesterday</span>
+            <div className="text-2xl font-bold">
+              {serviceStatus?.cag_health?.checks ? 
+                Object.values(serviceStatus.cag_health.checks).filter(v => v === true).length : 0}
+              /{serviceStatus?.cag_health?.checks ? 
+                Object.keys(serviceStatus.cag_health.checks).length : 4}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              LLM, Embeddings, Vector DB, CAG
             </div>
           </CardContent>
         </Card>
@@ -405,16 +411,14 @@ export function AgentDashboard({ className }: { className?: string }) {
         
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Avg Response</CardDescription>
+            <CardDescription>Integration</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {agents.length > 0 
-                ? (agents.reduce((acc, a) => acc + a.avgResponseTime, 0) / agents.length).toFixed(1)
-                : '0'}s
+              {serviceStatus?.status === 'operational' ? 'Ready' : 'Checking'}
             </div>
             <span className="text-xs text-muted-foreground">
-              Across all agents
+              {serviceStatus?.status === 'operational' ? 'All systems operational' : 'Verifying connections...'}
             </span>
           </CardContent>
         </Card>
@@ -423,9 +427,9 @@ export function AgentDashboard({ className }: { className?: string }) {
       {/* Agent Status Grid */}
       <Card>
         <CardHeader>
-          <CardTitle>Agent Status & Performance</CardTitle>
+          <CardTitle>Available CAG Agents</CardTitle>
           <CardDescription>
-            Real-time monitoring of all AI agents in the system
+            AI agents powered by Contextual Augmented Generation (CAG) engine
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -456,38 +460,24 @@ export function AgentDashboard({ className }: { className?: string }) {
                   </div>
                   
                   <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="text-muted-foreground">Current Load</span>
-                        <span className="font-medium">{agent.currentLoad}%</span>
-                      </div>
-                      <Progress 
-                        value={agent.currentLoad} 
-                        className={cn(
-                          "h-1.5",
-                          agent.currentLoad > 80 && "bg-red-200"
-                        )}
-                      />
-                    </div>
-                    
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>
-                        <p className="text-muted-foreground">Tasks</p>
-                        <p className="font-medium">{agent.tasksCompleted}</p>
+                        <p className="text-muted-foreground">Status</p>
+                        <p className="font-medium capitalize">{agent.status}</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Success</p>
-                        <p className="font-medium">{agent.successRate}%</p>
+                        <p className="text-muted-foreground">Source</p>
+                        <p className="font-medium uppercase text-xs">CAG</p>
                       </div>
-                      <div>
-                        <p className="text-muted-foreground">Avg Time</p>
-                        <p className="font-medium">{agent.avgResponseTime}s</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Last Active</p>
-                        <p className="font-medium text-xs">
-                          {agent.last_activity ? getRelativeTime(agent.last_activity) : 'Never'}
-                        </p>
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground mb-1">Capabilities</p>
+                        <div className="flex flex-wrap gap-1">
+                          {(agent.capabilities || []).slice(0, 3).map((cap: string, idx: number) => (
+                            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0">
+                              {cap}
+                            </Badge>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -508,9 +498,9 @@ export function AgentDashboard({ className }: { className?: string }) {
       {/* Recent Activity */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Agent Activity</CardTitle>
+          <CardTitle>Agent Activity Log</CardTitle>
           <CardDescription>
-            Latest actions performed by AI agents
+            Activity tracking will be available when agents process documents
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -519,7 +509,10 @@ export function AgentDashboard({ className }: { className?: string }) {
               {activities.length === 0 ? (
                 <div className="text-center py-12">
                   <IconActivity className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">No recent activity</p>
+                  <p className="text-sm text-muted-foreground">No activity yet</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Activities will appear here when agents process your documents
+                  </p>
                 </div>
               ) : activities.map(activity => (
                 <div

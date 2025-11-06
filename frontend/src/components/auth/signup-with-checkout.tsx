@@ -35,7 +35,8 @@ export function SignUpWithCheckout() {
     if (sessionId) {
       const fetchCheckoutSession = async () => {
         try {
-          const response = await fetch(`/api/stripe/checkout-session/${sessionId}`)
+          const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+          const response = await fetch(`${API_BASE}/api/v1/stripe/checkout-session/${sessionId}`)
           
           if (!response.ok) {
             throw new Error('Failed to fetch checkout session')
@@ -107,138 +108,175 @@ export function SignUpWithCheckout() {
   }
 
   return (
-    <div className="min-h-screen bg-background py-8">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          {/* Left side - Plan information */}
-          <div className="space-y-6">
-            <div className="text-center lg:text-left">
-              <h1 className="text-3xl font-bold text-foreground mb-2">
-                {invitation ? 'Join Your Team' : 'Completa tu registro'}
-              </h1>
-              <p className="text-muted-foreground">
-                {invitation 
-                  ? 'Create your account to join the team and start collaborating.'
-                  : checkoutData 
-                    ? 'Ya procesamos tu pago. Solo necesitamos algunos datos más para configurar tu cuenta.'
-                    : 'Create your account to get started with Nexus.'}
-              </p>
-            </div>
+    <div className="min-h-screen bg-background flex items-center justify-center py-8">
+      <div className="w-full max-w-md px-4">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-foreground mb-2">
+            {invitation ? 'Únete a tu equipo' : 'Crea tu cuenta'}
+          </h1>
+          <p className="text-muted-foreground">
+            {invitation 
+              ? 'Crea tu cuenta para unirte al equipo y comenzar a colaborar.'
+              : checkoutData 
+                ? 'Ya procesamos tu pago. Solo necesitamos algunos datos más.'
+                : plan === 'free'
+                  ? 'Comienza tu prueba gratis de 14 días'
+                  : 'Crea tu cuenta para comenzar con Nexus'}
+          </p>
+        </div>
 
-            {/* Payment confirmation */}
-            {checkoutData && (
-              <Card className="bg-card text-card-foreground border shadow-sm">
-                <CardHeader>
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-                    <CardTitle className="text-lg text-green-600 dark:text-green-400">Pago Confirmado</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Plan:</span>
-                    <Badge className={getPlanDisplayName(checkoutData.plan_id).color}>
-                      {getPlanDisplayName(checkoutData.plan_id).name}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Monto:</span>
-                    <span className="font-semibold">
-                      {formatAmount(checkoutData.amount_total, checkoutData.currency)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Email de facturación:</span>
-                    <span className="text-sm">{checkoutData.customer_email}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Team invitation info */}
-            {invitation && tenantId && (
-              <Card className="bg-card text-card-foreground border shadow-sm">
-                <CardHeader>
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-                    <CardTitle className="text-lg">Team Invitation</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    You're joining an existing team. After registration, you'll have access to all team resources.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Free plan info */}
-            {plan === 'free' && !invitation && (
-              <Card className="bg-card text-card-foreground border shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg">Plan Gratuito</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                      <span className="text-sm">Hasta 100 documentos</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                      <span className="text-sm">1 GB de almacenamiento</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                      <span className="text-sm">Búsqueda básica</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* What's next */}
-            <Card className="bg-card text-card-foreground border shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-lg">¿Qué sigue?</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ol className="space-y-2 text-sm text-muted-foreground">
-                  <li className="flex items-start">
-                    <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">1</span>
-                    Completa tu registro en el formulario de la derecha
-                  </li>
-                  <li className="flex items-start">
-                    <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">2</span>
-                    Configura los datos de tu empresa
-                  </li>
-                  <li className="flex items-start">
-                    <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">3</span>
-                    ¡Empieza a usar Nexus inmediatamente!
-                  </li>
-                </ol>
-              </CardContent>
-            </Card>
+        {/* Plan info badge */}
+        {plan === 'free' && !invitation && (
+          <div className="mb-6 text-center">
+            <Badge className="bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200 px-4 py-2">
+              <CheckCircle className="h-4 w-4 mr-2" />
+              14 días gratis • Sin tarjeta de crédito
+            </Badge>
           </div>
+        )}
 
-          {/* Right side - Clerk SignUp */}
-          <div className="flex justify-center">
-            <div className="w-full max-w-md">
-              <SignUp 
-                redirectUrl={invitation && tenantId ? `/${tenantId}/dashboard` : "/onboarding"}
-                afterSignUpUrl={invitation && tenantId ? `/${tenantId}/dashboard` : "/onboarding"}
-                initialValues={
-                  checkoutData?.customer_email || email 
-                    ? { emailAddress: checkoutData?.customer_email || email || '' }
-                    : undefined
-                }
-                unsafeMetadata={{
-                  invitation_code: invitation || undefined,
-                  tenant_id: tenantId || undefined
-                }}
-              />
+        {plan === 'pro' && !invitation && (
+          <div className="mb-6 text-center">
+            <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200 px-4 py-2">
+              Plan Pro • $29/mes
+            </Badge>
+          </div>
+        )}
+
+        {plan === 'enterprise' && !invitation && (
+          <div className="mb-6 text-center">
+            <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-200 px-4 py-2">
+              Plan Enterprise • $99/mes
+            </Badge>
+          </div>
+        )}
+
+        {/* Clerk SignUp Component */}
+        <div className="mb-8">
+          <SignUp 
+            appearance={{
+              elements: {
+                formButtonPrimary: 
+                  'bg-purple-600 hover:bg-purple-700 text-white shadow-sm',
+                formButtonSecondary:
+                  'bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-100',
+                socialButtonsBlockButton:
+                  'bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-100 dark:border-gray-600',
+                socialButtonsBlockButtonText:
+                  'text-gray-900 dark:text-gray-100 font-medium',
+                formFieldInput:
+                  'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600',
+                footerActionLink:
+                  'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300',
+                footerActionText:
+                  'text-gray-600 dark:text-gray-400',
+                identityPreviewText:
+                  'text-gray-900 dark:text-gray-100',
+                identityPreviewEditButtonIcon:
+                  'text-gray-600 dark:text-gray-400',
+                formHeaderTitle:
+                  'text-gray-900 dark:text-gray-100',
+                formHeaderSubtitle:
+                  'text-gray-600 dark:text-gray-400',
+                formFieldLabel:
+                  'text-gray-700 dark:text-gray-300',
+                formFieldSuccessText:
+                  'text-green-600 dark:text-green-400',
+                formFieldErrorText:
+                  'text-red-600 dark:text-red-400',
+                phoneInputBox:
+                  'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600',
+                card: 'shadow-sm',
+                footer: 'text-gray-600 dark:text-gray-400',
+                footerAction: 'text-gray-600 dark:text-gray-400',
+                footerPages: 'text-gray-600 dark:text-gray-400',
+              },
+              variables: {
+                colorPrimary: '#2563eb',
+                colorTextOnPrimaryBackground: '#ffffff',
+                colorBackground: 'transparent',
+                colorInputBackground: 'transparent',
+                colorInputText: 'inherit',
+                borderRadius: '0.5rem',
+              }
+            }}
+            redirectUrl={
+              invitation && tenantId 
+                ? `/${tenantId}/dashboard` 
+                : plan && plan !== 'free'
+                  ? `/checkout?plan=${plan}`
+                  : plan === 'free'
+                    ? '/onboarding-simple'
+                    : "/pricing"
+            }
+            afterSignUpUrl={
+              invitation && tenantId 
+                ? `/${tenantId}/dashboard` 
+                : plan && plan !== 'free'
+                  ? `/checkout?plan=${plan}`
+                  : plan === 'free'
+                    ? '/onboarding-simple'
+                    : "/pricing"
+            }
+            initialValues={
+              checkoutData?.customer_email || email 
+                ? { emailAddress: checkoutData?.customer_email || email || '' }
+                : undefined
+            }
+            unsafeMetadata={{
+              invitation_code: invitation || undefined,
+              tenant_id: tenantId || undefined,
+              selected_plan: plan || undefined
+            }}
+          />
+        </div>
+
+        {/* Additional info for free trial */}
+        {plan === 'free' && !invitation && (
+          <div className="text-center space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Al registrarte obtienes:
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 text-sm">
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-1" />
+                <span>Documentos ilimitados</span>
+              </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-1" />
+                <span>100 GB almacenamiento</span>
+              </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-1" />
+                <span>IA avanzada</span>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* Payment confirmation info */}
+        {checkoutData && (
+          <div className="text-center mt-6">
+            <div className="inline-flex items-center text-green-600 dark:text-green-400 mb-2">
+              <CheckCircle className="h-5 w-5 mr-2" />
+              <span className="font-semibold">Pago confirmado</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {getPlanDisplayName(checkoutData.plan_id).name} • {formatAmount(checkoutData.amount_total, checkoutData.currency)}
+            </p>
+          </div>
+        )}
+
+        {/* Back to pricing link */}
+        <div className="text-center mt-8">
+          <Button
+            variant="link"
+            onClick={() => window.location.href = '/pricing'}
+            className="text-sm"
+          >
+            ← Volver a planes
+          </Button>
         </div>
       </div>
     </div>

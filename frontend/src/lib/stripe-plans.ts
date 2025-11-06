@@ -2,36 +2,58 @@
 export const STRIPE_PLANS = {
   free: {
     id: 'free',
-    name: 'Free',
-    description: 'Perfecto para comenzar',
+    name: 'Starter',
+    description: 'Prueba gratis por 14 días',
     price: 0,
     currency: 'USD',
-    interval: 'forever',
+    interval: 'trial',
+    trialDays: 14,
     features: [
-      'Hasta 100 documentos',
-      '1 GB de almacenamiento',
-      'Búsqueda básica',
-      'Soporte estándar',
-      '1 usuario',
+      '14 días de prueba gratis',
+      'Todas las funciones Pro incluidas',
+      'Documentos ilimitados durante el trial',
+      '100 GB de almacenamiento',
+      'IA y análisis avanzados',
+      'Firma digital integrada',
+      'Sin tarjeta de crédito requerida',
     ],
     limitations: [
-      'Sin funciones de IA',
-      'Sin firma digital',
-      'Sin API access',
+      'Después del trial: $29/mes plan Basic',
+      'O actualiza a Pro para más funciones',
     ],
-    cta: 'Empezar Gratis',
+    cta: 'Comenzar Prueba Gratis',
     popular: false,
-    // Free plan handled locally, no Stripe integration
-    backend: false
+    // Free trial handled by Stripe with trial period
+    backend: true
+  },
+  basic: {
+    id: 'basic',
+    name: 'Basic',
+    description: 'Para uso personal',
+    price: 29,
+    currency: 'USD',
+    interval: 'month',
+    features: [
+      'Hasta 500 documentos',
+      '10 GB de almacenamiento',
+      'Búsqueda con IA básica',
+      'Análisis de documentos',
+      '1 usuario',
+      'Soporte por email',
+    ],
+    cta: 'Comenzar con Basic',
+    popular: false,
+    // Stripe data is handled by backend
+    backend: true
   },
   pro: {
     id: 'pro',
     name: 'Pro',
     description: 'Ideal para equipos en crecimiento',
-    price: 29,
+    price: 60,
     currency: 'USD',
     interval: 'month',
-    yearlyPrice: 290, // $24.17/month billed yearly
+    yearlyPrice: 600, // $50/month billed yearly
     features: [
       'Documentos ilimitados',
       '100 GB de almacenamiento',
@@ -43,7 +65,7 @@ export const STRIPE_PLANS = {
       'Acceso a API',
       'Integraciones avanzadas',
     ],
-    cta: 'Probar Pro',
+    cta: 'Elegir Pro',
     popular: true,
     // Stripe data is handled by backend
     backend: true
@@ -52,10 +74,10 @@ export const STRIPE_PLANS = {
     id: 'enterprise',
     name: 'Enterprise',
     description: 'Para organizaciones grandes',
-    price: 99,
+    price: null, // Custom pricing
     currency: 'USD',
-    interval: 'month',
-    yearlyPrice: 990, // $82.50/month billed yearly
+    interval: 'custom',
+    customPricing: true,
     features: [
       'Todo en Pro, además:',
       '1 TB de almacenamiento',
@@ -71,8 +93,8 @@ export const STRIPE_PLANS = {
     ],
     cta: 'Contactar Ventas',
     popular: false,
-    // Stripe data is handled by backend
-    backend: true
+    // No Stripe integration - handled by sales team
+    backend: false
   }
 } as const
 
@@ -84,7 +106,9 @@ export const getPlan = (planId: PlanId): Plan => {
 }
 
 export const getAllPlans = (): Plan[] => {
-  return Object.values(STRIPE_PLANS)
+  // Return plans in specific order: Basic, Pro, Enterprise (excluding free/starter)
+  const planOrder = ['basic', 'pro', 'enterprise']
+  return planOrder.map(id => STRIPE_PLANS[id as PlanId]).filter(Boolean)
 }
 
 export const getPaidPlans = (): Plan[] => {
@@ -112,10 +136,24 @@ export const isPaidPlan = (planId: PlanId): boolean => {
 // Feature flags por plan
 export const PLAN_FEATURES = {
   free: {
-    maxDocuments: 100,
-    maxStorageGB: 1,
+    // Durante el trial: características Pro
+    // Después del trial: características básicas
+    maxDocuments: 100, // unlimited during trial
+    maxStorageGB: 1, // 100GB during trial
+    maxUsers: 1, // 10 during trial
+    hasAI: false, // true during trial
+    hasSignatures: false, // true during trial
+    hasAPI: false, // true during trial
+    hasAdvancedIntegrations: false, // true during trial
+    hasPrioritySupport: false, // true during trial
+    isTrialPlan: true,
+    trialDays: 14,
+  },
+  basic: {
+    maxDocuments: 500,
+    maxStorageGB: 10,
     maxUsers: 1,
-    hasAI: false,
+    hasAI: true, // Basic AI features
     hasSignatures: false,
     hasAPI: false,
     hasAdvancedIntegrations: false,

@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - pre
-      - develp-new  # Agregado para tu rama actual
     paths:
       - 'backend/**'
       - 'backend/microservices/**'
@@ -78,15 +77,25 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
+<<<<<<< HEAD
           --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db,POSTGRES_SERVER=/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db,PYTHONUNBUFFERED=1,API_V1_STR=/api/v1,SERVER_NAME=Nexus Document Management API,TESTING=false,LOG_LEVEL=INFO,MULTI_TENANT=true,DEFAULT_TENANT=default,GCS_PROJECT_ID=nexusdocs360-pre,GCS_BUCKET_NAME=nexus-docs-eu,GCS_REGION=europe-west1" \
+=======
+          --set-env-vars "DEBUG=true,ENVIRONMENT=pre,POSTGRES_USER=postgres,POSTGRES_DB=nexusdocuments360db" \
+>>>>>>> feature/architecture-improvements
           --set-secrets "POSTGRES_PASSWORD=postgres-password:latest" \
           --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 0 \
           --max-instances 3 \
+<<<<<<< HEAD
           --memory 1Gi \
           --cpu 2 \
           --timeout 900 \
           --service-account nexus-cloud-run-pre@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+=======
+          --memory 512Mi \
+          --cpu 1 \
+          --timeout 300
+>>>>>>> feature/architecture-improvements
 
     # Deploy Storage Service to Cloud Run
     - name: Deploy Storage Service to Cloud Run

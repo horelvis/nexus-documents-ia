@@ -2,6 +2,7 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { UserNotifications } from "@/components/layout/user-notifications"
 import { ModeToggle } from "../common/mode-toggle"
+import { SiteHeaderChat } from "./site-header-chat"
 
 import type { SiteHeaderProps } from '@/lib/types'
 
@@ -16,6 +17,7 @@ export function SiteHeader({ tenantId }: SiteHeaderProps) {
         />
         <h1 className="text-base font-medium">Nexus Document System</h1>
         <div className="ml-auto flex items-center gap-2">
+          <SiteHeaderChat />
           <ModeToggle />
           <UserNotifications />
         </div>

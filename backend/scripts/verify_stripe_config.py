@@ -16,8 +16,9 @@ def verify_stripe_config():
     # Verificar variables de entorno
     required_vars = [
         'STRIPE_SECRET_KEY',
+        'STRIPE_BASIC_PRICE_ID',
         'STRIPE_PRO_PRICE_ID', 
-        'STRIPE_ENTERPRISE_PRICE_ID'
+        'STRIPE_PRO_YEARLY_PRICE_ID'
     ]
     
     missing_vars = []
@@ -39,9 +40,14 @@ def verify_stripe_config():
         
         # Verificar Price IDs
         price_ids = {
+            'Basic Monthly': settings.STRIPE_BASIC_PRICE_ID,
             'Pro Monthly': settings.STRIPE_PRO_PRICE_ID,
-            'Enterprise Monthly': settings.STRIPE_ENTERPRISE_PRICE_ID,
+            'Pro Yearly': settings.STRIPE_PRO_YEARLY_PRICE_ID,
         }
+        
+        # Solo verificar Enterprise si está configurado
+        if hasattr(settings, 'STRIPE_ENTERPRISE_PRICE_ID') and settings.STRIPE_ENTERPRISE_PRICE_ID:
+            price_ids['Enterprise Monthly'] = settings.STRIPE_ENTERPRISE_PRICE_ID
         
         for name, price_id in price_ids.items():
             try:

@@ -32,7 +32,8 @@ if not stripe.api_key:
 
 class SubscriptionPlan(str, Enum):
     """Subscription plan types"""
-    FREE = "free"
+    TRIAL = "trial"
+    BASIC = "basic"
     PRO = "pro"
     ENTERPRISE = "enterprise"
 
@@ -52,12 +53,19 @@ class SubscriptionStatus(str, Enum):
 class PlanLimits:
     """Plan limits configuration"""
     LIMITS = {
-        SubscriptionPlan.FREE: {
+        SubscriptionPlan.TRIAL: {
             "documents": 10,
             "storage_mb": 100,
             "agents_per_month": 0,
             "team_members": 0,
             "api_calls_per_day": 100
+        },
+        SubscriptionPlan.BASIC: {
+            "documents": 500,
+            "storage_mb": 10240,  # 10 GB
+            "agents_per_month": 10,
+            "team_members": 0,
+            "api_calls_per_day": 1000
         },
         SubscriptionPlan.PRO: {
             "documents": 1000,
@@ -78,17 +86,25 @@ class PlanLimits:
     @classmethod
     def get_limits(cls, plan: str) -> Dict[str, int]:
         """Get limits for a specific plan"""
-        return cls.LIMITS.get(SubscriptionPlan(plan), cls.LIMITS[SubscriptionPlan.FREE])
+        return cls.LIMITS.get(SubscriptionPlan(plan), cls.LIMITS[SubscriptionPlan.TRIAL])
 
 
 class PermissionManager:
     """Manages permissions based on subscription plans"""
     
     PERMISSIONS = {
-        SubscriptionPlan.FREE: {
+        SubscriptionPlan.TRIAL: {
             'view_documents',
             'basic_search',
             'upload_documents'
+        },
+        SubscriptionPlan.BASIC: {
+            'view_documents',
+            'basic_search',
+            'upload_documents',
+            'advanced_search',
+            'use_agents',  # Limited agents
+            'export_documents'
         },
         SubscriptionPlan.PRO: {
             'view_documents',
@@ -127,7 +143,7 @@ class PermissionManager:
             plan_enum = SubscriptionPlan(plan)
             return permission in cls.PERMISSIONS.get(plan_enum, set())
         except ValueError:
-            return permission in cls.PERMISSIONS[SubscriptionPlan.FREE]
+            return permission in cls.PERMISSIONS[SubscriptionPlan.TRIAL]
 
 
 def handle_stripe_errors(func):
@@ -279,6 +295,16 @@ class SubscriptionServiceV2:
                     "Payment service not configured"
                 )
             
+            # Verify customer exists in Stripe before fetching subscriptions
+            try:
+                stripe.Customer.retrieve(user.stripe_customer_id)
+                logger.debug(f"✅ Customer {user.stripe_customer_id} verified in Stripe")
+            except stripe.error.InvalidRequestError:
+                logger.warning(f"⚠️ Customer {user.stripe_customer_id} doesn't exist in Stripe")
+                return SubscriptionServiceV2._get_free_plan_status(
+                    message="Invalid customer - please re-authenticate"
+                )
+            
             # Fetch subscriptions from Stripe
             logger.debug(f"🔍 Fetching subscription from Stripe for customer {user.stripe_customer_id}")
             
@@ -288,8 +314,31 @@ class SubscriptionServiceV2:
                 expand=['data.default_payment_method']
             )
             
+            logger.debug(f"🔍 Subscriptions type: {type(subscriptions)}")
+            logger.debug(f"🔍 Subscriptions dir: {[attr for attr in dir(subscriptions) if not attr.startswith('_')]}")
+            logger.debug(f"🔍 Has data attr: {hasattr(subscriptions, 'data')}")
+            if hasattr(subscriptions, 'data'):
+                logger.debug(f"🔍 Data type: {type(subscriptions.data)}")
+            else:
+                logger.debug(f"🔍 Available attrs: {list(subscriptions.__dict__.keys()) if hasattr(subscriptions, '__dict__') else 'No __dict__'}")
+            
             # Find active subscription
-            active_subscription = SubscriptionServiceV2._find_active_subscription(subscriptions.data)
+            if not hasattr(subscriptions, 'data'):
+                logger.error(f"❌ Subscriptions object has no 'data' attribute: {type(subscriptions)}")
+                return SubscriptionServiceV2._get_error_status("Invalid subscription data format")
+                
+            if not isinstance(subscriptions.data, list):
+                logger.error(f"❌ Subscriptions data is not a list: {type(subscriptions.data)}")
+                return SubscriptionServiceV2._get_error_status("Invalid subscription data type")
+                
+            logger.debug(f"🔍 Found {len(subscriptions.data)} subscriptions for customer {user.stripe_customer_id}")
+            
+            try:
+                active_subscription = SubscriptionServiceV2._find_active_subscription(subscriptions.data)
+                logger.debug(f"🔍 Active subscription found: {active_subscription is not None}")
+            except Exception as e:
+                logger.error(f"❌ Error in _find_active_subscription: {e}")
+                return SubscriptionServiceV2._get_error_status(f"Error finding active subscription: {str(e)}")
             
             if not active_subscription:
                 return SubscriptionServiceV2._get_free_plan_status(
@@ -297,7 +346,11 @@ class SubscriptionServiceV2:
                 )
             
             # Build subscription status
-            return SubscriptionServiceV2._build_subscription_status(active_subscription)
+            try:
+                return SubscriptionServiceV2._build_subscription_status(active_subscription)
+            except Exception as e:
+                logger.error(f"❌ Error in _build_subscription_status: {e}")
+                return SubscriptionServiceV2._get_error_status(f"Error building subscription status: {str(e)}")
             
         except Exception as e:
             logger.error(f"❌ Error fetching subscription for user {user.id}: {e}")
@@ -314,8 +367,15 @@ class SubscriptionServiceV2:
         if not active_subs:
             return None
         
-        # Return most recent
-        return max(active_subs, key=lambda x: x.created)
+        # If multiple active subscriptions, prioritize trialing first (as they might be newer trials)
+        # then active, then past_due
+        priority_order = {'trialing': 3, 'active': 2, 'past_due': 1}
+        
+        # Sort by priority first, then by creation date
+        return max(active_subs, key=lambda x: (
+            priority_order.get(x.status, 0), 
+            getattr(x, 'created', 0) if hasattr(x, 'created') and not callable(getattr(x, 'created', None)) else 0
+        ))
     
     @staticmethod
     def _build_subscription_status(subscription: Any) -> Dict[str, Any]:
@@ -324,7 +384,7 @@ class SubscriptionServiceV2:
         plan_id = subscription.metadata.get('plan_id', 'pro')
         
         # Check for enterprise plan
-        if hasattr(subscription.items, 'data') and subscription.items.data:
+        if hasattr(subscription, 'items') and hasattr(subscription.items, 'data') and subscription.items.data:
             price_id = subscription.items.data[0].price.id
             if price_id == settings.STRIPE_ENTERPRISE_PRICE_ID:
                 plan_id = 'enterprise'
@@ -350,6 +410,18 @@ class SubscriptionServiceV2:
         can_use = status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]
         plan_limits = PlanLimits.get_limits(plan_id)
         
+        # Determine end date (use trial_end for trialing subscriptions, current_period_end for others)
+        period_end = None
+        if subscription.status == 'trialing' and subscription.trial_end:
+            period_end = datetime.fromtimestamp(subscription.trial_end).isoformat()
+        elif hasattr(subscription, 'current_period_end') and subscription.current_period_end:
+            period_end = datetime.fromtimestamp(subscription.current_period_end).isoformat()
+        # Fallback: try to get period_end from subscription items
+        elif hasattr(subscription, 'items') and hasattr(subscription.items, 'data') and subscription.items.data:
+            item = subscription.items.data[0]
+            if hasattr(item, 'current_period_end') and item.current_period_end:
+                period_end = datetime.fromtimestamp(item.current_period_end).isoformat()
+        
         # Build response
         result = {
             "plan": plan_id,
@@ -359,9 +431,12 @@ class SubscriptionServiceV2:
             "message": SubscriptionServiceV2._get_status_message(plan_id, status, trial_days_remaining),
             "limits": plan_limits,
             "subscription_id": subscription.id,
-            "current_period_end": datetime.fromtimestamp(subscription.current_period_end).isoformat(),
-            "cancel_at_period_end": subscription.cancel_at_period_end,
-            "created_at": datetime.fromtimestamp(subscription.created).isoformat(),
+            "current_period_end": period_end,
+            "cancel_at_period_end": getattr(subscription, 'cancel_at_period_end', False),
+            "created_at": datetime.fromtimestamp(
+                getattr(subscription, 'created', 0) if hasattr(subscription, 'created') 
+                and not callable(getattr(subscription, 'created', None)) else 0
+            ).isoformat() if getattr(subscription, 'created', 0) else datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
         
@@ -402,12 +477,12 @@ class SubscriptionServiceV2:
     def _get_free_plan_status(message: str = "Free Plan") -> Dict[str, Any]:
         """Get free plan status"""
         return {
-            "plan": SubscriptionPlan.FREE.value,
+            "plan": SubscriptionPlan.TRIAL.value,
             "status": SubscriptionStatus.ACTIVE.value,
             "can_use_agents": False,
             "can_use_advanced_features": False,
             "message": message,
-            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "limits": PlanLimits.get_limits(SubscriptionPlan.TRIAL),
             "updated_at": datetime.utcnow().isoformat()
         }
     
@@ -415,13 +490,13 @@ class SubscriptionServiceV2:
     def _get_error_status(error: str) -> Dict[str, Any]:
         """Get error status"""
         return {
-            "plan": SubscriptionPlan.FREE.value,
+            "plan": SubscriptionPlan.TRIAL.value,
             "status": SubscriptionStatus.ERROR.value,
             "can_use_agents": False,
             "can_use_advanced_features": False,
             "message": "Error checking subscription",
             "error": error,
-            "limits": PlanLimits.get_limits(SubscriptionPlan.FREE),
+            "limits": PlanLimits.get_limits(SubscriptionPlan.TRIAL),
             "updated_at": datetime.utcnow().isoformat()
         }
     
@@ -462,7 +537,17 @@ class SubscriptionServiceV2:
     async def _find_or_create_stripe_customer(db: AsyncSession, user: User) -> Optional[str]:
         """Find existing or create new Stripe customer"""
         try:
-            # Search for existing customer
+            # First verify if user already has a customer_id and it's valid
+            if user.stripe_customer_id:
+                try:
+                    stripe.Customer.retrieve(user.stripe_customer_id)
+                    logger.info(f"✅ Verified existing Stripe customer {user.stripe_customer_id} for {user.email}")
+                    return user.stripe_customer_id
+                except stripe.error.InvalidRequestError:
+                    logger.warning(f"⚠️ Customer {user.stripe_customer_id} doesn't exist in Stripe for {user.email}")
+                    # Continue to create new customer
+            
+            # Search for existing customer by email
             customers = stripe.Customer.list(email=user.email, limit=1)
             
             if customers.data:
@@ -481,7 +566,7 @@ class SubscriptionServiceV2:
                 customer_id = customer.id
                 logger.info(f"✅ Created new Stripe customer {customer_id} for {user.email}")
             
-            # Update user
+            # Update user with valid customer_id
             user.stripe_customer_id = customer_id
             await db.commit()
             
@@ -547,7 +632,7 @@ class SubscriptionServiceV2:
             return False, f"Your subscription is {status['status']}. Please update your subscription."
         
         # Check permission
-        plan = status.get('plan', SubscriptionPlan.FREE.value)
+        plan = status.get('plan', SubscriptionPlan.TRIAL.value)
         if PermissionManager.has_permission(plan, permission):
             return True, None
         

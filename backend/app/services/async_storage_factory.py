@@ -81,4 +81,8 @@ class AsyncStorageServiceFactory:
             return MockStorageService(tenant_id, user_id)
         
         # In production, fail if no credentials
-        raise Exception("No storage service available and not in testing mode")
+        error_msg = f"No storage service available and not in testing mode. "
+        error_msg += f"Storage service URL: {settings.STORAGE_SERVICE_URL}, "
+        error_msg += f"GCS credentials available: {credentials_available}, "
+        error_msg += f"Is Cloud Run: {settings.IS_CLOUD_RUN}"
+        raise Exception(error_msg)

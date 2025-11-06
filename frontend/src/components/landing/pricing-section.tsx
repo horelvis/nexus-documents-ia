@@ -14,20 +14,12 @@ export function PricingSection() {
   const plans = getAllPlans()
 
   const handlePlanSelection = (plan: Plan) => {
-    if (plan.id === 'free') {
-      // Free plan: go to signup if not signed in, dashboard if signed in
-      if (isSignedIn) {
-        router.push('/dashboard')
-      } else {
-        router.push('/auth/sign-up?plan=free')
-      }
+    if (isSignedIn) {
+      // If already signed in, go to dashboard
+      router.push('/dashboard')
     } else {
-      // Paid plans: go to signup to start onboarding flow with plan selection
-      if (isSignedIn) {
-        router.push('/dashboard')
-      } else {
-        router.push('/auth/sign-up')
-      }
+      // For all plans (including trial), pass the plan ID
+      router.push(`/auth/sign-up?plan=${plan.id}`)
     }
   }
 
@@ -43,17 +35,17 @@ export function PricingSection() {
   }
 
   return (
-    <section className="py-24 bg-gray-50">
+    <div className="py-24">
       <div className="container mx-auto px-4">
         {/* Header */}
         <div className="text-center mb-16">
           <Badge className="mb-4" variant="secondary">
             Planes y Precios
           </Badge>
-          <h2 className="text-3xl md:text-4xl font-bold mb-6">
+          <h2 className="text-3xl md:text-4xl font-bold mb-6 text-white">
             Elige el plan perfecto para ti
           </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          <p className="text-xl text-gray-300 max-w-3xl mx-auto">
             Desde startups hasta empresas. Empieza gratis y escala según crezca tu negocio.
           </p>
         </div>
@@ -65,13 +57,13 @@ export function PricingSection() {
               key={plan.id} 
               className={`relative transition-all duration-300 hover:shadow-xl ${
                 plan.popular 
-                  ? 'ring-2 ring-blue-500 shadow-lg scale-105' 
+                  ? 'ring-2 ring-purple-600 shadow-lg scale-105' 
                   : 'hover:scale-105'
               }`}
             >
               {plan.popular && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-1">
+                  <Badge className="bg-gradient-to-r from-purple-500 to-purple-700 text-white px-4 py-1">
                     <IconStar className="w-4 h-4 mr-1" />
                     Más Popular
                   </Badge>
@@ -83,7 +75,7 @@ export function PricingSection() {
                   {getPlanIcon(plan.id)}
                   <CardTitle className="text-xl font-bold ml-2">{plan.name}</CardTitle>
                 </div>
-                <CardDescription className="text-gray-600">
+                <CardDescription className="text-gray-300">
                   {plan.description}
                 </CardDescription>
                 <div className="pt-4">
@@ -91,7 +83,7 @@ export function PricingSection() {
                     {plan.price === 0 ? 'Gratis' : formatPrice(plan.price)}
                   </span>
                   {plan.price > 0 && (
-                    <span className="text-gray-500 ml-1">
+                    <span className="text-gray-400 ml-1">
                       /{plan.interval}
                     </span>
                   )}
@@ -103,11 +95,11 @@ export function PricingSection() {
                   {plan.features.slice(0, 4).map((feature, index) => (
                     <li key={index} className="flex items-start">
                       <IconCheck className="w-5 h-5 text-green-500 mr-3 mt-0.5 flex-shrink-0" />
-                      <span className="text-gray-600">{feature}</span>
+                      <span className="text-gray-300">{feature}</span>
                     </li>
                   ))}
                   {plan.features.length > 4 && (
-                    <li className="text-sm text-gray-500 text-center pt-2">
+                    <li className="text-sm text-gray-400 text-center pt-2">
                       +{plan.features.length - 4} características más
                     </li>
                   )}
@@ -131,7 +123,7 @@ export function PricingSection() {
 
         {/* Bottom CTA */}
         <div className="text-center mt-12">
-          <p className="text-gray-600 mb-4">
+          <p className="text-gray-300 mb-4">
             ¿Necesitas una solución personalizada?
           </p>
           <Button 
@@ -143,6 +135,6 @@ export function PricingSection() {
           </Button>
         </div>
       </div>
-    </section>
+    </div>
   )
 }

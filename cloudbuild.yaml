@@ -1,0 +1,290 @@
+# Cloud Build CI/CD Pipeline
+# Trigger on push to main/develop branches
+
+substitutions:
+  _REGION: europe-west1
+  _SERVICE_ACCOUNT: nexus-cloud-run@${PROJECT_ID}.iam.gserviceaccount.com
+  _DOMAIN: ${_DOMAIN}
+  _APP_SUBDOMAIN: ${_APP_SUBDOMAIN}
+  _API_SUBDOMAIN: ${_API_SUBDOMAIN}
+  _FRONTEND_URL: https://${_APP_SUBDOMAIN}.${_DOMAIN}
+  _API_URL: https://${_API_SUBDOMAIN}.${_DOMAIN}
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  substitution_option: 'ALLOW_LOOSE'
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # Step 1: Run tests
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'run-tests'
+    args:
+      - 'build'
+      - '-f'
+      - 'backend/Dockerfile.test'
+      - '-t'
+      - 'nexus-test'
+      - '.'
+    waitFor: ['-']
+
+  - name: 'nexus-test'
+    id: 'execute-tests'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd /app
+        pytest tests/ -v --cov=app --cov-report=xml
+    waitFor: ['run-tests']
+
+  # Step 2: Build Main API
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-api'
+    args:
+      - 'build'
+      - '-f'
+      - 'backend/Dockerfile.prod'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-api:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-api:latest'
+      - '--build-arg'
+      - 'BUILDKIT_INLINE_CACHE=1'
+      - '--cache-from'
+      - 'gcr.io/${PROJECT_ID}/nexus-api:latest'
+      - '.'
+    waitFor: ['execute-tests']
+
+  # Step 3: Build Microservices
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-storage'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/storage-service/Dockerfile'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-storage:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-storage:latest'
+      - './microservices/storage-service'
+    waitFor: ['execute-tests']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-langchain'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/langchain-service/Dockerfile'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-langchain:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-langchain:latest'
+      - './microservices/langchain-service'
+    waitFor: ['execute-tests']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-signature'
+    args:
+      - 'build'
+      - '-f'
+      - 'microservices/signature-service/Dockerfile'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-signature:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-signature:latest'
+      - './microservices/signature-service'
+    waitFor: ['execute-tests']
+
+  # Step 3.5: Build Frontend
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-frontend'
+    args:
+      - 'build'
+      - '-f'
+      - 'frontend/Dockerfile.prod'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-frontend:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/nexus-frontend:latest'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=${_API_URL}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${_CLERK_PUBLISHABLE_KEY}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard'
+      - '.'
+    secretEnv: ['_CLERK_PUBLISHABLE_KEY']
+    waitFor: ['execute-tests']
+
+  # Step 4: Push images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/nexus-api']
+    waitFor: ['build-api']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/nexus-storage']
+    waitFor: ['build-storage']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/nexus-langchain']
+    waitFor: ['build-langchain']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/nexus-signature']
+    waitFor: ['build-signature']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/nexus-frontend']
+    waitFor: ['build-frontend']
+
+  # Step 5: Run database migrations
+  - name: 'gcr.io/${PROJECT_ID}/nexus-api:${SHORT_SHA}'
+    id: 'run-migrations'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd /app
+        alembic upgrade head
+    env:
+      - 'DATABASE_URL=postgresql://${_DB_USER}:${_DB_PASS}@${_DB_HOST}/${_DB_NAME}'
+    secretEnv: ['_DB_USER', '_DB_PASS', '_DB_HOST', '_DB_NAME']
+    waitFor: ['push-images']
+
+  # Step 6: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-api'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-api'
+      - '--image=gcr.io/${PROJECT_ID}/nexus-api:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--set-env-vars=ENVIRONMENT=production'
+      - '--set-secrets=DATABASE_URL=database-url:latest,REDIS_URL=redis-url:latest,CLERK_SECRET_KEY=clerk-secret:latest'
+      - '--min-instances=1'
+      - '--max-instances=3'
+      - '--cpu=1'
+      - '--memory=2Gi'
+      - '--timeout=300'
+    waitFor: ['run-migrations']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-storage'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-storage'
+      - '--image=gcr.io/${PROJECT_ID}/nexus-storage:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=0.5'
+      - '--memory=1Gi'
+    waitFor: ['run-migrations']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-langchain'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-langchain'
+      - '--image=gcr.io/${PROJECT_ID}/nexus-langchain:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--service-account=${_SERVICE_ACCOUNT}'
+      - '--min-instances=1'
+      - '--max-instances=2'
+      - '--cpu=1'
+      - '--memory=2Gi'
+    waitFor: ['run-migrations']
+
+  # Step 6.5: Deploy Frontend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-frontend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'nexus-frontend'
+      - '--image=gcr.io/${PROJECT_ID}/nexus-frontend:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=1'
+      - '--max-instances=5'
+      - '--cpu=1'
+      - '--memory=512Mi'
+      - '--port=3000'
+    waitFor: ['deploy-api']
+
+  # Step 7: Update traffic gradually (Canary deployment)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'canary-traffic'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        # Start with 10% traffic to new version
+        gcloud run services update-traffic nexus-api \
+          --region=${_REGION} \
+          --to-revisions=nexus-api-${SHORT_SHA}=10
+        
+        # Monitor for 5 minutes
+        sleep 300
+        
+        # If healthy, increase to 50%
+        gcloud run services update-traffic nexus-api \
+          --region=${_REGION} \
+          --to-revisions=nexus-api-${SHORT_SHA}=50
+        
+        # Monitor for 5 minutes
+        sleep 300
+        
+        # If healthy, route 100%
+        gcloud run services update-traffic nexus-api \
+          --region=${_REGION} \
+          --to-revisions=nexus-api-${SHORT_SHA}=100
+    waitFor: ['deploy-api', 'deploy-storage', 'deploy-langchain', 'deploy-frontend']
+
+# Secrets configuration
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/db-user/versions/latest
+      env: '_DB_USER'
+    - versionName: projects/${PROJECT_ID}/secrets/db-pass/versions/latest
+      env: '_DB_PASS'
+    - versionName: projects/${PROJECT_ID}/secrets/db-host/versions/latest
+      env: '_DB_HOST'
+    - versionName: projects/${PROJECT_ID}/secrets/db-name/versions/latest
+      env: '_DB_NAME'
+    - versionName: projects/${PROJECT_ID}/secrets/clerk-publishable-key/versions/latest
+      env: '_CLERK_PUBLISHABLE_KEY'
+
+# Build timeout
+timeout: '1800s'
+
+# Artifacts to store
+artifacts:
+  objects:
+    location: 'gs://${PROJECT_ID}_cloudbuild/logs'
+    paths:
+      - '/workspace/backend/tests/coverage_report/**/*'

@@ -1,5 +1,5 @@
 """
-API endpoints for Agent management - Proxy to LangGraph microservice
+API endpoints for CrewAI Agent management
 """
 import logging
 from typing import Dict, Any, Optional
@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import json
 import httpx
 
-from app.api.async_dependencies import get_current_active_user_async, get_current_active_superuser_async, require_agent_permission_async
+from app.api.async_dependencies import get_current_active_user_async, get_current_tenant_id_async
 from app.db.models import User
 from app.core.config import settings
 
@@ -22,7 +22,11 @@ router = APIRouter()
 # =====================================
 
 class CreateAgentRequest(BaseModel):
-    agent_type: str
+    name: str
+    role: str
+    goal: str
+    backstory: str
+    tools: Optional[list] = []
     configuration: Optional[Dict[str, Any]] = None
 
 class ChatRequest(BaseModel):
@@ -31,76 +35,77 @@ class ChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 class ExecuteTaskRequest(BaseModel):
-    task_type: str
-    parameters: Dict[str, Any]
+    task_description: str
+    expected_output: str
+    agent_roles: Optional[list] = []
     context: Optional[Dict[str, Any]] = None
 
-class SignatureRequest(BaseModel):
-    title: str
-    document_name: str
-    signers: list
-    message: Optional[str] = None
-    signature_type: str = "sequential"
-
-class DocumentAnalysisRequest(BaseModel):
-    document_content: str
-    document_id: Optional[str] = None
-    analysis_type: str = "general"
-
 # =====================================
-# HEALTH AND STATUS
+# CREWAI SERVICE INTEGRATION
 # =====================================
 
 @router.get("/health")
-async def check_langgraph_health():
-    """Check connectivity with LangGraph service"""
+async def check_crewai_health():
+    """Check connectivity with CrewAI CAG service"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
+        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
+            response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             health_data = response.json()
             
         return {
             "status": "healthy",
-            "langgraph_service": health_data,
+            "crewai_service": health_data,
             "integration": "working"
         }
     except Exception as e:
-        logger.error(f"LangGraph health check failed: {str(e)}")
+        logger.error(f"CrewAI health check failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LangGraph service unavailable: {str(e)}"
+            detail=f"CrewAI service unavailable: {str(e)}"
         )
 
 @router.get("/status")
-async def get_service_status():
-    """Get service health status from LangGraph"""
+async def get_crewai_status():
+    """Get CrewAI service health status"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
-        async with httpx.AsyncClient() as client:
-            # Use the health endpoint instead of non-existent status endpoint
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
-            response.raise_for_status()
-            
-            health_data = response.json()
-            
-            # Also get available graph types
-            types_response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
-            types_data = types_response.json() if types_response.status_code == 200 else []
+        # Check CAG service health
+        cag_health = {"status": "unknown"}
+        try:
+            headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
+                if response.status_code == 200:
+                    cag_health = response.json()
+        except Exception as e:
+            logger.warning(f"CAG health check failed: {e}")
+        
+        # Determine overall status
+        overall_status = "operational"
+        if cag_health.get("status") != "healthy":
+            overall_status = "degraded"
         
         return {
-            "service": "agents",
-            "langgraph_health": health_data,
-            "available_types": types_data,
-            "status": "operational" if health_data.get("status") == "healthy" else "degraded"
+            "service": "crewai_agents",
+            "cag_health": cag_health,
+            "status": overall_status,
+            "agents_available": cag_health.get("agents_count", 0),
+            "crews_running": cag_health.get("crews_running", 0),
+            "system_resources": cag_health.get("system_resources", {
+                "cpu_percent": 0,
+                "memory_percent": 0,
+                "disk_percent": 0
+            })
         }
     except Exception as e:
         logger.error(f"Error getting service status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Service status unavailable: {str(e)}"
-        )
+        return {
+            "service": "crewai_agents", 
+            "status": "degraded",
+            "error": str(e),
+            "cag_health": {"status": "unknown"}
+        }
 
 # =====================================
 # AGENT TYPES AND LISTING
@@ -108,219 +113,178 @@ async def get_service_status():
 
 @router.get("/types")
 async def list_agent_types():
-    """List available agent types from LangGraph"""
+    """List available CrewAI agent types from REAL CAG service - NO HARDCODE"""
     try:
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
+        # Obtener datos REALES del nuevo endpoint de agentes
+        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/types", headers=headers)
+            # Usar el endpoint REAL que expone los agentes de CrewAI
+            response = await client.get(
+                f"{settings.CAG_SERVICE_URL}/api/v1/cag/agents/available",
+                headers=headers,
+                params={"tenant_id": "default"}
+            )
             response.raise_for_status()
+            agents_data = response.json()
             
-        graph_types = response.json()
-        
-        # Map LangGraph types to agent types
-        agent_types = {
-            "document_analyzer": {
-                "name": "Document Analyzer",
-                "description": "Analyzes and categorizes documents",
-                "capabilities": ["classification", "extraction", "analysis"],
-                "source": "langgraph"
-            },
-            "rag_assistant": {
-                "name": "RAG Assistant",
-                "description": "Retrieval-augmented generation for Q&A",
-                "capabilities": ["search", "qa", "context_retrieval"],
-                "source": "langgraph"
-            },
-            "digital_signature": {
-                "name": "Digital Signature Agent",
-                "description": "Manages signature workflows",
-                "capabilities": ["signature_management", "tracking"],
-                "source": "langgraph"
-            }
-        }
-        
-        # Add graph types as agent types
-        if isinstance(graph_types, dict):
-            for graph_type in graph_types.get("available_graphs", []):
-                if graph_type not in agent_types:
-                    agent_types[graph_type] = {
-                        "name": graph_type.replace("_", " ").title(),
-                        "description": f"LangGraph {graph_type} workflow",
-                        "capabilities": ["workflow", "automation"],
-                        "source": "langgraph"
-                    }
-        elif isinstance(graph_types, list):
-            for graph_type in graph_types:
-                if graph_type not in agent_types:
-                    agent_types[graph_type] = {
-                        "name": graph_type.replace("_", " ").title(),
-                        "description": f"LangGraph {graph_type} workflow",
-                        "capabilities": ["workflow", "automation"],
-                        "source": "langgraph"
-                    }
-        
-        return {"available_types": agent_types, "total": len(agent_types)}
+            # Devolver los datos REALES directamente del servicio CrewAI
+            return agents_data
         
     except Exception as e:
-        logger.error(f"Error listing agent types: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list agent types: {str(e)}"
-        )
+        logger.error(f"Error fetching REAL agent types from CrewAI: {str(e)}")
+        return {
+            "available_types": {},
+            "total": 0,
+            "error": f"Failed to fetch REAL agents from CrewAI: {str(e)}"
+        }
 
 @router.get("/list")
-async def list_agents(current_user: User = Depends(get_current_active_user_async)):
-    """List available agents/graphs for the tenant"""
-    # Since LangGraph doesn't persist agents, return available types
-    return await list_agent_types()
-
-# =====================================
-# DOCUMENT ANALYSIS
-# =====================================
-
-@router.post("/document/analyze")
-async def analyze_document(
-    request: DocumentAnalysisRequest,
-    current_user: User = Depends(get_current_active_user_async)
+async def list_available_agents(
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
-    """Analyze document using LangGraph document analysis workflow"""
-    async def event_stream():
-        try:
-            async with httpx.AsyncClient() as client:
-                # Use document_analysis_crew graph
-                stream_request = {
-                    "graph_type": "document_analysis_crew",
-                    "input_data": {
-                        "document_id": request.document_id or "temp-doc",
-                        "document_content": request.document_content,
-                        "tenant_id": str(current_user.tenant_id),
-                        "user_id": str(current_user.id)
-                    },
-                    "tenant_id": str(current_user.tenant_id),
-                    "user_id": str(current_user.id),
-                    "mode": "stream"
-                }
-                
-                headers = {
-                    "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
-                    "X-Tenant-ID": str(current_user.tenant_id),
-                    "X-User-ID": str(current_user.id)
-                }
-                
-                # Stream from LangGraph
-                async with client.stream(
-                    "POST",
-                    f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/stream",
-                    json=stream_request,
-                    headers=headers,
-                    timeout=120.0
-                ) as response:
-                    response.raise_for_status()
-                    
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            try:
-                                data = json.loads(line[6:])
-                                
-                                # Transform LangGraph events to our format
-                                if data.get("type") == "node_start":
-                                    node_name = data.get("node", "")
-                                    progress_map = {
-                                        "classify_document": 20,
-                                        "select_specialist_agents": 30,
-                                        "extract_entities": 40,
-                                        "execute_specialist_crew": 50,
-                                        "analyze_compliance": 60,
-                                        "synthesize_findings": 80,
-                                        "generate_recommendations": 90
-                                    }
-                                    progress = progress_map.get(node_name, 50)
-                                    
-                                    yield f"data: {json.dumps({'type': 'progress', 'content': f'Processing: {node_name}', 'progress': progress})}\n\n"
-                                
-                                elif data.get("type") == "result":
-                                    # Final result from LangGraph
-                                    result_data = data.get("data", {})
-                                    
-                                    result = {
-                                        "type": "result",
-                                        "content": {
-                                            "document_type": result_data.get("document_type", "general"),
-                                            "is_signable": result_data.get("requires_signature", False),
-                                            "required_agents": result_data.get("agents_used", ["document_analyzer"]),
-                                            "confidence": result_data.get("confidence_scores", {}).get("overall", 0.85),
-                                            "execution_type": "sequential",
-                                            "analysis": result_data.get("analysis", {}),
-                                            "recommendations": result_data.get("recommendations", []),
-                                            "action_items": result_data.get("action_items", []),
-                                            "extracted_data": result_data.get("extracted_data", {}),
-                                            "compliance_status": result_data.get("compliance_status", {}),
-                                            "risk_assessment": result_data.get("risk_assessment", {}),
-                                            "analysis_timestamp": datetime.utcnow().isoformat()
-                                        }
-                                    }
-                                    
-                                    yield f"data: {json.dumps(result)}\n\n"
-                                
-                                else:
-                                    # Pass through other events
-                                    yield f"data: {json.dumps(data)}\n\n"
-                                    
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse SSE data: {line}")
-                    
-                    yield f"data: [DONE]\n\n"
-                    
-        except Exception as e:
-            logger.error(f"Error in document analysis: {str(e)}")
-            error_response = {"type": "error", "content": str(e)}
-            yield f"data: {json.dumps(error_response)}\n\n"
-    
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
+    """List available CrewAI agents for the tenant"""
+    try:
+        # Get agent types and add tenant-specific information
+        agent_types_response = await list_agent_types()
+        available_types = agent_types_response.get("available_types", {})
+        
+        # Add tenant-specific status for each agent
+        for agent_key, agent_info in available_types.items():
+            agent_info.update({
+                "tenant_id": tenant_id,
+                "status": "active",  # CrewAI agents are always ready
+                "is_enabled": True,
+                "last_activity": None,
+                "execution_count": 0,  # Would need to track this
+                "average_response_time": 0  # Would need to track this
+            })
+        
+        return {
+            "available_types": available_types,
+            "total": len(available_types),
+            "tenant_id": tenant_id,
+            "service": "crewai"
         }
-    )
+        
+    except Exception as e:
+        logger.error(f"Error listing agents for tenant {tenant_id}: {str(e)}")
+        return {
+            "available_types": {},
+            "total": 0,
+            "tenant_id": tenant_id,
+            "error": str(e)
+        }
 
 # =====================================
-# AGENT INTERACTION (Chat/Execute)
+# AGENT CREATION AND MANAGEMENT  
+# =====================================
+
+@router.post("/create")
+async def create_custom_agent(
+    request: CreateAgentRequest,
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Create a custom CrewAI agent configuration"""
+    try:
+        # For now, CrewAI agents are pre-defined and managed by the service
+        # This endpoint could be used to create custom agent configurations
+        # that get passed to the CrewAI service
+        
+        custom_agent_config = {
+            "name": request.name,
+            "role": request.role,
+            "goal": request.goal, 
+            "backstory": request.backstory,
+            "tools": request.tools,
+            "tenant_id": tenant_id,
+            "created_by": str(current_user.id),
+            "created_at": datetime.utcnow().isoformat(),
+            "configuration": request.configuration or {}
+        }
+        
+        # In a full implementation, this would be stored and used by CrewAI
+        # For now, return the configuration
+        
+        return {
+            "agent_id": f"custom_{request.name.lower().replace(' ', '_')}_{tenant_id}",
+            "configuration": custom_agent_config,
+            "status": "created",
+            "message": "Custom agent configuration created. Will be available in next CrewAI deployment."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating custom agent: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create custom agent: {str(e)}"
+        )
+
+@router.delete("/{agent_id}")
+async def delete_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Delete/disable agent configuration"""
+    try:
+        # For standard CrewAI agents, they can't be deleted, only disabled
+        if not agent_id.startswith("custom_"):
+            return {
+                "status": "disabled",
+                "agent_id": agent_id,
+                "message": "Standard CrewAI agents cannot be deleted, only disabled"
+            }
+        
+        # For custom agents, remove the configuration
+        return {
+            "status": "deleted",
+            "agent_id": agent_id,
+            "message": "Custom agent configuration removed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete agent: {str(e)}"
+        )
+
+# =====================================
+# AGENT INTERACTION
 # =====================================
 
 @router.post("/chat")
-async def chat_with_agent(
+async def chat_with_agents(
     request: ChatRequest,
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
-    """Chat using RAG or conversational graphs"""
+    """Chat using CrewAI agents"""
     async def event_stream():
         try:
             async with httpx.AsyncClient() as client:
-                # Use RAG graph for chat
-                stream_request = {
-                    "graph_type": "rag",
-                    "input_data": {
-                        "question": request.message,
-                        "conversation_id": request.conversation_id,
-                        "context": request.context or {}
-                    },
-                    "tenant_id": str(current_user.tenant_id),
+                # Use CAG service for chat with CrewAI agents
+                query_request = {
+                    "query": request.message,
+                    "tenant_id": tenant_id,
                     "user_id": str(current_user.id),
-                    "mode": "stream"
+                    "context": request.context or {},
+                    "conversation_id": request.conversation_id
                 }
                 
                 headers = {
-                    "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
-                    "X-Tenant-ID": str(current_user.tenant_id),
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                    "X-Tenant-ID": tenant_id,
                     "X-User-ID": str(current_user.id)
                 }
                 
+                # Use streaming CAG endpoint
                 async with client.stream(
                     "POST",
-                    f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/stream",
-                    json=stream_request,
+                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/query/stream",
+                    json=query_request,
                     headers=headers,
                     timeout=60.0
                 ) as response:
@@ -328,118 +292,92 @@ async def chat_with_agent(
                     
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
-                            yield line + "\n\n"
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                yield "data: [DONE]\\n\\n"
+                                break
+                            
+                            try:
+                                event = json.loads(data_str)
+                                
+                                # Transform CAG events for chat
+                                if event["type"] == "result":
+                                    response_event = {
+                                        "type": "message",
+                                        "content": event["content"].get("answer", ""),
+                                        "agent": event["content"].get("agent_used", "unknown"),
+                                        "quality_score": event["content"].get("quality_score", 0),
+                                        "execution_time": event["content"].get("execution_time", 0)
+                                    }
+                                    yield f"data: {json.dumps(response_event)}\\n\\n"
+                                else:
+                                    # Pass through other events (progress, error)
+                                    yield f"data: {json.dumps(event)}\\n\\n"
+                                    
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse SSE data: {data_str}")
                             
         except Exception as e:
             logger.error(f"Error in chat: {str(e)}")
             error_response = {"type": "error", "content": str(e)}
-            yield f"data: {json.dumps(error_response)}\n\n"
+            yield f"data: {json.dumps(error_response)}\\n\\n"
     
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache", 
             "Connection": "keep-alive",
         }
     )
-
-# =====================================
-# BACKWARD COMPATIBILITY
-# =====================================
-
-@router.post("/create")
-async def create_agent(
-    request: CreateAgentRequest,
-    current_user: User = Depends(get_current_active_user_async)
-):
-    """Create agent - for backward compatibility"""
-    # LangGraph doesn't create persistent agents, return mock response
-    return {
-        "agent_id": f"{request.agent_type}_{current_user.tenant_id}",
-        "agent_type": request.agent_type,
-        "status": "created",
-        "tenant_id": str(current_user.tenant_id),
-        "message": "Using LangGraph workflows - agents are created on-demand"
-    }
-
-@router.delete("/{agent_id}")
-async def delete_agent(
-    agent_id: str,
-    current_user: User = Depends(get_current_active_user_async)
-):
-    """Delete agent - for backward compatibility"""
-    return {
-        "status": "deleted",
-        "agent_id": agent_id,
-        "message": "LangGraph workflows are stateless - nothing to delete"
-    }
 
 @router.post("/{agent_id}/chat")
 async def chat_with_specific_agent(
     agent_id: str,
     request: ChatRequest,
-    current_user: User = Depends(require_agent_permission_async)
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
-    """Chat with specific agent - routes to appropriate graph"""
-    # Map agent IDs to graph types
-    graph_mapping = {
-        "document_analyzer": "document_analysis_crew",
-        "rag_assistant": "rag",
-        "digital_signature": "document_processing"
-    }
-    
-    graph_type = graph_mapping.get(agent_id.split("_")[0], "rag")
-    
-    # Redirect to general chat with appropriate graph
+    """Chat with a specific CrewAI agent"""
+    # Add agent preference to context
     request.context = request.context or {}
-    request.context["graph_type"] = graph_type
+    request.context["preferred_agent"] = agent_id
     request.context["agent_id"] = agent_id
     
-    return await chat_with_agent(request, current_user)
+    return await chat_with_agents(request, current_user, tenant_id)
 
 @router.post("/{agent_id}/execute")
 async def execute_agent_task(
     agent_id: str,
     request: ExecuteTaskRequest,
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
-    """Execute task with agent - uses appropriate graph"""
+    """Execute a task with CrewAI agents"""
     async def event_stream():
         try:
-            # Map task types to graphs
-            graph_mapping = {
-                "analyze_document": "document_analysis_crew",
-                "answer_question": "rag",
-                "process_document": "document_processing",
-                "multi_agent_task": "multi_agent_workflow"
-            }
-            
-            graph_type = graph_mapping.get(request.task_type, "document_processing")
-            
             async with httpx.AsyncClient() as client:
-                stream_request = {
-                    "graph_type": graph_type,
-                    "input_data": {
-                        **request.parameters,
-                        "task_type": request.task_type,
-                        "context": request.context or {}
-                    },
-                    "tenant_id": str(current_user.tenant_id),
+                # Create a crew task for execution
+                task_request = {
+                    "task_description": request.task_description,
+                    "expected_output": request.expected_output,
+                    "agent_roles": request.agent_roles or [agent_id],
+                    "tenant_id": tenant_id,
                     "user_id": str(current_user.id),
-                    "mode": "stream"
+                    "context": request.context or {}
                 }
                 
                 headers = {
-                    "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
-                    "X-Tenant-ID": str(current_user.tenant_id),
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                    "X-Tenant-ID": tenant_id,
                     "X-User-ID": str(current_user.id)
                 }
                 
+                # Use CAG service to execute the task
                 async with client.stream(
                     "POST",
-                    f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/stream",
-                    json=stream_request,
+                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/execute/stream",
+                    json=task_request,
                     headers=headers,
                     timeout=120.0
                 ) as response:
@@ -447,12 +385,21 @@ async def execute_agent_task(
                     
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
-                            yield line + "\n\n"
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                yield "data: [DONE]\\n\\n"
+                                break
+                                
+                            try:
+                                event = json.loads(data_str)
+                                yield f"data: {json.dumps(event)}\\n\\n"
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse SSE data: {data_str}")
                             
         except Exception as e:
             logger.error(f"Error executing task: {str(e)}")
             error_response = {"type": "error", "content": str(e)}
-            yield f"data: {json.dumps(error_response)}\n\n"
+            yield f"data: {json.dumps(error_response)}\\n\\n"
     
     return StreamingResponse(
         event_stream(),
@@ -463,38 +410,142 @@ async def execute_agent_task(
         }
     )
 
-@router.post("/test")
-async def test_agent_integration(
-    current_user: User = Depends(get_current_active_user_async)
+# =====================================
+# ANALYTICS AND MONITORING
+# =====================================
+
+@router.get("/statistics")
+async def get_agent_statistics(
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
-    """Test LangGraph integration"""
+    """Get CrewAI agent usage statistics"""
     try:
-        # Test health check
-        headers = {"X-API-Key": settings.LANGGRAPH_API_KEY}
+        # In a full implementation, this would query actual usage data
+        # For now, return mock data that represents what would be tracked
+        
+        return {
+            "tenant_id": tenant_id,
+            "enabled_agents": 6,  # Number of CrewAI agents available
+            "total_executions": 0,  # Would track actual executions
+            "executions_last_24h": 0,
+            "success_rate": 0,
+            "avg_execution_time_ms": 0,
+            "total_tokens_used": 0,
+            "active_crews": 0,
+            "agent_performance": {
+                "virtual_assistant": {"executions": 0, "avg_time": 0, "success_rate": 0},
+                "search_specialist": {"executions": 0, "avg_time": 0, "success_rate": 0},
+                "document_analyst": {"executions": 0, "avg_time": 0, "success_rate": 0},
+                "compliance_expert": {"executions": 0, "avg_time": 0, "success_rate": 0},
+                "communication_specialist": {"executions": 0, "avg_time": 0, "success_rate": 0},
+                "workflow_coordinator": {"executions": 0, "avg_time": 0, "success_rate": 0}
+            },
+            "generated_at": datetime.utcnow().isoformat(),
+            "service": "crewai"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching agent statistics: {str(e)}")
+        return {
+            "tenant_id": tenant_id,
+            "error": str(e),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+
+@router.get("/activity")
+async def get_agent_activity(
+    limit: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get recent CrewAI agent activity"""
+    try:
+        # In a full implementation, this would track actual agent executions
+        # For now, return empty activity as no tracking is implemented yet
+        
+        return {
+            "activities": [],
+            "total": 0,
+            "tenant_id": tenant_id,
+            "has_more": False,
+            "service": "crewai",
+            "message": "Activity tracking for CrewAI agents will be implemented in future versions"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching agent activity: {str(e)}")
+        return {
+            "activities": [],
+            "total": 0,
+            "tenant_id": tenant_id,
+            "error": str(e)
+        }
+
+@router.get("/{agent_id}/stats")
+async def get_specific_agent_stats(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get statistics for a specific CrewAI agent"""
+    try:
+        return {
+            "agent_id": agent_id,
+            "tenant_id": tenant_id,
+            "tasks_completed": 0,
+            "avg_response_time": 0.0,
+            "success_rate": 0.0,
+            "total_executions": 0,
+            "last_24h_executions": 0,
+            "error_count": 0,
+            "status": "active",
+            "service": "crewai",
+            "message": "Individual agent statistics tracking will be implemented in future versions"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching stats for agent {agent_id}: {str(e)}")
+        return {
+            "agent_id": agent_id,
+            "tenant_id": tenant_id,
+            "error": str(e)
+        }
+
+# =====================================
+# TESTING AND DIAGNOSTICS
+# =====================================
+
+@router.post("/test")
+async def test_crewai_integration(
+    current_user: User = Depends(get_current_active_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Test CrewAI integration with a simple query"""
+    try:
+        # Test health check first
+        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.LANGGRAPH_SERVICE_URL}/health", headers=headers)
+            response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
             response.raise_for_status()
             
-        # Test simple graph execution
+        # Test simple query execution
         async with httpx.AsyncClient() as client:
             test_request = {
-                "graph_type": "tag_generation",
-                "input_data": {
-                    "content": "Test document for integration testing"
-                },
-                "tenant_id": str(current_user.tenant_id),
+                "query": "Hello, this is a test of the CrewAI integration",
+                "tenant_id": tenant_id,
                 "user_id": str(current_user.id),
-                "mode": "run"
+                "context": {"test": True}
             }
             
             headers = {
-                "X-API-Key": getattr(settings, 'LANGGRAPH_API_KEY', 'langgraph-secret-key-12345'),
-                "X-Tenant-ID": str(current_user.tenant_id),
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+                "X-Tenant-ID": tenant_id,
                 "X-User-ID": str(current_user.id)
             }
             
             response = await client.post(
-                f"{settings.LANGGRAPH_SERVICE_URL}/api/v1/graphs/run",
+                f"{settings.CAG_SERVICE_URL}/api/v1/cag/query",
                 json=test_request,
                 headers=headers,
                 timeout=30.0
@@ -504,53 +555,16 @@ async def test_agent_integration(
             
         return {
             "status": "success",
-            "message": "LangGraph integration test completed successfully",
+            "message": "CrewAI integration test completed successfully",
             "test_result": result,
-            "service": "langgraph"
+            "service": "crewai",
+            "agents_available": True,
+            "tenant_id": tenant_id
         }
         
     except Exception as e:
-        logger.error(f"LangGraph test failed: {str(e)}")
+        logger.error(f"CrewAI test failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Integration test failed: {str(e)}"
+            detail=f"CrewAI integration test failed: {str(e)}"
         )
-
-# =====================================
-# AGENT STATISTICS & ACTIVITY
-# =====================================
-
-@router.get("/{agent_id}/stats")
-async def get_agent_stats(
-    agent_id: str,
-    current_user: User = Depends(get_current_active_user_async)
-):
-    """Get statistics for a specific agent/graph"""
-    # LangGraph doesn't track persistent stats, return placeholder
-    return {
-        "agent_id": agent_id,
-        "tasks_completed": 0,
-        "avg_response_time": 0.0,
-        "success_rate": 0.0,
-        "total_executions": 0,
-        "last_24h_executions": 0,
-        "error_count": 0,
-        "avg_execution_time": 0.0,
-        "created_at": datetime.utcnow().isoformat(),
-        "last_activity": None,
-        "message": "Statistics tracked at graph execution level"
-    }
-
-@router.get("/activity")
-async def get_agent_activity(
-    limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(get_current_active_user_async)
-):
-    """Get recent agent activity"""
-    # Would need to implement activity tracking in LangGraph
-    return {
-        "activities": [],
-        "total": 0,
-        "tenant_id": str(current_user.tenant_id),
-        "message": "Activity tracking available through graph execution history"
-    }

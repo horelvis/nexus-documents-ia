@@ -1,0 +1,16 @@
+# Web framework
+fastapi
+uvicorn[standard]
+
+# CrewAI framework (usamos versión más reciente que no depende de langchain)
+crewai[tools]==0.86.0
+
+# Vector DB y Ollama  
+ollama
+langchain-ollama>=0.2.0
+qdrant-client
+
+# Dependencias básicas
+pydantic
+requests
+loguru

@@ -47,9 +47,13 @@ async def search_entities(
         )
     )
     
-    # Filter by specific document if provided
-    if document_id:
-        doc_query = doc_query.where(Document.id == UUID(document_id))
+    # Filter by specific document if provided (skip if document_id is "general" for global search)
+    if document_id and document_id != "general":
+        try:
+            doc_query = doc_query.where(Document.id == UUID(document_id))
+        except ValueError:
+            logger.warning(f"Invalid document_id format: {document_id}. Treating as general search.")
+            # Continue without document filter for invalid UUIDs
     
     # Execute query
     result = await db.execute(doc_query)

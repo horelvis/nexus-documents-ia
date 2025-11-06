@@ -28,7 +28,8 @@ import {
   IconChevronsLeft,
   IconChevronsRight,
   IconShare2,
-  IconSignature
+  IconSignature,
+  IconRefresh
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -56,7 +57,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Document as ApiDocument } from "@/lib/types"
-import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 
 interface DocumentsDataTableProps {
   data: ApiDocument[]
@@ -179,7 +180,12 @@ export function DocumentsDataTable({
         const document = row.original
         return (
           <div>
-            <div className="font-medium">{document.title || document.filename}</div>
+            <div 
+              className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+              onClick={() => onViewDocument(document)}
+            >
+              {document.title || document.filename}
+            </div>
             {document.description && (
               <div className="text-xs text-muted-foreground line-clamp-1">
                 {document.description}
@@ -226,15 +232,6 @@ export function DocumentsDataTable({
       cell: ({ row }) => row.original.category || "Sin Categoría",
     },
     {
-      accessorKey: "indexed",
-      header: "Status",
-      cell: ({ row }) => (
-        <Badge className={getStatusColor(row.original.indexed)} variant="secondary" size="sm">
-          {getStatusLabel(row.original.indexed)}
-        </Badge>
-      ),
-    },
-    {
       accessorKey: "tags",
       header: "Tags",
       cell: ({ row }) => {
@@ -270,11 +267,11 @@ export function DocumentsDataTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
-              onClick={() => onViewDocument(document)}
-              title="View Details"
+              onClick={() => onFullPagePreview(document)}
+              title="Full Preview"
             >
               <IconEye className="h-4 w-4" />
-              <span className="sr-only">View Details</span>
+              <span className="sr-only">Full Preview</span>
             </Button>
             <Button
               variant="ghost"
@@ -310,9 +307,9 @@ export function DocumentsDataTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={() => onFullPagePreview(document)}>
+                <DropdownMenuItem onClick={() => onViewDocument(document)}>
                   <IconEye className="mr-2 h-4 w-4" />
-                  Full Page Preview
+                  View Details
                 </DropdownMenuItem>
                 {onRequestSignature && (
                   <DropdownMenuItem onClick={() => onRequestSignature(document)}>
@@ -324,6 +321,7 @@ export function DocumentsDataTable({
                   <IconEdit className="mr-2 h-4 w-4" />
                   Edit
                 </DropdownMenuItem>
+                
                 
                 <DropdownMenuSeparator />
                 

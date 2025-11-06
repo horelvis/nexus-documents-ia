@@ -56,8 +56,8 @@ export function useUserOnboarding() {
         })
         
         // Redirect to pricing if not already there
-        if (pathname !== '/pricing' && pathname !== '/onboarding') {
-          router.push('/onboarding')
+        if (pathname !== '/pricing' && !pathname.includes('/onboarding')) {
+          router.push('/pricing')
         }
         return
       }
@@ -74,9 +74,10 @@ export function useUserOnboarding() {
         error: null
       })
 
-      // Redirect to pricing if needed and not already there
-      if (!hasCompletedOnboarding && pathname !== '/pricing' && pathname !== '/onboarding') {
-        router.push('/onboarding')
+      // Redirect to onboarding if needed and not already there
+      if (!hasCompletedOnboarding && pathname !== '/pricing' && !pathname.includes('/onboarding')) {
+        const tenantId = userData?.tenant_id || 'temp'
+        router.push(`/${tenantId}/onboarding`)
       }
 
     } catch (error) {
@@ -92,8 +93,8 @@ export function useUserOnboarding() {
       })
 
       // Redirect to pricing
-      if (pathname !== '/pricing' && pathname !== '/onboarding') {
-        router.push('/onboarding')
+      if (pathname !== '/pricing' && !pathname.includes('/onboarding')) {
+        router.push('/pricing')
       }
     }
   }

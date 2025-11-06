@@ -1,5 +1,6 @@
 """
-Client for Signature AI operations using LangChain microservice
+Client for Signature AI operations using Ollama directly
+Migrated from LangChain microservice to direct integration
 """
 import logging
 import httpx
@@ -12,10 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class SignatureAIClient:
-    """Client for AI signature operations via LangChain microservice"""
+    """Client for AI signature operations via direct Ollama integration"""
     
     def __init__(self):
-        self.base_url = f"http://langchain-service:8001"
+        self.ollama_base_url = settings.OLLAMA_BASE_URL
+        self.default_model = "llama3.2:latest"
         self.timeout = httpx.Timeout(30.0)
     
     async def analyze_document_content(

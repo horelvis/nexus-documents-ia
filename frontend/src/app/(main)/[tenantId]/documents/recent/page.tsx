@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useState, useEffect } from "react"
+import { useParams } from "next/navigation"
 import { 
   IconPlus, 
   IconClock,
@@ -16,15 +17,16 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { useDocumentService } from "@/lib/services/document.service"
-import { Document as ApiDocument } from "@/lib/types"
+import { useDocumentInsightsService, RecentDocument } from "@/lib/services/document-insights.service"
 import { getFileIcon, formatFileSize, getRelativeTime } from "@/lib/document-utils"
 
 export default function RecentDocumentsPage() {
-  const [documents, setDocuments] = useState<ApiDocument[]>([])
+  const params = useParams()
+  const tenantId = params.tenantId as string
+  const [documents, setDocuments] = useState<RecentDocument[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const documentService = useDocumentService()
+  const documentInsightsService = useDocumentInsightsService()
 
   // Load recent documents from API - simple pattern
   const loadRecentDocuments = async () => {
@@ -32,21 +34,13 @@ export default function RecentDocumentsPage() {
     setError(null)
     
     try {
-      // Get processed documents, sorted by created_at desc
-      const response = await documentService.getDocuments({
-        status: 'processed',
-        per_page: 20,
-        page: 1
-      })
+      // Get recently viewed documents from document-insights service
+      const response = await documentInsightsService.getRecentlyViewedDocuments(20, true)
       
       if (response.error) {
         setError(response.error)
       } else {
-        // Sort by created_at to get most recent first
-        const sortedDocs = (response.data?.documents || []).sort((a, b) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )
-        setDocuments(sortedDocs)
+        setDocuments(response.data || [])
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load recent documents')
@@ -73,10 +67,10 @@ export default function RecentDocumentsPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link href="/dashboard/documents">
+            <Link href={`/${tenantId}/documents`}>
               <Button variant="outline">All Documents</Button>
             </Link>
-            <Link href="/dashboard/documents/upload">
+            <Link href={`/${tenantId}/documents/upload`}>
               <Button>
                 <IconPlus className="mr-2 h-4 w-4" />
                 Upload Document
@@ -103,9 +97,9 @@ export default function RecentDocumentsPage() {
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-green-600">
-                  {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin mx-auto" /> : documents.filter(doc => doc.processed_at).length}
+                  {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin mx-auto" /> : documents.filter(doc => doc.indexed).length}
                 </p>
-                <p className="text-sm text-muted-foreground">Processed</p>
+                <p className="text-sm text-muted-foreground">Indexed</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-purple-600">
@@ -140,7 +134,7 @@ export default function RecentDocumentsPage() {
         {/* Recent Documents List */}
         {!isLoading && !error && (
           <div className="space-y-4">
-            {documents.map((document: ApiDocument) => (
+            {documents.map((document: RecentDocument) => (
               <Card key={document.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
@@ -154,10 +148,10 @@ export default function RecentDocumentsPage() {
                           <span>{formatFileSize(document.file_size)}</span>
                           <span>•</span>
                           <span>Uploaded {getRelativeTime(document.created_at)}</span>
-                          {document.processed_at && (
+                          {document.last_viewed_at && (
                             <>
                               <span>•</span>
-                              <span>Processed {getRelativeTime(document.processed_at)}</span>
+                              <span>Last viewed {getRelativeTime(document.last_viewed_at)}</span>
                             </>
                           )}
                         </div>
@@ -197,7 +191,7 @@ export default function RecentDocumentsPage() {
               <p className="text-muted-foreground mb-4">
                 Start viewing documents to see them appear here.
               </p>
-              <Link href="/dashboard/documents">
+              <Link href={`/${tenantId}/documents`}>
                 <Button>
                   Browse Documents
                 </Button>

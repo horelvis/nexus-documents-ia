@@ -1,0 +1,101 @@
+# Cloud Run service configuration for Backend
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexus-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:INSTANCE_NAME
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/PROJECT_ID/nexus-backend:latest
+        ports:
+        - containerPort: 8000
+        env:
+        # Database
+        - name: DATABASE_URL
+          value: "postgresql://user:password@/db?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME"
+        
+        # Redis
+        - name: REDIS_URL
+          value: "redis://your-redis-instance:6379"
+        
+        # Storage
+        - name: STORAGE_SERVICE_URL
+          value: "https://storage-service-HASH-uc.a.run.app"
+        - name: GCS_PROJECT_ID
+          value: "PROJECT_ID"
+        - name: GCS_BUCKET_NAME
+          value: "your-gcs-bucket"
+        
+        # Authentication
+        - name: CLERK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: clerk-secret
+              key: secret-key
+        
+        # Payments
+        - name: STRIPE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: stripe-secret
+              key: secret-key
+        
+        # URLs
+        - name: FRONTEND_URL
+          value: "https://nexus-frontend-HASH-uc.a.run.app"
+        - name: API_BASE_URL
+          value: "https://nexus-backend-HASH-uc.a.run.app"
+        
+        # Environment
+        - name: DEBUG
+          value: "false"
+        - name: ALLOW_ALL_CORS
+          value: "false"
+        
+        resources:
+          limits:
+            cpu: "2000m"
+            memory: "1Gi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+        
+        # Mount GCS credentials
+        volumeMounts:
+        - name: gcs-key
+          mountPath: /etc/secrets/gcs-key
+          readOnly: true
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      
+      volumes:
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+  
+  traffic:
+  - percent: 100
+    latestRevision: true

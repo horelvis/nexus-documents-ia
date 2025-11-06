@@ -3,6 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
+import { TenantNotFound } from '@/components/errors/tenant-not-found'
 import { Loader2 } from 'lucide-react'
 
 interface ProfileVerificationGuardProps {
@@ -11,12 +12,12 @@ interface ProfileVerificationGuardProps {
 }
 
 export function ProfileVerificationGuard({ children, fallback }: ProfileVerificationGuardProps) {
-  const { isClerkLoaded, isSignedIn, backendUser, userLoading } = useUserContext()
+  const { isClerkLoaded, isSignedIn, backendUser, userLoading, onboarding, refetchUser } = useUserContext()
   const router = useRouter()
   const pathname = usePathname()
   
   // Lista simple de rutas permitidas sin verificación completa
-  const allowedPaths = ['/onboarding', '/pricing', '/plans', '/auth/', '/help']
+  const allowedPaths = ['/onboarding', '/pricing', '/plans', '/auth/', '/help', '/checkout']
   const isAllowedPath = allowedPaths.some(path => pathname.includes(path))
   
   useEffect(() => {
@@ -28,18 +29,21 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
       return
     }
     
-    // Si no está en ruta permitida, verificar estado
+    // Subscription redirects are now handled by middleware.ts
+    // Only handle onboarding redirects here if needed
     if (!isAllowedPath && backendUser) {
-      // Solo redirigir a onboarding si:
-      // 1. No ha completado onboarding
-      // 2. Tiene una suscripción activa (no es plan free)
-      if (!backendUser.onboarding_completed && backendUser.subscription_plan && backendUser.subscription_plan !== 'free') {
-        router.push('/onboarding')
+      // Check if user needs onboarding
+      // Only redirect to onboarding if:
+      // 1. Has not completed onboarding
+      // 2. Has an active subscription (including trial)
+      const hasActiveSubscription = backendUser.subscription_plan && 
+        (backendUser.subscription_plan !== 'free' || backendUser.subscription_status === 'trialing')
+      
+      if (!backendUser.onboarding_completed && hasActiveSubscription) {
+        const tenantId = backendUser.tenant_id || 'temp'
+        router.push(`/${tenantId}/onboarding`)
         return
       }
-      
-      // Si es usuario free sin onboarding completado, está bien
-      // El onboarding solo es requerido para usuarios con suscripción pagada
     }
   }, [isClerkLoaded, isSignedIn, backendUser, userLoading, pathname, isAllowedPath])
   
@@ -55,6 +59,12 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
   // No autenticado
   if (!isSignedIn) {
     return null
+  }
+  
+  // Check for invalid tenant ID
+  if (onboarding.error === 'INVALID_TENANT') {
+    const tenantId = backendUser?.tenant_id || 'default'
+    return <TenantNotFound tenantId={tenantId} onRetry={refetchUser} />
   }
   
   // Rutas permitidas o verificación pasada

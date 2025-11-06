@@ -13,13 +13,14 @@ export default function PricingPage() {
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
     if (plan.id === 'free') {
       // Redirect directly to signup for free plan
-      window.location.href = '/auth/sign-up?plan=free'
+      const currentHost = window.location.origin;
+      window.location.href = `${currentHost}/auth/sign-up?plan=free`
       return
     }
 
     if (plan.id === 'enterprise') {
       // Open contact form or redirect to sales
-      window.location.href = 'mailto:sales@nexus.com?subject=Enterprise%20Plan%20Inquiry'
+      window.location.href = 'mailto:sales@nexusdocs360.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información&body=Hola,%0A%0AEstoy%20interesado%20en%20el%20plan%20Enterprise%20de%20NexusDocs360.%0A%0ANombre%20de%20la%20empresa:%20%0ANúmero%20de%20usuarios:%20%0ARequerimientos%20específicos:%20%0A%0AGracias.'
       return
     }
 
@@ -41,14 +42,14 @@ export default function PricingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+    <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16">
         {/* Header */}
         <div className="text-center mb-16">
           <Badge className="mb-4" variant="secondary">
             Pricing
           </Badge>
-          <h1 className="text-4xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          <h1 className="text-4xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-purple-500 to-purple-700 bg-clip-text text-transparent">
             Choose Your Plan
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
@@ -63,13 +64,13 @@ export default function PricingPage() {
               key={plan.id} 
               className={`relative transition-all duration-300 hover:shadow-xl ${
                 plan.popular 
-                  ? 'ring-2 ring-blue-500 shadow-lg scale-105' 
+                  ? 'ring-2 ring-purple-600 shadow-lg scale-105' 
                   : 'hover:scale-105'
               }`}
             >
               {plan.popular && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-1">
+                  <Badge className="bg-gradient-to-r from-purple-500 to-purple-700 text-white px-4 py-1">
                     <Star className="w-4 h-4 mr-1" />
                     Most Popular
                   </Badge>
@@ -86,12 +87,19 @@ export default function PricingPage() {
                 </CardDescription>
                 <div className="pt-4">
                   <span className="text-5xl font-bold">
-                    {plan.price === 0 ? 'Free' : formatPrice(plan.price)}
+                    {plan.price === 0 ? 'Free' : plan.price === null ? 'Custom' : formatPrice(plan.price)}
                   </span>
-                  {plan.price > 0 && (
+                  {plan.price && plan.price > 0 && (
                     <span className="text-gray-500 dark:text-gray-400 ml-1">
                       /{plan.interval}
                     </span>
+                  )}
+                  {plan.price === null && (
+                    <div className="mt-2">
+                      <span className="text-sm text-gray-500">
+                        Precios personalizados según tus necesidades
+                      </span>
+                    </div>
                   )}
                   {plan.yearlyPrice && (
                     <div className="mt-2">
@@ -118,24 +126,70 @@ export default function PricingPage() {
               </CardContent>
 
               <CardFooter className="flex flex-col space-y-2">
-                <Button
-                  className="w-full"
-                  variant={plan.popular ? 'default' : 'outline'}
-                  size="lg"
-                  onClick={() => handlePlanSelection(plan)}
-                >
-                  {getPlanIcon(plan.id)}
-                  <span className="ml-2">{plan.cta}</span>
-                </Button>
-                {plan.yearlyPrice && plan.price > 0 && (
-                  <Button
-                    className="w-full"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handlePlanSelection(plan, true)}
-                  >
-                    Choose Yearly (Save {calculateYearlyDiscount(plan.price * 12, plan.yearlyPrice)}%)
-                  </Button>
+                {plan.id === 'pro' ? (
+                  // Pro plan with dual buttons
+                  <>
+                    <div className="grid grid-cols-2 gap-2 w-full">
+                      <Button
+                        className="w-full"
+                        variant="default"
+                        size="lg"
+                        onClick={() => handlePlanSelection(plan)}
+                      >
+                        {getPlanIcon(plan.id)}
+                        <span className="ml-2">{plan.cta}</span>
+                      </Button>
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        size="lg"
+                        onClick={() => {
+                          // Use relative path to ensure it works with any base URL
+                          const currentHost = window.location.origin;
+                          window.location.href = `${currentHost}/auth/sign-up?plan=free`;
+                        }}
+                      >
+                        <Star className="w-4 h-4 mr-2" />
+                        Probar gratis
+                      </Button>
+                    </div>
+                    <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-2">
+                      Elige entre pagar o probar 14 días gratis
+                    </p>
+                    {plan.yearlyPrice && (
+                      <Button
+                        className="w-full mt-2"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handlePlanSelection(plan, true)}
+                      >
+                        Ahorra {calculateYearlyDiscount(plan.price * 12, plan.yearlyPrice)}% con plan anual
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  // Other plans with single button
+                  <>
+                    <Button
+                      className="w-full"
+                      variant={plan.popular ? 'default' : 'outline'}
+                      size="lg"
+                      onClick={() => handlePlanSelection(plan)}
+                    >
+                      {getPlanIcon(plan.id)}
+                      <span className="ml-2">{plan.cta}</span>
+                    </Button>
+                    {plan.yearlyPrice && plan.price > 0 && (
+                      <Button
+                        className="w-full"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handlePlanSelection(plan, true)}
+                      >
+                        Choose Yearly (Save {calculateYearlyDiscount(plan.price * 12, plan.yearlyPrice)}%)
+                      </Button>
+                    )}
+                  </>
                 )}
               </CardFooter>
             </Card>

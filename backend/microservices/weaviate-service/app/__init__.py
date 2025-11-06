@@ -1,0 +1,1 @@
+# Weaviate Service with Elysia Integration

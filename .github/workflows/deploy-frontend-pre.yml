@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - pre
-      - develp-new  # Agregado para tu rama actual
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend-pre.yml'

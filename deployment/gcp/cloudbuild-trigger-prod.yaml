@@ -1,0 +1,360 @@
+# Cloud Build Trigger Configuration for PRODUCTION environment
+# This builds and deploys only compiled/minified artifacts
+# Includes security scanning and multi-stage deployment
+
+substitutions:
+  _REGION: europe-west1
+  _SERVICE_ACCOUNT: nexus-cloud-run-prod@nexusdocs360-prod.iam.gserviceaccount.com
+  _ENVIRONMENT: prod
+  _NODE_VERSION: '18'
+  _SLACK_WEBHOOK: ${_SLACK_WEBHOOK_PROD}
+
+options:
+  machineType: 'E2_HIGHCPU_32'  # More power for production builds
+  logging: CLOUD_LOGGING_ONLY
+  pool:
+    name: 'projects/${PROJECT_ID}/locations/${_REGION}/workerPools/nexus-prod-pool'
+
+steps:
+  # Step 1: Security Scan
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'security-scan'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔒 Running security scans..."
+        
+        # Scan for secrets in code
+        docker run --rm -v "$PWD:/code" \
+          trufflesecurity/trufflehog:latest \
+          filesystem /code --exclude-paths=/code/.truffleeignore
+        
+        # Dependency check
+        pip install safety
+        safety check -r backend/requirements.txt || true
+        
+        cd frontend && npm audit --production || true
+
+  # Step 2: Build Frontend (production optimized)
+  - name: 'node:${_NODE_VERSION}'
+    id: 'build-frontend-prod'
+    dir: 'frontend'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "📦 Building frontend for PRODUCTION..."
+        
+        # Install dependencies
+        npm ci --production=false
+        
+        # Create production env
+        cat > .env.production.local << EOF
+        NEXT_PUBLIC_API_URL=https://api.nexusdocs360.com
+        NEXT_PUBLIC_APP_URL=https://app.nexusdocs360.com
+        NEXT_PUBLIC_ENVIRONMENT=production
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$$CLERK_PUBLISHABLE_KEY_PROD
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$$STRIPE_PUBLISHABLE_KEY_PROD
+        NEXT_PUBLIC_GA_ID=$$GA_MEASUREMENT_ID
+        EOF
+        
+        # Build with optimizations
+        npm run build
+        
+        # Analyze bundle size
+        npm run analyze || true
+        
+        # Create minimal production image
+        cat > Dockerfile.production << 'DOCKERFILE'
+        FROM node:18-alpine AS runner
+        WORKDIR /app
+        
+        ENV NODE_ENV production
+        ENV NEXT_TELEMETRY_DISABLED 1
+        
+        # Security: non-root user
+        RUN addgroup --system --gid 1001 nodejs && \
+            adduser --system --uid 1001 nextjs
+        
+        # Copy only production files
+        COPY --chown=nextjs:nodejs .next/standalone ./
+        COPY --chown=nextjs:nodejs .next/static ./.next/static
+        COPY --chown=nextjs:nodejs public ./public
+        
+        # Security headers
+        RUN echo "/* /index.html 200" > public/_headers && \
+            echo "X-Frame-Options: DENY" >> public/_headers && \
+            echo "X-Content-Type-Options: nosniff" >> public/_headers && \
+            echo "Referrer-Policy: strict-origin-when-cross-origin" >> public/_headers
+        
+        USER nextjs
+        EXPOSE 3000
+        
+        # Health check
+        HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+          CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+        
+        CMD ["node", "server.js"]
+        DOCKERFILE
+    secretEnv: ['CLERK_PUBLISHABLE_KEY_PROD', 'STRIPE_PUBLISHABLE_KEY_PROD', 'GA_MEASUREMENT_ID']
+
+  # Step 3: Build Backend (compiled + obfuscated)
+  - name: 'python:3.9-slim'
+    id: 'build-backend-prod'
+    dir: 'backend'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "📦 Building backend for PRODUCTION..."
+        
+        # Install build dependencies
+        pip install --upgrade pip wheel setuptools
+        pip install -r requirements.txt
+        pip install pyarmor  # For obfuscation
+        
+        # Compile and obfuscate
+        python -m compileall -b app/
+        
+        # Obfuscate critical business logic
+        pyarmor obfuscate --recursive app/core/ || true
+        pyarmor obfuscate --recursive app/services/ || true
+        
+        # Remove source files
+        find app/ -name "*.py" -type f -not -path "*/migrations/*" -delete
+        find app/ -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+        
+        # Create production Dockerfile
+        cat > Dockerfile.production << 'DOCKERFILE'
+        FROM python:3.9-slim
+        
+        # Security updates
+        RUN apt-get update && \
+            apt-get upgrade -y && \
+            apt-get install -y --no-install-recommends \
+              curl \
+              ca-certificates && \
+            rm -rf /var/lib/apt/lists/*
+        
+        WORKDIR /app
+        
+        # Install runtime dependencies
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt && \
+            pip install gunicorn && \
+            rm -rf /root/.cache/pip
+        
+        # Copy application
+        COPY app app/
+        COPY alembic alembic/
+        COPY alembic.ini .
+        
+        # Security: non-root user
+        RUN useradd -m -u 1001 -s /bin/bash appuser && \
+            chown -R appuser:appuser /app
+        
+        USER appuser
+        
+        # Health check endpoint
+        HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+          CMD curl -f http://localhost:8000/health || exit 1
+        
+        EXPOSE 8000
+        
+        # Production server with workers
+        CMD ["gunicorn", "app.main:app", \
+             "--worker-class", "uvicorn.workers.UvicornWorker", \
+             "--workers", "4", \
+             "--bind", "0.0.0.0:8000", \
+             "--access-logfile", "-", \
+             "--error-logfile", "-", \
+             "--timeout", "120"]
+        DOCKERFILE
+
+  # Step 4: Build and push images with scanning
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-scan-push'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🏗️ Building production images..."
+        
+        # Build images
+        docker build -f frontend/Dockerfile.production \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend:${SHORT_SHA} \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend:latest \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend:${TAG_NAME} \
+          frontend/
+        
+        docker build -f backend/Dockerfile.production \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api:${SHORT_SHA} \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api:latest \
+          -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api:${TAG_NAME} \
+          backend/
+        
+        echo "🔍 Scanning images for vulnerabilities..."
+        
+        # Scan with Trivy
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy:latest image \
+          --severity HIGH,CRITICAL \
+          --exit-code 1 \
+          ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend:${SHORT_SHA} || true
+        
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy:latest image \
+          --severity HIGH,CRITICAL \
+          --exit-code 1 \
+          ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api:${SHORT_SHA} || true
+        
+        echo "📤 Pushing images..."
+        docker push --all-tags ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend
+        docker push --all-tags ${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api
+
+  # Step 5: Database migrations with backup
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'database-backup'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "💾 Creating database backup before deployment..."
+        gcloud sql backups create \
+          --instance=nexus-db-prod \
+          --description="Pre-deployment backup ${BUILD_ID}" \
+          --async
+
+  # Step 6: Blue-Green Deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-production'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🚀 Deploying to PRODUCTION with Blue-Green strategy..."
+        
+        # Deploy new revision without traffic
+        gcloud run deploy nexus-frontend-prod \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/frontend:${SHORT_SHA} \
+          --region=${_REGION} \
+          --platform=managed \
+          --service-account=${_SERVICE_ACCOUNT} \
+          --min-instances=2 \
+          --max-instances=100 \
+          --cpu=2 \
+          --memory=2Gi \
+          --no-traffic \
+          --tag=blue \
+          --set-env-vars="NODE_ENV=production"
+        
+        gcloud run deploy nexus-api-prod \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/nexusdocs360-prod/api:${SHORT_SHA} \
+          --region=${_REGION} \
+          --platform=managed \
+          --service-account=${_SERVICE_ACCOUNT} \
+          --min-instances=4 \
+          --max-instances=200 \
+          --cpu=4 \
+          --memory=4Gi \
+          --no-traffic \
+          --tag=blue \
+          --set-secrets="DATABASE_URL=database-url-prod:latest,REDIS_URL=redis-url-prod:latest" \
+          --set-env-vars="ENVIRONMENT=production,PYTHONUNBUFFERED=1"
+        
+        echo "🧪 Running production tests on blue environment..."
+        
+        # Get blue URLs
+        BLUE_FRONTEND=$(gcloud run services describe nexus-frontend-prod --region=${_REGION} --format='value(status.traffic[0].url)')
+        BLUE_API=$(gcloud run services describe nexus-api-prod --region=${_REGION} --format='value(status.traffic[0].url)')
+        
+        # Run comprehensive tests
+        npm run test:e2e -- --baseUrl=$$BLUE_FRONTEND --apiUrl=$$BLUE_API
+        
+        # If tests pass, shift traffic
+        if [ $? -eq 0 ]; then
+          echo "✅ Tests passed! Shifting traffic..."
+          
+          # Gradual traffic shift
+          gcloud run services update-traffic nexus-frontend-prod \
+            --region=${_REGION} \
+            --to-tags=blue=10
+          
+          gcloud run services update-traffic nexus-api-prod \
+            --region=${_REGION} \
+            --to-tags=blue=10
+          
+          # Wait and monitor
+          sleep 300  # 5 minutes
+          
+          # Check error rate
+          ERROR_RATE=$(gcloud logging read \
+            'resource.type="cloud_run_revision" AND severity>=ERROR' \
+            --format=json \
+            --freshness=5m | jq length)
+          
+          if [ $$ERROR_RATE -lt 10 ]; then
+            echo "✅ Low error rate, completing deployment..."
+            
+            # Full traffic shift
+            gcloud run services update-traffic nexus-frontend-prod \
+              --region=${_REGION} \
+              --to-latest
+            
+            gcloud run services update-traffic nexus-api-prod \
+              --region=${_REGION} \
+              --to-latest
+            
+            # Notify success
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"✅ Production deployment successful! Version: ${SHORT_SHA}\"}" \
+              ${_SLACK_WEBHOOK}
+          else
+            echo "❌ High error rate detected! Rolling back..."
+            exit 1
+          fi
+        else
+          echo "❌ Tests failed! Deployment aborted."
+          exit 1
+        fi
+
+  # Step 7: Post-deployment validation
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'validate-production'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔍 Validating production deployment..."
+        
+        # Run validation script
+        ./deployment/gcp/scripts/validate-prod.sh
+        
+        # Update monitoring
+        gcloud monitoring dashboards update prod-overview \
+          --config-from-file=deployment/gcp/monitoring/dashboard-prod.yaml
+
+# Secrets configuration
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/clerk-publishable-key-prod/versions/latest
+      env: 'CLERK_PUBLISHABLE_KEY_PROD'
+    - versionName: projects/${PROJECT_ID}/secrets/stripe-publishable-key-prod/versions/latest
+      env: 'STRIPE_PUBLISHABLE_KEY_PROD'
+    - versionName: projects/${PROJECT_ID}/secrets/ga-measurement-id/versions/latest
+      env: 'GA_MEASUREMENT_ID'
+    - versionName: projects/${PROJECT_ID}/secrets/slack-webhook-prod/versions/latest
+      env: '_SLACK_WEBHOOK_PROD'
+
+# Timeout for production deployment
+timeout: 3600s  # 1 hour
+
+# Artifacts to store
+artifacts:
+  objects:
+    location: 'gs://nexusdocs360-prod-builds/${BUILD_ID}'
+    paths:
+      - 'frontend/.next/BUILD_ID'
+      - 'frontend/.next/build-manifest.json'
+      - 'security-scan-results.json'

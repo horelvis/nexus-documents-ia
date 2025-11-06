@@ -4,10 +4,17 @@ This directory contains Docker configurations for running the Nexus Document Bac
 
 ## Quick Start
 
-### Development Mode (Recommended)
+### Fast Development Mode (Recommended for active development)
+```bash
+./start-dev-fast.sh
+```
+**Best for:** Maximum development speed with instant code changes
+
+### Standard Development Mode
 ```bash
 ./start-dev.sh
 ```
+**Best for:** When you need to modify dependencies or Dockerfiles
 
 ### Production Mode
 ```bash
@@ -16,29 +23,41 @@ This directory contains Docker configurations for running the Nexus Document Bac
 
 ## Development vs Production
 
-### 🔧 Development Mode (`docker-compose.dev.yml`)
+### ⚡ Fast Development Mode (`docker-compose.dev.yml` + `start-dev-fast.sh`)
 
-**Best for:** Active development, debugging, testing changes
+**Best for:** Maximum development speed with instant code changes
 
 **Features:**
-- ✅ **Live code reloading** - Python files mounted as volumes
-- ✅ **No rebuilds needed** - Only when requirements change
-- ✅ **Auto-reload enabled** - uvicorn `--reload` flag
-- ✅ **Faster iteration** - Immediate code changes
-- ✅ **Development debugging** - Full source access
-
-**Files:**
-- `docker-compose.dev.yml` - Development configuration
-- `Dockerfile.dev` - Development images for each microservice
-- `start-dev.sh` - Development startup script
+- ✅ **Instant code changes** - No rebuilds, just save and refresh
+- ✅ **Volume mounting** - All source code mounted as volumes
+- ✅ **Live reloading** - uvicorn `--reload` flag on all services
+- ✅ **Smart building** - Only rebuilds when dependencies change
+- ✅ **Full debugging** - Source maps and error traces
+- ✅ **Hot module replacement** - Changes reflect immediately
 
 **Volume Mounts:**
 ```
-microservices/langchain-service/app  → /app/app  (live reload)
-microservices/langroid-service/app   → /app/app  (live reload) 
-microservices/storage-service/app    → /app/app  (live reload)
-microservices/ollama-service/app     → /app/app  (live reload)
+../app                          → /app/app          (main API)
+../microservices/*/app          → /app/app          (all microservices)
+../credentials                  → /app/credentials  (GCS keys)
+../scripts                      → /app/scripts      (utility scripts)
 ```
+
+### 🔧 Standard Development Mode (`docker-compose.yml` + `start-dev.sh`)
+
+**Best for:** When you need to modify Dockerfiles or dependencies
+
+**Features:**
+- ✅ **Traditional Docker** - Rebuilds on every startup
+- ✅ **Clean builds** - Ensures consistency
+- ✅ **Dependency updates** - Picks up requirements.txt changes
+- ✅ **Dockerfile changes** - Applies configuration updates
+
+**When to use:**
+- After modifying `requirements.txt`
+- After changing `Dockerfile`
+- When you want guaranteed clean state
+- For CI/CD pipeline testing
 
 ### 🚀 Production Mode (`docker-compose.yml`)
 
@@ -91,22 +110,40 @@ cp .env.example .env
 
 ## Usage Commands
 
-### Development Workflow
+### Fast Development Workflow (Recommended)
 ```bash
-# Start development environment
-./start-dev.sh
+# Start fast development environment
+./start-dev-fast.sh
 
 # View logs
 docker compose -f docker-compose.dev.yml logs -f
 
 # View specific service logs
-docker compose -f docker-compose.dev.yml logs -f langchain-service
+docker compose -f docker-compose.dev.yml logs -f api
 
 # Stop services
 docker compose -f docker-compose.dev.yml down
 
 # Restart a single service
-docker compose -f docker-compose.dev.yml restart langchain-service
+docker compose -f docker-compose.dev.yml restart api
+```
+
+### Standard Development Workflow
+```bash
+# Start standard development environment
+./start-dev.sh
+
+# View logs
+docker compose logs -f
+
+# View specific service logs
+docker compose logs -f api
+
+# Stop services
+docker compose down
+
+# Restart a single service
+docker compose restart api
 ```
 
 ### Production Workflow  

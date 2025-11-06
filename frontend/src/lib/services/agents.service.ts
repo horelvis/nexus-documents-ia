@@ -218,14 +218,14 @@ export class AgentsService {
     await this.apiClient.post(`${API_CONFIG.ENDPOINTS.AGENTS}/${agentId}/execute/stream`, request)
   }
 
-  // Health check for LangGraph integration
-  async checkLangGraphHealth() {
+  // Health check for CAG integration
+  async checkCAGHealth() {
     const response = await this.apiClient.get<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/health`)
     return response
   }
 
-  // Test LangGraph integration
-  async testLangGraphAgent() {
+  // Test CAG integration
+  async testCAGAgent() {
     const response = await this.apiClient.post<any>(`${API_CONFIG.ENDPOINTS.AGENTS}/test`)
     return response
   }

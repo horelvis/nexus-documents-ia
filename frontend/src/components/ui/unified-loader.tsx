@@ -4,22 +4,30 @@ import { IconLoader2 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
 
-// Company Logo Component (reutilizado del loading.tsx)
+// Company Logo Component (perfectamente circular)
 function CompanyLogo({ className, size = "md" }: { className?: string; size?: "sm" | "md" | "lg" }) {
   const sizeClasses = {
-    sm: "p-1.5 text-lg",
-    md: "p-2 text-xl",
-    lg: "p-3 text-2xl"
+    sm: "w-8 h-8 text-sm",
+    md: "w-10 h-10 text-base", 
+    lg: "w-12 h-12 text-lg"
   }
   
   return (
     <div className={cn("flex items-center justify-center", className)}>
       <div className={cn(
-        "bg-gradient-to-br from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500",
-        "text-white rounded-lg shadow-lg font-bold",
+        "bg-gradient-to-br from-purple-500 via-purple-600 to-purple-700",
+        "dark:from-purple-400 dark:via-purple-500 dark:to-purple-600",
+        "text-white rounded-full shadow-xl font-bold",
+        "border-2 border-white/20 dark:border-white/10",
+        "transition-all duration-300",
+        "hover:scale-110 hover:shadow-2xl",
+        "relative overflow-hidden",
+        "flex items-center justify-center",
         sizeClasses[size]
       )}>
-        N
+        {/* Efecto de brillo */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-white/20 via-transparent to-transparent rounded-full" />
+        <span className="relative z-10 font-extrabold tracking-tight">N</span>
       </div>
     </div>
   )
@@ -37,7 +45,7 @@ interface UnifiedLoaderProps {
 
 const sizeClasses = {
   sm: "h-6 w-6",
-  md: "h-12 w-12",
+  md: "h-12 w-12", 
   lg: "h-16 w-16"
 }
 
@@ -60,18 +68,53 @@ export function UnifiedLoader({
 
   // Componente principal del spinner con animaciones mejoradas
   const SpinnerComponent = (
-    <div className="relative">
-      <IconLoader2 
-        className={cn(
-          "animate-spin text-purple-600 dark:text-purple-400",
-          sizeClasses[size]
-        )} 
-      />
+    <div className="relative flex items-center justify-center">
+      {/* Círculo base */}
+      <div className={cn(
+        "absolute rounded-full border-4 border-purple-100/50 dark:border-purple-900/50",
+        sizeClasses[size]
+      )} />
+      
+      {/* Círculo principal que gira */}
+      <div className={cn(
+        "absolute animate-spin rounded-full border-4 border-transparent",
+        "border-t-purple-600 border-r-purple-500 border-l-purple-400",
+        "dark:border-t-purple-400 dark:border-r-purple-300 dark:border-l-purple-500",
+        "drop-shadow-lg",
+        sizeClasses[size]
+      )} />
+      
+      {/* Círculo secundario que gira en dirección opuesta */}
+      <div className={cn(
+        "absolute animate-reverse-spin rounded-full border-2 border-transparent",
+        "border-b-purple-400 border-l-purple-300",
+        "dark:border-b-purple-600 dark:border-l-purple-700",
+        sizeClasses[size]
+      )} />
+      
+      {/* Logo en el centro (no gira) con mejores efectos */}
+      {showLogo && (variant === "initial" || variant === "page") && (
+        <div className="relative z-10 animate-pulse">
+          <CompanyLogo 
+            size={size === "lg" ? "md" : size === "md" ? "sm" : "sm"} 
+            className="drop-shadow-md"
+          />
+        </div>
+      )}
+      
+      {/* Efecto glow para variantes principales - perfectamente circular */}
       {(variant === "initial" || variant === "page") && size !== "sm" && (
-        <div className={cn(
-          "absolute inset-0 animate-ping rounded-full bg-purple-600/20 dark:bg-purple-400/20",
-          sizeClasses[size]
-        )} />
+        <>
+          <div className={cn(
+            "absolute animate-ping rounded-full bg-purple-500/20 dark:bg-purple-400/20",
+            size === "lg" ? "w-20 h-20" : size === "md" ? "w-14 h-14" : "w-8 h-8"
+          )} />
+          <div className={cn(
+            "absolute animate-pulse rounded-full bg-gradient-to-r from-purple-500/10 to-purple-600/10",
+            "dark:from-purple-400/10 dark:to-purple-500/10",
+            size === "lg" ? "w-24 h-24" : size === "md" ? "w-16 h-16" : "w-10 h-10"
+          )} />
+        </>
       )}
     </div>
   )
@@ -84,8 +127,11 @@ export function UnifiedLoader({
   // Variante inline - para uso dentro de componentes
   if (variant === "inline") {
     return (
-      <div className={cn("flex items-center justify-center gap-2 py-4", className)}>
-        <IconLoader2 className="h-4 w-4 animate-spin text-purple-600 dark:text-purple-400" />
+      <div className={cn("flex items-center justify-center gap-3 py-4", className)}>
+        <div className="relative flex items-center justify-center">
+          <div className="absolute w-4 h-4 rounded-full border-2 border-purple-200 dark:border-purple-900" />
+          <div className="absolute w-4 h-4 animate-spin rounded-full border-2 border-transparent border-t-purple-600 dark:border-t-purple-400" />
+        </div>
         {text && <span className="text-sm text-muted-foreground">{text}</span>}
       </div>
     )
@@ -93,11 +139,7 @@ export function UnifiedLoader({
 
   // Contenido del loader para variantes initial y page
   const LoaderContent = (
-    <div className="flex flex-col items-center space-y-4">
-      {showLogo && variant === "initial" && (
-        <CompanyLogo size={size} className="mb-2" />
-      )}
-      
+    <div className="flex flex-col items-center space-y-6">
       {SpinnerComponent}
       
       <div className="space-y-2 text-center">

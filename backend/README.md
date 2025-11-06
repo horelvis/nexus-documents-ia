@@ -125,7 +125,7 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 │          │Session Store  │  │Service    │Service         │  │Cloud    │Payment │
 ├──────────┼──────────────┤  ├───────────┼────────────────┤  │Storage  │API     │
 │Qdrant    │Alembic       │  │Storage    │Ollama          │  ├─────────┼────────┤
-│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │SendGrid│
+│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │Google  │
 │          │              │  ├───────────┼────────────────┤  │Auth     │Email   │
 │          │              │  │Gotenberg  │                │  └─────────┴────────┘
 │          │              │  │Service    │                │
@@ -196,7 +196,7 @@ User Request → Clerk Auth → Tenant Resolution → Data Isolation → Respons
 ### External Services
 - **Clerk**: Authentication and user management
 - **Stripe**: Payment processing
-- **SendGrid**: Email notifications
+- **Google Workspace**: Email services
 - **Sentry**: Error tracking
 
 ## Project Structure
@@ -358,9 +358,13 @@ nexus-document-backend/
    - Install and run Redis
    - Install and run Qdrant
 
-4. **Run database migrations**
+4. **Run database migrations safely**
    ```bash
-   alembic upgrade head
+   # Check for potential conflicts
+   python scripts/alembic_safe_migrate.py --check
+
+   # Apply migrations with safety checks
+   python scripts/alembic_safe_migrate.py
    ```
 
 5. **Start the API server**
@@ -423,9 +427,13 @@ python scripts/alembic_utils.py check
 python scripts/alembic_utils.py visualize
 ```
 
-**Apply migrations:**
+**Apply migrations safely:**
 ```bash
-alembic upgrade head
+# Check for conflicts first
+python scripts/alembic_safe_migrate.py --check
+
+# Apply migrations with safety checks
+python scripts/alembic_safe_migrate.py
 ```
 
 #### 3. **Frontend Development**

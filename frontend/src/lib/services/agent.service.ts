@@ -5,16 +5,20 @@ export interface Agent {
   id: string
   name: string
   description?: string
-  agent_type: 'generic' | 'document_analyzer' | 'digital_signature' | 'rag_assistant' | 'contract_analyzer' | 'financial_analyzer' | 'legal_compliance'
-  tenant_id: string
-  created_by: string
-  created_at: string
-  updated_at: string
-  status: 'inactive' | 'active' | 'busy' | 'error'
+  agent_type: 'virtual_assistant' | 'search_specialist' | 'document_analyst' | 'compliance_expert' | 'communication_specialist' | 'workflow_coordinator' | 'generic' | 'document_analyzer' | 'digital_signature' | 'rag_assistant' | 'contract_analyzer' | 'financial_analyzer' | 'legal_compliance'
+  tenant_id?: string
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+  status: 'inactive' | 'active' | 'busy' | 'error' | 'idle'
   last_activity?: string
-  configuration: Record<string, any>
-  is_active: boolean
+  configuration?: Record<string, any>
+  is_active?: boolean
   capabilities?: string[]
+  source?: string
+  role?: string
+  goal?: string
+  tools?: string[]
 }
 
 export interface AgentStats {
@@ -41,20 +45,24 @@ export interface AgentHealth {
 }
 
 export interface AgentServiceStatus {
-  langgraph_service: {
+  service: string
+  status: string
+  cag_health?: {
     status: string
-    graphs_loaded: number
-    active_sessions: number
+    agents_count?: number
+    crews_running?: number
+    system_resources?: {
+      cpu_percent: number
+      memory_percent: number
+      disk_percent: number
+    }
   }
-  system_resources: {
+  agents_available?: number
+  crews_running?: number
+  system_resources?: {
     cpu_percent: number
     memory_percent: number
     disk_percent: number
-  }
-  graph_stats: {
-    total_graphs: number
-    active_graphs: number
-    graphs_by_type: Record<string, number>
   }
 }
 
@@ -74,16 +82,12 @@ export interface ChatMessage {
 class AgentService {
   constructor(private apiClient: ReturnType<typeof useApiClient>) {}
 
-  async getAgents(): Promise<{ data?: Agent[]; error?: string }> {
+  async getAgents(): Promise<{ data?: any; error?: string }> {
     try {
       const response = await this.apiClient.get('/agents/list')
       
-      // Handle the nested structure from the API
-      if (response.data && typeof response.data === 'object' && 'agents' in response.data) {
-        return { data: response.data.agents }
-      }
-      
-      // Fallback to direct array if API changes
+      // The /agents/list endpoint returns available_types from the CrewAI integration
+      // Return the full response data to let components handle the structure
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to fetch agents:', error)
@@ -91,9 +95,17 @@ class AgentService {
     }
   }
 
-  async createAgent(data: CreateAgentRequest): Promise<{ data?: Agent; error?: string }> {
+  async createAgent(data: CreateAgentRequest): Promise<{ data?: any; error?: string }> {
     try {
-      const response = await this.apiClient.post('/agents/create', data)
+      const requestData = {
+        name: data.name,
+        role: data.name, // Use name as role for CrewAI
+        goal: `Be a helpful ${data.agent_type} assistant`,
+        backstory: data.description || `I am a specialized ${data.agent_type} agent.`,
+        tools: [],
+        configuration: data.configuration || {}
+      }
+      const response = await this.apiClient.post('/agents/create', requestData)
       return { data: response.data }
     } catch (error: any) {
       console.error('Failed to create agent:', error)
@@ -203,7 +215,12 @@ class AgentService {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ task, document_ids: documentIds })
+        body: JSON.stringify({ 
+          task_description: task, 
+          expected_output: 'Detailed analysis and results',
+          agent_roles: [agentId],
+          context: { document_ids: documentIds || [] }
+        })
       })
 
       if (!response.ok) {
@@ -270,6 +287,16 @@ class AgentService {
     }
   }
 
+  async getAgentStatistics(): Promise<{ data?: any; error?: string }> {
+    try {
+      const response = await this.apiClient.get('/agents/statistics')
+      return { data: response.data }
+    } catch (error: any) {
+      console.error('Failed to fetch agent statistics:', error)
+      return { error: error.message || 'Failed to fetch agent statistics' }
+    }
+  }
+
   async analyzeDocument(
     documentId: string,
     documentType: string,
@@ -300,31 +327,59 @@ class AgentService {
         throw new Error('No response body')
       }
 
+      let buffer = ''
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        // Decode the chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Process complete lines
+        const lines = buffer.split('\n')
+        
+        // Keep the last line in buffer if it's incomplete
+        buffer = lines.pop() || ''
 
         for (const line of lines) {
+          if (line.trim() === '') continue
+          
           if (line.startsWith('data: ')) {
-            const data = line.slice(6)
+            const data = line.slice(6).trim()
             if (data === '[DONE]') {
               return {}
             }
-            try {
-              const parsed = JSON.parse(data)
-              if (parsed.type === 'progress' && onProgress) {
-                onProgress(parsed)
-              } else if (parsed.type === 'result' && onResult) {
-                onResult(parsed.content)
-              } else if (parsed.type === 'error' && onError) {
-                onError(parsed.content)
+            
+            if (data) {
+              try {
+                const parsed = JSON.parse(data)
+                if (parsed.type === 'progress' && onProgress) {
+                  onProgress(parsed)
+                } else if (parsed.type === 'result' && onResult) {
+                  onResult(parsed.content)
+                } else if (parsed.type === 'error' && onError) {
+                  onError(parsed.content)
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE data:', e, 'Data:', data)
               }
-            } catch (e) {
-              console.error('Failed to parse SSE data:', e)
             }
+          }
+        }
+      }
+
+      // Process any remaining data in buffer
+      if (buffer.trim() && buffer.startsWith('data: ')) {
+        const data = buffer.slice(6).trim()
+        if (data && data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.type === 'result' && onResult) {
+              onResult(parsed.content)
+            }
+          } catch (e) {
+            console.error('Failed to parse final SSE data:', e)
           }
         }
       }
@@ -347,59 +402,15 @@ class AgentService {
     }
   }
 
-  // Helper function to get agent type metadata
-  getAgentMetadata(agentType: Agent['agent_type']) {
-    const metadata: Record<Agent['agent_type'], {
-      icon: string
-      color: string
-      description: string
-      capabilities: string[]
-    }> = {
-      generic: {
-        icon: '🤖',
-        color: 'bg-gray-500',
-        description: 'General purpose AI assistant',
-        capabilities: ['general_qa', 'text_generation']
-      },
-      document_analyzer: {
-        icon: '📄',
-        color: 'bg-blue-500',
-        description: 'Analyzes document content and structure',
-        capabilities: ['content_analysis', 'extraction', 'summarization']
-      },
-      digital_signature: {
-        icon: '✍️',
-        color: 'bg-purple-500',
-        description: 'Manages digital signature workflows',
-        capabilities: ['signature_requests', 'status_tracking', 'signer_management']
-      },
-      rag_assistant: {
-        icon: '🔍',
-        color: 'bg-green-500',
-        description: 'Retrieval-augmented generation for Q&A',
-        capabilities: ['document_search', 'context_qa', 'knowledge_retrieval']
-      },
-      contract_analyzer: {
-        icon: '📑',
-        color: 'bg-orange-500',
-        description: 'Analyzes contracts and legal documents',
-        capabilities: ['clause_extraction', 'risk_assessment', 'compliance_check']
-      },
-      financial_analyzer: {
-        icon: '💰',
-        color: 'bg-yellow-500',
-        description: 'Financial document analysis',
-        capabilities: ['financial_metrics', 'trend_analysis', 'report_generation']
-      },
-      legal_compliance: {
-        icon: '⚖️',
-        color: 'bg-red-500',
-        description: 'Legal compliance and regulatory analysis',
-        capabilities: ['compliance_check', 'risk_assessment', 'regulatory_analysis']
-      }
+  // Get agent types from API - NO HARDCODING
+  async getAgentTypes(): Promise<{ data?: any; error?: string }> {
+    try {
+      const response = await this.apiClient.get('/agents/types')
+      return { data: response.data }
+    } catch (error: any) {
+      console.error('Failed to fetch agent types:', error)
+      return { error: error.message || 'Failed to fetch agent types' }
     }
-    
-    return metadata[agentType] || metadata.generic
   }
 }
 

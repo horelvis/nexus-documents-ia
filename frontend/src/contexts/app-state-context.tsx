@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useConnectionStatus } from '@/hooks/use-connection-status'
 import { ConnectionError } from '@/components/errors/connection-error'
+import { usePathname } from 'next/navigation'
 
 // Notification types
 interface Notification {
@@ -44,6 +45,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const { isOnline, isBackendAvailable, isChecking, lastError, checkConnection } = useConnectionStatus()
   const [showError, setShowError] = useState(false)
   const [hasChecked, setHasChecked] = useState(false)
+  const pathname = usePathname()
 
   // Notifications management
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -52,6 +54,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hasChecked && !isChecking) {
       setHasChecked(true)
+    }
+    
+    // Don't show connection error on caps-copy page
+    if (pathname === '/caps-copy') {
+      setShowError(false)
+      return
     }
     
     if (hasChecked && isOnline && !isBackendAvailable && !isChecking) {
@@ -63,7 +71,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     } else {
       setShowError(false)
     }
-  }, [isOnline, isBackendAvailable, isChecking, hasChecked])
+  }, [isOnline, isBackendAvailable, isChecking, hasChecked, pathname])
 
   const handleRetry = async () => {
     setShowError(false)

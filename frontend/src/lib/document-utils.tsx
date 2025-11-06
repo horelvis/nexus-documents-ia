@@ -20,6 +20,7 @@ const sizeClasses = {
 
 /**
  * Returns the appropriate file icon based on file type, MIME type, or filename extension
+ * Now with colored icons matching the sidebar design
  */
 export function getFileIcon(
   fileType: string | undefined | null, 
@@ -33,51 +34,51 @@ export function getFileIcon(
   
   const className = sizeClasses[size]
   
-  // PDF files
+  // PDF files - Blue color for PDF documents
   if (type.includes('pdf') || extension === 'pdf') {
-    return <IconFileTypePdf className={`${className} text-muted-foreground`} />
+    return <IconFileTypePdf className={`${className} text-blue-600 dark:text-blue-400`} />
   }
   
-  // Word documents
+  // Word documents - Blue color for text documents
   if (type.includes('word') || type.includes('officedocument') || 
       extension.includes('doc') || extension === 'docx') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-blue-600 dark:text-blue-400`} />
   }
   
-  // Excel/Spreadsheets
+  // Excel/Spreadsheets - Green color for spreadsheets
   if (type.includes('spreadsheet') || type.includes('excel') ||
       extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-green-600 dark:text-green-400`} />
   }
   
-  // PowerPoint
+  // PowerPoint - Orange color for presentations
   if (type.includes('presentation') || type.includes('powerpoint') ||
       extension === 'pptx' || extension === 'ppt') {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-orange-600 dark:text-orange-400`} />
   }
   
-  // Images
+  // Images - Purple color for visual files
   if (type.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(extension)) {
-    return <IconPhoto className={`${className} text-muted-foreground`} />
+    return <IconPhoto className={`${className} text-purple-600 dark:text-purple-400`} />
   }
   
-  // Videos
+  // Videos - Pink color for video files
   if (type.includes('video') || ['mp4', 'avi', 'mov', 'wmv', 'flv'].includes(extension)) {
-    return <IconVideo className={`${className} text-muted-foreground`} />
+    return <IconVideo className={`${className} text-pink-600 dark:text-pink-400`} />
   }
   
-  // Audio
+  // Audio - Yellow color for audio files
   if (type.includes('audio') || ['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(extension)) {
-    return <IconMusic className={`${className} text-muted-foreground`} />
+    return <IconMusic className={`${className} text-yellow-600 dark:text-yellow-400`} />
   }
   
-  // Text files
+  // Text files - Indigo color for plain text
   if (type.includes('text') || ['txt', 'md', 'rtf'].includes(extension)) {
-    return <IconFileText className={`${className} text-muted-foreground`} />
+    return <IconFileText className={`${className} text-indigo-600 dark:text-indigo-400`} />
   }
   
-  // Default file icon
-  return <IconFile className={`${className} text-muted-foreground`} />
+  // Default file icon - Gray color for unknown types
+  return <IconFile className={`${className} text-gray-600 dark:text-gray-400`} />
 }
 
 /**
@@ -94,10 +95,10 @@ export function formatFileSize(bytes: number | null | undefined): string {
 }
 
 /**
- * Maps numeric or string status values to proper labels
+ * Maps numeric or string status values to descriptive status keys
  */
-export function getStatusLabel(status: string | number | null | undefined): string {
-  // Map numeric status values to labels
+export function getStatusKey(status: string | number | null | undefined): string {
+  // Map numeric status values to string constants
   const statusMap: Record<string | number, string> = {
     '1': 'INDEXED',
     '2': 'PROCESSING', 
@@ -106,34 +107,143 @@ export function getStatusLabel(status: string | number | null | undefined): stri
     1: 'INDEXED',
     2: 'PROCESSING',
     3: 'INDEXING_ERROR',
-    0: 'PENDING'
+    0: 'PENDING',
+    // String versions remain as is
+    'INDEXED': 'INDEXED',
+    'PROCESSING': 'PROCESSING',
+    'INDEXING_ERROR': 'INDEXING_ERROR',
+    'PENDING': 'PENDING'
   }
   
-  // Return mapped value or original if it's already a valid status
+  // Return mapped value or default
   if (status === null || status === undefined) return 'PENDING'
-  return statusMap[status] || String(status)
+  return statusMap[status] || 'PENDING'
 }
 
 /**
- * Returns status color classes based on indexing status
+ * Returns user-friendly status label for document state
+ */
+export function getStatusLabel(status: string | number | null | undefined, t?: (key: string) => string): string {
+  const statusKey = getStatusKey(status)
+  
+  // If translation function is provided, use it
+  if (t) {
+    return t(`documents.statusLabels.${statusKey}`)
+  }
+  
+  // User-friendly labels (no technical jargon)
+  const friendlyLabels: Record<string, string> = {
+    'INDEXED': 'Disponible',           // Simple and positive
+    'PROCESSING': 'Preparando...',     // Less technical, more friendly
+    'INDEXING_ERROR': 'Revisar',       // Non-alarming, actionable
+    'PENDING': 'En cola'               // Simple queue concept
+  }
+  
+  return friendlyLabels[statusKey] || 'En cola'
+}
+
+/**
+ * Returns user-friendly status description
+ */
+export function getStatusDescription(status: string | number | null | undefined, t?: (key: string) => string): string {
+  const statusKey = getStatusKey(status)
+  
+  // If translation function is provided, use it
+  if (t) {
+    return t(`documents.statusDescriptions.${statusKey}`)
+  }
+  
+  // User-friendly descriptions (focus on what user can do)
+  const friendlyDescriptions: Record<string, string> = {
+    'INDEXED': 'Listo para búsqueda y análisis',
+    'PROCESSING': 'Analizando contenido del documento',
+    'INDEXING_ERROR': 'Necesita ser reprocesado',
+    'PENDING': 'Esperando turno para ser procesado'
+  }
+  
+  return friendlyDescriptions[statusKey] || 'Esperando turno para ser procesado'
+}
+
+/**
+ * Returns status color classes - more subtle and less alarming
  */
 export function getStatusColor(indexed: string | number | null | undefined): string {
-  // First map the status to a label
-  const status = getStatusLabel(indexed)
+  // Get the normalized status key
+  const statusKey = getStatusKey(indexed)
   
-  switch (status) {
+  switch (statusKey) {
     case 'INDEXED':
-      return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+      return 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'  // Professional blue instead of green
     case 'PROCESSING':
-    case 'INDEXING':
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+      return 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'  // Softer amber
     case 'INDEXING_ERROR':
-      return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+      return 'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300'  // Orange instead of alarming red
     case 'PENDING':
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+      return 'bg-slate-50 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400'  // Subtle gray
     default:
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+      return 'bg-slate-50 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400'
   }
+}
+
+/**
+ * Returns whether document status should show as "ready to use" 
+ */
+export function isDocumentReady(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'INDEXED'
+}
+
+/**
+ * Returns whether document is currently being processed
+ */
+export function isDocumentProcessing(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'PROCESSING'
+}
+
+/**
+ * Returns whether document needs user attention
+ */
+export function needsAttention(indexed: string | number | null | undefined): boolean {
+  const statusKey = getStatusKey(indexed)
+  return statusKey === 'INDEXING_ERROR'
+}
+
+/**
+ * Returns user-friendly status badge variant for UI components
+ */
+export function getStatusVariant(indexed: string | number | null | undefined): 'default' | 'secondary' | 'outline' | 'destructive' {
+  const statusKey = getStatusKey(indexed)
+  
+  switch (statusKey) {
+    case 'INDEXED':
+      return 'default'      // Normal blue badge - "ready"
+    case 'PROCESSING':
+      return 'secondary'    // Muted badge for processing
+    case 'INDEXING_ERROR':
+      return 'outline'      // Outline badge - less alarming than destructive
+    case 'PENDING':
+      return 'secondary'    // Muted badge for pending
+    default:
+      return 'secondary'
+  }
+}
+
+/**
+ * Returns status icon component for different states
+ */
+export function getStatusIcon(indexed: string | number | null | undefined) {
+  const statusKey = getStatusKey(indexed)
+  
+  // Import icons lazily to avoid bundle issues
+  const icons = {
+    'INDEXED': () => import('@tabler/icons-react').then(m => m.IconCheck),
+    'PROCESSING': () => import('@tabler/icons-react').then(m => m.IconLoader2),
+    'INDEXING_ERROR': () => import('@tabler/icons-react').then(m => m.IconAlertCircle),
+    'PENDING': () => import('@tabler/icons-react').then(m => m.IconClock)
+  }
+  
+  return icons[statusKey] || icons['PENDING']
 }
 
 /**
@@ -181,4 +291,39 @@ export function isPreviewSupported(fileType: string | undefined | null, filename
   
   return previewableTypes.some(t => type.includes(t)) || 
          previewableExtensions.includes(extension)
+}
+
+/**
+ * Checks if a file is an image
+ */
+export function isImageFile(fileType: string | undefined | null, mimeType?: string | undefined | null, filename?: string): boolean {
+  const type = (fileType || '').toLowerCase()
+  const mime = (mimeType || '').toLowerCase()
+  const extension = getFileExtension(filename || '')
+  
+  // Check by MIME type (most reliable)
+  if (mime.startsWith('image/')) {
+    return true
+  }
+  
+  // Check by file type
+  if (type.includes('image')) {
+    return true
+  }
+  
+  // Check by extension
+  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'tiff', 'tif', 'ico']
+  return imageExtensions.includes(extension)
+}
+
+/**
+ * Gets the image format from MIME type or filename
+ */
+export function getImageFormat(mimeType?: string | undefined | null, filename?: string): string {
+  if (mimeType && mimeType.startsWith('image/')) {
+    return mimeType.split('/')[1]?.toUpperCase() || 'IMAGE'
+  }
+  
+  const extension = getFileExtension(filename || '')
+  return extension.toUpperCase() || 'IMAGE'
 }

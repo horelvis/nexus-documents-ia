@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useAuth } from '@clerk/nextjs'
 import { useNotifications } from '@/contexts/app-state-context'
 import { useUserContext } from '@/contexts/user-context'
@@ -9,6 +9,7 @@ import { Loader2 } from 'lucide-react'
 
 export function SubscriptionSync() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { getToken } = useAuth()
   const { addNotification } = useNotifications()
   const { checkOnboardingStatus } = useUserContext()
@@ -60,11 +61,21 @@ export function SubscriptionSync() {
           })
         }
         
-        // Remove query params from URL
+        // Remove query params from URL and redirect to dashboard
         const url = new URL(window.location.href)
         url.searchParams.delete('sync')
         url.searchParams.delete('upgraded')
-        window.history.replaceState({}, '', url)
+        
+        // Get current path without query params
+        const currentPath = window.location.pathname
+        
+        // If not already on dashboard, redirect there after sync
+        if (!currentPath.includes('/dashboard')) {
+          router.push('/dashboard')
+        } else {
+          // Just clean up the URL if already on dashboard
+          window.history.replaceState({}, '', url.pathname + url.hash)
+        }
       } else {
         const errorData = await syncResponse.json().catch(() => ({}))
         console.error('SubscriptionSync: Sync error:', errorData)
@@ -82,17 +93,8 @@ export function SubscriptionSync() {
     }
   }
 
-  if (isSyncing) {
-    return (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-        <div className="bg-white dark:bg-gray-900 rounded-lg p-6 flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-lg font-medium">Actualizando tu suscripción...</p>
-          <p className="text-sm text-muted-foreground">Esto solo tomará un momento</p>
-        </div>
-      </div>
-    )
-  }
+  // Removed modal - sync happens in background
+  // User wanted direct navigation without intermediate modal
 
   return null
 }

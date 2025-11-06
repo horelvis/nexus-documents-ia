@@ -54,12 +54,13 @@ MAIL_VALIDATE_CERTS=True
 
 ### Configuración para otros proveedores
 
-#### SendGrid
+#### Google Workspace (Recomendado)
 ```env
-MAIL_SERVER=smtp.sendgrid.net
+MAIL_SERVER=smtp.gmail.com
 MAIL_PORT=587
-MAIL_USERNAME=apikey
-MAIL_PASSWORD=tu_api_key_de_sendgrid
+MAIL_USERNAME=tu_email@tudominio.com
+MAIL_PASSWORD=tu_contraseña_de_aplicación
+# Nota: Actualmente usamos Google Workspace para todos los servicios de email
 ```
 
 #### Mailgun

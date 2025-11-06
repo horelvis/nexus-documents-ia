@@ -3,56 +3,113 @@
 from fastapi import APIRouter, Depends, Query
 from typing import List
 from app.schemas.document import DocumentWithMetrics, DocumentBasic
-from app.services.document_insights_service import DocumentInsightsService
+from app.services.async_document_service import AsyncDocumentService
 from app.api.async_dependencies import get_current_user_async
+from app.db.async_database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/trending", response_model=List[DocumentWithMetrics])
-async def get_trending_documents(
-    limit: int = Query(10, ge=1, le=50),
-    time_period_days: int = Query(30, ge=1, le=365),
-    current_user = Depends(get_current_user_async)
-):
-    """Obtiene los documentos más populares/tendencia en el tenant"""
-    insights_service = DocumentInsightsService(
-        tenant_id=str(current_user.tenant_id),
-        user_id=str(current_user.id)
-    )
-    
-    return insights_service.get_trending_documents(
-        limit=limit,
-        time_period_days=time_period_days
-    )
-
-@router.get("/recently-viewed", response_model=List[DocumentBasic])
+@router.get("/recently-viewed")
 async def get_recently_viewed_documents(
     limit: int = Query(10, ge=1, le=50),
     user_specific: bool = Query(True),
-    current_user = Depends(get_current_user_async)
+    current_user = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Obtiene los documentos vistos recientemente por el usuario o en el tenant"""
-    insights_service = DocumentInsightsService(
-        tenant_id=str(current_user.tenant_id),
-        user_id=str(current_user.id)
-    )
-    
-    return insights_service.get_recently_viewed_documents(
-        limit=limit,
-        user_specific=user_specific
-    )
+    try:
+        from sqlalchemy import select, func
+        from app.db.models import Document, DocumentView
+        
+        # Base query with Document and DocumentView joined
+        query = select(
+            Document,
+            func.max(DocumentView.viewed_at).label("last_viewed_at")
+        ).join(
+            DocumentView, Document.id == DocumentView.document_id
+        ).filter(
+            Document.tenant_id == current_user.tenant_id
+        )
+        
+        # Filter by user if specified
+        if user_specific and current_user.id:
+            query = query.filter(DocumentView.user_id == current_user.id)
+        
+        # Group by document, order by most recent view, limit results
+        query = query.group_by(Document.id).order_by(
+            func.max(DocumentView.viewed_at).desc()
+        ).limit(limit)
+        
+        result = await db.execute(query)
+        documents = result.fetchall()
+        
+        # Format results
+        results = []
+        for doc, last_viewed_at in documents:
+            results.append({
+                "id": str(doc.id),
+                "filename": doc.filename,
+                "title": doc.title,
+                "description": doc.description,
+                "file_type": doc.file_type,
+                "mime_type": doc.mime_type,
+                "file_size": doc.file_size,
+                "tags": doc.tags or [],
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                "indexed": doc.indexed,
+                "category": doc.category,
+                "tenant_id": str(doc.tenant_id),
+                "created_by": str(doc.created_by),
+                "last_viewed_at": last_viewed_at.isoformat() if last_viewed_at else None
+            })
+        
+        logger.info(f"Retrieved {len(results)} recently viewed documents")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error getting recently viewed documents: {str(e)}")
+        return []
 
-@router.get("/recommendations", response_model=List[DocumentBasic])
-async def get_document_recommendations(
-    limit: int = Query(5, ge=1, le=20),
+@router.post("/mark-viewed")
+async def mark_document_as_viewed(
+    document_id: str,
+    view_duration_seconds: int = Query(None),
+    scroll_percentage: float = Query(None),
     current_user = Depends(get_current_user_async)
 ):
-    """Obtiene recomendaciones de documentos para el usuario"""
-    insights_service = DocumentInsightsService(
-        tenant_id=str(current_user.tenant_id),
-        user_id=str(current_user.id)
-    )
+    """Marca un documento como visto por el usuario actual"""
+    from app.services.async_document_service import AsyncDocumentService
+    from app.db.async_database import get_async_db
+    from fastapi import Depends
+    from sqlalchemy.ext.asyncio import AsyncSession
     
-    return await insights_service.get_document_recommendations(limit=limit)
+    try:
+        async with get_async_db() as db:
+            document_service = await AsyncDocumentService.create(
+                tenant_id=str(current_user.tenant_id),
+                user_id=str(current_user.id),
+                db=db
+            )
+            
+            view_id = await document_service.mark_document_viewed(
+                document_id=document_id,
+                view_duration_seconds=view_duration_seconds,
+                scroll_percentage=scroll_percentage
+            )
+            
+            return {
+                "success": True,
+                "view_id": str(view_id),
+                "message": "Document marked as viewed"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error marking document as viewed: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

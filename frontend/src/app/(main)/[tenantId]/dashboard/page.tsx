@@ -9,7 +9,6 @@ import { SharedDocumentsPanel } from "@/components/dashboard/shared-documents-pa
 import { AIInsightsPanel } from "@/components/dashboard/ai-insights-panel"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-
 export default function DashboardPage() {
   const params = useParams()
   const tenantId = params.tenantId as string

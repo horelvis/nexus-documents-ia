@@ -111,12 +111,12 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThink
         }
         addMessage(errorMessage)
       } else {
-        // Handle other errors normally
+        // Handle other errors with transparency
         const errorMessage: ChatMessage = {
           role: 'assistant',
-          content: 'Lo siento, ocurrió un error al procesar tu mensaje.',
+          content: `🔥 Error del agente: ${error?.message || 'Servicio de agentes no disponible'}. Estado del sistema: Fallo real.`,
           timestamp: new Date().toISOString(),
-          metadata: { error: true }
+          metadata: { error: true, errorDetails: error?.message }
         }
         addMessage(errorMessage)
         onError?.(error?.message || 'Unknown error')

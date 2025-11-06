@@ -19,13 +19,15 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, Tag, Tenant
+from app.db.models import Document, Tag, Tenant, DocumentView
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
+from app.services.weaviate_client import weaviate_client
 from app.services.llm_service import LLMService
+from app.services.elasticsearch_client import elasticsearch_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,22 +46,24 @@ class AsyncDocumentService:
         self.embedding_service = None
         self.vector_service = None
         self.llm_service = None
+        self.elasticsearch_service = None  # NEW: Elasticsearch for hybrid search
         self._initialized = False
     
     @classmethod
-    async def create(cls, tenant_id: str = None, user_id: str = None):
+    async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
         """
         Factory method to create and initialize AsyncDocumentService
         """
         service = cls(tenant_id, user_id)
-        await service._initialize()
+        await service._initialize(db)
         return service
     
-    async def _initialize(self):
+    async def _initialize(self, db: AsyncSession = None):
         """Initialize the service with async operations"""
         # If tenant_id is None or "default", get the real UUID
         if not self.tenant_id or self.tenant_id == settings.DEFAULT_TENANT:
-            async with AsyncSessionLocal() as db:
+            if db:
+                # Use provided session
                 stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
                 result = await db.execute(stmt)
                 default_tenant = result.scalar_one_or_none()
@@ -73,15 +77,39 @@ class AsyncDocumentService:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
+            else:
+                # Create new session only if not provided
+                async with AsyncSessionLocal() as new_db:
+                    stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
+                    result = await new_db.execute(stmt)
+                    default_tenant = result.scalar_one_or_none()
+                    
+                    if default_tenant:
+                        self.tenant_id = str(default_tenant.id)
+                    else:
+                        raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
+                    
+                    # Create storage service using async factory
+                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
+                        self.tenant_id, self.user_id, new_db
+                    )
         else:
-            async with AsyncSessionLocal() as db:
+            if db:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
                     self.tenant_id, self.user_id, db
                 )
+            else:
+                async with AsyncSessionLocal() as new_db:
+                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
+                        self.tenant_id, self.user_id, new_db
+                    )
         
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorService(self.tenant_id, self.user_id)
+        self.vector_service = VectorService(self.tenant_id)
         self.llm_service = LLMService()
+        # Elasticsearch service is now a microservice - no local initialization needed
+        logger.info(f"✅ Elasticsearch microservice ready for tenant {self.tenant_id}")
+        
         self._initialized = True
     
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -123,8 +151,116 @@ class AsyncDocumentService:
         date_to: Optional[str] = None,
         category: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get paginated list of documents with filters"""
+        """Get paginated list of documents with filters using hybrid search when applicable"""
         try:
+            # If we have a search term, REQUIRE Elasticsearch to work
+            if search and search.strip():
+                if not self.elasticsearch_service:
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="Search functionality unavailable: Elasticsearch service not initialized"
+                    )
+                
+                logger.info(f"🔍 Using Elasticsearch hybrid search for query: '{search}' (NO FALLBACK)")
+                
+                # Prepare filters for Elasticsearch
+                es_filters = {}
+                if category:
+                    es_filters["category"] = category
+                if tags:
+                    es_filters["tags"] = tags
+                if date_from:
+                    es_filters["date_from"] = date_from
+                if date_to:
+                    es_filters["date_to"] = date_to
+                
+                # Perform hybrid search via microservice - LET IT FAIL if broken
+                es_results = await elasticsearch_client.hybrid_search(
+                    tenant_id=self.tenant_id,
+                    query=search,
+                    limit=per_page * 2,  # Get more results to account for filtering
+                    filters=es_filters
+                )
+                
+                logger.info(f"✅ Elasticsearch returned {len(es_results)} results")
+                
+                # Extract document IDs from ES results
+                doc_ids = [result["document"]["id"] for result in es_results]
+                
+                # Get full document objects from database in the same order
+                if doc_ids:
+                    # Create case statement to preserve ES ranking order
+                    when_clauses = []
+                    for i, doc_id in enumerate(doc_ids):
+                        when_clauses.append((Document.id == doc_id, i))
+                    
+                    order_case = func.case(
+                        *when_clauses,
+                        else_=len(doc_ids)
+                    )
+                    
+                    # Apply pagination to the ordered ES results
+                    offset = (page - 1) * per_page
+                    paginated_doc_ids = doc_ids[offset:offset + per_page]
+                    
+                    if paginated_doc_ids:
+                        query = select(Document).filter(
+                            Document.id.in_(paginated_doc_ids),
+                            Document.tenant_id == self.tenant_id
+                        ).options(
+                            selectinload(Document.tags),
+                            selectinload(Document.creator)
+                        ).order_by(order_case)
+                        
+                        result = await db.execute(query)
+                        documents = result.scalars().all()
+                        
+                        # Build response with ES scores
+                        items = []
+                        es_scores = {res["document"]["id"]: res["score"] for res in es_results}
+                        
+                        for doc in documents:
+                            doc_dict = self._document_to_dict(doc)
+                            doc_dict["search_score"] = es_scores.get(str(doc.id), 0.0)
+                            doc_dict["search_matches"] = [
+                                match for res in es_results 
+                                if res["document"]["id"] == str(doc.id)
+                                for match in res.get("matches", [])
+                            ]
+                            items.append(doc_dict)
+                        
+                        return {
+                            "items": items,
+                            "total": len(doc_ids),
+                            "page": page,
+                            "per_page": per_page,
+                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
+                            "search_engine": "elasticsearch_hybrid"
+                        }
+                    else:
+                        # No results for this page
+                        return {
+                            "items": [],
+                            "total": len(doc_ids),
+                            "page": page,
+                            "per_page": per_page,
+                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
+                            "search_engine": "elasticsearch_hybrid"
+                        }
+                else:
+                    # No documents found - this is a valid result, not an error
+                    return {
+                        "items": [],
+                        "total": 0,
+                        "page": page,
+                        "per_page": per_page,
+                        "total_pages": 0,
+                        "search_engine": "elasticsearch_hybrid"
+                    }
+            
+            # Fallback to SQL search or when no search term provided
+            logger.info("Using SQL-based document search")
+            
             # Base query
             query = select(Document).filter(
                 Document.tenant_id == self.tenant_id
@@ -139,7 +275,7 @@ class AsyncDocumentService:
                     or_(
                         Document.title.ilike(f"%{search}%"),
                         Document.description.ilike(f"%{search}%"),
-                        Document.content.ilike(f"%{search}%")
+                        Document.filename.ilike(f"%{search}%")
                     )
                 )
             
@@ -202,12 +338,35 @@ class AsyncDocumentService:
                 "total": total,
                 "page": page,
                 "per_page": per_page,
-                "pages": (total + per_page - 1) // per_page
+                "pages": (total + per_page - 1) // per_page,
+                "search_engine": "sql"
             }
             
         except Exception as e:
             logger.error(f"Error getting documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+    
+    def _document_to_dict(self, doc: Document) -> Dict[str, Any]:
+        """Convert Document model to dictionary"""
+        return {
+            "id": str(doc.id),
+            "title": doc.title,
+            "description": doc.description,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "mime_type": doc.mime_type,
+            "indexed": self._get_indexed_status_string(doc.indexed),
+            "category": doc.category if hasattr(doc, 'category') else None,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+            "tags": [{"id": str(tag.id), "name": tag.name} for tag in doc.tags],
+            "created_by": {
+                "id": str(doc.creator.id),
+                "email": doc.creator.email,
+                "full_name": doc.creator.full_name
+            } if doc.creator else None
+        }
     
     async def upload_document(
         self,
@@ -222,7 +381,7 @@ class AsyncDocumentService:
         try:
             # Ensure service is initialized
             if not self._initialized:
-                await self._initialize()
+                await self._initialize(db)
             # Validate file
             file_ext, contents, file_size = await self._validate_file(file, file.filename)
             
@@ -294,7 +453,14 @@ class AsyncDocumentService:
             doc = result.scalar_one()
             
             # Extract text and index asynchronously
-            task = asyncio.create_task(self._process_document_async(str(doc.id), contents, file_ext))
+            # Pass document info to avoid needing new DB session
+            doc_info = {
+                "id": str(doc.id),
+                "filename": doc.filename,
+                "tenant_id": self.tenant_id,
+                "user_id": self.user_id
+            }
+            task = asyncio.create_task(self._process_document_async(doc_info, contents, file_ext))
             # Add error handler for the background task
             task.add_done_callback(lambda t: logger.error(f"Background processing failed: {t.exception()}") if t.exception() else None)
             
@@ -305,8 +471,9 @@ class AsyncDocumentService:
             logger.error(f"Error uploading document: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def _process_document_async(self, doc_id: str, contents: bytes, file_ext: str):
+    async def _process_document_async(self, doc_info: dict, contents: bytes, file_ext: str):
         """Process document in background"""
+        doc_id = doc_info["id"]
         try:
             logger.info(f"Starting async processing for document {doc_id}, file type: {file_ext}")
             
@@ -334,22 +501,85 @@ class AsyncDocumentService:
                     raise Exception(f"Embedding generation failed: {str(e)}")
                 
                 try:
+                    # Get full document info for metadata before storing in vector DB
+                    async with AsyncSessionLocal() as db:
+                        stmt = select(Document).filter(Document.id == doc_id)
+                        result = await db.execute(stmt)
+                        doc = result.scalar_one_or_none()
+                        
+                        if not doc:
+                            raise Exception("Document not found in database")
+                    
+                    # Build comprehensive metadata for vector search
+                    metadata = {
+                        "file_type": file_ext,
+                        "tenant_id": self.tenant_id,
+                        "filename": doc.filename,
+                        "title": doc.title or doc.filename,
+                        "description": doc.description,
+                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                        "file_size": doc.file_size,
+                        "mime_type": doc.mime_type,
+                        "category": doc.category
+                    }
+                    
                     # Store in vector DB (use the same text that was used for embeddings)
-                    logger.info(f"Storing document {doc_id} in vector database")
+                    logger.info(f"Storing document {doc_id} in vector database with enhanced metadata")
                     success = await self.vector_service.add_document(
                         doc_id=doc_id,
                         text=text_for_embedding,  # Use the same text that was embedded
-                        metadata={"file_type": file_ext, "tenant_id": self.tenant_id}
+                        metadata=metadata
                     )
                     
                     if not success:
                         raise Exception("Failed to store document in vector database")
                     logger.info(f"Successfully stored document {doc_id} in vector database")
+                    
+                    # ALSO store in Weaviate (new migration path)
+                    try:
+                        import httpx
+                        from app.core.config import settings
+                        
+                        logger.info(f"Storing document {doc_id} in Weaviate via microservice")
+                        
+                        # Get collection name with proper format
+                        collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
+                        
+                        # Prepare document for Weaviate microservice with correct schema
+                        weaviate_doc = {
+                            "id": doc_id,  # Use PostgreSQL document ID
+                            "title": doc.title or doc.filename,
+                            "content": text_for_embedding,
+                            "tenant_id": self.tenant_id,
+                            "document_type": doc.category or "general", 
+                            "tags": [doc.category] if doc.category else []
+                        }
+                        
+                        # Call Weaviate microservice
+                        microservice_url = f"{settings.WEAVIATE_SERVICE_URL}/weaviate/collections/{collection_name}/documents"
+                        headers = {
+                            "Authorization": f"Bearer {settings.microservices_api_key}",
+                            "Content-Type": "application/json"
+                        }
+                        
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            response = await client.post(microservice_url, json=weaviate_doc, headers=headers)
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                logger.info(f"✅ Document {doc_id} stored in Weaviate: {result.get('id', 'no_id')}")
+                            else:
+                                logger.error(f"❌ Weaviate microservice error {response.status_code}: {response.text}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Failed to store document {doc_id} in Weaviate microservice: {e}")
+                        # Don't fail the whole process if Weaviate fails - it's a migration feature
                 except Exception as e:
                     logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
                     raise Exception(f"Vector storage failed: {str(e)}")
                 
-                # Update document status
+                # Update document status and perform routing in single session
                 async with AsyncSessionLocal() as db:
                     stmt = select(Document).filter(Document.id == doc_id)
                     result = await db.execute(stmt)
@@ -357,9 +587,89 @@ class AsyncDocumentService:
                     
                     if doc:
                         doc.indexed = IndexingStatus.INDEXED
-                        doc.content = text[:1000]  # Store first 1000 chars
+                        # Generate summary instead of storing first 1000 chars
+                        summary = await self._generate_document_summary(text, doc_info["filename"])
+                        doc.content = summary[:1000]  # Store summary (max 1000 chars)
                         await db.commit()
-                        logger.info(f"Document {doc_id} marked as INDEXED")
+                        logger.info(f"Document {doc_id} marked as INDEXED with summary")
+                        
+                        # MANDATORY: Index document in Elasticsearch for hybrid search
+                        if not self.elasticsearch_service:
+                            # FAIL EXPLICITLY - search depends on Elasticsearch
+                            error_msg = f"❌ CRITICAL: Elasticsearch service not initialized - cannot index document {doc_id}"
+                            logger.error(error_msg)
+                            raise Exception(f"Elasticsearch service required for document indexing: {error_msg}")
+                        
+                        logger.info(f"🔍 MANDATORY Elasticsearch indexing for document {doc_id} (title: {doc.title})")
+                        
+                        # Prepare metadata for Elasticsearch
+                        es_metadata = {
+                            "file_type": doc.file_type,
+                            "category": doc.category,
+                            "tags": [tag.name for tag in doc.tags] if doc.tags else [],
+                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            "file_size": doc.file_size,
+                            "tenant_id": doc.tenant_id
+                        }
+                        
+                        logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
+                        
+                        # Index in Elasticsearch via microservice - MUST SUCCEED
+                        es_success = await elasticsearch_client.index_document(
+                            tenant_id=self.tenant_id,
+                            doc_id=str(doc_id),
+                            title=doc.title,
+                            content=text[:5000],  # Index more content for better search
+                            description=doc.description,
+                            metadata=es_metadata
+                        )
+                        
+                        if not es_success:
+                            # FAIL EXPLICITLY - indexing is mandatory
+                            error_msg = f"❌ CRITICAL: Document {doc_id} failed to index in Elasticsearch"
+                            logger.error(error_msg)
+                            raise Exception(f"Elasticsearch indexing required for search functionality: {error_msg}")
+                        
+                        logger.info(f"✅ Document {doc_id} successfully indexed in Elasticsearch")
+                        
+                        # Perform routing analysis in the same session
+                        await self._perform_routing_analysis(db, doc_info, text, file_ext)
+                        
+                        # NEW: Extract entities with LangExtract
+                        try:
+                            logger.info(f"🧠 Starting entity extraction for document {doc_id}")
+                            entities_result = await self._extract_entities_langextract(
+                                text=text,
+                                doc_type=doc.category or "general",
+                                filename=doc.filename
+                            )
+                            
+                            if entities_result.get("success"):
+                                doc.extracted_entities = entities_result.get("extractions", [])
+                                await db.commit()
+                                logger.info(
+                                    f"✅ Entities extracted for {doc_id}: "
+                                    f"{entities_result.get('total_extractions', 0)} entities found "
+                                    f"(type: {entities_result.get('extraction_type', 'unknown')})"
+                                )
+                            else:
+                                # Store empty array to indicate extraction was attempted
+                                doc.extracted_entities = []
+                                await db.commit()
+                                logger.warning(
+                                    f"⚠️ Entity extraction failed for {doc_id}: "
+                                    f"{entities_result.get('error', 'Unknown error')}"
+                                )
+                        except Exception as entity_error:
+                            logger.error(f"❌ Entity extraction exception for {doc_id}: {entity_error}")
+                            # Don't fail the whole process if entity extraction fails
+                            # Just mark with empty array to show it was attempted
+                            try:
+                                doc.extracted_entities = []
+                                await db.commit()
+                            except:
+                                pass  # If even this fails, continue without entities
                 
                 # Queue document for auto-categorization
                 try:
@@ -374,6 +684,8 @@ class AsyncDocumentService:
                 except Exception as e:
                     logger.warning(f"Failed to queue categorization for {doc_id}: {e}")
                     # Don't fail the whole process if categorization queueing fails
+                
+                # Routing is now handled in the same DB session above to avoid greenlet errors
             else:
                 logger.warning(f"No text extracted from document {doc_id}")
                 raise Exception("No text could be extracted from the document")
@@ -392,19 +704,85 @@ class AsyncDocumentService:
                     await db.commit()
                     logger.info(f"Document {doc_id} marked as INDEXING_ERROR: {str(e)}")
     
+    def _clean_extracted_text(self, text: str) -> str:
+        """Clean extracted text to remove problematic characters that cause UTF-8 errors"""
+        if not text:
+            return ""
+        
+        # Remove null bytes and other control characters that cause PostgreSQL UTF-8 errors
+        # Keep only printable characters and common whitespace
+        import re
+        
+        # Remove null bytes specifically
+        text = text.replace('\x00', '')
+        
+        # Remove other problematic control characters but keep tabs, newlines, and carriage returns
+        text = re.sub(r'[\x01-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+        
+        # Normalize whitespace - replace multiple spaces/tabs/newlines with single spaces
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Strip leading/trailing whitespace
+        text = text.strip()
+        
+        return text
+
     async def _extract_text_async(self, contents: bytes, file_ext: str) -> Optional[str]:
         """Extract text from document asynchronously"""
         # This is a simplified version - in production you'd want proper async extraction
         return await asyncio.to_thread(self._extract_text_sync, contents, file_ext)
     
     def _extract_text_sync(self, contents: bytes, file_ext: str) -> Optional[str]:
-        """Synchronous text extraction"""
+        """Synchronous text extraction with OCR fallback for scanned PDFs"""
         try:
             if file_ext == "pdf":
+                # First try PyPDF2 for text-based PDFs
                 pdf_reader = PyPDF2.PdfReader(io.BytesIO(contents))
                 text = ""
                 for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
+                    page_text = page.extract_text()
+                    # Clean text to remove null bytes and other problematic characters
+                    cleaned_page_text = self._clean_extracted_text(page_text)
+                    text += cleaned_page_text + "\n"
+                
+                # If no text extracted (likely scanned PDF), try OCR
+                if not text.strip():
+                    logger.info("No text extracted with PyPDF2, attempting OCR for scanned PDF")
+                    try:
+                        import fitz  # PyMuPDF
+                        from PIL import Image
+                        import pytesseract
+                        
+                        # Open PDF with PyMuPDF for better image handling
+                        doc = fitz.open(stream=contents, filetype="pdf")
+                        ocr_text = ""
+                        
+                        for page_num in range(len(doc)):
+                            page = doc.load_page(page_num)
+                            # Convert page to image
+                            mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
+                            pix = page.get_pixmap(matrix=mat)
+                            img_data = pix.tobytes("png")
+                            
+                            # OCR the image
+                            image = Image.open(io.BytesIO(img_data))
+                            page_text = pytesseract.image_to_string(image, lang='spa+eng')  # Spanish + English
+                            # Clean OCR text as well
+                            cleaned_page_text = self._clean_extracted_text(page_text)
+                            ocr_text += cleaned_page_text + "\n"
+                            logger.info(f"OCR extracted {len(page_text)} chars from page {page_num + 1}")
+                        
+                        doc.close()
+                        text = ocr_text
+                        logger.info(f"OCR completed: extracted {len(text)} total characters")
+                        
+                    except ImportError:
+                        logger.warning("OCR libraries not available (fitz, PIL, pytesseract). Install: pip install PyMuPDF Pillow pytesseract")
+                        return ""
+                    except Exception as ocr_error:
+                        logger.error(f"OCR failed: {ocr_error}")
+                        return ""
+                
                 return text
             
             elif file_ext == "txt":
@@ -706,3 +1084,357 @@ class AsyncDocumentService:
             await db.rollback()
             logger.error(f"Error removing tag from document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="Error removing tag")
+    
+    async def mark_document_viewed(
+        self, 
+        document_id: str, 
+        view_duration_seconds: int = None,
+        scroll_percentage: float = None
+    ) -> str:
+        """
+        Mark document as viewed by current user
+        
+        Args:
+            document_id: ID of the document being viewed
+            view_duration_seconds: Optional duration of view in seconds
+            scroll_percentage: Optional percentage of document scrolled
+            
+        Returns:
+            view_id: ID of the created view record
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                # Check if document exists and belongs to tenant
+                stmt = select(Document).filter(
+                    Document.id == document_id,
+                    Document.tenant_id == self.tenant_id
+                )
+                result = await db.execute(stmt)
+                document = result.scalar_one_or_none()
+                
+                if not document:
+                    raise HTTPException(status_code=404, detail="Document not found")
+                
+                # Create or update document view record
+                view_record = DocumentView(
+                    user_id=self.user_id,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id,
+                    viewed_at=func.now(),
+                    view_duration_seconds=view_duration_seconds,
+                    scroll_percentage=scroll_percentage
+                )
+                
+                db.add(view_record)
+                await db.commit()
+                await db.refresh(view_record)
+                
+                logger.info(f"Document {document_id} marked as viewed by user {self.user_id}")
+                return str(view_record.id)
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error marking document {document_id} as viewed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error marking document as viewed")
+    
+    async def get_recently_viewed_documents(
+        self, 
+        limit: int = 10, 
+        user_specific: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get recently viewed documents for the user or tenant"""
+        try:
+            async with AsyncSessionLocal() as db:
+                # Base query with Document and DocumentView joined
+                query = select(
+                    Document,
+                    func.max(DocumentView.viewed_at).label("last_viewed_at")
+                ).join(
+                    DocumentView, Document.id == DocumentView.document_id
+                ).filter(
+                    Document.tenant_id == self.tenant_id
+                )
+                
+                # Filter by user if specified
+                if user_specific and self.user_id:
+                    query = query.filter(DocumentView.user_id == self.user_id)
+                
+                # Group by document, order by most recent view, limit results
+                query = query.group_by(Document.id).order_by(
+                    func.max(DocumentView.viewed_at).desc()
+                ).limit(limit)
+                
+                result = await db.execute(query)
+                documents = result.fetchall()
+                
+                # Format results
+                results = []
+                for doc, last_viewed_at in documents:
+                    results.append({
+                        "id": str(doc.id),
+                        "filename": doc.filename,
+                        "title": doc.title,
+                        "description": doc.description,
+                        "file_type": doc.file_type,
+                        "mime_type": doc.mime_type,
+                        "file_size": doc.file_size,
+                        "tags": doc.tags or [],
+                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                        "indexed": doc.indexed,
+                        "category": doc.category,
+                        "tenant_id": str(doc.tenant_id),
+                        "created_by": str(doc.created_by)
+                    })
+                
+                logger.info(f"Retrieved {len(results)} recently viewed documents")
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error getting recently viewed documents: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error retrieving recently viewed documents")
+    
+    async def _generate_document_summary(self, text: str, filename: str) -> str:
+        """Generate a concise summary of the document"""
+        try:
+            import httpx
+            from app.core.config import settings
+            
+            # Prepare text for summarization (limit to reasonable size)
+            text_for_summary = text[:5000] if len(text) > 5000 else text
+            
+            # Try to generate summary using LangChain service
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
+                        json={
+                            "messages": [{
+                                "role": "system",
+                                "content": "You are a document summarizer. Create a concise summary of the document in 2-3 sentences. Focus on the main topic, purpose, and key points. Maximum 200 words."
+                            }, {
+                                "role": "user",
+                                "content": f"Summarize this document:\n\nFilename: {filename}\n\nContent:\n{text_for_summary}"
+                            }],
+                            "model": settings.OLLAMA_MODEL,
+                            "max_tokens": 300,
+                            "temperature": 0.3
+                        },
+                        headers={
+                            "X-API-Key": settings.MICROSERVICES_API_KEY,
+                            "Content-Type": "application/json"
+                        },
+                        timeout=20.0
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if summary:
+                            logger.info(f"Generated summary for {filename}: {len(summary)} chars")
+                            return summary
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate LLM summary: {e}")
+            
+            # Fallback to simple extraction if LLM fails
+            return self._create_simple_summary(text, filename)
+            
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return self._create_simple_summary(text, filename)
+    
+    def _create_simple_summary(self, text: str, filename: str) -> str:
+        """Create a simple summary without LLM"""
+        # Clean up text
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        # Use DocumentTypeDetector for accurate type detection
+        try:
+            from app.services.document_type_detector import get_document_type_detector
+            detector = get_document_type_detector()
+            doc_type, confidence = detector.detect_type(text, filename)
+            
+            # Capitalize first letter for display
+            doc_type_display = doc_type.capitalize()
+            
+            # Add confidence indicator if low
+            if confidence < 0.5:
+                doc_type_display = f"Possible {doc_type_display}"
+        except Exception as e:
+            logger.warning(f"Could not use DocumentTypeDetector: {e}")
+            # Fallback to basic detection
+            doc_type_display = "Document"
+        
+        # Get first meaningful lines
+        meaningful_lines = []
+        for line in lines[:10]:
+            if len(line) > 20:  # Skip very short lines
+                meaningful_lines.append(line)
+                if len(meaningful_lines) >= 3:
+                    break
+        
+        if meaningful_lines:
+            preview = " ".join(meaningful_lines[:2])[:200]
+            return f"{doc_type_display}: {filename}. {preview}..."
+        else:
+            return f"{doc_type_display}: {filename}. Content preview: {text[:200]}..."
+    
+    async def _perform_routing_analysis(self, db: AsyncSession, doc_info: dict, text: str, file_ext: str):
+        """Perform routing analysis using the same DB session"""
+        try:
+            from app.services.agent_router_service import AgentRouterService
+            
+            # Initialize router service
+            router_service = AgentRouterService(
+                tenant_id=doc_info["tenant_id"],
+                user_id=doc_info["user_id"]
+            )
+            
+            # Analyze and route document
+            routing_result = await router_service.analyze_and_route_document(
+                db=db,
+                document_id=doc_info["id"],
+                content=text,
+                filename=doc_info["filename"],
+                file_type=file_ext
+            )
+            
+            if routing_result.get("success"):
+                logger.info(
+                    f"Document {doc_info['id']} routed successfully: "
+                    f"Type: {routing_result.get('document_type')}, "
+                    f"Agents: {len(routing_result.get('assigned_agents', []))}"
+                )
+            else:
+                logger.warning(f"Document routing failed for {doc_info['id']}: {routing_result.get('error')}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to route document {doc_info['id']} with Agent Router: {e}")
+            # Don't fail the whole process if routing fails
+    
+    async def _extract_entities_langextract(
+        self, 
+        text: str, 
+        doc_type: str = "general", 
+        filename: str = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities using LangExtract microservice
+        
+        Args:
+            text: Document text to analyze
+            doc_type: Type of document (contract, invoice, report, general)
+            filename: Optional filename for context
+            
+        Returns:
+            Dictionary with extraction results
+        """
+        try:
+            import httpx
+            from app.core.config import settings
+            
+            logger.info(f"🧠 Extracting entities with LangExtract for {doc_type} document")
+            
+            # Map document categories to LangExtract types
+            langextract_type_mapping = {
+                "contract": "contract",
+                "legal": "contract", 
+                "invoice": "invoice",
+                "financial": "invoice",
+                "report": "report",
+                "compliance": "report",
+                "technical": "report",
+                "correspondence": "general",
+                "hr": "general",
+                "general": "general"
+            }
+            
+            extraction_type = langextract_type_mapping.get(doc_type, "general")
+            
+            # Prepare request payload
+            request_payload = {
+                "text": text[:50000],  # Limit text size to avoid timeouts
+                "document_type": extraction_type,
+                "filename": filename,
+                "provider": "ollama"  # Use Ollama by default
+            }
+            
+            # Call LangExtract microservice
+            microservice_url = f"{settings.LANGEXTRACT_SERVICE_URL}/api/v1/extraction/extract"
+            headers = {
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(f"📞 Calling LangExtract service at {microservice_url}")
+                response = await client.post(microservice_url, json=request_payload, headers=headers)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Process and structure the result
+                    if result.get("success", False):
+                        extractions = result.get("extractions", [])
+                        entities_summary = result.get("summary", {})
+                        metadata = result.get("metadata", {})
+                        
+                        logger.info(f"✅ LangExtract completed: {len(extractions)} extractions found")
+                        logger.info(f"🔍 Entity types: {list(result.get('entities', {}).keys())}")
+                        
+                        # Format entities for storage in DB
+                        formatted_entities = []
+                        for extraction in extractions:
+                            formatted_entities.append({
+                                "name": extraction.get("text", ""),
+                                "type": extraction.get("class", "other"),
+                                "role": extraction.get("attributes", {}).get("role", ""),
+                                "context": extraction.get("attributes", {}).get("type", ""),
+                                "metadata": {
+                                    "extraction_method": "langextract",
+                                    "provider": metadata.get("provider", "ollama"),
+                                    "model": metadata.get("model", "unknown"),
+                                    "confidence": extraction.get("attributes", {}).get("confidence", 0.8),
+                                    "source_indices": extraction.get("source_indices"),
+                                    "document_type": extraction_type
+                                }
+                            })
+                        
+                        return {
+                            "success": True,
+                            "extractions": formatted_entities,
+                            "summary": entities_summary,
+                            "total_extractions": len(extractions),
+                            "extraction_type": extraction_type,
+                            "provider": metadata.get("provider", "ollama"),
+                            "visualization_html": result.get("visualization_html")
+                        }
+                    else:
+                        error_msg = result.get("error", "Unknown extraction error")
+                        logger.error(f"❌ LangExtract service returned error: {error_msg}")
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "extractions": [],
+                            "extraction_type": extraction_type
+                        }
+                else:
+                    error_msg = f"LangExtract service returned {response.status_code}: {response.text}"
+                    logger.error(f"❌ LangExtract service HTTP error: {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "extractions": [],
+                        "extraction_type": extraction_type
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ LangExtract entity extraction failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "extractions": [],
+                "extraction_type": "general"
+            }

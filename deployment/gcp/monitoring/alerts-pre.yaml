@@ -1,0 +1,389 @@
+# Cloud Monitoring Alert Policies for NexusDocs360 PRE
+# Critical alerts for pre-production environment
+
+# Alert 1: High Error Rate
+- displayName: "PRE - High Error Rate Alert"
+  documentation:
+    content: |
+      Error rate exceeded 5% for more than 5 minutes in PRE environment.
+      
+      **Troubleshooting Steps:**
+      1. Check application logs: `gcloud logging read "severity>=ERROR" --limit=50`
+      2. Review recent deployments
+      3. Check external service dependencies
+      4. Verify database connectivity
+      
+      **Rollback if needed:** See ROLLBACK_PROCEDURES_PRE.md
+  conditions:
+    - displayName: "Error rate > 5%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/request_count"
+          metric.labels.response_code_class != "2xx"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_RATE
+            crossSeriesReducer: REDUCE_SUM
+            groupByFields:
+              - resource.label.service_name
+        comparison: COMPARISON_GT
+        thresholdValue: 0.05
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+    - projects/nexusdocs360-pre/notificationChannels/email-pre-oncall
+  alertStrategy:
+    autoClose: 3600s
+
+# Alert 2: High Latency
+- displayName: "PRE - High Latency Alert"
+  documentation:
+    content: |
+      P95 latency exceeded 2 seconds for more than 5 minutes.
+      
+      **Common Causes:**
+      - Database query performance issues
+      - AI service response delays
+      - Memory pressure causing GC pauses
+      - Cold starts
+  conditions:
+    - displayName: "P95 Latency > 2s"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/request_latencies"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_PERCENTILE_95
+            crossSeriesReducer: REDUCE_MAX
+        comparison: COMPARISON_GT
+        thresholdValue: 2000
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+  severity: WARNING
+
+# Alert 3: Service Down
+- displayName: "PRE - Service Down Alert"
+  documentation:
+    content: |
+      CRITICAL: Service has not received any requests for 5 minutes.
+      
+      **Immediate Actions:**
+      1. Check Cloud Run service status
+      2. Verify Nginx proxy configuration
+      3. Check DNS resolution
+      4. Review recent changes
+  conditions:
+    - displayName: "No requests received"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/request_count"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_RATE
+            crossSeriesReducer: REDUCE_SUM
+            groupByFields:
+              - resource.label.service_name
+        comparison: COMPARISON_LT
+        thresholdValue: 0.01
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-critical
+    - projects/nexusdocs360-pre/notificationChannels/pagerduty-pre
+  severity: CRITICAL
+
+# Alert 4: Database Connection Pool Exhaustion
+- displayName: "PRE - Database Connection Pool Alert"
+  documentation:
+    content: |
+      Database connection pool usage exceeded 80%.
+      
+      **Actions:**
+      1. Check for connection leaks
+      2. Review active queries
+      3. Consider scaling connection pool
+      4. Check for stuck transactions
+  conditions:
+    - displayName: "Connection pool > 80%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloudsql_database"
+          resource.labels.database_id =~ ".*nexus-db-pre"
+          metric.type = "cloudsql.googleapis.com/database/postgresql/num_backends"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_MEAN
+        comparison: COMPARISON_GT
+        thresholdValue: 40  # 80% of 50 max connections
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+
+# Alert 5: High Memory Usage
+- displayName: "PRE - High Memory Usage Alert"
+  documentation:
+    content: |
+      Memory usage exceeded 85% for a service.
+      
+      **Troubleshooting:**
+      1. Check for memory leaks
+      2. Review recent code changes
+      3. Analyze heap dumps if available
+      4. Consider increasing memory limits
+  conditions:
+    - displayName: "Memory usage > 85%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/container/memory/utilizations"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_MEAN
+            groupByFields:
+              - resource.label.service_name
+        comparison: COMPARISON_GT
+        thresholdValue: 0.85
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+
+# Alert 6: High CPU Usage
+- displayName: "PRE - High CPU Usage Alert"
+  documentation:
+    content: |
+      CPU usage exceeded 80% for more than 10 minutes.
+      
+      **Investigation:**
+      1. Check for CPU-intensive operations
+      2. Review AI processing queue
+      3. Look for infinite loops
+      4. Consider horizontal scaling
+  conditions:
+    - displayName: "CPU usage > 80%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/container/cpu/utilizations"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_MEAN
+            groupByFields:
+              - resource.label.service_name
+        comparison: COMPARISON_GT
+        thresholdValue: 0.80
+        duration: 600s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+  severity: WARNING
+
+# Alert 7: Database High CPU
+- displayName: "PRE - Database High CPU Alert"
+  documentation:
+    content: |
+      Cloud SQL CPU usage exceeded 70%.
+      
+      **Actions:**
+      1. Identify slow queries
+      2. Check for missing indexes
+      3. Review query patterns
+      4. Consider scaling up if persistent
+  conditions:
+    - displayName: "DB CPU > 70%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloudsql_database"
+          resource.labels.database_id =~ ".*nexus-db-pre"
+          metric.type = "cloudsql.googleapis.com/database/cpu/utilization"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_MEAN
+        comparison: COMPARISON_GT
+        thresholdValue: 0.70
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+
+# Alert 8: Redis Memory Alert
+- displayName: "PRE - Redis Memory Alert"
+  documentation:
+    content: |
+      Redis memory usage exceeded 80%.
+      
+      **Actions:**
+      1. Check eviction policy
+      2. Review cached data size
+      3. Clear expired keys
+      4. Consider increasing Redis instance size
+  conditions:
+    - displayName: "Redis memory > 80%"
+      conditionThreshold:
+        filter: |
+          resource.type = "redis_instance"
+          resource.labels.instance_id = "nexus-redis-pre"
+          metric.type = "redis.googleapis.com/stats/memory/usage_ratio"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_MEAN
+        comparison: COMPARISON_GT
+        thresholdValue: 0.80
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+
+# Alert 9: Cold Start Frequency
+- displayName: "PRE - Excessive Cold Starts"
+  documentation:
+    content: |
+      More than 10 cold starts in 5 minutes detected.
+      
+      **Mitigation:**
+      1. Increase minimum instances
+      2. Review traffic patterns
+      3. Check for deployment issues
+      4. Optimize startup time
+  conditions:
+    - displayName: "Cold starts > 10 in 5min"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-.*-pre"
+          metric.type = "run.googleapis.com/container/startup_latencies"
+        aggregations:
+          - alignmentPeriod: 300s
+            perSeriesAligner: ALIGN_COUNT
+            crossSeriesReducer: REDUCE_SUM
+        comparison: COMPARISON_GT
+        thresholdValue: 10
+        duration: 60s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+  severity: WARNING
+
+# Alert 10: AI Service Failure
+- displayName: "PRE - AI Service Failure"
+  documentation:
+    content: |
+      AI services (LangChain/Langroid) experiencing high error rates.
+      
+      **Troubleshooting:**
+      1. Check AI API keys and quotas
+      2. Review model availability
+      3. Check Qdrant vector DB status
+      4. Verify microservice health
+  conditions:
+    - displayName: "AI service errors > 10%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name =~ "nexus-(langchain|langroid)-pre"
+          metric.type = "run.googleapis.com/request_count"
+          metric.labels.response_code_class = "5xx"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_RATE
+            crossSeriesReducer: REDUCE_SUM
+            groupByFields:
+              - resource.label.service_name
+        comparison: COMPARISON_GT
+        thresholdValue: 0.10
+        duration: 180s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-critical
+  severity: CRITICAL
+
+# Alert 11: Storage Service Issues
+- displayName: "PRE - Storage Service Alert"
+  documentation:
+    content: |
+      Storage service experiencing issues with GCS operations.
+      
+      **Check:**
+      1. GCS bucket permissions
+      2. Service account credentials
+      3. Network connectivity
+      4. GCS API quotas
+  conditions:
+    - displayName: "Storage errors > 5%"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloud_run_revision"
+          resource.labels.service_name = "nexus-storage-pre"
+          metric.type = "run.googleapis.com/request_count"
+          metric.labels.response_code_class != "2xx"
+        aggregations:
+          - alignmentPeriod: 60s
+            perSeriesAligner: ALIGN_RATE
+        comparison: COMPARISON_GT
+        thresholdValue: 0.05
+        duration: 300s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-alerts
+
+# Alert 12: Backup Failure
+- displayName: "PRE - Database Backup Failure"
+  documentation:
+    content: |
+      Scheduled database backup failed.
+      
+      **Actions:**
+      1. Check backup logs
+      2. Verify storage permissions
+      3. Check disk space
+      4. Manually trigger backup if needed
+  conditions:
+    - displayName: "Backup failed"
+      conditionThreshold:
+        filter: |
+          resource.type = "cloudsql_database"
+          resource.labels.database_id =~ ".*nexus-db-pre"
+          metric.type = "cloudsql.googleapis.com/database/backup/failed_count"
+        aggregations:
+          - alignmentPeriod: 3600s
+            perSeriesAligner: ALIGN_MAX
+        comparison: COMPARISON_GT
+        thresholdValue: 0
+        duration: 60s
+  notificationChannels:
+    - projects/nexusdocs360-pre/notificationChannels/slack-pre-critical
+    - projects/nexusdocs360-pre/notificationChannels/email-pre-oncall
+  severity: CRITICAL
+
+# Notification Channels Configuration
+notificationChannels:
+  - type: slack
+    displayName: "PRE Alerts - Slack"
+    labels:
+      channel_name: "#nexus-pre-alerts"
+    userLabels:
+      severity: "warning"
+    enabled: true
+
+  - type: slack
+    displayName: "PRE Critical - Slack"
+    labels:
+      channel_name: "#nexus-pre-critical"
+    userLabels:
+      severity: "critical"
+    enabled: true
+
+  - type: email
+    displayName: "PRE On-Call Email"
+    labels:
+      email_address: "pre-oncall@nexusdocs360.com"
+    enabled: true
+
+  - type: pagerduty
+    displayName: "PRE PagerDuty"
+    labels:
+      service_key: "${PAGERDUTY_PRE_KEY}"
+    userLabels:
+      severity: "critical"
+    enabled: true

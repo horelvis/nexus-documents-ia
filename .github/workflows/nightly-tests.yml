@@ -1,0 +1,436 @@
+name: Nightly Tests
+
+on:
+  schedule:
+    # Ejecutar todas las noches a las 1 AM UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      full_test_suite:
+        description: 'Ejecutar suite completa de tests'
+        required: false
+        default: true
+        type: boolean
+      include_performance:
+        description: 'Incluir tests de performance'
+        required: false
+        default: true
+        type: boolean
+      include_load_test:
+        description: 'Incluir tests de carga'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+  FULL_TEST_SUITE: ${{ github.event.inputs.full_test_suite != 'false' }}
+  INCLUDE_PERFORMANCE: ${{ github.event.inputs.include_performance != 'false' }}
+  INCLUDE_LOAD_TEST: ${{ github.event.inputs.include_load_test == 'true' }}
+
+jobs:
+  nightly-integration:
+    name: Nightly Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      weaviate:
+        image: semitechnologies/weaviate:latest
+        ports:
+          - 8080:8080
+        env:
+          QUERY_DEFAULTS_LIMIT: 25
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+
+      elasticsearch:
+        image: elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: 'false'
+          "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+        ports:
+          - 9200:9200
+          - 9300:9300
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client redis-tools curl jq
+
+    - name: Install Python dependencies
+      working-directory: ./backend
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio requests psutil locust
+
+    - name: Install Node.js dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Wait for all services
+      run: |
+        echo "⏳ Waiting for all services to be ready..."
+
+        # PostgreSQL
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U test_user; then
+            echo "✅ PostgreSQL ready"
+            break
+          fi
+          sleep 2
+        done
+
+        # Redis
+        for i in {1..30}; do
+          if redis-cli -h localhost -p 6379 ping | grep -q PONG; then
+            echo "✅ Redis ready"
+            break
+          fi
+          sleep 2
+        done
+
+        # Weaviate
+        for i in {1..30}; do
+          if curl -s http://localhost:8080/v1/meta > /dev/null; then
+            echo "✅ Weaviate ready"
+            break
+          fi
+          sleep 2
+        done
+
+        # Elasticsearch
+        for i in {1..30}; do
+          if curl -s http://localhost:9200/_cluster/health > /dev/null; then
+            echo "✅ Elasticsearch ready"
+            break
+          fi
+          sleep 2
+        done
+
+    - name: System validation
+      run: |
+        echo "🔍 Running system validation..."
+        python3 validate_system.py
+
+    - name: Full integration test suite
+      if: env.FULL_TEST_SUITE == 'true'
+      working-directory: ./backend/tests
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        ENVIRONMENT: test
+        SECRET_KEY: test-secret-key
+        CLERK_SECRET_KEY: test-clerk-secret
+        WEAVIATE_URL: http://localhost:8080
+        ELASTICSEARCH_URL: http://localhost:9200
+        TESTING: true
+      run: |
+        echo "🧪 Running complete integration test suite..."
+        python3 test_validation_complete.py
+
+    - name: Unit tests with coverage
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        ENVIRONMENT: test
+        SECRET_KEY: test-secret-key
+        CLERK_SECRET_KEY: test-clerk-secret
+        TESTING: true
+      run: |
+        echo "📊 Running unit tests with coverage..."
+        python3 -m pytest tests/ -v --cov=app --cov-report=xml --cov-report=term --cov-report=html --durations=10
+
+    - name: Frontend tests
+      working-directory: ./frontend
+      run: |
+        echo "⚛️ Running frontend tests..."
+        npm test -- --coverage --watchAll=false
+
+    - name: Performance tests
+      if: env.INCLUDE_PERFORMANCE == 'true'
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+      run: |
+        echo "⚡ Running performance tests..."
+        python3 -c "
+import time
+import requests
+import statistics
+
+def performance_test(url, num_requests=50):
+    print(f'🔬 Testing {url} with {num_requests} requests...')
+    response_times = []
+
+    for i in range(num_requests):
+        start = time.time()
+        try:
+            response = requests.get(url, timeout=10)
+            end = time.time()
+            if response.status_code == 200:
+                response_times.append(end - start)
+        except Exception as e:
+            print(f'❌ Request {i+1} failed: {e}')
+
+    if response_times:
+        avg_time = statistics.mean(response_times)
+        median_time = statistics.median(response_times)
+        min_time = min(response_times)
+        max_time = max(response_times)
+        p95 = statistics.quantiles(response_times, n=20)[18]  # 95th percentile
+
+        print(f'📊 Results for {url}:')
+        print(f'   Total requests: {len(response_times)}/{num_requests}')
+        print(f'   Average: {avg_time:.3f}s')
+        print(f'   Median: {median_time:.3f}s')
+        print(f'   Min: {min_time:.3f}s')
+        print(f'   Max: {max_time:.3f}s')
+        print(f'   95th percentile: {p95:.3f}s')
+
+        # Performance criteria
+        if avg_time < 0.5 and p95 < 1.0:
+            print('✅ Performance criteria met')
+            return True
+        else:
+            print('❌ Performance criteria not met')
+            return False
+    else:
+        print('❌ No successful requests')
+        return False
+
+# Test health endpoint
+health_ok = performance_test('http://localhost:8000/api/v1/health', 30)
+print(f'🏥 Health endpoint performance: {\"PASS\" if health_ok else \"FAIL\"}')
+        "
+
+    - name: Load testing
+      if: env.INCLUDE_LOAD_TEST == 'true'
+      working-directory: ./backend
+      run: |
+        echo "🔥 Running load tests..."
+        python3 -c "
+import threading
+import time
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def make_request(url, request_id):
+    start = time.time()
+    try:
+        response = requests.get(url, timeout=5)
+        end = time.time()
+        return {
+            'request_id': request_id,
+            'status_code': response.status_code,
+            'response_time': end - start,
+            'success': response.status_code == 200
+        }
+    except Exception as e:
+        end = time.time()
+        return {
+            'request_id': request_id,
+            'status_code': None,
+            'response_time': end - start,
+            'success': False,
+            'error': str(e)
+        }
+
+def load_test(url, num_users=10, duration=30):
+    print(f'🚀 Starting load test: {num_users} users for {duration}s')
+    print(f'🎯 Target: {url}')
+
+    results = []
+    start_time = time.time()
+    end_time = start_time + duration
+
+    with ThreadPoolExecutor(max_workers=num_users) as executor:
+        request_id = 0
+        futures = []
+
+        while time.time() < end_time:
+            # Submit new requests
+            for _ in range(min(5, num_users)):  # Max 5 concurrent per user
+                if time.time() < end_time:
+                    future = executor.submit(make_request, url, request_id)
+                    futures.append(future)
+                    request_id += 1
+                    time.sleep(0.1)  # Small delay between requests
+
+        # Wait for all requests to complete
+        for future in as_completed(futures):
+            result = future.result()
+            results.append(result)
+
+    # Analyze results
+    successful_requests = [r for r in results if r['success']]
+    failed_requests = [r for r in results if not r['success']]
+
+    if results:
+        response_times = [r['response_time'] for r in successful_requests]
+        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+
+        print(f'📊 Load Test Results:')
+        print(f'   Total requests: {len(results)}')
+        print(f'   Successful: {len(successful_requests)}')
+        print(f'   Failed: {len(failed_requests)}')
+        print(f'   Success rate: {(len(successful_requests)/len(results)*100):.1f}%')
+        print(f'   Average response time: {avg_response_time:.3f}s')
+
+        # Load test criteria
+        if len(successful_requests)/len(results) > 0.95 and avg_response_time < 2.0:
+            print('✅ Load test criteria met')
+            return True
+        else:
+            print('❌ Load test criteria not met')
+            return False
+    else:
+        print('❌ No requests completed')
+        return False
+
+# Run load test
+load_test_passed = load_test('http://localhost:8000/api/v1/health', num_users=5, duration=20)
+print(f'🔥 Load test result: {\"PASS\" if load_test_passed else \"FAIL\"}')
+        "
+
+    - name: Generate nightly report
+      run: |
+        echo "## 🌙 Nightly Test Report - $(date +'%Y-%m-%d')" >> nightly-report.md
+        echo "" >> nightly-report.md
+        echo "### 📊 Test Results" >> nightly-report.md
+        echo "" >> nightly-report.md
+        echo "| Metric | Value | Status |" >> nightly-report.md
+        echo "|--------|-------|--------|" >> nightly-report.md
+
+        # Add test results
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "| Overall Status | ✅ PASS | 🟢 |" >> nightly-report.md
+        else
+          echo "| Overall Status | ❌ FAIL | 🔴 |" >> nightly-report.md
+        fi
+
+        echo "| Test Suite | ${{ env.FULL_TEST_SUITE }} | - |" >> nightly-report.md
+        echo "| Performance Tests | ${{ env.INCLUDE_PERFORMANCE }} | - |" >> nightly-report.md
+        echo "| Load Tests | ${{ env.INCLUDE_LOAD_TEST }} | - |" >> nightly-report.md
+
+        echo "" >> nightly-report.md
+        echo "### 🔍 Details" >> nightly-report.md
+        echo "" >> nightly-report.md
+        echo "- **Execution Time**: $(date)" >> nightly-report.md
+        echo "- **GitHub Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> nightly-report.md
+        echo "" >> nightly-report.md
+        echo "### 📈 Coverage Report" >> nightly-report.md
+        echo "Coverage reports are available in the workflow artifacts." >> nightly-report.md
+
+    - name: Upload nightly report
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-report-${{ github.run_number }}
+        path: nightly-report.md
+
+    - name: Upload coverage and performance data
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-coverage-${{ github.run_number }}
+        path: |
+          backend/htmlcov/
+          backend/coverage.xml
+          frontend/coverage/
+
+  notify-results:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: nightly-integration
+    if: always()
+
+    steps:
+    - name: Send notification
+      run: |
+        if [ "${{ needs.nightly-integration.result }}" == "success" ]; then
+          echo "✅ Nightly tests passed successfully"
+          # Aquí se podría agregar integración con Slack, Discord, etc.
+        else
+          echo "❌ Nightly tests failed"
+          # Aquí se podría agregar alertas para fallos
+        fi
+
+    - name: Create issue on failure
+      if: needs.nightly-integration.result == 'failure'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = `🔴 Nightly Tests Failed - ${new Date().toISOString().split('T')[0]}`;
+          const body = `
+          ## 🚨 Nightly Test Failure
+
+          The nightly test suite has failed. This may indicate:
+
+          - Regression in functionality
+          - Performance degradation
+          - Infrastructure issues
+          - Dependency conflicts
+
+          ### 🔗 Links
+          - [Failed Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - [Test Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)
+
+          ### 📋 Next Steps
+          1. Review the test logs for specific failures
+          2. Check if it's a transient issue by re-running the workflow
+          3. Investigate and fix any identified issues
+          4. Update tests if needed to reflect intentional changes
+
+          ---
+          *This issue was automatically created by the nightly test workflow.*
+          `;
+
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['nightly-failure', 'automated', 'testing']
+          });

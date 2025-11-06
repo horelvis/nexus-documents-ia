@@ -57,11 +57,24 @@ export function SubscriptionErrorDialog({
       onClose()
       // Small delay to ensure dialog closes before navigation
       setTimeout(() => {
-        const plansUrl = `/plans/${tenantId}`
-        router.push(plansUrl)
+        router.push(`/${tenantId}/plans`)
       }, 100)
     }
   }
+
+  const handleRenewSubscription = () => {
+    if (tenantId) {
+      onClose()
+      setTimeout(() => {
+        router.push('/pricing')
+      }, 100)
+    }
+  }
+
+  // Determinar si la suscripción ha caducado
+  const hasExpired = errorDetail.subscription_status?.is_limited || 
+    errorDetail.subscription_status?.status === 'canceled' || 
+    errorDetail.subscription_status?.status === 'past_due'
 
   const getPlanDisplayName = (planType: string) => {
     const planNames: Record<string, string> = {
@@ -107,11 +120,14 @@ export function SubscriptionErrorDialog({
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <IconAlertCircle className="h-5 w-5 text-amber-600" />
-            Función no disponible
+            <IconAlertCircle className="h-5 w-5 text-red-600" />
+            {hasExpired ? 'Suscripción Caducada' : 'Función no disponible'}
           </DialogTitle>
           <DialogDescription>
-            {errorDetail.message}
+            {hasExpired 
+              ? 'Tu suscripción ha caducado. Renueva tu plan o inicia una nueva suscripción para continuar.'
+              : errorDetail.message
+            }
           </DialogDescription>
         </DialogHeader>
 
@@ -168,7 +184,18 @@ export function SubscriptionErrorDialog({
           <Button variant="outline" onClick={onClose}>
             Cerrar
           </Button>
-          {errorDetail.action_required === 'upgrade_plan' && (
+          {hasExpired ? (
+            <div className="flex gap-2">
+              <Button onClick={handleRenewSubscription} variant="outline" className="gap-2">
+                <IconCrown className="h-4 w-4" />
+                Renovar Plan
+              </Button>
+              <Button onClick={handleRenewSubscription} className="gap-2">
+                <IconCrown className="h-4 w-4" />
+                Nueva Suscripción
+              </Button>
+            </div>
+          ) : errorDetail.action_required === 'upgrade_plan' && (
             <Button onClick={handleUpgrade} className="gap-2">
               <IconCrown className="h-4 w-4" />
               Ver planes

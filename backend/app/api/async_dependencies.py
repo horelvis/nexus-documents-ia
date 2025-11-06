@@ -16,15 +16,29 @@ from app.core.config import settings
 
 async def get_current_user_async(
     db: AsyncSession = Depends(get_async_db),
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
 ) -> User:
     """
     Async version of get_current_user that works with AsyncSession
     """
     import logging
+    import os
     logger = logging.getLogger(__name__)
     
-    logger.info(f"🔑 [ASYNC_DEPENDENCIES] get_current_user_async called with authorization: {'Yes' if authorization else 'No'}")
+    logger.info(f"🔑 [ASYNC_DEPENDENCIES] get_current_user_async called with authorization: {'Yes' if authorization else 'No'}, X-User-Id: {x_user_id}")
+    
+    # Development mode: Allow X-User-Id header for testing
+    if x_user_id and os.getenv("ENVIRONMENT", "development") == "development":
+        logger.info(f"🔧 [ASYNC_DEPENDENCIES] Development mode: Using X-User-Id: {x_user_id}")
+        result = await db.execute(
+            select(User).where(User.clerk_user_id == x_user_id).options(selectinload(User.tenant))
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            logger.info(f"✅ [ASYNC_DEPENDENCIES] Found user via X-User-Id: {user.email}")
+            return user
+        logger.warning(f"⚠️ User not found with X-User-Id: {x_user_id}")
     
     if not authorization:
         logger.warning("⚠️ No Authorization header provided")

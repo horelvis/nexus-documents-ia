@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
 import { useApiClient } from '@/lib/api-client'
@@ -19,6 +19,7 @@ export function UserProvider({ children }: UserProviderProps) {
   const [backendUser, setBackendUser] = useState<BackendUser | null>(null)
   const [userLoading, setUserLoading] = useState(true)
   const [userError] = useState<string | null>(null)
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
   
   // Onboarding state
   const [onboarding, setOnboarding] = useState<OnboardingStatus>({
@@ -51,7 +52,7 @@ export function UserProvider({ children }: UserProviderProps) {
   // when they sign up through Clerk after completing checkout
 
   // Mark onboarding as completed
-  const markOnboardingComplete = async (onboardingData?: any): Promise<boolean> => {
+  const markOnboardingComplete = useCallback(async (onboardingData?: any): Promise<boolean> => {
     try {
       // Send the onboarding data directly as the request body
       const response = await apiClient.post('/auth/complete-onboarding', onboardingData)
@@ -73,10 +74,10 @@ export function UserProvider({ children }: UserProviderProps) {
       console.error('Error completing onboarding:', error)
       return false
     }
-  }
+  }, [apiClient])
 
   // Reset onboarding (for development/testing)
-  const resetOnboarding = async (): Promise<boolean> => {
+  const resetOnboarding = useCallback(async (): Promise<boolean> => {
     try {
       const response = await apiClient.post('/auth/reset-onboarding')
       
@@ -97,10 +98,10 @@ export function UserProvider({ children }: UserProviderProps) {
       console.error('Error resetting onboarding:', error)
       return false
     }
-  }
+  }, [apiClient])
 
   // Check user status in backend
-  const checkOnboardingStatus = async (): Promise<void> => {
+  const checkOnboardingStatus = useCallback(async (): Promise<void> => {
     if (!clerkUser) return
 
     try {
@@ -126,23 +127,54 @@ export function UserProvider({ children }: UserProviderProps) {
 
       // User exists, update state
       const userData: BackendUser = response.data
+      
+      // Check for invalid/default tenant ID
+      const isInvalidTenantId = !userData.tenant_id || 
+        userData.tenant_id === 'default' || 
+        userData.tenant_id === '00000000-0000-0000-0000-000000000000' ||
+        userData.tenant_id === 'undefined' ||
+        userData.tenant_id === 'null'
+      
+      if (isInvalidTenantId) {
+        console.error('Invalid tenant ID detected:', userData.tenant_id)
+        setOnboarding({
+          needsOnboarding: false,
+          isNewUser: false,
+          hasCompletedSync: false,
+          loading: false,
+          error: 'INVALID_TENANT'
+        })
+        setUserLoading(false)
+        return
+      }
+      
       setBackendUser(userData)
       
-      // Check if user needs onboarding (only after first payment)
+      // Check if user needs onboarding (only after first payment or trial start)
       const hasCompletedOnboarding = userData?.onboarding_completed || false
+      const needsOnboarding = !hasCompletedOnboarding && 
+        (userData?.subscription_plan !== 'free' || userData?.subscription_status === 'trialing')
+      
       setOnboarding({
-        needsOnboarding: !hasCompletedOnboarding && userData?.subscription_plan !== 'free',
+        needsOnboarding,
         isNewUser: false,
         hasCompletedSync: true,
         loading: false,
         error: null
       })
 
-      // Redirect to onboarding only if:
-      // 1. User has not completed onboarding
-      // 2. User has a paid subscription (just came from checkout)
-      // 3. Not already on onboarding page
-      if (!hasCompletedOnboarding && userData?.subscription_plan !== 'free' && !isOnboardingPath()) {
+      // Subscription redirects are now handled by middleware.ts
+      // Only handle onboarding redirects here
+      
+      // Check if user has valid subscription or trial for onboarding purposes
+      const hasValidTrial = userData?.trial_ends_at && new Date(userData.trial_ends_at) > new Date()
+      const hasPaidSubscription = userData?.subscription_plan && 
+        ['basic', 'pro', 'professional', 'enterprise'].includes(userData.subscription_plan)
+      
+      // If user has paid plan (including valid trial) but hasn't completed onboarding
+      const hasValidPlan = hasPaidSubscription || hasValidTrial
+      
+      if (!hasCompletedOnboarding && hasValidPlan && !isOnboardingPath()) {
         router.push(getOnboardingPath(userData))
       }
 
@@ -180,13 +212,28 @@ export function UserProvider({ children }: UserProviderProps) {
     } finally {
       setUserLoading(false)
     }
-  }
+  }, [clerkUser, apiClient, pathname, router])
+
+  // Helper functions for subscription status
+  const hasValidTrial = useCallback((): boolean => {
+    if (!backendUser?.trial_ends_at) return false
+    return new Date(backendUser.trial_ends_at) > new Date()
+  }, [backendUser?.trial_ends_at])
+  
+  const hasPaidSubscription = useCallback((): boolean => {
+    if (!backendUser?.subscription_plan) return false
+    return ['basic', 'pro', 'professional', 'enterprise'].includes(backendUser.subscription_plan)
+  }, [backendUser?.subscription_plan])
+  
+  const needsPayment = useCallback((): boolean => {
+    return !hasValidTrial() && !hasPaidSubscription()
+  }, [hasValidTrial, hasPaidSubscription])
 
   // Refetch user data
-  const refetchUser = async (): Promise<void> => {
+  const refetchUser = useCallback(async (): Promise<void> => {
     if (!clerkUser) return
     await checkOnboardingStatus()
-  }
+  }, [clerkUser, checkOnboardingStatus])
 
   // Initialize user data when Clerk user is loaded
   useEffect(() => {
@@ -207,7 +254,7 @@ export function UserProvider({ children }: UserProviderProps) {
     checkOnboardingStatus()
   }, [isClerkLoaded, clerkUser])
 
-  const contextValue: UserContextType = {
+  const contextValue: UserContextType = useMemo(() => ({
     // Clerk data
     clerkUser,
     isClerkLoaded,
@@ -225,8 +272,28 @@ export function UserProvider({ children }: UserProviderProps) {
     markOnboardingComplete,
     resetOnboarding,
     checkOnboardingStatus,
-    refetchUser
-  }
+    refetchUser,
+    
+    // Subscription helpers
+    hasValidTrial,
+    hasPaidSubscription,
+    needsPayment
+  }), [
+    clerkUser,
+    isClerkLoaded,
+    isSignedIn,
+    backendUser,
+    userLoading,
+    userError,
+    onboarding,
+    markOnboardingComplete,
+    resetOnboarding,
+    checkOnboardingStatus,
+    refetchUser,
+    hasValidTrial,
+    hasPaidSubscription,
+    needsPayment
+  ])
 
   return (
     <UserContext.Provider value={contextValue}>

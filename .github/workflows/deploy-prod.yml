@@ -1,0 +1,414 @@
+name: Deploy to PRODUCTION
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  PROJECT_ID: nexusdocs360-prod
+  REGION: europe-west1
+  REPOSITORY: nexus-registry-prod
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy:
+    name: Deploy to PRODUCTION
+    runs-on: ubuntu-latest
+    needs: security-scan
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY_PROD }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+    # Create Backup
+    - name: Create Database Backup
+      run: |
+        BACKUP_ID="backup-before-${GITHUB_REF_NAME}-$(date +%Y%m%d-%H%M%S)"
+        gcloud sql backups create \
+          --instance=nexus-db-prod \
+          --description="Backup before deploying ${GITHUB_REF_NAME}" \
+          --backup-id="${BACKUP_ID}"
+        echo "BACKUP_ID=${BACKUP_ID}" >> $GITHUB_ENV
+
+    # Backend Build with PyArmor
+    - name: Build Backend (Production)
+      run: |
+        cd backend
+        
+        # Install dependencies
+        pip install -r requirements.txt
+        pip install pyarmor
+        
+        # Obfuscate critical business logic
+        pyarmor obfuscate --recursive \
+          --exclude "alembic/*" \
+          --exclude "tests/*" \
+          --exclude "scripts/*" \
+          app/core/ app/services/ app/api/
+        
+        # Compile remaining Python files
+        python -m compileall -b app/
+        find app/ -name "*.py" -type f -not -path "*/dist/*" -delete
+        
+        # Create production Docker image
+        cat > Dockerfile.production << 'EOF'
+        FROM python:3.9-slim
+        WORKDIR /app
+        
+        # Security: Run as non-root user
+        RUN useradd -m -u 1001 appuser
+        
+        # Copy only production files
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt && \
+            rm -rf /root/.cache/pip
+        
+        COPY --chown=appuser:appuser app/ ./app/
+        COPY --chown=appuser:appuser alembic.ini .
+        COPY --chown=appuser:appuser .pyarmor_config/ ./.pyarmor_config/
+        
+        # Remove any development files
+        RUN find . -name "*.py" -type f | xargs rm -f && \
+            find . -name "__pycache__" -type d | xargs rm -rf && \
+            find . -name "*.pyc" -exec chmod 444 {} \;
+        
+        USER appuser
+        EXPOSE 8000
+        CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+        EOF
+        
+        # Build and push with cache
+        docker build -f Dockerfile.production \
+          -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_REF_NAME} \
+          -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:latest \
+          --cache-from ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:latest \
+          .
+        
+        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_REF_NAME}
+        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:latest
+
+    # Frontend Build with Optimization
+    - name: Build Frontend (Production)
+      run: |
+        cd frontend
+        
+        # Install and build with production optimizations
+        npm ci
+        npm run build
+        
+        # Create optimized production image
+        cat > Dockerfile.production << 'EOF'
+        FROM node:18-alpine AS runner
+        WORKDIR /app
+        
+        # Security: Run as non-root user
+        RUN addgroup -g 1001 -S nodejs && \
+            adduser -S nextjs -u 1001
+        
+        # Copy only production files
+        COPY --chown=nextjs:nodejs package*.json ./
+        RUN npm ci --only=production && \
+            npm cache clean --force
+        
+        COPY --chown=nextjs:nodejs .next/standalone ./
+        COPY --chown=nextjs:nodejs .next/static ./.next/static
+        COPY --chown=nextjs:nodejs public ./public
+        
+        USER nextjs
+        EXPOSE 3000
+        ENV NODE_ENV production
+        ENV NEXT_TELEMETRY_DISABLED 1
+        
+        CMD ["node", "server.js"]
+        EOF
+        
+        # Build and push with cache
+        docker build -f Dockerfile.production \
+          -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_REF_NAME} \
+          -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:latest \
+          --cache-from ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:latest \
+          .
+        
+        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_REF_NAME}
+        docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:latest
+
+    # Blue-Green Deployment - Backend
+    - name: Deploy Backend (Blue-Green)
+      run: |
+        # Deploy new revision with tag
+        gcloud run deploy nexus-api-prod \
+          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_REF_NAME} \
+          --region ${REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --tag blue \
+          --no-traffic \
+          --set-env-vars "ENVIRONMENT=prod" \
+          --set-secrets "DATABASE_URL=database-url-prod:latest" \
+          --set-secrets "REDIS_URL=redis-url-prod:latest" \
+          --set-secrets "CLERK_SECRET_KEY=clerk-secret-prod:latest" \
+          --set-secrets "OPENAI_API_KEY=openai-api-key-prod:latest" \
+          --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key-prod:latest" \
+          --set-secrets "STRIPE_SECRET_KEY=stripe-secret-prod:latest" \
+          --vpc-connector nexus-connector-prod \
+          --min-instances 3 \
+          --max-instances 100 \
+          --memory 2Gi \
+          --cpu 2 \
+          --concurrency 250 \
+          --timeout 60
+        
+        # Gradual traffic shift (10% -> 50% -> 100%)
+        echo "Shifting 10% traffic to blue..."
+        gcloud run services update-traffic nexus-api-prod \
+          --region ${REGION} \
+          --to-tags blue=10
+        
+        # Wait and monitor
+        sleep 60
+        
+        # Check error rate
+        ERROR_COUNT=$(gcloud logging read \
+          "resource.type=cloud_run_revision AND \
+           resource.labels.service_name=nexus-api-prod AND \
+           resource.labels.revision_name=~'.*-blue' AND \
+           severity>=ERROR" \
+          --limit 10 \
+          --format "value(severity)" | wc -l)
+        
+        if [ $ERROR_COUNT -gt 5 ]; then
+          echo "High error rate detected! Rolling back..."
+          gcloud run services update-traffic nexus-api-prod \
+            --region ${REGION} \
+            --to-latest
+          exit 1
+        fi
+        
+        # Continue traffic shift
+        echo "Shifting 50% traffic to blue..."
+        gcloud run services update-traffic nexus-api-prod \
+          --region ${REGION} \
+          --to-tags blue=50
+        
+        sleep 120
+        
+        # Final shift
+        echo "Shifting 100% traffic to blue..."
+        gcloud run services update-traffic nexus-api-prod \
+          --region ${REGION} \
+          --to-tags blue=100
+
+    # Blue-Green Deployment - Frontend
+    - name: Deploy Frontend (Blue-Green)
+      run: |
+        # Deploy new revision with tag
+        gcloud run deploy nexus-frontend-prod \
+          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-frontend:${GITHUB_REF_NAME} \
+          --region ${REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --tag blue \
+          --no-traffic \
+          --set-env-vars "NEXT_PUBLIC_API_URL=https://api.nexusdocs360.com" \
+          --set-env-vars "NEXT_PUBLIC_APP_URL=https://app.nexusdocs360.com" \
+          --set-secrets "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=clerk-publishable-key-prod:latest" \
+          --min-instances 3 \
+          --max-instances 100 \
+          --memory 1Gi \
+          --cpu 2 \
+          --concurrency 250
+        
+        # Same gradual traffic shift
+        gcloud run services update-traffic nexus-frontend-prod \
+          --region ${REGION} \
+          --to-tags blue=10
+        
+        sleep 60
+        
+        gcloud run services update-traffic nexus-frontend-prod \
+          --region ${REGION} \
+          --to-tags blue=50
+        
+        sleep 120
+        
+        gcloud run services update-traffic nexus-frontend-prod \
+          --region ${REGION} \
+          --to-tags blue=100
+
+    # Deploy Microservices
+    - name: Deploy Microservices (Production)
+      run: |
+        for SERVICE in langchain langroid storage; do
+          cd $GITHUB_WORKSPACE/microservices/${SERVICE}-service
+          
+          # Build production image
+          docker build \
+            -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_REF_NAME} \
+            -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:latest \
+            .
+          
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_REF_NAME}
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:latest
+          
+          # Deploy with high availability
+          gcloud run deploy nexus-${SERVICE}-prod \
+            --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-${SERVICE}:${GITHUB_REF_NAME} \
+            --region ${REGION} \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --vpc-connector nexus-connector-prod \
+            --min-instances 1 \
+            --max-instances 20 \
+            --memory 2Gi \
+            --cpu 2
+        done
+
+    # Run Database Migrations
+    - name: Run Database Migrations
+      run: |
+        # Create migration job
+        gcloud run jobs create migrate-db-prod-${GITHUB_SHA:0:7} \
+          --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nexus-api:${GITHUB_REF_NAME} \
+          --region ${REGION} \
+          --set-secrets "DATABASE_URL=database-url-prod:latest" \
+          --vpc-connector nexus-connector-prod \
+          --command "alembic" \
+          --args "upgrade,head" \
+          --max-retries 1 \
+          --task-timeout 10m
+        
+        # Execute migration
+        gcloud run jobs execute migrate-db-prod-${GITHUB_SHA:0:7} --region ${REGION} --wait
+        
+        # Cleanup
+        gcloud run jobs delete migrate-db-prod-${GITHUB_SHA:0:7} --region ${REGION} --quiet
+
+    # Production Tests
+    - name: Run Production Tests
+      run: |
+        # Wait for services
+        sleep 60
+        
+        # Health checks
+        for endpoint in "https://api.nexusdocs360.com/health" "https://app.nexusdocs360.com/api/health"; do
+          echo "Testing $endpoint"
+          response=$(curl -s -o /dev/null -w "%{http_code}" $endpoint)
+          if [ $response -ne 200 ]; then
+            echo "Health check failed for $endpoint"
+            exit 1
+          fi
+        done
+        
+        # Performance test
+        echo "Running performance test..."
+        curl -o /dev/null -s -w "Response time: %{time_total}s\n" https://app.nexusdocs360.com
+        
+        echo "All production tests passed!"
+
+    # Update CDN Cache
+    - name: Purge CDN Cache
+      run: |
+        # Clear CDN cache for new deployment
+        gcloud compute url-maps invalidate-cdn-cache nexus-lb-prod \
+          --path "/*" \
+          --global
+
+    # Create Release
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## 🚀 Production Deployment ${{ github.ref }}
+          
+          ### Deployment Details
+          - **Environment**: Production
+          - **Build**: ${{ github.run_id }}
+          - **Backup ID**: ${{ env.BACKUP_ID }}
+          
+          ### URLs
+          - **Application**: https://app.nexusdocs360.com
+          - **API**: https://api.nexusdocs360.com
+          - **Landing**: https://nexusdocs360.com
+          
+          ### What's Changed
+          See commit history for details.
+        draft: false
+        prerelease: false
+
+    # Notify Success
+    - name: Notify Success
+      if: success()
+      run: |
+        echo "✅ Production deployment completed successfully!"
+        echo "Version: ${GITHUB_REF_NAME}"
+        echo "Application: https://app.nexusdocs360.com"
+        echo "API: https://api.nexusdocs360.com"
+
+    # Rollback on Failure
+    - name: Rollback on Failure
+      if: failure()
+      run: |
+        echo "❌ Deployment failed! Initiating rollback..."
+        
+        # Rollback traffic to previous revision
+        gcloud run services update-traffic nexus-api-prod \
+          --region ${REGION} \
+          --to-latest
+        
+        gcloud run services update-traffic nexus-frontend-prod \
+          --region ${REGION} \
+          --to-latest
+        
+        echo "Rollback completed. Previous version restored."

@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
     STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
     STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
+    STRIPE_BASIC_PRICE_ID: Optional[str] = os.getenv("STRIPE_BASIC_PRICE_ID")
     STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
+    STRIPE_PRO_YEARLY_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_YEARLY_PRICE_ID")
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -35,15 +37,33 @@ class Settings(BaseSettings):
     
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
         "http://127.0.0.1:3000", 
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://192.168.1.47:3000",
+        "http://192.168.1.47:3001",
+        "http://192.168.1.47:3002",
         "http://192.168.1.47:8000",
         "http://192.168.1.45:3000",
+        "http://192.168.1.45:3001",
+        "http://192.168.1.45:3002",
         "http://192.168.1.45:8000",
         "http://192.168.1.54:3000",
-        "http://192.168.1.54:8000"
+        "http://192.168.1.54:3001",
+        "http://192.168.1.54:3002",
+        "http://192.168.1.54:8000",
+        "http://192.168.1.35:3000",
+        "http://192.168.1.35:3001",
+        "http://192.168.1.35:3002",
+        "http://192.168.1.35:8000",
+        "http://192.168.1.58:3000",
+        "http://192.168.1.58:3001",
+        "http://192.168.1.58:3002",
+        "http://192.168.1.58:8000"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -80,12 +100,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    
+    @property
+    def REDIS_URL(self) -> str:
+        """Generate Redis URL from host and port"""
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
-    # Vector DB (Qdrant)
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "documents"
+    # NEW: Elasticsearch for hybrid search and analytics
+    ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "localhost")
+    ELASTICSEARCH_PORT: int = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+    ELASTICSEARCH_URL: str = f"http://{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
     
     # Google Cloud Storage
     GCS_BUCKET_NAME: str
@@ -94,13 +119,26 @@ class Settings(BaseSettings):
     GCS_REGION: str = "europe-west1"  # Región por defecto
     # Tiempo de validez para URLs firmadas (segundos)
     SIGNED_URL_EXPIRATION: int = 300
+    # Cloud Run detection
+    IS_CLOUD_RUN: bool = os.getenv("K_SERVICE", None) is not None
     
-    # LangChain Microservice
-    LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"
+    # REMOVED: LangChain/LangGraph services - migrated to Weaviate/Elysia
+    # LANGCHAIN_SERVICE_URL: str = "http://langchain-service:8001"  # DEPRECATED
+    # LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"  # DEPRECATED
     
+    # NEW: Weaviate Service with Elysia integration (DEFAULT VECTOR ENGINE)
+    WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
+    USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
     
-    # LangGraph Microservice (State-based Workflows)
-    LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"
+    # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
+    ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+    ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
+    
+    # CAG Microservice (Contextual Augmented Generation)
+    CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")
+    
+    # LangExtract Service (Entity Extraction)
+    LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://ollama-service:11434"
@@ -112,9 +150,20 @@ class Settings(BaseSettings):
     
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
-    ALLOWED_EXTENSIONS: List[str] = ["pdf", "docx", "txt", "md", "csv", "xlsx", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"]
+    # Store as string to avoid JSON parsing issues
+    _ALLOWED_EXTENSIONS: str = "pdf,docx,txt,md,csv,xlsx,png,jpg,jpeg,gif,bmp,tiff,webp,json"
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
+    
+    @property
+    def ALLOWED_EXTENSIONS(self) -> List[str]:
+        """Parse comma-separated extensions into list"""
+        if hasattr(self, '_allowed_extensions_parsed'):
+            return self._allowed_extensions_parsed
+        
+        extensions_str = os.getenv("ALLOWED_EXTENSIONS", self._ALLOWED_EXTENSIONS)
+        self._allowed_extensions_parsed = [ext.strip() for ext in extensions_str.split(",") if ext.strip()]
+        return self._allowed_extensions_parsed
     
     # Tenants
     MULTI_TENANT: bool = True
@@ -124,7 +173,7 @@ class Settings(BaseSettings):
     MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
     
     # Legacy API Key (for backward compatibility)
-    API_KEY: str = "your-secret-api-key-here" # Default value, should be overridden by env var
+    API_KEY: str = os.getenv("API_KEY", "your-secret-api-key-here") # Default value, should be overridden by env var
     
     # Clerk Configuration
     CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")
@@ -132,7 +181,7 @@ class Settings(BaseSettings):
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
     # Microservices URLs
-    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8001")
+    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")
@@ -163,6 +212,11 @@ class Settings(BaseSettings):
     
     @property
     def STORAGE_API_KEY(self) -> str:
+        return self.MICROSERVICES_API_KEY
+    
+    @property
+    def microservices_api_key(self) -> str:
+        """Compatibility property for microservices_api_key (lowercase)"""
         return self.MICROSERVICES_API_KEY
 
 

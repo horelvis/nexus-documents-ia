@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Any, Dict
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from app.core.config import settings
 from .enums import IndexingStatus
 
@@ -79,6 +79,35 @@ class DocumentBasic(DocumentBase):
     updated_at: datetime
     tags: List[TagBase] = []
     
+    @computed_field
+    @property
+    def status(self) -> str:
+        """
+        Campo computado que devuelve un estado user-friendly
+        en lugar del estado técnico de indexado
+        """
+        return self._get_user_friendly_status()
+    
+    @computed_field
+    @property
+    def ready_for_search(self) -> bool:
+        """
+        Campo computado que indica si el documento está disponible para búsqueda
+        """
+        return self.indexed == IndexingStatus.INDEXED
+        
+    def _get_user_friendly_status(self) -> str:
+        """
+        Convierte estados técnicos en estados user-friendly
+        """
+        status_map = {
+            IndexingStatus.INDEXED: "available",      # Disponible - neutral y positivo
+            IndexingStatus.PROCESSING: "processing",  # Procesando - temporal
+            IndexingStatus.INDEXING_ERROR: "needs_attention", # Requiere atención - menos alarmante
+            IndexingStatus.NOT_INDEXED: "pending"     # Pendiente - neutral
+        }
+        return status_map.get(self.indexed, "pending")
+    
     class Config:
         from_attributes = True
 
@@ -127,6 +156,49 @@ class Document(DocumentBase):
     updated_at: datetime
     tags: List[Tag] = []
     extracted_entities: Optional[List[Dict[str, Any]]] = []
+    
+    @computed_field
+    @property
+    def status(self) -> str:
+        """
+        Campo computado que devuelve un estado user-friendly
+        en lugar del estado técnico de indexado
+        """
+        return self._get_user_friendly_status()
+    
+    @computed_field
+    @property
+    def ready_for_search(self) -> bool:
+        """
+        Campo computado que indica si el documento está disponible para búsqueda
+        """
+        return self.indexed == IndexingStatus.INDEXED
+    
+    @computed_field  
+    @property
+    def status_message(self) -> str:
+        """
+        Campo computado que devuelve un mensaje descriptivo del estado
+        """
+        message_map = {
+            IndexingStatus.INDEXED: "Documento listo para búsqueda y análisis",
+            IndexingStatus.PROCESSING: "Analizando contenido del documento...",
+            IndexingStatus.INDEXING_ERROR: "El documento necesita ser reprocesado",
+            IndexingStatus.NOT_INDEXED: "Documento en cola de procesamiento"
+        }
+        return message_map.get(self.indexed, "Estado desconocido")
+        
+    def _get_user_friendly_status(self) -> str:
+        """
+        Convierte estados técnicos en estados user-friendly
+        """
+        status_map = {
+            IndexingStatus.INDEXED: "available",      # Disponible - neutral y positivo
+            IndexingStatus.PROCESSING: "processing",  # Procesando - temporal
+            IndexingStatus.INDEXING_ERROR: "needs_attention", # Requiere atención - menos alarmante
+            IndexingStatus.NOT_INDEXED: "pending"     # Pendiente - neutral
+        }
+        return status_map.get(self.indexed, "pending")
     
     class Config:
         from_attributes = True

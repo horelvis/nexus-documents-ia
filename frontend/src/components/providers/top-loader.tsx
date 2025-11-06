@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Suspense } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { TopProgressBar } from '@/components/ui/unified-loader'
 
-export function TopLoader() {
+function TopLoaderInner() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isLoading, setIsLoading] = useState(false)
@@ -119,4 +119,12 @@ export function TopLoader() {
   }, [])
 
   return <TopProgressBar isLoading={isLoading} progress={progress} />
+}
+
+export function TopLoader() {
+  return (
+    <Suspense fallback={null}>
+      <TopLoaderInner />
+    </Suspense>
+  )
 }

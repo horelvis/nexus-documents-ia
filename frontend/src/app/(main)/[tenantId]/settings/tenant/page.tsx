@@ -29,7 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { useUser } from "@/contexts/user-context"
+import { useBackendUser } from "@/contexts/user-context"
 import { useNotifications } from "@/contexts/app-state-context"
 import { useTenantService } from "@/lib/services/tenant.service"
 import { formatBytes } from "@/lib/utils"
@@ -37,7 +37,7 @@ import { formatBytes } from "@/lib/utils"
 export default function TenantSettingsPage() {
   const params = useParams()
   const tenantId = params.tenantId as string
-  const { user } = useUser()
+  const { backendUser: user } = useBackendUser()
   const { addNotification } = useNotifications()
   const tenantService = useTenantService()
 

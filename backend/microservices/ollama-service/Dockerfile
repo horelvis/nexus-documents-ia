@@ -1,22 +1,30 @@
-FROM ollama/ollama:latest as ollama-base
+# Use NVIDIA CUDA base image with Python for GPU support
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
-# Install Python and dependencies for the API wrapper
-FROM python:3.11-slim
-
-# Install required system packages
+# Install Python 3.11 and system dependencies
 RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Ollama binary from the base image
-COPY --from=ollama-base /bin/ollama /bin/ollama
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Install Ollama with GPU support
+RUN curl -fsSL https://ollama.com/install.sh | sh
+
+# Ollama is already installed in the base image
 
 # Set working directory
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/

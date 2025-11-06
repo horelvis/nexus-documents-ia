@@ -49,10 +49,10 @@ async def create_checkout_session(
     """
     try:
         # Validate plan ID
-        if request.planId not in ['pro', 'enterprise']:
+        if request.planId not in ['basic', 'pro']:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid plan ID: {request.planId}. Must be 'pro' or 'enterprise'"
+                detail=f"Invalid plan ID: {request.planId}. Must be 'basic' or 'pro'"
             )
         
         # Validate interval
@@ -64,13 +64,13 @@ async def create_checkout_session(
         
         # Centralized plan to price mapping
         plan_price_mapping = {
+            'basic': {
+                'month': settings.STRIPE_BASIC_PRICE_ID,
+                'year': getattr(settings, 'STRIPE_BASIC_YEARLY_PRICE_ID', None)
+            },
             'pro': {
                 'month': settings.STRIPE_PRO_PRICE_ID,
                 'year': getattr(settings, 'STRIPE_PRO_YEARLY_PRICE_ID', None)
-            },
-            'enterprise': {
-                'month': settings.STRIPE_ENTERPRISE_PRICE_ID,
-                'year': getattr(settings, 'STRIPE_ENTERPRISE_YEARLY_PRICE_ID', None)
             }
         }
         
@@ -83,10 +83,19 @@ async def create_checkout_session(
                 detail=f"Price not configured for plan '{request.planId}' with interval '{request.interval}'"
             )
 
-        # Si el usuario ya tiene un customer_id, usarlo
+        # Si el usuario ya tiene un customer_id, verificar que existe en Stripe
         customer_id = current_user.stripe_customer_id
         
-        # Si no tiene customer_id, crear uno nuevo
+        # Verificar si el customer_id existe en Stripe
+        if customer_id:
+            try:
+                stripe.Customer.retrieve(customer_id)
+                logger.info(f"✅ Using existing Stripe customer: {customer_id}")
+            except stripe.error.InvalidRequestError as e:
+                logger.warning(f"⚠️ Customer {customer_id} doesn't exist in Stripe, creating new one: {e}")
+                customer_id = None  # Force creation of new customer
+        
+        # Si no tiene customer_id o el existente no es válido, crear uno nuevo
         if not customer_id:
             customer = stripe.Customer.create(
                 email=current_user.email,
@@ -96,6 +105,7 @@ async def create_checkout_session(
                 }
             )
             customer_id = customer.id
+            logger.info(f"✅ Created new Stripe customer: {customer_id}")
             
             # Guardar el customer_id en la base de datos
             current_user.stripe_customer_id = customer_id
@@ -109,8 +119,8 @@ async def create_checkout_session(
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=request.success_url or f"{settings.FRONTEND_URL}/{current_user.tenant_id}/dashboard?upgraded=true&sync=true",
-            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/plans/{current_user.tenant_id}",
+            success_url=request.success_url or f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/{current_user.tenant_id}/plans",
             metadata={
                 'plan_id': request.planId,
                 'user_id': str(current_user.id),
@@ -157,6 +167,59 @@ async def create_checkout_session(
         )
 
 
+@router.get("/debug-checkout-session/{session_id}")
+async def debug_checkout_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_async_db)
+) -> Dict[str, Any]:
+    """
+    Endpoint de debug para ver toda la información de la sesión
+    """
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session_id,
+            expand=['customer', 'subscription', 'line_items']
+        )
+        
+        # También obtener line_items separadamente
+        line_items = stripe.checkout.Session.list_line_items(session_id)
+        
+        return {
+            "session": {
+                "id": session.id,
+                "amount_total": session.amount_total,
+                "currency": session.currency,
+                "payment_status": session.payment_status,
+                "metadata": session.metadata,
+                "customer_details": session.customer_details,
+                "subscription": session.subscription.id if session.subscription else None,
+                "line_items": session.line_items.data if hasattr(session, 'line_items') else None,
+            },
+            "separate_line_items": [
+                {
+                    "price_id": item.price.id if item.price else None,
+                    "unit_amount": item.price.unit_amount if item.price else None,
+                    "currency": item.price.currency if item.price else None,
+                    "quantity": item.quantity,
+                    "amount_total": item.amount_total,
+                }
+                for item in line_items.data
+            ] if line_items.data else [],
+            "subscription_details": {
+                "id": session.subscription.id if session.subscription else None,
+                "items": [
+                    {
+                        "price_id": item.price.id if item.price else None,
+                        "unit_amount": item.price.unit_amount if item.price else None,
+                        "currency": item.price.currency if item.price else None,
+                    }
+                    for item in session.subscription.items.data
+                ] if session.subscription and hasattr(session.subscription, 'items') else []
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.get("/checkout-session/{session_id}")
 async def get_checkout_session(
     session_id: str,
@@ -169,7 +232,7 @@ async def get_checkout_session(
     try:
         session = stripe.checkout.Session.retrieve(
             session_id,
-            expand=['customer', 'subscription']
+            expand=['customer', 'subscription', 'line_items']
         )
 
         if session.payment_status != 'paid':
@@ -178,6 +241,40 @@ async def get_checkout_session(
                 detail="Payment not completed"
             )
 
+        # Obtener información de precio - siempre usar el precio de la suscripción/line_items
+        # porque en trial periods, session.amount_total será 0
+        amount_total = session.amount_total
+        currency = session.currency or 'usd'
+        
+        # Siempre intentar obtener el precio real desde line_items (más confiable)
+        try:
+            line_items = stripe.checkout.Session.list_line_items(session_id, limit=1)
+            if line_items.data and line_items.data[0].price:
+                price = line_items.data[0].price
+                # Usar el precio unitario (precio real del plan) no el amount_total (que puede ser 0 en trial)
+                amount_total = price.unit_amount * line_items.data[0].quantity
+                currency = price.currency
+                logger.info(f"Got price from line_items: {amount_total} {currency}")
+        except Exception as e:
+            logger.warning(f"Could not get line_items: {e}")
+            
+        # Fallback: obtener desde la suscripción si line_items falló
+        if amount_total == 0 and session.subscription:
+            try:
+                subscription = session.subscription
+                if hasattr(subscription, 'items') and subscription.items.data:
+                    price = subscription.items.data[0].price
+                    amount_total = price.unit_amount
+                    currency = price.currency
+                    logger.info(f"Got price from subscription: {amount_total} {currency}")
+            except Exception as e:
+                logger.warning(f"Could not get subscription price: {e}")
+        
+        # Último fallback: usar el amount_total de la sesión si no conseguimos nada más
+        if amount_total == 0:
+            amount_total = session.amount_total
+            logger.warning(f"Using session amount_total: {amount_total} {currency}")
+
         return {
             "session_id": session.id,
             "customer_id": session.customer,
@@ -185,8 +282,8 @@ async def get_checkout_session(
             "subscription_id": session.subscription,
             "plan_id": session.metadata.get('plan_id'),
             "payment_status": session.payment_status,
-            "amount_total": session.amount_total,
-            "currency": session.currency,
+            "amount_total": amount_total or 0,
+            "currency": currency or 'usd',
         }
 
     except stripe.error.InvalidRequestError as e:

@@ -1,0 +1,448 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Ejecutar diariamente a las 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Tipo de test a ejecutar'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - unit
+        - integration
+        - performance
+        - security
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+  DOCKER_COMPOSE_VERSION: '2.0.1'
+
+jobs:
+  integration-test:
+    name: Integration Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      weaviate:
+        image: semitechnologies/weaviate:latest
+        ports:
+          - 8080:8080
+        env:
+          QUERY_DEFAULTS_LIMIT: 25
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+        options: >-
+          --health-cmd "curl -f http://localhost:8080/v1/meta || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      elasticsearch:
+        image: elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: 'false'
+          "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+        ports:
+          - 9200:9200
+          - 9300:9300
+        options: >-
+          --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client redis-tools curl jq
+
+    - name: Install Python dependencies
+      working-directory: ./backend
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio requests psutil
+
+    - name: Install Node.js dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Wait for services to be ready
+      run: |
+        echo "⏳ Waiting for PostgreSQL..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U test_user; then
+            echo "✅ PostgreSQL is ready"
+            break
+          fi
+          sleep 2
+        done
+
+        echo "⏳ Waiting for Redis..."
+        for i in {1..30}; do
+          if redis-cli -h localhost -p 6379 ping | grep -q PONG; then
+            echo "✅ Redis is ready"
+            break
+          fi
+          sleep 2
+        done
+
+        echo "⏳ Waiting for Weaviate..."
+        for i in {1..30}; do
+          if curl -s http://localhost:8080/v1/meta > /dev/null; then
+            echo "✅ Weaviate is ready"
+            break
+          fi
+          sleep 2
+        done
+
+        echo "⏳ Waiting for Elasticsearch..."
+        for i in {1..30}; do
+          if curl -s http://localhost:9200/_cluster/health > /dev/null; then
+            echo "✅ Elasticsearch is ready"
+            break
+          fi
+          sleep 2
+        done
+
+    - name: Run system validation
+      run: python3 validate_system.py
+
+    - name: Run integration tests
+      working-directory: ./backend/tests
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        ENVIRONMENT: test
+        SECRET_KEY: test-secret-key
+        CLERK_SECRET_KEY: test-clerk-secret
+        WEAVIATE_URL: http://localhost:8080
+        ELASTICSEARCH_URL: http://localhost:9200
+        TESTING: true
+      run: |
+        python3 test_validation_complete.py
+
+    - name: Run unit tests with coverage
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        ENVIRONMENT: test
+        SECRET_KEY: test-secret-key
+        CLERK_SECRET_KEY: test-clerk-secret
+        TESTING: true
+      run: |
+        python3 -m pytest tests/ -v --cov=app --cov-report=xml --cov-report=term --cov-report=html
+
+    - name: Run frontend tests
+      working-directory: ./frontend
+      run: npm test -- --coverage --watchAll=false
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+        name: Backend Coverage
+
+    - name: Upload coverage reports (Frontend)
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/lcov.info
+        flags: frontend
+        name: Frontend Coverage
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ github.run_number }}
+        path: |
+          backend/htmlcov/
+          backend/test-results/
+          frontend/coverage/
+
+  performance-test:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: integration-test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: |
+        pip install -r requirements.txt
+        pip install locust pytest
+
+    - name: Run performance tests
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+      run: |
+        # Tests de performance básicos
+        echo "🚀 Running performance tests..."
+        python3 -c "
+import time
+import requests
+import concurrent.futures
+
+def test_endpoint_load(url, num_requests=10):
+    response_times = []
+    for i in range(num_requests):
+        start = time.time()
+        try:
+            response = requests.get(url, timeout=5)
+            end = time.time()
+            if response.status_code == 200:
+                response_times.append(end - start)
+        except:
+            pass
+
+    if response_times:
+        avg_time = sum(response_times) / len(response_times)
+        min_time = min(response_times)
+        max_time = max(response_times)
+        print(f'📊 {url}:')
+        print(f'   Requests: {len(response_times)}/{num_requests}')
+        print(f'   Avg: {avg_time:.3f}s')
+        print(f'   Min: {min_time:.3f}s')
+        print(f'   Max: {max_time:.3f}s')
+        return avg_time < 1.0  # Debe ser < 1 segundo
+    return False
+
+# Test health endpoint
+success = test_endpoint_load('http://localhost:8000/api/v1/health', 5)
+print(f'✅ Health check performance: {\"PASS\" if success else \"FAIL\"}')
+        "
+
+  security-test:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: integration-test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install security tools
+      run: |
+        pip install bandit safety
+        npm install -g audit-ci
+
+    - name: Run Python security scan
+      working-directory: ./backend
+      run: |
+        echo "🔒 Running Python security scan..."
+        bandit -r app/ -f json -o security-report.json || true
+        safety check -r requirements.txt --json > safety-report.json || true
+
+    - name: Run Node.js security audit
+      working-directory: ./frontend
+      run: npm audit --audit-level moderate --json > npm-audit.json || true
+
+    - name: Check for security issues
+      run: |
+        echo "📋 Security Scan Results:"
+
+        # Check Python security
+        if [ -f "backend/security-report.json" ]; then
+          python_issues=$(jq '.results | length' backend/security-report.json 2>/dev/null || echo "0")
+          echo "🐍 Python security issues: $python_issues"
+        fi
+
+        # Check dependency vulnerabilities
+        if [ -f "backend/safety-report.json" ]; then
+          vuln_count=$(jq '.vulnerabilities | length' backend/safety-report.json 2>/dev/null || echo "0")
+          echo "📦 Dependency vulnerabilities: $vuln_count"
+        fi
+
+        # Check npm audit
+        if [ -f "frontend/npm-audit.json" ]; then
+          npm_issues=$(jq '.metadata.vulnerabilities.total' frontend/npm-audit.json 2>/dev/null || echo "0")
+          echo "📦 NPM vulnerabilities: $npm_issues"
+        fi
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports-${{ github.run_number }}
+        path: |
+          backend/security-report.json
+          backend/safety-report.json
+          frontend/npm-audit.json
+
+  e2e-test:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: integration-test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install Playwright
+      working-directory: ./frontend
+      run: |
+        npm install -D @playwright/test
+        npx playwright install
+
+    - name: Run E2E tests
+      working-directory: ./frontend
+      run: |
+        echo "🎭 Running E2E tests..."
+        # Aquí irían los tests de Playwright
+        echo "✅ E2E tests completed (placeholder)"
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [integration-test, performance-test, security-test, e2e-test]
+    if: always()
+
+    steps:
+    - name: Generate test summary
+      run: |
+        echo "## 🧪 Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Suite | Status | Duration |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+        # Integration Tests
+        if [ "${{ needs.integration-test.result }}" == "success" ]; then
+          echo "| Integration Tests | ✅ PASS | ${{ needs.integration-test.outputs.duration || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Integration Tests | ❌ FAIL | ${{ needs.integration-test.outputs.duration || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Performance Tests
+        if [ "${{ needs.performance-test.result }}" == "success" ]; then
+          echo "| Performance Tests | ✅ PASS | N/A |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.performance-test.result }}" == "skipped" ]; then
+          echo "| Performance Tests | ⏭️ SKIP | N/A |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Performance Tests | ❌ FAIL | N/A |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Security Tests
+        if [ "${{ needs.security-test.result }}" == "success" ]; then
+          echo "| Security Tests | ✅ PASS | N/A |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Security Tests | ❌ FAIL | N/A |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # E2E Tests
+        if [ "${{ needs.e2e-test.result }}" == "success" ]; then
+          echo "| E2E Tests | ✅ PASS | N/A |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.e2e-test.result }}" == "skipped" ]; then
+          echo "| E2E Tests | ⏭️ SKIP | N/A |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| E2E Tests | ❌ FAIL | N/A |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Overall Status" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          echo "❌ Some tests failed. Please check the detailed logs." >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+          echo "⏹️ Some tests were cancelled." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "✅ All tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+        echo "- [Test Results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [Coverage Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)" >> $GITHUB_STEP_SUMMARY

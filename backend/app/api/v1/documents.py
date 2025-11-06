@@ -2,6 +2,7 @@ from typing import List, Optional
 import os
 import datetime
 
+from app.services.async_document_service import AsyncDocumentService
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -74,7 +75,7 @@ async def create_document(
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
     
     from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
+    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
     return await document_service.upload_document(
         db=db,
         file=file,
@@ -480,6 +481,17 @@ async def get_document_preview(
             force_regenerate=force_regenerate
         )
         
+        # Marcar documento como visualizado cuando se obtiene preview por primera vez
+        if not force_regenerate:
+            try:
+                await document_service.mark_document_viewed(
+                    document_id=doc_id,
+                    view_duration_seconds=0,
+                    scroll_percentage=0.0
+                )
+            except Exception as e:
+                logger.warning(f"Failed to mark document {doc_id} as viewed: {e}")
+        
         return preview_result
         
     except HTTPException:
@@ -709,7 +721,7 @@ async def recategorize_all_documents(
     # Get documents to recategorize
     query = select(DBDocument.id).filter(
         DBDocument.tenant_id == tenant_id,
-        DBDocument.content.isnot(None)  # Only documents with content
+        DBDocument.indexed > 0  # Only documents that have been indexed
     )
     
     if only_uncategorized:
@@ -893,3 +905,57 @@ async def queue_batch_preview_generation(
             "status": "failed",
             "error": "Failed to queue batch preview generation"
         }
+
+
+@router.post("/facets", response_model=dict)
+async def get_document_facets(
+    query: Optional[str] = Body(None, description="Search query to filter facets"),
+    filters: Optional[dict] = Body(None, description="Current filters to apply"),
+    facet_fields: Optional[List[str]] = Body(["file_type", "category", "tags"], description="Fields to facet on"),
+    max_facet_values: int = Body(10, ge=1, le=50, description="Maximum values per facet"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Get facets for document search results
+    Returns aggregated counts for filtering options
+    """
+    try:
+        from app.services.elasticsearch_client import elasticsearch_client
+
+        # Get facets from Elasticsearch
+        facets_data = await elasticsearch_client.get_facets(
+            tenant_id=tenant_id,
+            query=query,
+            filters=filters,
+            facet_fields=facet_fields,
+            max_facet_values=max_facet_values
+        )
+
+        # Mark selected facets based on current filters
+        if filters and facets_data.get("facets"):
+            for facet in facets_data["facets"]:
+                field_name = facet["field"]
+                if field_name in filters:
+                    current_filter_values = filters[field_name]
+                    if isinstance(current_filter_values, list):
+                        for bucket in facet["buckets"]:
+                            bucket["selected"] = bucket["key"] in current_filter_values
+                    else:
+                        for bucket in facet["buckets"]:
+                            bucket["selected"] = bucket["key"] == current_filter_values
+
+        return {
+            "facets": facets_data.get("facets", []),
+            "total_documents": facets_data.get("total_documents", 0),
+            "query": query,
+            "applied_filters": filters
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get document facets: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve facets: {str(e)}"
+        )

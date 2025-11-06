@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { 
   IconPlus, 
@@ -22,13 +22,15 @@ import {
   IconShare2,
   IconSignature,
   IconDotsVertical,
-  IconBrain
+  IconBrain,
+  IconRefresh,
+  IconAlertTriangle
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { RichTextInput } from "@/components/ui/rich-text-input"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { 
   DropdownMenu, 
@@ -46,16 +48,17 @@ import {
   EditDocumentDialog, 
   DocumentViewerDialog, 
   DeleteDocumentDialog,
-  DocumentPreviewDialog,
   DocumentsDataTable 
 } from "@/components/documents"
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { getFileIcon, formatFileSize, getStatusColor, getStatusLabel } from "@/lib/document-utils"
+import { getFileIcon, formatFileSize } from "@/lib/document-utils"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export default function DocumentsPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.tenantId as string
+  const { t } = useTranslation()
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -66,7 +69,7 @@ export default function DocumentsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalDocuments, setTotalDocuments] = useState(0)
-  const [perPage] = useState(10)
+  const [perPage] = useState(50)
   
   // Load user preferences from localStorage
   const getStoredPreference = (key: string, defaultValue: any) => {
@@ -96,15 +99,13 @@ export default function DocumentsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => 
     getStoredPreference('viewMode', 'grid')
   )
-  const [useDeepSearch, setUseDeepSearch] = useState(() => 
-    getStoredPreference('deepSearch', false)
-  )
+  // Siempre usar búsqueda semántica por contenido
+  const useDeepSearch = true
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
@@ -112,6 +113,9 @@ export default function DocumentsPage() {
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
   const searchService = useSearchService()
+
+
+
 
   // Load documents from API - simple pattern
   const loadDocuments = async () => {
@@ -121,7 +125,7 @@ export default function DocumentsPage() {
     try {
       let response;
       
-      // Use deep search if enabled and there's a search query
+      // Usar búsqueda semántica por contenido cuando hay un query de búsqueda
       if (useDeepSearch && searchQuery && searchQuery.trim()) {
         // Use semantic search for content
         const searchResults = await searchService.searchDocuments({
@@ -130,27 +134,46 @@ export default function DocumentsPage() {
         })
         
         if (searchResults.error) {
-          setError(searchResults.error)
-          return
-        }
+          console.warn('Semantic search failed, falling back to regular search:', searchResults.error)
+          // Fallback to regular document search instead of showing error
+          response = await documentService.getDocuments({
+            search: searchQuery || undefined,
+            status: selectedFilter !== 'all' ? selectedFilter : undefined,
+            per_page: viewMode === 'table' ? 100 : perPage,
+            page: viewMode === 'table' ? 1 : currentPage
+          })
+        } else {
         
         // Transform search results to match document format
-        const documents = searchResults.data?.map(result => ({
-          ...result.document,
-          status: 'active' as const,
-          created_by: {},
-          tenant_id: tenantId,
-          indexing_status: result.document.indexed as any,
-          file_hash: '',
-          version: 1,
-          category: '',
-          document_metadata: {},
-          content: '',
-          extracted_entities: null,
-          ocr_status: null,
-          ocr_completed_at: null,
-          signature_fields: null
-        })) || []
+        const documents = searchResults.data?.map(result => {
+          const doc = result.document || result || {}
+          return {
+            ...doc,
+            id: doc.id || '',
+            title: doc.title || doc.filename || 'Untitled',
+            filename: doc.filename || 'unknown',
+            status: 'active' as const,
+            created_by: doc.created_by || {},
+            tenant_id: tenantId,
+            indexed: doc.indexed || 'INDEXED',
+            file_hash: doc.file_hash || '',
+            version: doc.version || 1,
+            category: doc.category || '',
+            document_metadata: doc.document_metadata || {},
+            content: doc.content || '',
+            extracted_entities: doc.extracted_entities || null,
+            ocr_status: doc.ocr_status || null,
+            ocr_completed_at: doc.ocr_completed_at || null,
+            signature_fields: doc.signature_fields || null,
+            file_type: doc.file_type || 'unknown',
+            mime_type: doc.mime_type || 'application/octet-stream',
+            file_size: doc.file_size || 0,
+            created_at: doc.created_at || new Date().toISOString(),
+            updated_at: doc.updated_at || new Date().toISOString(),
+            tags: doc.tags || [],
+            description: doc.description || ''
+          }
+        }) || []
         response = {
           data: {
             items: documents,
@@ -159,6 +182,7 @@ export default function DocumentsPage() {
             per_page: documents.length,
             pages: 1
           }
+        }
         }
       } else {
         // Use regular document listing
@@ -171,12 +195,26 @@ export default function DocumentsPage() {
         })
       }
       
-      if (response.error) {
+      if (response?.error) {
         setError(response.error)
+      } else if (response?.data) {
+        // Ensure all documents have required fields to prevent undefined errors
+        const safeDocuments = (response.data.items || []).map(doc => ({
+          ...doc,
+          indexed: doc.indexed || 'INDEXED',
+          status: doc.status || 'active',
+          created_by: doc.created_by || {},
+          tags: doc.tags || [],
+          file_type: doc.file_type || 'unknown',
+          mime_type: doc.mime_type || 'application/octet-stream',
+          file_size: doc.file_size || 0
+        }))
+        
+        setDocuments(safeDocuments)
+        setTotalPages(response.data.pages || 1)
+        setTotalDocuments(response.data.total || 0)
       } else {
-        setDocuments(response.data?.items || [])
-        setTotalPages(response.data?.pages || 1)
-        setTotalDocuments(response.data?.total || 0)
+        setError('Invalid response from server')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents')
@@ -185,13 +223,12 @@ export default function DocumentsPage() {
     }
   }
 
-
-  // Reload when filters, pagination, view mode or search type changes
+  // Reload when dependencies change
   useEffect(() => {
     loadDocuments()
-  }, [selectedFilter, currentPage, viewMode, useDeepSearch])
+  }, [selectedFilter, currentPage, viewMode])
   
-  // Reset to page 1 when filter or view mode changes
+  // Reset to page 1 when filter or search query changes
   useEffect(() => {
     setCurrentPage(1)
   }, [selectedFilter, searchQuery, viewMode])
@@ -243,8 +280,7 @@ export default function DocumentsPage() {
   }
 
   const handlePreviewDocument = (document: ApiDocument) => {
-    setSelectedDocument(document)
-    setPreviewDialogOpen(true)
+    router.push(`/${tenantId}/documents/${document.id}/preview`)
   }
 
   const handleShareDocument = (document: ApiDocument) => {
@@ -424,105 +460,36 @@ export default function DocumentsPage() {
           </Button>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconFile className="h-8 w-8 text-blue-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Total Documents</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconClock className="h-8 w-8 text-green-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Processed</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'INDEXED').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconEye className="h-8 w-8 text-purple-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Recently Viewed</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'INDEXED').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <IconDownload className="h-8 w-8 text-orange-500" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-muted-foreground">Processing</p>
-                  <p className="text-2xl font-bold">
-                    {isLoading ? <IconLoader2 className="h-6 w-6 animate-spin" /> : (documents || []).filter((d: any) => d.indexed === 'PROCESSING').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
-        {/* Search and Filter */}
-        <Card className="mb-6">
+        {/* Main content */}
+        <div className="mb-6">
+            {/* Search and Filter */}
+            <Card className="mb-6">
           <CardContent className="p-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 flex flex-col gap-3">
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                    <Input
-                      placeholder="Search documents..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
-                      className="pl-10"
-                    />
-                  </div>
-                  <Button onClick={loadDocuments} variant="outline">
-                    Search
-                  </Button>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="deep-search"
-                    checked={useDeepSearch}
-                    onCheckedChange={(checked) => {
-                      setUseDeepSearch(checked)
-                      storePreference('deepSearch', checked)
+            <div className="flex flex-col gap-4">
+              {/* Search Bar Row */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                <div className="flex-1 relative">
+                  <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
+                  <RichTextInput
+                    placeholder="Search documents... (usa @ para mencionar entidades)"
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
+                    className="pl-10"
+                    documentId="general"
+                    onEntitySelect={(entity) => {
+                      console.log("Entity selected in document search:", entity)
+                      // Optionally trigger search when entity is selected
+                      loadDocuments()
                     }}
                   />
-                  <Label 
-                    htmlFor="deep-search" 
-                    className="text-sm cursor-pointer flex items-center gap-2"
-                  >
-                    <IconBrain className="h-4 w-4" />
-                    Deep Search (search in document content)
-                  </Label>
                 </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
+                
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button onClick={loadDocuments} variant="outline" className="flex-shrink-0">
+                    Search
+                  </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline">
@@ -538,18 +505,6 @@ export default function DocumentsPage() {
                       All Documents
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('INDEXED')
-                      storePreference('filter', 'INDEXED')
-                    }}>
-                      Indexed
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('PROCESSING')
-                      storePreference('filter', 'PROCESSING')
-                    }}>
-                      Processing
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
                       setSelectedFilter('INDEXING_ERROR')
                       storePreference('filter', 'INDEXING_ERROR')
                     }}>
@@ -557,6 +512,7 @@ export default function DocumentsPage() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                
                 
                 {/* View Toggle */}
                 <div className="flex items-center rounded-md border">
@@ -583,6 +539,13 @@ export default function DocumentsPage() {
                     <IconLayoutList className="h-4 w-4" />
                   </Button>
                 </div>
+                </div>
+              </div>
+              
+              {/* Búsqueda semántica siempre habilitada */}
+              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                <IconBrain className="h-4 w-4" />
+                <span>Búsqueda inteligente por contenido activada</span>
               </div>
             </div>
           </CardContent>
@@ -609,10 +572,14 @@ export default function DocumentsPage() {
         )}
 
         {/* Documents List */}
-        {!isLoading && !error && viewMode === 'grid' && (
+        {!isLoading && !error && viewMode === 'grid' && filteredDocuments.length > 0 && (
           <div className="space-y-2">
             {filteredDocuments.map((document: any) => (
-              <Card key={document.id} className="hover:shadow-lg transition-shadow">
+              <Card 
+                key={document.id} 
+                className="hover:shadow-lg transition-shadow cursor-pointer group"
+                onClick={() => handleFullPagePreview(document)}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     {/* File Icon */}
@@ -624,7 +591,11 @@ export default function DocumentsPage() {
                     <div className="flex-grow min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <div className="min-w-0 flex-1">
-                          <h3 className="text-base font-medium truncate" title={document.title || document.filename}>
+                          <h3 
+                            className="text-base font-medium truncate cursor-pointer hover:text-blue-600 transition-colors" 
+                            title={document.title || document.filename}
+                            onClick={() => handleViewDocument(document)}
+                          >
                             {document.title || document.filename}
                           </h3>
                           {document.description && (
@@ -633,9 +604,6 @@ export default function DocumentsPage() {
                             </p>
                           )}
                         </div>
-                        <Badge className={getStatusColor(document.indexed)} variant="secondary" size="sm">
-                          {getStatusLabel(document.indexed)}
-                        </Badge>
                       </div>
                       
                       {/* Metadata and Actions */}
@@ -649,32 +617,41 @@ export default function DocumentsPage() {
                         </div>
                         
                         {/* Actions */}
-                        <div className="flex gap-0.5 flex-shrink-0">
+                        <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                           {/* 3 Main Actions */}
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleViewDocument(document)}
-                            title="View details"
-                            className="h-7 w-7 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleFullPagePreview(document)
+                            }}
+                            title="Full Preview"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconEye className="h-3.5 w-3.5" />
                           </Button>
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleDownloadDocument(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDownloadDocument(document)
+                            }}
                             title="Download"
-                            className="h-7 w-7 p-0"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconDownload className="h-3.5 w-3.5" />
                           </Button>
                           <Button 
                             size="sm" 
                             variant="ghost"
-                            onClick={() => handleShareDocument(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleShareDocument(document)
+                            }}
                             title="Share"
-                            className="h-7 w-7 p-0"
+                            className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconShare2 className="h-3.5 w-3.5" />
                           </Button>
@@ -685,16 +662,17 @@ export default function DocumentsPage() {
                               <Button 
                                 size="sm" 
                                 variant="ghost"
+                                onClick={(e) => e.stopPropagation()}
                                 title="More actions"
-                                className="h-7 w-7 p-0"
+                                className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                               >
                                 <IconDotsVertical className="h-3.5 w-3.5" />
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleFullPagePreview(document)}>
+                              <DropdownMenuItem onClick={() => handleViewDocument(document)}>
                                 <IconEye className="mr-2 h-4 w-4" />
-                                Full Page Preview
+                                View Details
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleDownloadDocument(document)}>
                                 <IconDownload className="mr-2 h-4 w-4" />
@@ -708,6 +686,7 @@ export default function DocumentsPage() {
                                 <IconEdit className="mr-2 h-4 w-4" />
                                 Edit
                               </DropdownMenuItem>
+                              
                               
                               <DropdownMenuSeparator />
                               
@@ -742,7 +721,7 @@ export default function DocumentsPage() {
         )}
 
         {/* Documents Table */}
-        {!isLoading && !error && viewMode === 'table' && (
+        {!isLoading && !error && viewMode === 'table' && filteredDocuments.length > 0 && (
           <DocumentsDataTable
             data={filteredDocuments}
             onViewDocument={handleViewDocument}
@@ -886,17 +865,14 @@ export default function DocumentsPage() {
           onConfirm={handleConfirmDelete}
         />
 
-        <DocumentPreviewDialog
-          document={selectedDocument}
-          open={previewDialogOpen}
-          onOpenChange={setPreviewDialogOpen}
-        />
 
         <ShareDocumentDialog
           document={selectedDocument}
           open={shareDialogOpen}
           onOpenChange={setShareDialogOpen}
         />
+
+        </div> {/* End main content */}
 
       </div>
     </div>

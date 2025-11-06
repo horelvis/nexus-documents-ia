@@ -140,6 +140,42 @@ def get_current_tenant_id(
     
     return str(current_user.tenant_id)
 
+def get_current_tenant(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    x_tenant_id: Optional[str] = Header(None)
+):
+    """
+    Gets the current tenant object.
+    If the X-Tenant-ID header is present and valid for a superuser, it's used.
+    Otherwise, uses the tenant of the current user.
+    """
+    from app.db.models import Tenant
+    
+    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
+        # In a multi-tenant mode, allow superusers to override tenant via header
+        tenant = db.query(Tenant).filter(Tenant.id == x_tenant_id).first()
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tenant not found"
+            )
+        return tenant
+    
+    # Use the tenant from the current user's relationship
+    if current_user.tenant:
+        return current_user.tenant
+        
+    # Fallback: query by tenant_id
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User tenant not found"
+        )
+    
+    return tenant
+
 def get_current_active_user( # This is a more specific version of get_current_user
     current_user: User = Depends(get_current_user)
 ) -> User:

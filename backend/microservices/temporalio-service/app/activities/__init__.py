@@ -1,0 +1,1 @@
+# Activities package for Temporalio workflows

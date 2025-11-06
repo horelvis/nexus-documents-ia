@@ -195,9 +195,10 @@ class DocumentService:
             
             # Extract entities from the document text
             try:
-                # Get LangChain client from vector service
-                langchain_client = self.vector_service.langchain_client
-                entities = await langchain_client.extract_entities(document_text, self.tenant_id)
+                # Use LLM service for entity extraction (migrated from LangChain)
+                from app.services.llm_service import LLMService
+                llm_service = LLMService()
+                entities = await llm_service.extract_entities(document_text)
                 
                 if entities:
                     # Store extracted entities in the document
@@ -210,13 +211,19 @@ class DocumentService:
                 logger.error(f"Failed to extract entities from document {db_document.id}: {str(e)}")
                 db_document.extracted_entities = []
             
-            # Prepare metadata for the document
+            # Prepare comprehensive metadata for the document
             document_metadata = {
                 "doc_id": str(db_document.id),
                 "tenant_id": self.tenant_id,
                 "title": title,
                 "filename": db_document.filename,
+                "description": db_document.description,
                 "file_type": file_ext,
+                "created_at": db_document.created_at.isoformat() if db_document.created_at else None,
+                "updated_at": db_document.updated_at.isoformat() if db_document.updated_at else None,
+                "file_size": db_document.file_size,
+                "mime_type": db_document.mime_type,
+                "category": db_document.category,
                 "created_by": self.user_id or "system"
             }
 

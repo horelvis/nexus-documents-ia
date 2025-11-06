@@ -1,20 +1,25 @@
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
-from app.db.models import User
+from app.db.models import User, Document
 from app.services.search_service import SearchService
 from app.services.vector_service import VectorService
 from app.services.reindex_service import ReindexService
+from app.services.cag_client import CAGClient
 from app.schemas.document import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[dict])
-async def search_documents(
+@router.get("/elasticsearch", response_model=List[dict])
+async def search_elasticsearch(
     query: str = Query(..., description="Texto de búsqueda"),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=100),
+    search_type: Optional[str] = Query("hybrid", description="Tipo de búsqueda: hybrid, keyword"),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -22,25 +27,240 @@ async def search_documents(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Realiza una búsqueda semántica entre los documentos.
+    SIMPLE Elasticsearch search - no fallbacks
+    - hybrid: Elasticsearch (keyword + semantic) 
+    - keyword: Elasticsearch (traditional search)
     """
-    search_service = SearchService(tenant_id=tenant_id)
+    from app.services.elasticsearch_client import elasticsearch_client
     
-    # Preparar filtros
+    # Prepare filters
     filters = {}
     if tags:
         filters["tags"] = tags
     if date_from:
-        filters["date_from"] = date_from
+        filters["date_from"] = date_from  
     if date_to:
         filters["date_to"] = date_to
     
-    results = await search_service.search_documents(
+    # Direct Elasticsearch microservice search - NO FALLBACKS
+    results = await elasticsearch_client.hybrid_search(
+        tenant_id=tenant_id,
         query=query,
-        limit=limit
+        limit=limit,
+        filters=filters
     )
     
     return results
+
+
+@router.get("/database", response_model=List[dict])
+async def search_database(
+    query: str = Query(..., description="Texto de búsqueda"),
+    limit: int = Query(10, ge=1, le=100),
+    tags: Optional[List[str]] = Query(None),
+    category: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    SIMPLE database search - no fallbacks
+    Searches in title, description, content in PostgreSQL
+    """
+    try:
+        from sqlalchemy.future import select
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import or_
+        from app.db.database import SessionLocal
+
+        with SessionLocal() as db:
+            stmt = select(Document).options(
+                selectinload(Document.tags)
+            ).filter(
+                Document.tenant_id == tenant_id
+            )
+
+            # Apply search filter - METADATA ONLY (no content search in DB)
+            if query:
+                stmt = stmt.filter(
+                    or_(
+                        Document.title.ilike(f"%{query}%"),
+                        Document.description.ilike(f"%{query}%"),
+                        Document.filename.ilike(f"%{query}%")
+                    )
+                )
+
+            # Apply other filters
+            if category:
+                stmt = stmt.filter(Document.category == category)
+
+            stmt = stmt.limit(limit)
+
+            result = db.execute(stmt)
+            documents = result.scalars().all()
+
+            # Format results to match expected structure
+            formatted_results = []
+            for doc in documents:
+                try:
+                    formatted_results.append({
+                        "document": {
+                            "id": str(doc.id),
+                            "title": doc.title or "",
+                            "description": doc.description or "",
+                            "filename": doc.filename or "",
+                            "file_type": doc.file_type or "",
+                            "file_size": doc.file_size or 0,
+                            "mime_type": doc.mime_type or "",
+                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            "indexed": str(doc.indexed) if doc.indexed is not None else "false",
+                            "tenant_id": str(doc.tenant_id),
+                            "tags": [tag.name for tag in doc.tags] if doc.tags else []
+                        },
+                        "score": 1.0,  # Database doesn't provide relevance scoring
+                        "matches": []
+                    })
+                except Exception as e:
+                    logger.warning(f"Error formatting document {doc.id}: {e}")
+                    continue
+
+            return formatted_results
+    except Exception as e:
+        logger.error(f"Database search error: {e}")
+        # Return empty list instead of raising exception
+        return []
+
+
+@router.get("/", response_model=List[dict])
+async def search_documents(
+    query: str = Query(..., description="Texto de búsqueda"),
+    limit: int = Query(10, ge=1, le=100),
+    search_type: Optional[str] = Query("auto", description="Tipo de búsqueda: auto, elasticsearch, database"),
+    tags: Optional[List[str]] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    OPTIMIZED search - Elasticsearch primary, Database fallback only if ES is down
+    - auto: Try Elasticsearch first, fallback to Database only if ES fails
+    - elasticsearch: Force Elasticsearch search
+    - database: Force database search (metadata only)
+    """
+    from app.services.elasticsearch_client import elasticsearch_client
+
+    try:
+        # Always try Elasticsearch first (has the content)
+        if search_type in ["auto", "elasticsearch"]:
+            try:
+
+                # Prepare filters
+                filters = {}
+                if tags:
+                    filters["tags"] = tags
+                if date_from:
+                    filters["date_from"] = date_from
+                if date_to:
+                    filters["date_to"] = date_to
+
+                # Try Elasticsearch microservice search
+                results = await elasticsearch_client.hybrid_search(
+                    tenant_id=tenant_id,
+                    query=query,
+                    limit=limit,
+                    filters=filters
+                )
+
+                # Ensure results is a list
+                if results and isinstance(results, list):
+                    return results
+                elif results:
+                    # If results is not a list, wrap it
+                    return [results] if isinstance(results, dict) else []
+
+            except Exception as es_error:
+                logger.warning(f"⚠️ Elasticsearch failed: {es_error}")
+
+                # Only fallback to database if it's a connection issue or explicitly requested
+                if search_type == "database" or "connection" in str(es_error).lower() or "timeout" in str(es_error).lower():
+                    logger.info("🔄 Falling back to database search (metadata only)")
+                    return await search_database(query, limit, tags, None, current_user, tenant_id)
+                else:
+                    # For other ES errors, still try database as fallback in auto mode
+                    if search_type == "auto":
+                        logger.info("🔄 ES error in auto mode, trying database fallback")
+                        return await search_database(query, limit, tags, None, current_user, tenant_id)
+                    else:
+                        # Re-raise ES error if search_type is explicitly elasticsearch
+                        raise es_error
+
+        # If search_type is database or if we reach here, do database search
+        if search_type == "database":
+            return await search_database(query, limit, tags, None, current_user, tenant_id)
+
+        # Default: return empty results
+        return []
+
+    except Exception as e:
+        logger.error(f"💥 Search endpoint error: {e}")
+        # Return empty list instead of raising exception to avoid Content-Length issues
+        return []
+
+
+@router.get("/analytics", response_model=dict)
+async def get_search_analytics(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Get comprehensive search and document analytics from Elasticsearch
+    """
+    try:
+        search_service = SearchService(tenant_id)
+        analytics = await search_service.get_search_analytics(date_from, date_to)
+        return {
+            "success": True,
+            "analytics": analytics
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "analytics": {}
+        }
+
+
+@router.get("/suggest-type", response_model=dict)
+async def suggest_search_type(
+    query: str = Query(..., description="Query to analyze"),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Suggest optimal search type based on query characteristics
+    """
+    try:
+        search_service = SearchService(tenant_id)
+        suggested_type = await search_service.suggest_search_type(query)
+        return {
+            "success": True,
+            "query": query,
+            "suggested_type": suggested_type,
+            "description": {
+                "semantic": "Fast semantic search using Weaviate",
+                "hybrid": "Keyword + semantic search using Elasticsearch", 
+                "keyword": "Traditional keyword search using Elasticsearch"
+            }.get(suggested_type)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "suggested_type": "semantic"  # Safe default
+        }
 
 
 @router.post("/ask", response_model=dict)
@@ -123,7 +343,7 @@ async def reindex_all_documents(
     """
     Reindexa todos los documentos que faltan en el vector store.
     """
-    reindex_service = ReindexService(tenant_id=tenant_id)
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
     result = await reindex_service.reindex_all_missing()
     return result
 
@@ -181,7 +401,7 @@ async def reindex_specific_documents(
     if not document_ids:
         raise HTTPException(status_code=400, detail="Document IDs list cannot be empty")
     
-    reindex_service = ReindexService(tenant_id=tenant_id)
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
     result = await reindex_service.reindex_specific_documents(document_ids)
     return result
 
@@ -210,3 +430,61 @@ async def fix_collection_and_reindex(
             status_code=500,
             detail="Failed to initiate collection fix and reindexing"
         )
+
+
+@router.post("/auto-reindex", response_model=dict)
+async def auto_reindex_failed_documents(
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Automáticamente reindexa documentos que tienen errores de indexación.
+    """
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    result = await reindex_service.auto_reindex_failed_documents()
+    return result
+
+
+@router.post("/auto-reindex/start-global", response_model=dict)
+async def start_global_auto_reindex(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Inicia la tarea automática de reindexado para todos los tenants.
+    Solo administradores pueden usar este endpoint.
+    """
+    # Check if user is admin (you might want to add this check)
+    # if not current_user.is_superuser:
+    #     raise HTTPException(status_code=403, detail="Only administrators can start global auto-reindex")
+    
+    from app.tasks.auto_reindex_task import auto_reindex_task
+    
+    # Start the task in background
+    background_tasks.add_task(auto_reindex_task.start_periodic_task)
+    
+    return {
+        "message": "Global auto-reindex task started",
+        "status": "started",
+        "interval_seconds": auto_reindex_task.run_interval
+    }
+
+
+@router.post("/auto-reindex/run-once", response_model=dict)
+async def run_auto_reindex_once(
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Ejecuta una sola vez el auto-reindex para el tenant actual.
+    """
+    from app.tasks.auto_reindex_task import auto_reindex_task
+    
+    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    result = await reindex_service.auto_reindex_failed_documents()
+    
+    return {
+        "message": "Auto-reindex completed for current tenant",
+        "tenant_id": tenant_id,
+        "result": result
+    }

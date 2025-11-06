@@ -1,245 +1,265 @@
 #!/usr/bin/env python3
 """
-Script para crear productos y precios en Stripe para Nexus
-Ejecutar: python scripts/create_stripe_products.py
+Create Stripe Products and Prices for NexusDocs360
+This script creates the products in Stripe with proper trial configuration
 """
 
 import os
 import sys
 import stripe
-from typing import Dict, Any
+from dotenv import load_dotenv
 
-# Configuración de Stripe
+# Load environment variables
+# Try to load from parent directory first (backend/.env)
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+    print(f"✓ Loaded .env from: {env_path}")
+else:
+    load_dotenv()
+    print("⚠️  Loading .env from default location")
+
+# Configure Stripe
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 if not stripe.api_key:
-    print("❌ Error: STRIPE_SECRET_KEY no está configurado en las variables de entorno")
+    print("❌ Error: STRIPE_SECRET_KEY not found in environment variables")
+    print(f"   Searched in: {env_path if os.path.exists(env_path) else 'default .env location'}")
     sys.exit(1)
 
-def create_product_and_prices() -> Dict[str, Any]:
-    """Crear productos y precios en Stripe"""
-    results = {
-        "products": {},
-        "prices": {},
-        "errors": []
-    }
-    
-    # Definir productos
-    products_config = [
-        {
-            "id": "nexus_free",
-            "name": "Nexus Free",
-            "description": "Plan gratuito para comenzar con gestión documental básica",
-            "metadata": {
-                "plan_type": "free",
-                "features": "100 documents, 1GB storage, basic search, 1 user"
-            }
-        },
-        {
-            "id": "nexus_pro", 
-            "name": "Nexus Pro",
-            "description": "Plan profesional con IA avanzada y funcionalidades premium",
-            "metadata": {
-                "plan_type": "pro",
-                "features": "Unlimited documents, 100GB storage, AI search, signatures, 10 users, API access"
-            }
-        },
-        {
-            "id": "nexus_enterprise",
-            "name": "Nexus Enterprise", 
-            "description": "Plan empresarial con todas las funcionalidades y soporte dedicado",
-            "metadata": {
-                "plan_type": "enterprise",
-                "features": "Unlimited everything, 1TB storage, advanced AI, custom integrations, unlimited users, SLA"
-            }
-        }
-    ]
-    
-    # Definir precios (solo para planes de pago)
-    prices_config = [
-        {
-            "product_id": "nexus_pro",
-            "unit_amount": 2900,  # $29.00 USD
-            "currency": "usd",
-            "recurring_interval": "month",
-            "nickname": "Pro Monthly",
-            "lookup_key": "nexus_pro_monthly"
-        },
-        {
-            "product_id": "nexus_pro", 
-            "unit_amount": 29000,  # $290.00 USD (yearly discount)
-            "currency": "usd",
-            "recurring_interval": "year",
-            "nickname": "Pro Yearly",
-            "lookup_key": "nexus_pro_yearly"
-        },
-        {
-            "product_id": "nexus_enterprise",
-            "unit_amount": 9900,  # $99.00 USD
-            "currency": "usd", 
-            "recurring_interval": "month",
-            "nickname": "Enterprise Monthly",
-            "lookup_key": "nexus_enterprise_monthly"
-        },
-        {
-            "product_id": "nexus_enterprise",
-            "unit_amount": 99000,  # $990.00 USD (yearly discount)
-            "currency": "usd",
-            "recurring_interval": "year", 
-            "nickname": "Enterprise Yearly",
-            "lookup_key": "nexus_enterprise_yearly"
-        }
-    ]
-    
-    print("🚀 Creando productos en Stripe...")
-    
-    # Crear productos
-    for product_config in products_config:
-        try:
-            # Verificar si el producto ya existe
-            existing_products = stripe.Product.list(limit=100)
-            existing_product = None
-            
-            for existing in existing_products.data:
-                if existing.metadata.get("plan_type") == product_config["metadata"]["plan_type"]:
-                    existing_product = existing
-                    break
-            
-            if existing_product:
-                print(f"✅ Producto {product_config['name']} ya existe: {existing_product.id}")
-                results["products"][product_config["id"]] = existing_product
-            else:
-                product = stripe.Product.create(
-                    name=product_config["name"],
-                    description=product_config["description"],
-                    metadata=product_config["metadata"]
-                )
-                print(f"✅ Producto creado: {product_config['name']} - {product.id}")
-                results["products"][product_config["id"]] = product
-                
-        except Exception as e:
-            error_msg = f"Error creando producto {product_config['name']}: {str(e)}"
-            print(f"❌ {error_msg}")
-            results["errors"].append(error_msg)
-    
-    print("\n💰 Creando precios en Stripe...")
-    
-    # Crear precios
-    for price_config in prices_config:
-        try:
-            product_id = results["products"][price_config["product_id"]].id
-            
-            # Verificar si el precio ya existe
-            existing_prices = stripe.Price.list(product=product_id, limit=100)
-            existing_price = None
-            
-            for existing in existing_prices.data:
-                if (existing.lookup_key == price_config["lookup_key"] or
-                    (existing.nickname == price_config["nickname"] and 
-                     existing.unit_amount == price_config["unit_amount"])):
-                    existing_price = existing
-                    break
-            
-            if existing_price:
-                print(f"✅ Precio {price_config['nickname']} ya existe: {existing_price.id}")
-                results["prices"][price_config["lookup_key"]] = existing_price
-            else:
-                price = stripe.Price.create(
-                    product=product_id,
-                    unit_amount=price_config["unit_amount"],
-                    currency=price_config["currency"],
-                    recurring={
-                        "interval": price_config["recurring_interval"]
-                    },
-                    nickname=price_config["nickname"],
-                    lookup_key=price_config["lookup_key"]
-                )
-                print(f"✅ Precio creado: {price_config['nickname']} - {price.id}")
-                results["prices"][price_config["lookup_key"]] = price
-                
-        except Exception as e:
-            error_msg = f"Error creando precio {price_config['nickname']}: {str(e)}"
-            print(f"❌ {error_msg}")
-            results["errors"].append(error_msg)
-    
-    return results
+# Debug info  
+actual_key = stripe.api_key
+if actual_key and len(actual_key) > 30:
+    print(f"✓ Stripe API key loaded (length: {len(actual_key)}, ends with: ...{actual_key[-4:]})")
+else:
+    print(f"✓ Stripe API key loaded (starts with: {actual_key[:20] if actual_key else 'NOT SET'}...)")
 
-def display_results(results: Dict[str, Any]):
-    """Mostrar resumen de resultados"""
-    print("\n" + "="*60)
-    print("📋 RESUMEN DE CONFIGURACIÓN")
-    print("="*60)
+# Product definitions
+PRODUCTS = {
+    "basic": {
+        "name": "NexusDocs360 Basic",
+        "description": "Plan esencial para uso personal",
+        "metadata": {
+            "plan_id": "basic",
+            "max_users": "1",
+            "max_documents": "500",
+            "storage_gb": "10",
+            "features": "basic_ai,document_analysis"
+        }
+    },
+    "pro": {
+        "name": "NexusDocs360 Pro",
+        "description": "Plan profesional para equipos en crecimiento",
+        "metadata": {
+            "plan_id": "pro",
+            "max_users": "10",
+            "max_documents": "unlimited",
+            "storage_gb": "100",
+            "features": "advanced_ai,digital_signatures,api_access,integrations",
+            "trial_days": "14"  # Pro plan offers 14-day trial
+        }
+    }
+    # Note: Enterprise plan removed - handled by sales team
+    # Note: Starter/Free plan removed - trial is now part of Pro plan
+}
+
+# Price definitions
+PRICES = {
+    "basic": {
+        "monthly": {
+            "unit_amount": 2900,  # $29.00
+            "currency": "usd",
+            "recurring": {
+                "interval": "month"
+            },
+            "metadata": {
+                "billing_period": "monthly",
+                "plan_id": "basic"
+            }
+        }
+    },
+    "pro": {
+        "monthly": {
+            "unit_amount": 6000,  # $60.00
+            "currency": "usd",
+            "recurring": {
+                "interval": "month",
+                "trial_period_days": 14  # 14-day trial for Pro plan
+            },
+            "metadata": {
+                "billing_period": "monthly",
+                "plan_id": "pro",
+                "has_trial": "true"
+            }
+        },
+        "yearly": {
+            "unit_amount": 60000,  # $600.00 ($50.00/month)
+            "currency": "usd",
+            "recurring": {
+                "interval": "year",
+                "trial_period_days": 14  # 14-day trial for yearly too
+            },
+            "metadata": {
+                "billing_period": "yearly",
+                "plan_id": "pro",
+                "monthly_equivalent": "50.00",
+                "has_trial": "true",
+                "discount_percentage": "17"  # ~17% discount
+            }
+        }
+    }
+    # Note: Enterprise plan removed - handled by sales team
+    # Note: Starter/Free plan removed - trial is now part of Pro plan
+}
+
+
+def create_or_update_product(product_id, product_data):
+    """Create or update a Stripe product"""
+    try:
+        # Try to retrieve existing product
+        existing_products = stripe.Product.list(limit=100)
+        existing_product = None
+        
+        for product in existing_products.data:
+            if product.metadata.get("plan_id") == product_data["metadata"]["plan_id"]:
+                existing_product = product
+                break
+        
+        if existing_product:
+            # Update existing product
+            product = stripe.Product.modify(
+                existing_product.id,
+                name=product_data["name"],
+                description=product_data["description"],
+                metadata=product_data["metadata"]
+            )
+            print(f"✅ Updated product: {product.name} (ID: {product.id})")
+        else:
+            # Create new product
+            product = stripe.Product.create(
+                name=product_data["name"],
+                description=product_data["description"],
+                metadata=product_data["metadata"]
+            )
+            print(f"✅ Created product: {product.name} (ID: {product.id})")
+        
+        return product
     
-    print("\n🏷️  PRODUCTOS CREADOS:")
-    for product_id, product in results["products"].items():
-        print(f"  • {product.name}")
-        print(f"    ID: {product.id}")
-        print(f"    Tipo: {product.metadata.get('plan_type', 'N/A')}")
-        print()
+    except stripe.error.StripeError as e:
+        print(f"❌ Error creating/updating product {product_id}: {str(e)}")
+        return None
+
+
+def create_or_update_price(product, price_type, price_data):
+    """Create or update a Stripe price"""
+    try:
+        # Check if price already exists
+        existing_prices = stripe.Price.list(
+            product=product.id,
+            limit=100
+        )
+        
+        existing_price = None
+        for price in existing_prices.data:
+            if price.metadata.get("billing_period") == price_data["metadata"]["billing_period"]:
+                existing_price = price
+                break
+        
+        if existing_price and existing_price.active:
+            print(f"  ℹ️  Price already exists: {price_type} - ${existing_price.unit_amount/100:.2f}")
+            return existing_price
+        
+        # Create new price
+        price = stripe.Price.create(
+            product=product.id,
+            **price_data
+        )
+        
+        # Archive old price if it exists
+        if existing_price:
+            stripe.Price.modify(
+                existing_price.id,
+                active=False
+            )
+        
+        trial_info = ""
+        if price.recurring and hasattr(price.recurring, 'trial_period_days') and price.recurring.trial_period_days:
+            trial_info = f" (includes {price.recurring.trial_period_days}-day trial)"
+        
+        print(f"  ✅ Created price: {price_type} - ${price.unit_amount/100:.2f}{trial_info}")
+        print(f"     Price ID: {price.id}")
+        return price
     
-    print("💳 PRECIOS CREADOS:")
-    for lookup_key, price in results["prices"].items():
-        amount = price.unit_amount / 100
-        interval = price.recurring.interval if price.recurring else "one-time"
-        print(f"  • {price.nickname}: ${amount:.2f} USD/{interval}")
-        print(f"    ID: {price.id}")
-        print(f"    Lookup Key: {lookup_key}")
-        print()
-    
-    if results["errors"]:
-        print("❌ ERRORES:")
-        for error in results["errors"]:
-            print(f"  • {error}")
-        print()
-    
-    print("🔧 VARIABLES DE ENTORNO RECOMENDADAS:")
-    pro_monthly = results["prices"].get("nexus_pro_monthly")
-    enterprise_monthly = results["prices"].get("nexus_enterprise_monthly")
-    
-    if pro_monthly:
-        print(f"STRIPE_PRO_PRICE_ID={pro_monthly.id}")
-    if enterprise_monthly:
-        print(f"STRIPE_ENTERPRISE_PRICE_ID={enterprise_monthly.id}")
-    
-    print("\n🎯 PRÓXIMOS PASOS:")
-    print("1. Copiar los Price IDs a tus variables de entorno")
-    print("2. Configurar webhooks en Stripe Dashboard")
-    print("3. Probar el flujo de checkout completo")
-    print("4. Configurar Customer Portal si es necesario")
+    except stripe.error.StripeError as e:
+        print(f"  ❌ Error creating price {price_type}: {str(e)}")
+        return None
+
 
 def main():
-    """Función principal"""
-    print("🎯 Configurando productos y precios de Nexus en Stripe")
-    print("="*60)
+    """Main function to create all products and prices"""
+    print("🚀 Creating Stripe products and prices for NexusDocs360...")
+    print(f"   Using Stripe API in {'TEST' if 'test' in stripe.api_key else 'LIVE'} mode")
+    print("")
     
-    try:
-        # Verificar conexión con Stripe
-        stripe.Account.retrieve()
-        print("✅ Conexión con Stripe establecida")
-        
-        # Crear productos y precios
-        results = create_product_and_prices()
-        
-        # Mostrar resultados
-        display_results(results)
-        
-        if not results["errors"]:
-            print("\n🎉 ¡Configuración completada exitosamente!")
-        else:
-            print(f"\n⚠️  Configuración completada con {len(results['errors'])} errores")
-            return 1
+    created_products = {}
+    created_prices = {}  # Store created prices for final output
+    
+    # Create products
+    for product_id, product_data in PRODUCTS.items():
+        product = create_or_update_product(product_id, product_data)
+        if product:
+            created_products[product_id] = product
+    
+    print("")
+    
+    # Create prices
+    for product_id, price_configs in PRICES.items():
+        if product_id in created_products:
+            product = created_products[product_id]
+            print(f"Creating prices for {product.name}...")
+            created_prices[product_id] = {}
             
-    except stripe.error.AuthenticationError:
-        print("❌ Error: Clave de API de Stripe inválida")
-        return 1
-    except stripe.error.StripeError as e:
-        print(f"❌ Error de Stripe: {str(e)}")
-        return 1
-    except Exception as e:
-        print(f"❌ Error inesperado: {str(e)}")
-        return 1
+            for price_type, price_data in price_configs.items():
+                price = create_or_update_price(product, price_type, price_data)
+                if price:
+                    created_prices[product_id][price_type] = price
+            
+            print("")
     
-    return 0
+    # Print summary
+    print("\n📋 Summary:")
+    print("=" * 50)
+    
+    for product_id, product in created_products.items():
+        print(f"\n{product.name}:")
+        print(f"  Product ID: {product.id}")
+        print(f"  Metadata: {product.metadata}")
+        
+        # List active prices
+        prices = stripe.Price.list(product=product.id, active=True, limit=10)
+        for price in prices.data:
+            interval = price.recurring.interval if price.recurring else "one-time"
+            amount = f"${price.unit_amount/100:.2f}"
+            trial = f" (with {price.recurring.trial_period_days}-day trial)" if price.recurring and price.recurring.trial_period_days else ""
+            print(f"  - {interval}: {amount}{trial}")
+    
+    print("\n✅ All products and prices created successfully!")
+    print("\n⚠️  Important: Update your .env file with these Price IDs:")
+    print("\n# Stripe Price IDs")
+    
+    # Show actual price IDs
+    if "basic" in created_prices and "monthly" in created_prices["basic"]:
+        print(f"STRIPE_BASIC_PRICE_ID={created_prices['basic']['monthly'].id}")
+    
+    if "pro" in created_prices:
+        if "monthly" in created_prices["pro"]:
+            print(f"STRIPE_PRO_PRICE_ID={created_prices['pro']['monthly'].id}")
+        if "yearly" in created_prices["pro"]:
+            print(f"STRIPE_PRO_YEARLY_PRICE_ID={created_prices['pro']['yearly'].id}")
+    
+    print("\n# Note: The Pro plan includes a 14-day trial automatically")
+    print("# No separate trial product needed - trial is configured in the Pro prices")
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
