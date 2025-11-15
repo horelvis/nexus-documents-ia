@@ -12,6 +12,7 @@
 ### 🌟 Características Principales Potenciadas por IA
 
 - **🧠 Emma AI Assistant**: Asistente inteligente que comprende contexto, extrae insights y genera respuestas personalizadas
+- **🖼️ Previews Instantáneos**: Conversión con Gotenberg para visualizar cualquier documento al instante
 - **🌐 Búsqueda Web en Tiempo Real**: Acceso a información actualizada con herramientas de búsqueda web integradas
 - **🔍 Búsqueda Semántica Avanzada**: Powered by Weaviate para encontrar documentos por significado, no solo palabras
 - **💬 Chat Conversacional**: Interactúa con tus documentos usando procesamiento de lenguaje natural
@@ -131,6 +132,7 @@ graph TB
         TemporalioSvc[🔄 Temporalio Service<br/>Durable Workflows<br/>Port: 8010]
         TemplateSvc[🧩 Template Editor Service<br/>Process Library<br/>Port: 8011]
         ElasticSvc[🔎 Elasticsearch Service<br/>Hybrid Search<br/>Port: 8005]
+        GotenbergSvc[📄 Gotenberg Service<br/>Document Conversion<br/>Port: 3000 int.]
         OllamaHost[🦙 Ollama Host<br/>Local LLMs<br/>Port: 11434]
     end
 
@@ -182,6 +184,7 @@ graph TB
     AgentSvc --> TemporalioSvc
     TemplateSvc --> TemporalioSvc
     TemporalioSvc --> CAG_Svc
+    DocumentSvc --> GotenbergSvc
 
     LangExtractSvc --> OllamaHost
     CAG_Svc --> OllamaHost
@@ -203,6 +206,7 @@ graph TB
     ElasticSvc --> Elasticsearch
 
     StorageSvc --> GCS
+    StorageSvc --> GotenbergSvc
     SignatureSvc --> SignatureProviders
     NotificationSvc --> EmailSvc
 
@@ -222,7 +226,7 @@ graph TB
     class NextJS,Mobile,AdminUI frontend
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
-    class CAG_Svc,LangExtractSvc,TextExtractSvc,WeaviateSvc,TemporalioSvc,TemplateSvc,ElasticSvc,OllamaHost microservice
+    class CAG_Svc,LangExtractSvc,TextExtractSvc,WeaviateSvc,TemporalioSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaHost microservice
     class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
@@ -244,7 +248,7 @@ graph TB
 - **CORS**: Configuración segura para desarrollo y producción
 
 #### ⚙️ **Servicios de Negocio (Core)**
-- **Document Service**: Gestión completa del ciclo de vida de documentos
+- **Document Service**: Gestión completa del ciclo de vida de documentos, incluyendo conversión/previews mediante Gotenberg
 - **Search Service**: Búsqueda híbrida (semántica + keyword)
 - **Agent Service**: Gestión de conversaciones con IA
 - **Signature Service**: Integración con proveedores de firma digital
@@ -261,6 +265,7 @@ graph TB
 - **Temporalio Service** (8010): Ejecución de workflows durables conectados al Process Library
 - **Template Editor Service** (8011): Gestión colaborativa de plantillas y formularios AI
 - **Elasticsearch Service** (8005): Búsqueda híbrida (keyword + vector) y analytics
+- **Gotenberg Service** (3000 int.): Conversión y generación de PDFs a partir de HTML/Office
 - **Ollama Host** (11434): Modelos LLM locales (Llama 3.x, GPT-OSS) para baja latencia
 
 #### 💾 **Capa de Datos**

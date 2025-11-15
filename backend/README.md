@@ -127,8 +127,7 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 │Qdrant    │Alembic       │  │WeaviateSvc│Template Editor │  ├─────────┼────────┤
 │Vector DB │Migrations    │  │Storage Svc│Elasticsearch   │  │Clerk    │Email   │
 │          │              │  ├───────────┼────────────────┤  │Auth     │Alerts  │
-│          │              │  │Gotenberg  │                │  └─────────┴────────┘
-│          │              │  │Ollama Host│                │
+│          │              │  │Gotenberg  │Ollama Host     │  └─────────┴────────┘
 └──────────┴──────────────┘  └───────────┴────────────────┘
 
 MICROSERVICES ARCHITECTURE:
@@ -571,79 +570,55 @@ API rate limits by subscription tier:
 
 ## Microservices
 
-### 1. LangChain Service (Port 8001)
+### 1. CAG Service (Port 8008)
+- **Contenido + agentes**: Ejecuta cadenas de razonamiento y genera resúmenes/insights avanzados.
+- **Embeddings inteligentes**: Coordina llamadas a Ollama/OpenAI y publica resultados en Weaviate.
+- **API principal**: `POST /analyze`, `POST /agents/run`, `GET /health`.
 
-Handles document processing and basic LLM operations:
+### 2. LangExtract Service (Port 8009)
+- **Extracción automática** de entidades en cada upload (personas, empresas, importes, fechas).
+- **LLM specialization** con prompts médicos/legales según tenant.
+- **Endpoints**: `POST /extract`, `POST /bulk`, `GET /health`.
 
-- **Document Processing**: Text extraction, chunking, embedding
-- **Summarization**: AI-powered document summaries
-- **Q&A**: Question answering over documents
-- **Classification**: Document categorization
+### 3. TextExtract Service (Port 8012)
+- **Parsing determinístico/OCR** para PDFs complejos y anexos escaneados.
+- **Normalización**: limpia tablas, firmas y campos estructurados antes de LangExtract.
+- **Endpoints**: `POST /parse`, `POST /ocr`, `GET /health`.
 
-**Key endpoints:**
-- `POST /process` - Process uploaded document
-- `POST /embed` - Generate embeddings
-- `POST /summarize` - Generate summary
-- `POST /qa` - Answer questions
+### 4. Storage Service (Port 8003)
+- **Operaciones GCS** asíncronas (upload, delete, versioning) con signed URLs.
+- **Metadata hooks**: emite eventos para CAG/LangExtract tras completar el guardado.
+- **Endpoints**: `POST /upload`, `GET /download/{id}`, `DELETE /files/{id}`.
 
-### 2. LangGraph Service (Port 8002)
+### 5. Weaviate Service (Port 8007)
+- **Proxy multi-tenant** frente a Weaviate core (auth, cuotas, métricas).
+- **Operaciones**: creación de collections, búsqueda híbrida y filtros por tenant.
+- **Endpoints**: `POST /vectors/upsert`, `POST /search`, `GET /stats`.
 
-Advanced AI agent orchestration:
+### 6. Elasticsearch Service (Port 8005)
+- **Búsqueda híbrida** (keyword + vector), filtros avanzados y analytics.
+- **Fallback**: entrega resultados cuando no hay embeddings o se requiere BM25 puro.
+- **Endpoints**: `POST /search`, `POST /reindex`, `GET /health`.
 
-- **Multi-Agent Systems**: Coordinate multiple AI agents
-- **Workflow Management**: Complex document workflows
-- **State Machines**: Stateful agent conversations
-- **Tool Integration**: External API integration
+### 7. Temporalio Service (Port 8010)
+- **Orquestación durable** para workflows (contract renewal, onboarding, etc.).
+- **Signals & Queries**: controla ejecuciones en vivo y expone visibilidad agregada.
+- **Endpoints**: `POST /workflows/start`, `GET /workflows/status/{id}`, `POST /workflows/cancel`.
 
-**Key endpoints:**
-- `POST /agents/create` - Create agent workflow
-- `POST /agents/{id}/execute` - Execute agent
-- `GET /agents/{id}/state` - Get execution state
+### 8. Template Editor Service (Port 8011)
+- **Process Library**: administra plantillas, formularios dinámicos e inputs validados.
+- **Colaboración**: controla versiones, permisos y publicación por tenant.
+- **Endpoints**: `GET /templates`, `POST /templates`, `PATCH /templates/{id}`.
 
-### 3. Storage Service (Port 8003)
+### 9. Gotenberg Service (Port 3000 interno)
+- **Conversión de documentos** (HTML/Office → PDF), generación de thumbnails y snapshots para el visor.
+- **Pipeline legal + preview**: Storage lo invoca tras cada upload para producir versiones firmables y el preview incrustado en la UI.
+- **Endpoints**: `POST /convert/html`, `POST /convert/office`, `POST /merge`.
 
-Async storage operations with GCS:
-
-- **File Upload**: Streaming uploads with progress
-- **Signed URLs**: Secure, time-limited access
-- **Batch Operations**: Bulk file operations
-- **Metadata Management**: File tagging and search
-
-**Key endpoints:**
-- `POST /upload` - Upload file
-- `GET /download/{file_id}` - Get signed URL
-- `DELETE /files/{file_id}` - Delete file
-- `POST /batch` - Batch operations
-
-### 4. Ollama Service (Port 8004)
-
-Local LLM hosting and inference:
-
-- **Model Management**: Download and manage models
-- **Inference**: Run LLM inference locally
-- **Streaming**: Real-time response streaming
-- **Custom Models**: Support for fine-tuned models
-
-**Key endpoints:**
-- `GET /models` - List available models
-- `POST /generate` - Generate text
-- `POST /embed` - Generate embeddings
-- `GET /models/{name}` - Get model info
-
-### 5. Gotenberg Service (Port 8005)
-
-Document conversion and generation:
-
-- **PDF Generation**: HTML to PDF conversion
-- **Format Conversion**: Between document formats
-- **Thumbnail Generation**: Document previews
-- **Merge Operations**: Combine PDFs
-
-**Key endpoints:**
-- `POST /convert/html` - HTML to PDF
-- `POST /convert/office` - Office to PDF
-- `POST /merge` - Merge PDFs
-- `POST /thumbnail` - Generate thumbnail
+### 10. Ollama Host (Port 11434)
+- **LLM local** para inferencias privadas (Llama 3.x, GPT-OSS, Mistral).
+- **Streaming** y soporte para modelos embebidos utilizados por CAG/LangExtract.
+- **Endpoints**: `/api/generate`, `/api/embeddings`, `/api/tags`.
 
 ### Microservice Communication
 
