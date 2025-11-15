@@ -15,10 +15,23 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     # Database
-    database_url: str = "postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db"
+    database_url: str = Field(
+        default="postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db",
+        validation_alias=AliasChoices(
+            "TEMPLATE_EDITOR_DATABASE_URL",
+            "TEMPLATE_EDITOR_DB_URL",
+            "DATABASE_URL",
+        ),
+    )
     
     # Google APIs
-    google_credentials_path: str = "/app/credentials/google-service-account.json"
+    google_credentials_path: str = Field(
+        default="/app/credentials/google-service-account.json",
+        validation_alias=AliasChoices(
+            "TEMPLATE_EDITOR_GOOGLE_CREDENTIALS",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ),
+    )
     google_drive_folder_id: Optional[str] = None  # Optional parent folder for temp docs
     
     # Security

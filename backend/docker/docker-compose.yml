@@ -286,9 +286,11 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TEMPLATE_EDITOR_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/template-editor-service/app:/app/app:ro
+      - ../../credentials:/app/credentials:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
