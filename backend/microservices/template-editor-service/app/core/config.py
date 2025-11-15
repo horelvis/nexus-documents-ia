@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db"
+    database_url: str = "postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db"
     
     # Google APIs
     google_credentials_path: str = "/app/credentials/google-service-account.json"
