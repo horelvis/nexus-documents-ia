@@ -121,24 +121,27 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 ┌─────────────────────────┐  ┌──────────────────────────────┐  ┌──────────────────┐
 │     DATA LAYER          │  │      MICROSERVICES          │  │ EXTERNAL SERVICES│
 ├──────────┬──────────────┤  ├───────────┬────────────────┤  ├─────────┬────────┤
-│PostgreSQL│Redis Cache    │  │LangChain  │LangGraph       │  │Google   │Stripe  │
-│          │Session Store  │  │Service    │Service         │  │Cloud    │Payment │
+│PostgreSQL│Redis Cache    │  │CAG Svc    │LangExtract Svc │  │Google   │Stripe  │
+│Weaviate  │Session Store  │  │TextExtract│Temporalio Svc  │  │Cloud    │Payment │
 ├──────────┼──────────────┤  ├───────────┼────────────────┤  │Storage  │API     │
-│Qdrant    │Alembic       │  │Storage    │Ollama          │  ├─────────┼────────┤
-│Vector DB │Migrations    │  │Service    │Service         │  │Clerk    │Google  │
-│          │              │  ├───────────┼────────────────┤  │Auth     │Email   │
+│Qdrant    │Alembic       │  │WeaviateSvc│Template Editor │  ├─────────┼────────┤
+│Vector DB │Migrations    │  │Storage Svc│Elasticsearch   │  │Clerk    │Email   │
+│          │              │  ├───────────┼────────────────┤  │Auth     │Alerts  │
 │          │              │  │Gotenberg  │                │  └─────────┴────────┘
-│          │              │  │Service    │                │
+│          │              │  │Ollama Host│                │
 └──────────┴──────────────┘  └───────────┴────────────────┘
 
 MICROSERVICES ARCHITECTURE:
 ╔══════════════════════════════════════════════════════════════════════╗
-║ • LangChain Service (8001): Document processing, embeddings, RAG     ║
-║ • LangGraph Service (8002): Advanced AI agents, multi-agent systems  ║
-║ • Storage Service (8003): Async GCS operations, signed URLs          ║
-║ • Ollama Service (8004): Local LLM hosting and inference            ║
-║ • Gotenberg Service (8005): PDF generation, document conversion     ║
-║ • Main API (8000): Business logic, authentication, orchestration    ║
+║ • CAG Service (8008): Contenido + agentes para análisis avanzado     ║
+║ • LangExtract Service (8009): Extracción automática de entidades     ║
+║ • TextExtract Service (8012): Extracción determinística/OCR          ║
+║ • Weaviate Service (8007): Proxy vectorial multi-tenant             ║
+║ • Temporalio Service (8010): Workflows durables + Process Library    ║
+║ • Template Editor Service (8011): Gestión de plantillas colaborativa ║
+║ • Storage Service (8003): Operaciones GCS y signed URLs              ║
+║ • Elasticsearch Service (8005): Búsqueda híbrida y analytics         ║
+║ • Main API (8000): Lógica de negocio, auth y orquestación            ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
 KEY ARCHITECTURAL PATTERNS:
@@ -180,11 +183,11 @@ User Request → Clerk Auth → Tenant Resolution → Data Isolation → Respons
 - **Google Cloud Storage**: Document storage
 
 ### AI/ML Stack
-- **LangChain**: Document processing and LLM orchestration
-- **LangGraph**: Agent workflow management
-- **Ollama**: Local LLM hosting
-- **OpenAI/Anthropic**: Cloud LLM providers
-- **Sentence Transformers**: Document embeddings
+- **Emma AI + CAG Service**: Orquestación multi-agente y análisis avanzado
+- **LangExtract & TextExtract**: Extracción de entidades (LLM) + parsing determinístico
+- **Weaviate (+ Service Proxy)**: Búsqueda vectorial multi-tenant y guarda de similitud
+- **Ollama / OpenAI / Anthropic**: Modelos LLM locales y cloud
+- **Sentence Transformers**: Embeddings especializados por dominio
 
 ### Infrastructure
 - **Docker**: Container orchestration
@@ -241,11 +244,15 @@ nexus-document-backend/
 │   │   └── main.py              # FastAPI application
 │   │
 │   ├── microservices/           # Microservice applications
-│   │   ├── langchain-service/   # Document processing
-│   │   ├── langroid-service/    # AI agents
-│   │   ├── storage-service/     # Storage operations
-│   │   ├── ollama-service/      # LLM inference
-│   │   └── shared/              # Shared utilities
+│   │   ├── cag-service/                 # Content Analysis & Generative agents
+│   │   ├── langextract-service/         # Entity extraction pipeline
+│   │   ├── textextract-service/         # Deterministic text/OCR extraction
+│   │   ├── weaviate-service/            # Vector proxy + multi-tenant guards
+│   │   ├── elasticsearch-service/       # Hybrid keyword/vector bridge
+│   │   ├── storage-service/             # Async storage + signed URLs
+│   │   ├── template-editor-service/     # Workflow template editor APIs
+│   │   ├── temporalio-service/          # Durable workflow orchestrator
+│   │   └── shared/                      # Shared utilities
 │   │
 │   ├── docker/                  # Docker configuration
 │   │   ├── docker-compose.yml   # Development setup
@@ -336,8 +343,9 @@ nexus-document-backend/
 6. **Access the application**
    - API Documentation: http://localhost:8000/docs
    - Main API: http://localhost:8000
-   - LangChain Service: http://localhost:8001
-   - Storage Service: http://localhost:8003
+   - CAG Service: http://localhost:8008
+   - LangExtract Service: http://localhost:8009
+   - Temporalio Service: http://localhost:8010
 
 ### Manual Setup (Without Docker)
 
@@ -399,11 +407,11 @@ cd backend/docker
 # 4. Add tests in tests/
 
 # Run specific microservice
-docker compose up langchain-service
+docker compose up cag-service
 
 # View logs
 docker compose logs -f api
-docker compose logs -f langchain-service
+docker compose logs -f cag-service
 
 # Access database
 docker compose exec db psql -U postgres -d nexus_docs
@@ -480,8 +488,14 @@ GCS_BUCKET_PREFIX=nexus-docs
 
 # Microservices
 MICROSERVICE_API_KEY=your-unified-api-key
-LANGCHAIN_SERVICE_URL=http://langchain-service:8001
-STORAGE_SERVICE_URL=http://storage-service:8003
+CAG_SERVICE_URL=http://cag-service:8000
+LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
+TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+STORAGE_SERVICE_URL=http://storage-service:8000
+WEAVIATE_SERVICE_URL=http://weaviate-service:8000
+ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8000
+TEMPORALIO_SERVICE_URL=http://temporalio-service:8000
+TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8000
 
 # External Services
 CLERK_SECRET_KEY=your-clerk-secret
