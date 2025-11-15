@@ -89,6 +89,29 @@ class GoogleDocsService:
             logger.error(f"❌ Failed to share document with user {user_email}: {e}")
             # Continue - not critical, user might still be able to access via other means
     
+    async def _transfer_document_ownership(self, doc_id: str, user_email: str):
+        """Transfer document ownership to the editing user if enabled."""
+        if not settings.google_transfer_ownership or not self._drive_service:
+            return
+        
+        try:
+            permission = {
+                'type': 'user',
+                'role': 'owner',
+                'emailAddress': user_email
+            }
+            self._drive_service.permissions().create(
+                fileId=doc_id,
+                body=permission,
+                transferOwnership=True,
+                sendNotificationEmail=False
+            ).execute()
+            logger.info(f"👑 Ownership of document {doc_id} transferred to {user_email}")
+        except HttpError as e:
+            logger.warning(f"⚠️ Unable to transfer ownership of {doc_id} to {user_email}: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Unexpected error transferring ownership of {doc_id}: {e}")
+    
     async def create_temporary_document(
         self,
         title: str,
@@ -149,6 +172,9 @@ class GoogleDocsService:
             
             # 3. Share document with user as editor
             await self._share_document_with_user(doc_id, user_email)
+            
+            # 3b. Attempt to transfer ownership so the doc lives in the user's Drive
+            await self._transfer_document_ownership(doc_id, user_email)
             
             # 4. Get document URLs
             doc_urls = self._get_document_urls(doc_id)

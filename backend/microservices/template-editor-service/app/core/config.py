@@ -33,6 +33,13 @@ class Settings(BaseSettings):
         ),
     )
     google_drive_folder_id: Optional[str] = None  # Optional parent folder for temp docs
+    google_transfer_ownership: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "TEMPLATE_EDITOR_TRANSFER_OWNERSHIP",
+            "GOOGLE_TRANSFER_OWNERSHIP",
+        ),
+    )
     
     # Security
     microservices_api_key: str = Field(
