@@ -9,7 +9,7 @@ API_KEY="${MICROSERVICES_API_KEY:?MICROSERVICES_API_KEY not set}"
 
 # 1. Check if containers are running
 echo "1️⃣ Checking container status..."
-docker compose ps | grep -E "ollama-service|langchain-service|api" | head -5
+docker compose ps | grep -E "ollama-service|cag-service|api" | head -5
 
 # 2. Check Ollama models
 echo ""
@@ -24,21 +24,17 @@ docker compose exec -T ollama-service sh -c 'echo "OLLAMA_EMBEDDING_MODEL=$OLLAM
 docker compose exec -T ollama-service sh -c 'echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"'
 
 echo ""
-echo "In LangChain service:"
-docker compose exec -T langchain-service sh -c 'echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"'
-
-echo ""
-echo "In LangGraph service:"
-docker compose exec -T langgraph-service sh -c 'echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"'
+echo "In CAG service:"
+docker compose exec -T cag-service sh -c 'echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"'
 
 # 4. Test embedding generation
 echo ""
-echo "4️⃣ Testing embedding generation..."
-curl -X POST http://localhost:8001/embeddings/generate \
+echo "4️⃣ Testing embedding generation via CAG..."
+curl -X POST http://localhost:8008/api/v1/cag/embeddings \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: ${API_KEY}" \
-  -d '{"text": "This is a test for embedding generation with GPU acceleration"}' \
-  2>/dev/null | jq -r '.embedding[:5]' 2>/dev/null || echo "Embedding test failed"
+  -H "X-API-Key: ${API_KEY}" \
+  -d '["This is a test for embedding generation with GPU acceleration"]' \
+  2>/dev/null | jq -r '.embeddings[0][:5]' 2>/dev/null || echo "Embedding test failed"
 
 # 5. Check GPU usage
 echo ""
@@ -50,10 +46,10 @@ echo ""
 echo "6️⃣ Testing embedding generation speed..."
 echo "Generating embedding for a sample text..."
 START_TIME=$(date +%s.%N)
-curl -X POST http://localhost:8001/embeddings/generate \
+curl -X POST http://localhost:8008/api/v1/cag/embeddings \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: ${API_KEY}" \
-  -d '{"text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."}' \
+  -H "X-API-Key: ${API_KEY}" \
+  -d '["Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."]' \
   > /dev/null 2>&1
 END_TIME=$(date +%s.%N)
 ELAPSED=$(echo "$END_TIME - $START_TIME" | bc)

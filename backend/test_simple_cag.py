@@ -1,97 +1,52 @@
 #!/usr/bin/env python3
 """
-Simple CAG test with minimal configuration
+Simple CAG test with minimal configuration (directly hits CAG service).
 """
 import asyncio
 import os
 import httpx
-import time
 
 API_KEY = os.getenv("MICROSERVICES_API_KEY")
+CAG_URL = os.getenv("CAG_SERVICE_URL", "http://cag-service:8000").rstrip("/")
+TENANT_ID = os.getenv("DEFAULT_TENANT", "default")
 
 if not API_KEY:
     raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_simple_cag.py")
+
 
 async def test_simple_cag():
     """Test CAG with simplest possible query"""
     print("=== Simple CAG Test ===\n")
     
-    # Very simple request
     request = {
-        "graph_type": "cag",
-        "input_data": {
-            "query": "Hi",
-            "tenant_id": "1",
-            "user_id": "1"
-        },
-        "tenant_id": "1"
+        "query": "Hola, ¿qué tipos de documentos puedes analizar?",
+        "tenant_id": str(TENANT_ID),
+        "user_id": "simple-test",
+        "context": {"demo": True}
     }
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        print("Sending simple CAG request...")
-        start_time = time.time()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        print("Enviando consulta simple a CAG...")
+        response = await client.post(
+            f"{CAG_URL}/api/v1/cag/query",
+            json=request,
+            headers={"X-API-Key": API_KEY, "X-Tenant-ID": str(TENANT_ID)}
+        )
         
-        try:
-            response = await client.post(
-                "http://langgraph-service:8007/api/v1/graphs/run",
-                json=request,
-                headers={"X-API-Key": API_KEY}
-            )
-            
-            elapsed = time.time() - start_time
-            print(f"\nResponse received in {elapsed:.2f}s")
-            
-            if response.status_code == 200:
-                result = response.json()
-                print(f"Status: {result.get('status')}")
-                if 'final_state' in result and 'final_answer' in result['final_state']:
-                    print(f"Answer: {result['final_state']['final_answer']}")
-            else:
-                print(f"Error: {response.status_code}")
-                print(response.text)
-                
-        except httpx.TimeoutException:
-            elapsed = time.time() - start_time
-            print(f"\nTimeout after {elapsed:.2f}s")
-        except Exception as e:
-            print(f"\nError: {e}")
+        if response.status_code == 200:
+            data = response.json()
+            print("\n✅ Respuesta recibida!")
+            print("-" * 50)
+            print(data.get("answer", "Sin respuesta")[:500])
+            print("-" * 50)
+        else:
+            print(f"\n❌ Error: {response.status_code}")
+            print(response.text[:300])
 
-async def test_direct_ollama():
-    """Test Ollama directly"""
-    print("\n=== Direct Ollama Test ===\n")
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        print("Testing Ollama directly...")
-        start_time = time.time()
-        
-        try:
-            response = await client.post(
-                "http://ollama-service:11434/api/generate",
-                json={
-                    "model": "llama3.2",
-                    "prompt": "Say hi",
-                    "stream": False
-                }
-            )
-            
-            elapsed = time.time() - start_time
-            print(f"Response in {elapsed:.2f}s")
-            
-            if response.status_code == 200:
-                result = response.json()
-                print(f"Ollama says: {result.get('response', '')[:100]}")
-            else:
-                print(f"Error: {response.status_code}")
-                
-        except Exception as e:
-            print(f"Error: {e}")
 
 async def main():
-    # First test Ollama directly
-    await test_direct_ollama()
-    
-    # Then test CAG
     await test_simple_cag()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -232,56 +232,70 @@ async def _categorize_with_llm(
     tenant_id: str,
     user_id: str
 ) -> Optional[str]:
-    """Helper function to categorize using LLM"""
+    """Helper function to categorize using CAG microservice"""
     try:
-        async with httpx.AsyncClient() as client:
+        prompt = (
+            "Clasifica este documento en una de las categorías: "
+            "contract, invoice, report, legal, financial, technical, correspondence, presentation o general. "
+            "Responde solo con el nombre de la categoría.
+
+"
+            f"Nombre: {filename}
+"
+            f"Contenido:
+{content_preview}"
+        )
+
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(
-                f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
+                f"{settings.CAG_SERVICE_URL.rstrip('/')}/api/v1/cag/query",
                 json={
-                    "messages": [{
-                        "role": "system",
-                        "content": """You are a document categorization expert. Analyze the document and categorize it into one of these categories:
-                        - contract: Legal contracts, agreements, terms
-                        - invoice: Invoices, bills, receipts
-                        - report: Reports, analysis, research documents
-                        - legal: Legal documents, policies, regulations
-                        - financial: Financial statements, budgets, accounting
-                        - technical: Technical documentation, manuals, specifications
-                        - correspondence: Letters, emails, memos
-                        - presentation: Slides, presentations
-                        - general: Other documents
-                        
-                        Respond with ONLY the category name, nothing else."""
-                    }, {
-                        "role": "user", 
-                        "content": f"Document name: {filename}\nContent preview: {content_preview}"
-                    }],
-                    "model": settings.OLLAMA_MODEL,
-                    "max_tokens": 50,
-                    "temperature": 0.1
+                    "query": prompt,
+                    "tenant_id": str(tenant_id),
+                    "user_id": str(user_id or 'system'),
+                    "context": {
+                        "task": "auto_categorization",
+                        "filename": filename
+                    }
                 },
                 headers={
                     "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "Content-Type": "application/json"
-                },
-                timeout=30.0
+                    "X-Tenant-ID": str(tenant_id)
+                }
             )
-            
+
             if response.status_code == 200:
-                result = response.json()
-                category = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
-                
-                # Validate category
-                valid_categories = ["contract", "invoice", "report", "legal", "financial", 
-                                  "technical", "correspondence", "presentation", "general"]
-                if category in valid_categories:
+                answer = response.json().get("answer", "")
+                category = _normalize_category(answer)
+                if category:
                     return category
-            
+            else:
+                logger.warning(
+                    "CAG categorization request failed | status=%s body=%s",
+                    response.status_code,
+                    response.text[:200]
+                )
+
     except Exception as e:
-        logger.warning(f"LLM categorization failed: {e}")
-    
+        logger.error(f"Error in LLM categorization: {e}")
+
     return None
 
+
+def _normalize_category(answer: str) -> Optional[str]:
+    """Normalize arbitrary LLM response to one of the supported categories."""
+    if not answer:
+        return None
+    valid_categories = [
+        "contract", "invoice", "report", "legal", "financial",
+        "technical", "correspondence", "presentation", "general"
+    ]
+    clean = answer.strip().lower()
+    for category in valid_categories:
+        if category in clean:
+            return category
+    first_word = clean.split()[0]
+    return first_word if first_word in valid_categories else None
 
 def _simple_categorize(filename: str, content: str) -> str:
     """Simple rule-based categorization as fallback"""

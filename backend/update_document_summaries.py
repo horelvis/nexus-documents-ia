@@ -15,12 +15,13 @@ sys.path.insert(0, '/app' if os.path.exists('/.dockerenv') else '.')
 # Database configuration
 if os.path.exists('/.dockerenv'):
     DATABASE_URL = "postgresql+asyncpg://postgres:password@db:5432/nexus_db"
-    LANGCHAIN_SERVICE_URL = "http://langchain-service:8001"
+    CAG_SERVICE_URL = "http://cag-service:8000"
 else:
     DATABASE_URL = "postgresql+asyncpg://postgres:password@localhost:5432/nexus_db"
-    LANGCHAIN_SERVICE_URL = "http://localhost:8001"
+    CAG_SERVICE_URL = os.getenv("CAG_SERVICE_URL", "http://localhost:8000")
 
 MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY")
+DEFAULT_TENANT = os.getenv("DEFAULT_TENANT", "default")
 
 if not MICROSERVICES_API_KEY:
     raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for update_document_summaries.py")
@@ -64,44 +65,45 @@ def create_simple_summary(text: str, filename: str) -> str:
 
 
 async def generate_llm_summary(text: str, filename: str) -> str:
-    """Generate summary using LLM service"""
+    """Generate summary using CAG microservice"""
     try:
         import httpx
         
-        # Prepare text for summarization (limit to reasonable size)
         text_for_summary = text[:5000] if len(text) > 5000 else text
+        prompt = (
+            "Genera un resumen conciso (máximo 200 palabras) en 2-3 oraciones. "
+            "Incluye objetivo, puntos clave y conclusiones.\n\n"
+            f"Archivo: {filename}\n"
+            f"Contenido:\n{text_for_summary}"
+        )
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(
-                f"{LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
+                f"{CAG_SERVICE_URL.rstrip('/')}/api/v1/cag/query",
                 json={
-                    "messages": [{
-                        "role": "system",
-                        "content": "You are a document summarizer. Create a concise summary of the document in 2-3 sentences. Focus on the main topic, purpose, and key points. Maximum 200 words."
-                    }, {
-                        "role": "user",
-                        "content": f"Summarize this document:\n\nFilename: {filename}\n\nContent:\n{text_for_summary}"
-                    }],
-                    "model": "llama3.2:latest",
-                    "max_tokens": 300,
-                    "temperature": 0.3
+                    "query": prompt,
+                    "tenant_id": DEFAULT_TENANT,
+                    "user_id": "summary-script",
+                    "context": {
+                        "task": "document_summary",
+                        "filename": filename
+                    }
                 },
                 headers={
                     "X-API-Key": MICROSERVICES_API_KEY,
-                    "Content-Type": "application/json"
-                },
-                timeout=20.0
+                    "X-Tenant-ID": DEFAULT_TENANT
+                }
             )
             
             if response.status_code == 200:
-                result = response.json()
-                summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                summary = response.json().get("answer", "")
                 if summary:
-                    return summary[:1000]  # Limit to 1000 chars
+                    return summary.strip()[:1000]
+            else:
+                print(f"  ⚠️  CAG summary request failed: {response.status_code} -> {response.text[:120]}")
     except Exception as e:
         print(f"  ⚠️  LLM summary failed: {e}")
     
-    # Fallback to simple summary
     return create_simple_summary(text, filename)
 
 

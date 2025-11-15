@@ -36,11 +36,13 @@ def check_system_status():
 
     services = [
         ("http://localhost:8000", "API Principal"),
-        ("http://localhost:8001", "LangChain Service"),
-        ("http://localhost:8002", "Langroid Service"),
         ("http://localhost:8003", "Storage Service"),
         ("http://localhost:8004", "Ollama Service"),
-        ("http://localhost:8005", "Gotenberg Service")
+        ("http://localhost:8005", "Gotenberg Service"),
+        ("http://localhost:8007", "Weaviate Service"),
+        ("http://localhost:8008", "CAG Service"),
+        ("http://localhost:8009", "LangExtract Service"),
+        ("http://localhost:8010", "Temporalio Service"),
     ]
 
     healthy_services = 0
@@ -57,7 +59,7 @@ def check_system_status():
         except:
             print(f"❌ {name}: No disponible")
 
-    if healthy_services >= 4:  # Al menos API + 3 servicios
+    if healthy_services >= 5:  # API + 4 servicios críticos
         print("✅ Sistema listo para validación\n")
         return True
     else:
@@ -92,7 +94,7 @@ def run_validation_tests():
 
     duration = end_time - start_time
     print("-" * 60)
-    print(".2f"
+    print(f"⏱️  Duración de pytest: {duration:.2f} segundos")
     return result.returncode, duration
 
 def print_summary(exit_code, duration, start_time):

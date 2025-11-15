@@ -45,6 +45,72 @@ class AsyncDocumentService:
         self.llm_service = None
         self.elasticsearch_service = None  # NEW: Elasticsearch for hybrid search
         self._initialized = False
+
+    async def _call_cag_query(
+        self,
+        query: str,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        timeout: float = 45.0
+    ) -> Optional[str]:
+        """
+        Helper to call the CAG microservice and return the LLM answer.
+        Falls back quietly if the service is unavailable.
+        """
+        import httpx
+
+        tenant = tenant_id or self.tenant_id or settings.DEFAULT_TENANT
+        user = user_id or self.user_id or "system"
+        payload = {
+            "query": query,
+            "tenant_id": str(tenant),
+            "user_id": str(user),
+            "context": context or {}
+        }
+        headers = {
+            "X-API-Key": settings.MICROSERVICES_API_KEY,
+            "X-Tenant-ID": str(tenant)
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    f"{settings.CAG_SERVICE_URL.rstrip('/')}/api/v1/cag/query",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                data = response.json()
+                answer = data.get("answer")
+                if answer:
+                    return answer.strip()
+        except Exception as exc:
+            logger.warning(
+                "CAG query failed | tenant=%s user=%s error=%s",
+                tenant,
+                user,
+                exc
+            )
+        return None
+
+    @staticmethod
+    def _normalize_category(answer: str) -> str:
+        """Extract a valid category label from a free-form LLM answer."""
+        valid_categories = [
+            "contract", "invoice", "report", "legal", "financial",
+            "technical", "correspondence", "presentation", "general"
+        ]
+        if not answer:
+            return "general"
+
+        clean = answer.strip().lower()
+        for category in valid_categories:
+            if category in clean:
+                return category
+
+        first_word = clean.split()[0]
+        return first_word if first_word in valid_categories else "general"
     
     @classmethod
     async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
@@ -792,9 +858,6 @@ class AsyncDocumentService:
     async def _auto_categorize_document(self, doc_id: str, text_content: str):
         """Auto-categorize document using the LangChain service"""
         try:
-            import httpx
-            from app.core.config import settings
-            
             async with AsyncSessionLocal() as db:
                 # Get document info
                 stmt = select(Document).filter(Document.id == doc_id)
@@ -804,69 +867,37 @@ class AsyncDocumentService:
                 if not doc:
                     return
                 
-                # First try LangChain service for simple categorization
-                try:
-                    async with httpx.AsyncClient() as client:
-                        # Use LangChain service for document analysis
-                        response = await client.post(
-                            f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
-                            json={
-                                "messages": [{
-                                    "role": "system",
-                                    "content": """You are a document categorization expert. Analyze the document and categorize it into one of these categories:
-                                    - contract: Legal contracts, agreements, terms
-                                    - invoice: Invoices, bills, receipts
-                                    - report: Reports, analysis, research documents
-                                    - legal: Legal documents, policies, regulations
-                                    - financial: Financial statements, budgets, accounting
-                                    - technical: Technical documentation, manuals, specifications
-                                    - correspondence: Letters, emails, memos
-                                    - presentation: Slides, presentations
-                                    - general: Other documents
-                                    
-                                    Respond with ONLY the category name, nothing else."""
-                                }, {
-                                    "role": "user", 
-                                    "content": f"Document name: {doc.filename}\nContent preview: {text_content[:1000]}"
-                                }],
-                                "model": settings.OLLAMA_MODEL,
-                                "max_tokens": 50,
-                                "temperature": 0.1
-                            },
-                            headers={
-                                "X-API-Key": settings.MICROSERVICES_API_KEY,
-                                "Content-Type": "application/json"
-                            },
-                            timeout=30.0
-                        )
-                        
-                        if response.status_code == 200:
-                            result = response.json()
-                            category = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
-                            
-                            # Validate category
-                            valid_categories = ["contract", "invoice", "report", "legal", "financial", 
-                                              "technical", "correspondence", "presentation", "general"]
-                            if category not in valid_categories:
-                                category = "general"
-                            
-                            # Update document category
-                            doc.category = category
-                            doc.document_metadata = doc.document_metadata or {}
-                            doc.document_metadata["auto_categorization"] = {
-                                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                "method": "langchain",
-                                "model": settings.OLLAMA_MODEL
-                            }
-                            await db.commit()
-                            
-                            logger.info(f"Document {doc_id} auto-categorized as '{category}'")
-                        else:
-                            logger.warning(f"Failed to auto-categorize document {doc_id}: HTTP {response.status_code}")
-                            
-                except Exception as e:
-                    logger.warning(f"LangChain categorization failed for {doc_id}: {e}")
-                    # Fallback to simple rule-based categorization
+                cag_prompt = (
+                    "Clasifica el siguiente documento en una de estas categorías: "
+                    "contract, invoice, report, legal, financial, technical, correspondence, presentation o general. "
+                    "Responde solo con el nombre de la categoría.\n\n"
+                    f"Nombre: {doc.filename}\n"
+                    f"Contenido:\n{text_content[:1200]}"
+                )
+                cag_answer = await self._call_cag_query(
+                    query=cag_prompt,
+                    tenant_id=str(doc.tenant_id),
+                    user_id=str(doc.created_by or self.user_id or 'system'),
+                    context={
+                        "task": "auto_categorization",
+                        "document_id": str(doc.id),
+                        "filename": doc.filename
+                    }
+                )
+
+                if cag_answer:
+                    category = self._normalize_category(cag_answer)
+                    doc.category = category
+                    doc.document_metadata = doc.document_metadata or {}
+                    doc.document_metadata["auto_categorization"] = {
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "method": "cag",
+                        "model": "cag-service"
+                    }
+                    await db.commit()
+                    logger.info(f"Document {doc_id} auto-categorized as '{category}'")
+                else:
+                    logger.warning(f"CAG categorization failed for {doc_id}, using fallback rules")
                     category = self._simple_categorize(doc.filename, text_content)
                     doc.category = category
                     doc.document_metadata = doc.document_metadata or {}
@@ -1144,51 +1175,32 @@ class AsyncDocumentService:
     async def _generate_document_summary(self, text: str, filename: str) -> str:
         """Generate a concise summary of the document"""
         try:
-            import httpx
-            from app.core.config import settings
-            
             # Prepare text for summarization (limit to reasonable size)
             text_for_summary = text[:5000] if len(text) > 5000 else text
             
-            # Try to generate summary using LangChain service
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        f"{settings.LANGCHAIN_SERVICE_URL}/api/v1/chat/completions",
-                        json={
-                            "messages": [{
-                                "role": "system",
-                                "content": "You are a document summarizer. Create a concise summary of the document in 2-3 sentences. Focus on the main topic, purpose, and key points. Maximum 200 words."
-                            }, {
-                                "role": "user",
-                                "content": f"Summarize this document:\n\nFilename: {filename}\n\nContent:\n{text_for_summary}"
-                            }],
-                            "model": settings.OLLAMA_MODEL,
-                            "max_tokens": 300,
-                            "temperature": 0.3
-                        },
-                        headers={
-                            "X-API-Key": settings.MICROSERVICES_API_KEY,
-                            "Content-Type": "application/json"
-                        },
-                        timeout=20.0
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        if summary:
-                            logger.info(f"Generated summary for {filename}: {len(summary)} chars")
-                            return summary
-                    
-            except Exception as e:
-                logger.warning(f"Failed to generate LLM summary: {e}")
+            cag_answer = await self._call_cag_query(
+                query=(
+                    "Genera un resumen conciso (2-3 oraciones, máximo 200 palabras) "
+                    "del siguiente documento. Incluye el propósito principal y los puntos clave.\n\n"
+                    f"Archivo: {filename}\n"
+                    f"Contenido:\n{text_for_summary}"
+                ),
+                tenant_id=self.tenant_id or settings.DEFAULT_TENANT,
+                user_id=self.user_id or "system",
+                context={
+                    "task": "document_summary",
+                    "filename": filename
+                },
+                timeout=30.0
+            )
             
-            # Fallback to simple extraction if LLM fails
-            return self._create_simple_summary(text, filename)
-            
+            if cag_answer:
+                summary = cag_answer.strip()
+                logger.info(f"Generated summary for {filename}: {len(summary)} chars")
+                return summary
+                    
         except Exception as e:
-            logger.error(f"Error generating summary: {e}")
+            logger.warning(f"Failed to generate LLM summary: {e}")
             return self._create_simple_summary(text, filename)
     
     def _create_simple_summary(self, text: str, filename: str) -> str:

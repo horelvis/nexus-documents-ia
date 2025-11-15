@@ -12,7 +12,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
-      - LANGGRAPH_SERVICE_URL=http://langgraph-service:8007
+      - CAG_SERVICE_URL=http://cag-service:8000
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       - STORAGE_SERVICE_URL=http://storage-service:8000

@@ -1,67 +1,80 @@
 #!/usr/bin/env python3
 """
-Test script for entity extraction functionality
+Quick sanity test for the LangExtract microservice.
+
+Run inside the backend container (needs MICROSERVICES_API_KEY and LANGEXTRACT_SERVICE_URL).
 """
 import asyncio
 import httpx
-from app.services.langchain_client import LangChainClient
 from app.core.config import settings
 
+LANGEXTRACT_URL = settings.LANGEXTRACT_SERVICE_URL.rstrip("/")
+API_KEY = settings.MICROSERVICES_API_KEY
+TENANT_ID = settings.DEFAULT_TENANT
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY is required to run test_entity_extraction.py")
+
+
 async def test_entity_extraction():
-    """Test entity extraction with sample text."""
-    
-    # Sample text with various entities
+    """Call LangExtract service with a sample contract and display the entities."""
     sample_text = """
-    Apple Inc. announced today that Tim Cook, the company's CEO, will be meeting with 
-    representatives from Microsoft Corporation in Seattle, Washington next week. 
-    The meeting will also include Satya Nadella, Microsoft's CEO, and key executives 
-    from both companies. They plan to discuss potential collaboration on AI initiatives.
+    CONTRATO DE PRESTACIÓN DE SERVICIOS
     
-    John Smith from the legal department and Sarah Johnson from finance will be 
-    attending from Apple's side. The meeting is scheduled for December 15th at 
-    Microsoft's headquarters in Redmond.
+    Entre Apple Inc., representada por Tim Cook (CEO), y Microsoft Corporation,
+    representada por Satya Nadella (CEO), ambas con domicilio en Seattle, Washington.
+    
+    Objeto: colaboración en iniciativas de IA.
+    Duración: 6 meses (15 de diciembre 2024 - 15 de junio 2025).
+    Valor: USD 50,000 pagaderos a la firma.
     """
     
-    async with httpx.AsyncClient(timeout=30.0) as http_client:
-        client = LangChainClient(
-            http_client=http_client,
-            tenant_id=settings.DEFAULT_TENANT
+    payload = {
+        "text": sample_text.strip(),
+        "document_type": "contract",
+        "filename": "sample_contract.txt",
+        "tenant_id": TENANT_ID,
+        "user_id": "test-user"
+    }
+    
+    headers = {
+        "X-API-Key": API_KEY,
+        "X-Tenant-ID": TENANT_ID
+    }
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{LANGEXTRACT_URL}/api/v1/extraction/extract",
+            json=payload,
+            headers=headers
         )
-        
-        print("Testing entity extraction...")
-        print(f"Input text length: {len(sample_text)} characters")
-        print("-" * 80)
-        
-        try:
-            # Extract entities
-            entities = await client.extract_entities(sample_text)
-            
-            if entities:
-                print(f"Found {len(entities)} entities:")
-                print("-" * 80)
-                
-                # Group by type
-                by_type = {}
-                for entity in entities:
-                    entity_type = entity.get('type', 'other')
-                    if entity_type not in by_type:
-                        by_type[entity_type] = []
-                    by_type[entity_type].append(entity)
-                
-                # Display by type
-                for entity_type, items in by_type.items():
-                    print(f"\n{entity_type.upper()} ({len(items)}):")
-                    for item in items:
-                        print(f"  - {item.get('name')}")
-                        if item.get('role'):
-                            print(f"    Role: {item.get('role')}")
-                        if item.get('context'):
-                            print(f"    Context: {item.get('context')[:100]}...")
+        response.raise_for_status()
+        result = response.json()
+    
+    if not result.get("success"):
+        raise RuntimeError(f"LangExtract returned error: {result.get('error')}")
+    
+    entities = result.get("entities", {})
+    print("\n✅ LangExtract responded successfully")
+    print(f"Total extractions: {result.get('metadata', {}).get('total_extractions')}")
+    
+    for entity_type, items in entities.items():
+        print(f"\n{entity_type.upper()} ({len(items)})")
+        for item in items[:5]:
+            text = item.get("text") or item.get("value")
+            attrs = item.get("attributes", {})
+            print(f"  - {text}")
+            if attrs:
+                print(f"    attrs: {attrs}")
+    
+    summary = result.get("summary") or {}
+    if summary:
+        print("\n📋 Summary:")
+        for key, value in summary.items():
+            if isinstance(value, (list, tuple)):
+                print(f"  {key}: {', '.join(value)}")
             else:
-                print("No entities found.")
-                
-        except Exception as e:
-            print(f"Error: {str(e)}")
+                print(f"  {key}: {value}")
 
 
 if __name__ == "__main__":

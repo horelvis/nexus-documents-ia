@@ -260,11 +260,13 @@ class TestValidationComplete:
 
         # Verificar que los servicios micro estén respondiendo
         services_to_check = [
-            ("http://localhost:8001", "LangChain Service"),
-            ("http://localhost:8002", "Langroid Service"),
             ("http://localhost:8003", "Storage Service"),
             ("http://localhost:8004", "Ollama Service"),
-            ("http://localhost:8005", "Gotenberg Service")
+            ("http://localhost:8005", "Gotenberg Service"),
+            ("http://localhost:8007", "Weaviate Service"),
+            ("http://localhost:8008", "CAG Service"),
+            ("http://localhost:8009", "LangExtract Service"),
+            ("http://localhost:8010", "Temporalio Service"),
         ]
 
         healthy_services = 0
@@ -280,7 +282,7 @@ class TestValidationComplete:
                 print(f"⚠️  {service_name}: No disponible ({str(e)[:50]}...)")
 
         # Al menos algunos servicios deben estar funcionando
-        assert healthy_services >= 2, f"Solo {healthy_services} servicios están funcionando. Se requieren al menos 2."
+        assert healthy_services >= 3, f"Solo {healthy_services} servicios están funcionando. Se requieren al menos 3."
         print(f"✅ {healthy_services} servicios funcionando correctamente")
 
     def test_08_performance_validation(self, test_client, clerk_test_users):

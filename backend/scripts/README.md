@@ -49,7 +49,7 @@ This directory contains utility scripts for managing the Nexus Document Backend 
 - **`add_test_users.py`** - Add test users for development
 - **`make_superuser.py`** - Create or update superuser accounts
 - **`reindex_documents.py`** - Reindex all documents in vector database
-- **`extract_entities_from_documents.py`** - Extract entities from existing documents
+- **`migrate_extract_entities_langextract.py`** - Extrae entidades de documentos existentes usando el microservicio LangExtract (batch/filtros por tenant)
 
 ## Service Configuration
 

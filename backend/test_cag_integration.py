@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script de prueba para CAG integration
-Ejecutar dentro del contenedor API
+Script de prueba para verificar el microservicio CAG real.
+Ejecutar dentro del contenedor API (requiere MICROSERVICES_API_KEY).
 """
 import asyncio
 import os
@@ -9,6 +9,7 @@ import httpx
 import json
 
 API_KEY = os.getenv("MICROSERVICES_API_KEY")
+CAG_URL = os.getenv("CAG_SERVICE_URL", "http://cag-service:8000").rstrip("/")
 
 if not API_KEY:
     raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_cag_integration.py")
@@ -26,148 +27,83 @@ async def test_document_analysis():
     """Probar análisis de documentos con CAG"""
     print("=== Prueba de Document Analysis con CAG ===\n")
     
-    # Crear usuario fake
     user = FakeUser()
-    
-    # Crear request simple
     document_content = """
         CONTRATO DE PRESTACIÓN DE SERVICIOS
         
         Entre ABC Corp y XYZ Consulting
-        
         Objeto: Servicios de consultoría en IA
         Duración: 6 meses
         Valor: $50,000 USD
         Fecha: 5 de agosto de 2025
-        """
+    """
     
-    print(f"Documento: {document_content[:100]}...")
-    print("\nEnviando a CAG para análisis...")
-    
-    try:
-        # Simular la llamada al endpoint
-        # En producción esto sería a través de HTTP
-        async def mock_analyze():
-            # Aquí normalmente iría la lógica del endpoint
-            # Por ahora solo verificamos que CAG esté disponible
-            import httpx
-            
-            async with httpx.AsyncClient() as client:
-                # Verificar que LangGraph esté activo
-                response = await client.get(
-                    "http://langgraph-service:8007/health",
-                    headers={"X-API-Key": API_KEY}
-                )
-                
-                if response.status_code == 200:
-                    print("\n✅ LangGraph service está activo")
-                    health = response.json()
-                    print(f"Estado: {health}")
-                    
-                    # Ahora probar CAG directamente
-                    cag_request = {
-                        "graph_type": "cag",
-                        "input_data": {
-                            "query": f"Analiza este contrato: {document_content}",
-                            "tenant_id": str(user.tenant_id),
-                            "user_id": str(user.id)
-                        },
-                        "tenant_id": str(user.tenant_id)
-                    }
-                    
-                    print("\n📤 Enviando a CAG...")
-                    response = await client.post(
-                        "http://langgraph-service:8007/api/v1/graphs/run",
-                        json=cag_request,
-                        headers={"X-API-Key": API_KEY},
-                        timeout=30.0
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        print("\n✅ CAG procesó exitosamente!")
-                        print(f"Run ID: {result.get('run_id')}")
-                        print(f"Estado: {result.get('status')}")
-                        print(f"Tiempo: {result.get('execution_time', 0):.2f}s")
-                        
-                        if 'final_state' in result:
-                            state = result['final_state']
-                            if 'final_answer' in state:
-                                print(f"\n📝 Respuesta del CAG:")
-                                print("-" * 50)
-                                print(state['final_answer'][:500])
-                                print("-" * 50)
-                    else:
-                        print(f"\n❌ Error en CAG: {response.status_code}")
-                        print(response.text[:200])
-                else:
-                    print(f"\n❌ LangGraph service no está disponible: {response.status_code}")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Health check
+        health = await client.get(f"{CAG_URL}/health", headers={"X-API-Key": API_KEY})
+        health.raise_for_status()
+        print("\n✅ CAG service está activo")
+        print(json.dumps(health.json(), indent=2)[:300])
         
-        await mock_analyze()
+        # Document analysis
+        request_payload = {
+            "document_content": document_content,
+            "document_id": "demo-contract",
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+            "analysis_type": "legal"
+        }
         
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print("\n📤 Enviando /api/v1/cag/analyze...")
+        response = await client.post(
+            f"{CAG_URL}/api/v1/cag/analyze",
+            json=request_payload,
+            headers={"X-API-Key": API_KEY, "X-Tenant-ID": str(user.tenant_id)}
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        print("\n✅ CAG procesó exitosamente!")
+        print(f"Tiempo: {result.get('execution_time', 0):.2f}s | Confianza: {result.get('confidence', 0):.2f}")
+        print("-" * 50)
+        print(result.get("analysis", "Sin respuesta")[:600])
+        print("-" * 50)
 
 
 async def test_chat_with_cag():
-    """Probar chat con CAG"""
+    """Probar consulta simple con CAG query endpoint"""
     print("\n\n=== Prueba de Chat con CAG ===\n")
     
     user = FakeUser()
+    prompt = "¿Qué aspectos debo revisar antes de firmar un contrato de servicios?"
     
-    try:
-        import httpx
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.post(
+            f"{CAG_URL}/api/v1/cag/query",
+            json={
+                "query": prompt,
+                "tenant_id": str(user.tenant_id),
+                "user_id": str(user.id),
+                "context": {"demo": True}
+            },
+            headers={"X-API-Key": API_KEY, "X-Tenant-ID": str(user.tenant_id)}
+        )
         
-        async with httpx.AsyncClient() as client:
-            chat_request = {
-                "graph_type": "cag",
-                "input_data": {
-                    "query": "¿Qué tipos de contratos puedes analizar?",
-                    "tenant_id": str(user.tenant_id),
-                    "user_id": str(user.id)
-                },
-                "tenant_id": str(user.tenant_id)
-            }
-            
-            print("Pregunta: ¿Qué tipos de contratos puedes analizar?")
-            print("\n📤 Enviando a CAG...")
-            
-            response = await client.post(
-                "http://langgraph-service:8007/api/v1/graphs/run",
-                json=chat_request,
-                headers={"X-API-Key": API_KEY},
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                print("\n✅ Respuesta recibida!")
-                
-                if 'final_state' in result and 'final_answer' in result['final_state']:
-                    print(f"\n🤖 CAG responde:")
-                    print("-" * 50)
-                    print(result['final_state']['final_answer'][:500])
-                    print("-" * 50)
-            else:
-                print(f"\n❌ Error: {response.status_code}")
-                
-    except Exception as e:
-        print(f"\n❌ Error en chat: {str(e)}")
+        if response.status_code == 200:
+            result = response.json()
+            answer = result.get("answer", "Sin respuesta")
+            print("\n✅ Respuesta recibida!")
+            print("-" * 50)
+            print(answer[:600])
+            print("-" * 50)
+        else:
+            print(f"\n❌ Error: {response.status_code}")
+            print(response.text[:300])
 
 
 async def main():
-    """Ejecutar todas las pruebas"""
-    print("🧪 Iniciando pruebas de integración CAG\n")
-    
-    # Probar análisis de documentos
     await test_document_analysis()
-    
-    # Probar chat
     await test_chat_with_cag()
-    
-    print("\n\n✅ Pruebas completadas!")
 
 
 if __name__ == "__main__":
