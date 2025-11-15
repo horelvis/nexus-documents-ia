@@ -54,6 +54,24 @@
 6. **Búsqueda por Entidades**: Encuentra documentos por personas, organizaciones o importes
 7. **Recomendaciones Proactivas**: Sugiere acciones basadas en patrones
 
+## 🧩 Biblioteca de Plantillas + Workflows Durables
+
+### Plantillas Inteligentes Reutilizables
+- **Process Library por tenant**: En la ruta `/{tenantId}/workflows` encontrarás plantillas curadas como Renovación de Contratos u Onboarding con formularios dinámicos y validación en vivo.
+- **Catálogo híbrido**: El Core sirve `/api/v1/workflow-templates` (DB multi-tenant); si falla, el sistema usa el catálogo AI (`backend/app/data/ai_workflow_catalog.py`) para mantener operativa la librería.
+- **Schemas ricos**: Cada plantilla define pasos, campos condicionales, tags, complejidad y duración estimada, por lo que el frontend se configura automáticamente sin código adicional.
+- **Payloads normalizados**: `build_workflow_payload()` agrega defaults y transforma inputs antes de enviar la ejecución a Temporalio, reduciendo errores por datos incompletos.
+
+### Workflows impulsados por Temporalio
+- **Motor durable**: Temporalio Server (7233) + Web UI (8233) + microservicio `temporalio-service` (8010) orquestan Emma/Ollama con reintentos automáticos, señales y queries en caliente.
+- **Workflows listos**: `ContractRenewalWorkflow` y `EmployeeOnboardingWorkflow` ya están disponibles con seguimiento en tiempo real y opciones de cancelar/consultar desde la UI o API.
+- **Monitorización integrada**: Dashboard y pestaña Monitor refrescan los estados cada 30 s/10 s; los endpoints `/temporalio/workflow/{id}/status`, `/temporalio/workflows` y `/workflow-executions` exponen la misma telemetría para automatizaciones.
+- **Setup rápido**: `cd backend/docker && ./start-dev.sh` levanta API + Temporalio; health checks en `http://localhost:8010/health` y Web UI en `http://localhost:8233/`.
+
+### Documentación relacionada
+- [TEMPORALIO_INTEGRATION.md](TEMPORALIO_INTEGRATION.md): Arquitectura, endpoints, fases del rollout y mejores prácticas de operación.
+- [WORKFLOW_UI_TEST_PLAN.md](WORKFLOW_UI_TEST_PLAN.md): Pasos detallados para validar plantillas y workflows desde la UI y las APIs de visibilidad.
+
 ## 🏗️ Arquitectura del Sistema
 
 NexusDocs360 está construido con una arquitectura de microservicios moderna y orientada a IA, diseñada para máxima escalabilidad, seguridad y rendimiento.
