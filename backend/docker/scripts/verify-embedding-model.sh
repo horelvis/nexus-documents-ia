@@ -5,6 +5,8 @@
 echo "🔍 Verifying Embedding Model Configuration..."
 echo ""
 
+API_KEY="${MICROSERVICES_API_KEY:?MICROSERVICES_API_KEY not set}"
+
 # 1. Check if containers are running
 echo "1️⃣ Checking container status..."
 docker compose ps | grep -E "ollama-service|langchain-service|api" | head -5
@@ -34,7 +36,7 @@ echo ""
 echo "4️⃣ Testing embedding generation..."
 curl -X POST http://localhost:8001/embeddings/generate \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: unified-microservices-key-12345" \
+  -H "X-API-KEY: ${API_KEY}" \
   -d '{"text": "This is a test for embedding generation with GPU acceleration"}' \
   2>/dev/null | jq -r '.embedding[:5]' 2>/dev/null || echo "Embedding test failed"
 
@@ -50,7 +52,7 @@ echo "Generating embedding for a sample text..."
 START_TIME=$(date +%s.%N)
 curl -X POST http://localhost:8001/embeddings/generate \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: unified-microservices-key-12345" \
+  -H "X-API-KEY: ${API_KEY}" \
   -d '{"text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."}' \
   > /dev/null 2>&1
 END_TIME=$(date +%s.%N)

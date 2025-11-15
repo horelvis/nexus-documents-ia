@@ -10,7 +10,7 @@ class Settings:
     """Configuración del storage microservice"""
     
     # API Security
-    API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "")
     
     # Google Cloud Storage
     GCS_PROJECT_ID: str = os.getenv("GCS_PROJECT_ID", "your-project-id")
@@ -44,9 +44,13 @@ class Settings:
 # Crear instancia y log de configuración
 settings = Settings()
 
+if not settings.MICROSERVICES_API_KEY:
+    raise EnvironmentError("MICROSERVICES_API_KEY environment variable is required for storage-service")
+
 # Log de variables importantes para debugging
 logger.info("=== STORAGE SERVICE CONFIGURATION ===")
-logger.info(f"API_KEY: {settings.API_KEY[:10]}... (masked)")
+masked_api_key = f"{settings.MICROSERVICES_API_KEY[:10]}... (masked)" if settings.MICROSERVICES_API_KEY else "NOT_SET"
+logger.info(f"MICROSERVICES_API_KEY: {masked_api_key}")
 logger.info(f"GCS_PROJECT_ID: {settings.GCS_PROJECT_ID}")
 logger.info(f"GCS_CREDENTIALS: {settings.GCS_CREDENTIALS}")
 logger.info(f"GCS_BUCKET_NAME: {settings.GCS_BUCKET_NAME}")
@@ -58,9 +62,11 @@ logger.info("=== END CONFIGURATION ===")
 
 # Log de variables de entorno raw
 logger.info("=== RAW ENVIRONMENT VARIABLES ===")
-for key in ["API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING", "REDIS_HOST", "REDIS_PORT"]:
+for key in ["MICROSERVICES_API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING", "REDIS_HOST", "REDIS_PORT"]:
     value = os.getenv(key, "NOT_SET")
-    if key == "API_KEY" and value != "NOT_SET":
+    if key == "MICROSERVICES_API_KEY" and value not in ("NOT_SET", ""):
         value = f"{value[:10]}... (masked)"
+    elif key == "MICROSERVICES_API_KEY":
+        value = "NOT_SET"
     logger.info(f"ENV {key}: {value}")
 logger.info("=== END RAW ENV VARS ===")

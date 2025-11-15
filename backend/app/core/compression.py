@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 class CompressionMiddleware:
     """Middleware for compressing HTTP responses"""
 
-    def __init__(self, app: Callable, compression_level: int = 6):
+    def __init__(self, app: Callable, compression_level: int = 6, min_size: int = 1024):
         self.app = app
         self.compression_level = compression_level
+        self.min_size = min_size
 
     async def __call__(self, scope, receive, send):
         """ASGI middleware implementation"""
@@ -24,56 +25,116 @@ class CompressionMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Intercept the send callable to compress responses
+        request_headers = dict(scope.get("headers") or [])
+        accepts_gzip = False
+        for key, value in request_headers.items():
+            if key == b"accept-encoding" and b"gzip" in value.lower():
+                accepts_gzip = True
+                break
+
+        # Skip compression for streaming/document endpoints explicitly
+        request_path = scope.get("path", "") or ""
+        if not accepts_gzip or "/stream" in request_path:
+            await self.app(scope, receive, send)
+            return
+
         original_send = send
+        response_start_message = None
+        response_headers = []
+        headers_sent = False
+        can_compress = True
 
         async def compressed_send(message):
-            if message["type"] == "http.response.start":
-                # Check if client accepts gzip compression
-                headers = dict(message.get("headers", []))
-                accept_encoding = None
+            nonlocal response_start_message, response_headers, headers_sent, can_compress
 
-                for key, value in headers.items():
-                    if key == b"accept-encoding":
-                        accept_encoding = value.decode("utf-8").lower()
+            if message["type"] == "http.response.start":
+                response_start_message = message.copy()
+                response_headers = list(message.get("headers", []))
+
+                # Inspect content type to skip non-compressible responses (PDF, binaries, SSE, etc.)
+                content_type = ""
+                for key, value in response_headers:
+                    if key == b"content-type":
+                        content_type = value.decode("latin-1").lower()
                         break
 
-                # Add compression header if client supports it
-                if accept_encoding and "gzip" in accept_encoding:
-                    message["headers"] = message.get("headers", []) + [
-                        [b"content-encoding", b"gzip"]
+                nonlocal_can_compress = can_compress
+                if any(
+                    media in content_type
+                    for media in [
+                        "application/pdf",
+                        "application/zip",
+                        "application/gzip",
+                        "application/octet-stream",
+                        "image/",
+                        "audio/",
+                        "video/",
+                        "text/event-stream",
                     ]
+                ):
+                    nonlocal_can_compress = False
 
-            elif message["type"] == "http.response.body":
-                # Compress the response body if it's not empty
+                can_compress = nonlocal_can_compress
+                return
+
+            if message["type"] == "http.response.body":
                 body = message.get("body", b"")
-                if body and len(body) > 1024:  # Only compress if body is > 1KB
-                    try:
-                        compressed_body = gzip.compress(
-                            body,
-                            compresslevel=self.compression_level
-                        )
+                more_body = message.get("more_body", False)
 
-                        # Only use compressed version if it's actually smaller
-                        if len(compressed_body) < len(body):
-                            message["body"] = compressed_body
-                            # Update Content-Length header to match compressed size
-                            message["headers"] = message.get("headers", [])
-                            # Remove existing content-length header
-                            message["headers"] = [
-                                [k, v] for k, v in message["headers"]
-                                if k != b"content-length"
-                            ]
-                            # Add new content-length header
-                            message["headers"].append([b"content-length", str(len(compressed_body)).encode("utf-8")])
-                            logger.debug(f"Compressed response from {len(body)} to {len(compressed_body)} bytes")
-                        else:
-                            logger.debug(f"Compression not beneficial, keeping original size: {len(body)} bytes")
+                # If the response is streaming (multiple body chunks), skip compression
+                if more_body:
+                    can_compress = False
 
-                    except Exception as e:
-                        logger.warning(f"Compression failed: {str(e)}, sending uncompressed response")
+                if not headers_sent:
+                    start_message = response_start_message or {"type": "http.response.start", "headers": []}
+                    adjusted_headers = response_headers
 
-            await original_send(message)
+                    compressed_body = body
+                    did_compress = False
+
+                    if (
+                        can_compress
+                        and body
+                        and not more_body
+                        and len(body) >= self.min_size
+                    ):
+                        try:
+                            candidate = gzip.compress(body, compresslevel=self.compression_level)
+                            if len(candidate) < len(body):
+                                compressed_body = candidate
+                                did_compress = True
+                            else:
+                                can_compress = False
+                        except Exception as e:
+                            logger.warning(f"Compression failed: {str(e)}, sending uncompressed response")
+                            can_compress = False
+
+                    if did_compress:
+                        adjusted_headers = [
+                            [k, v]
+                            for k, v in response_headers
+                            if k not in (b"content-length", b"content-encoding")
+                        ]
+                        adjusted_headers.append([b"content-encoding", b"gzip"])
+                        adjusted_headers.append([b"content-length", str(len(compressed_body)).encode("utf-8")])
+                        message["body"] = compressed_body
+                    else:
+                        # If compression not applied, ensure original body is used
+                        message["body"] = body
+
+                    start_message["headers"] = adjusted_headers
+                    response_start_message = None
+                    await original_send(start_message)
+                    headers_sent = True
+
+                    if did_compress:
+                        await original_send(message)
+                        return
+
+                # For subsequent body messages or when compression is not applied
+                await original_send(message)
+            else:
+                await original_send(message)
 
         await self.app(scope, receive, compressed_send)
 

@@ -3,6 +3,8 @@ Configuration for LangExtract Service
 """
 import os
 from typing import Optional
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -33,11 +35,14 @@ class Settings(BaseSettings):
     parallel_workers: int = 4  # Parallel processing workers
     
     # API Security
-    api_key: str = os.getenv("MICROSERVICES_API_KEY", "dev-api-key-2024")
+    MICROSERVICES_API_KEY: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     
     # Document type configurations
     confidence_threshold: float = 0.7  # Minimum confidence for extractions
-    
+
+
     class Config:
         env_file = ".env"
         case_sensitive = False

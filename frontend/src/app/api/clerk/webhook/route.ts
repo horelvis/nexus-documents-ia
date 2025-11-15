@@ -46,7 +46,14 @@ export async function POST(req: Request) {
     const { id, email_addresses, unsafe_metadata } = evt.data
     const email = email_addresses[0]?.email_address
     const plan = unsafe_metadata?.plan as string || 'free'
-    const interval = unsafe_metadata?.interval as string || 'monthly'
+    const rawInterval = (unsafe_metadata?.interval as string) || 'month'
+    const lowerInterval = rawInterval.toLowerCase()
+    const interval =
+      lowerInterval === 'yearly'
+        ? 'year'
+        : lowerInterval === 'monthly'
+          ? 'month'
+          : lowerInterval
 
     // Create user in our database
     try {

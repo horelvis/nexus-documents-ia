@@ -82,6 +82,11 @@ export async function POST(req: Request) {
 }
 
 function getPriceId(plan: string, interval: string): string | null {
+  const lowerInterval = interval?.toLowerCase?.() ?? interval
+  const normalizedInterval = lowerInterval === 'month' ? 'monthly'
+    : lowerInterval === 'year' ? 'yearly'
+    : lowerInterval
+
   const prices: Record<string, Record<string, string>> = {
     pro: {
       monthly: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID!,
@@ -93,5 +98,5 @@ function getPriceId(plan: string, interval: string): string | null {
     },
   }
 
-  return prices[plan]?.[interval] || null
+  return prices[plan]?.[normalizedInterval] || null
 }

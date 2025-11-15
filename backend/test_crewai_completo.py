@@ -3,13 +3,17 @@
 Test completo de CrewAI con todos los componentes
 """
 import asyncio
+import os
 import httpx
 import json
 from datetime import datetime
 import time
 
 BASE_URL = "http://localhost:8008"
-API_KEY = "unified-microservices-key-12345"  # API key correcta del servicio
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_crewai_completo.py")
 
 async def test_health():
     """Verificar salud del servicio"""

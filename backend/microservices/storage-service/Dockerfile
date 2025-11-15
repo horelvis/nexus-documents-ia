@@ -10,7 +10,10 @@ WORKDIR /app
 
 # Copiar requirements y instalar dependencias Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5 \
+    PIP_NO_CACHE_DIR=1
+RUN pip install --prefer-binary -r requirements.txt
 
 # Copiar código de la aplicación
 COPY app/ ./app/

@@ -353,6 +353,16 @@ class DistributedCache:
         # Fallback to memory cache
         return self.memory_cache.get(key)
 
+    def get_json(self, key: str) -> Optional[Any]:
+        """Get JSON-deserialized value from cache"""
+        value = self.get(key)
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to decode JSON for key {key}")
+        return value
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Set value in cache with fallback"""
         success = False
@@ -364,6 +374,17 @@ class DistributedCache:
         memory_success = self.memory_cache.set(key, value, ttl)
 
         return success or memory_success
+
+    def set_json(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Serialize and set JSON value in cache"""
+        serialized = value
+        if not isinstance(value, (str, bytes)):
+            try:
+                serialized = json.dumps(value)
+            except (TypeError, ValueError) as e:
+                logger.error(f"Failed to serialize value for key {key}: {e}")
+                return False
+        return self.set(key, serialized, ttl)
 
     def delete(self, key: str) -> bool:
         """Delete value from cache"""

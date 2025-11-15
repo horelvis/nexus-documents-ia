@@ -23,14 +23,14 @@ const Tools = () => {
                     <Badge size="lg" variant="outline">
                         <Waypoints className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            Powerful Integrations
+                            Integraciones para asesorías
                         </span>
                     </Badge>
                     <h2 className="mt-6 text-2xl font-semibold text-center lg:text-3xl xl:text-4xl">
-                        Seamlessly connect your document ecosystem
+                        Conecta tu correo, almacenamiento y firma electrónica
                     </h2>
                     <p className="max-w-lg mt-6 text-center text-neutral-500">
-                        Integrate with popular productivity tools, cloud storage platforms, and business applications to create a unified document management experience.
+                        Importa documentos desde email, Drive o OneDrive, sincroniza con tu gestor de nóminas y lanza flujos de firma certificados sin salir de NexusDocs360.
                     </p>
                 </div>
             </AnimationContainer>

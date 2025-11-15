@@ -293,24 +293,29 @@ class AsyncAuthService:
         user_by_email = result.scalar_one_or_none()
         
         if user_by_email:
-            # Usuario existe por email pero sin clerk_user_id
-            if user_by_email.clerk_user_id:
-                # Ya tiene un clerk_user_id diferente - posible duplicado
-                logger.error(f"🚫 Email {email} already exists with different clerk_user_id: {user_by_email.clerk_user_id}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Email {email} is already registered with a different account"
+            # Usuario existe por email; manejar posibles discrepancias de Clerk ID
+            if user_by_email.clerk_user_id and user_by_email.clerk_user_id != clerk_user_id:
+                previous_clerk_id = user_by_email.clerk_user_id
+                logger.warning(
+                    "⚠️ Clerk ID mismatch for email %s. Updating stored ID from %s to %s",
+                    email,
+                    previous_clerk_id,
+                    clerk_user_id,
                 )
+                user_by_email.clerk_user_id = clerk_user_id
+            elif not user_by_email.clerk_user_id:
+                logger.info(f"🔗 Linking existing user by email: {user_by_email.id}")
+                user_by_email.clerk_user_id = clerk_user_id
+            else:
+                logger.info(f"🔁 Clerk ID already up to date for user: {user_by_email.id}")
             
-            # Usuario existe sin clerk_user_id, vincularlo
-            logger.info(f"🔗 Linking existing user by email: {user_by_email.id}")
-            user_by_email.clerk_user_id = clerk_user_id
             user_by_email.full_name = full_name
             if stripe_customer_id:
                 user_by_email.stripe_customer_id = stripe_customer_id
             
             await db.commit()
             await db.refresh(user_by_email)
+            logger.info(f"✅ User synced from Clerk by email: {user_by_email.id}")
             return user_by_email
         
         # Usuario no existe, crear uno nuevo

@@ -55,11 +55,18 @@ async def create_checkout_session(
                 detail=f"Invalid plan ID: {request.planId}. Must be 'basic' or 'pro'"
             )
         
-        # Validate interval
-        if request.interval not in ['month', 'year']:
+        # Normalize and validate interval values
+        interval_map = {
+            'month': 'month',
+            'monthly': 'month',
+            'year': 'year',
+            'yearly': 'year'
+        }
+        normalized_interval = interval_map.get(request.interval.lower())
+        if not normalized_interval:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid interval: {request.interval}. Must be 'month' or 'year'"
+                detail=f"Invalid interval: {request.interval}. Must be 'month'/'monthly' or 'year'/'yearly'"
             )
         
         # Centralized plan to price mapping
@@ -75,12 +82,12 @@ async def create_checkout_session(
         }
         
         # Get the appropriate price ID
-        stripe_price_id = plan_price_mapping.get(request.planId, {}).get(request.interval)
+        stripe_price_id = plan_price_mapping.get(request.planId, {}).get(normalized_interval)
         
         if not stripe_price_id:
             raise HTTPException(
                 status_code=400,
-                detail=f"Price not configured for plan '{request.planId}' with interval '{request.interval}'"
+                detail=f"Price not configured for plan '{request.planId}' with interval '{normalized_interval}'"
             )
 
         # Si el usuario ya tiene un customer_id, verificar que existe en Stripe
@@ -124,7 +131,8 @@ async def create_checkout_session(
             metadata={
                 'plan_id': request.planId,
                 'user_id': str(current_user.id),
-                'tenant_id': str(current_user.tenant_id)
+                'tenant_id': str(current_user.tenant_id),
+                'interval': normalized_interval
             },
             customer=customer_id,
             # Recopilar información adicional
@@ -136,7 +144,7 @@ async def create_checkout_session(
                 'trial_period_days': 14 if request.planId == 'pro' else None,
                 'metadata': {
                     'plan_id': request.planId,
-                    'interval': request.interval,
+                    'interval': normalized_interval,
                 }
             }
         )

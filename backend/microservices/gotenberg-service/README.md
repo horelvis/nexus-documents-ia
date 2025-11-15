@@ -38,14 +38,14 @@ El microservicio **`gotenberg-service`** (puerto 8005) está basado en la imagen
 ## Autenticación
 
 Todos los endpoints requieren:
-- Header `X-API-Key`: Clave API del microservicio
+- Header `X-API-Key`: Clave API del microservicio (valor de `MICROSERVICES_API_KEY`)
 - Header `X-Tenant-ID`: ID del tenant (opcional, extraído del contexto)
 - Header `X-User-ID`: ID del usuario (opcional)
 
 ## Configuración
 
 ### Variables de Entorno
-- `API_KEY`: Clave API para autenticación
+- `MICROSERVICES_API_KEY`: Clave API para autenticación
 - `GOTENBERG_BASE_URL`: URL interna de Gotenberg (http://localhost:3000)
 - `THUMBNAIL_WIDTH/HEIGHT`: Dimensiones de thumbnails
 - `PDF_CONVERSION_TIMEOUT`: Timeout para conversiones

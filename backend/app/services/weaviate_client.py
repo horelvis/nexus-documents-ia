@@ -12,21 +12,24 @@ class WeaviateClient:
     
     def __init__(self):
         self.base_url = getattr(settings, 'WEAVIATE_SERVICE_URL', 'http://weaviate-service:8007')
-        self.api_key = settings.MICROSERVICES_API_KEY if hasattr(settings, 'MICROSERVICES_API_KEY') else 'unified-microservices-key-12345'
+        self.api_key = settings.MICROSERVICES_API_KEY
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
+        logger.info("WeaviateClient initialized | base_url=%s", self.base_url)
         
     async def health_check(self) -> Dict[str, Any]:
         """Check Weaviate service health"""
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.base_url}/health", headers=self.headers)
+                url = f"{self.base_url}/health"
+                logger.debug("Checking Weaviate health | url=%s", url)
+                response = await client.get(url, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Weaviate health check failed: {e}")
+            logger.exception("❌ Weaviate health check failed | base_url=%s error=%s", self.base_url, e)
             return {"status": "unhealthy", "error": str(e)}
     
     # Weaviate operations
@@ -36,12 +39,23 @@ class WeaviateClient:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/weaviate/collections/{collection_name}/create"
                 payload = {"schema": schema} if schema else {}
+                logger.debug(
+                    "Creating Weaviate collection | url=%s collection=%s payload_keys=%s",
+                    url,
+                    collection_name,
+                    list(payload.keys()),
+                )
                 
                 response = await client.post(url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Failed to create collection {collection_name}: {e}")
+            logger.exception(
+                "❌ Failed to create collection | url=%s collection=%s error=%s",
+                f"{self.base_url}/weaviate/collections/{collection_name}/create",
+                collection_name,
+                e,
+            )
             raise
     
     async def add_document(self, collection_name: str, document_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,12 +63,23 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/weaviate/collections/{collection_name}/documents"
+                logger.debug(
+                    "Adding document to Weaviate | url=%s collection=%s document_keys=%s",
+                    url,
+                    collection_name,
+                    list(document_data.keys()),
+                )
                 
                 response = await client.post(url, json=document_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Failed to add document to {collection_name}: {e}")
+            logger.exception(
+                "❌ Failed to add document | url=%s collection=%s error=%s",
+                f"{self.base_url}/weaviate/collections/{collection_name}/documents",
+                collection_name,
+                e,
+            )
             raise
     
     async def search_documents(self, collection_name: str, search_request: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,12 +87,23 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 url = f"{self.base_url}/weaviate/collections/{collection_name}/search"
+                logger.debug(
+                    "Searching Weaviate | url=%s collection=%s payload_keys=%s",
+                    url,
+                    collection_name,
+                    list(search_request.keys()),
+                )
                 
                 response = await client.post(url, json=search_request, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Search failed in {collection_name}: {e}")
+            logger.exception(
+                "❌ Weaviate search failed | url=%s collection=%s error=%s",
+                f"{self.base_url}/weaviate/collections/{collection_name}/search",
+                collection_name,
+                e,
+            )
             raise
     
     async def batch_add_documents(self, collection_name: str, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -75,12 +111,24 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 url = f"{self.base_url}/weaviate/collections/{collection_name}/batch"
+                logger.debug(
+                    "Batch adding to Weaviate | url=%s collection=%s batch_size=%d",
+                    url,
+                    collection_name,
+                    len(documents),
+                )
                 
                 response = await client.post(url, json=documents, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Batch add failed for {collection_name}: {e}")
+            logger.exception(
+                "❌ Batch add failed | url=%s collection=%s batch_size=%d error=%s",
+                f"{self.base_url}/weaviate/collections/{collection_name}/batch",
+                collection_name,
+                len(documents),
+                e,
+            )
             raise
     
     async def list_collections(self) -> List[str]:
@@ -88,13 +136,18 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/weaviate/collections"
+                logger.debug("Listing Weaviate collections | url=%s", url)
                 
                 response = await client.get(url, headers=self.headers)
                 response.raise_for_status()
                 data = response.json()
                 return data.get("collections", [])
         except Exception as e:
-            logger.error(f"❌ Failed to list collections: {e}")
+            logger.exception(
+                "❌ Failed to list Weaviate collections | base_url=%s error=%s",
+                self.base_url,
+                e,
+            )
             raise
     
     # Elysia operations
@@ -103,12 +156,17 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 url = f"{self.base_url}/elysia/query"
+                logger.debug("Calling Elysia query | url=%s payload_keys=%s", url, list(query_data.keys()))
                 
                 response = await client.post(url, json=query_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Elysia query failed: {e}")
+            logger.exception(
+                "❌ Elysia query failed | url=%s error=%s",
+                f"{self.base_url}/elysia/query",
+                e,
+            )
             raise
     
     async def execute_tool(self, tool_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -116,12 +174,17 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 url = f"{self.base_url}/elysia/tools/execute"
+                logger.debug("Executing Elysia tool | url=%s payload_keys=%s", url, list(tool_data.keys()))
                 
                 response = await client.post(url, json=tool_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Tool execution failed: {e}")
+            logger.exception(
+                "❌ Elysia tool execution failed | url=%s error=%s",
+                f"{self.base_url}/elysia/tools/execute",
+                e,
+            )
             raise
     
     async def list_tools(self) -> List[Dict[str, Any]]:
@@ -129,13 +192,18 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/elysia/tools"
+                logger.debug("Listing Elysia tools | url=%s", url)
                 
                 response = await client.get(url, headers=self.headers)
                 response.raise_for_status()
                 data = response.json()
                 return data.get("tools", [])
         except Exception as e:
-            logger.error(f"❌ Failed to list tools: {e}")
+            logger.exception(
+                "❌ Failed to list Elysia tools | url=%s error=%s",
+                f"{self.base_url}/elysia/tools",
+                e,
+            )
             raise
     
     async def create_visualization(self, viz_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -143,12 +211,17 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/elysia/visualize"
+                logger.debug("Creating Elysia visualization | url=%s payload_keys=%s", url, list(viz_data.keys()))
                 
                 response = await client.post(url, json=viz_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Visualization creation failed: {e}")
+            logger.exception(
+                "❌ Visualization creation failed | url=%s error=%s",
+                f"{self.base_url}/elysia/visualize",
+                e,
+            )
             raise
     
     async def submit_feedback(self, feedback_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,12 +229,17 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient() as client:
                 url = f"{self.base_url}/elysia/feedback"
+                logger.debug("Submitting Elysia feedback | url=%s payload_keys=%s", url, list(feedback_data.keys()))
                 
                 response = await client.post(url, json=feedback_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Feedback submission failed: {e}")
+            logger.exception(
+                "❌ Feedback submission failed | url=%s error=%s",
+                f"{self.base_url}/elysia/feedback",
+                e,
+            )
             raise
     
     async def migrate_from_qdrant(self, migration_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -169,12 +247,21 @@ class WeaviateClient:
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:  # 5 minute timeout for migration
                 url = f"{self.base_url}/elysia/migrate-from-qdrant"
+                logger.debug(
+                    "Migrating from Qdrant | url=%s payload_keys=%s",
+                    url,
+                    list(migration_data.keys()),
+                )
                 
                 response = await client.post(url, json=migration_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Migration failed: {e}")
+            logger.exception(
+                "❌ Elysia migration failed | url=%s error=%s",
+                f"{self.base_url}/elysia/migrate-from-qdrant",
+                e,
+            )
             raise
 
 

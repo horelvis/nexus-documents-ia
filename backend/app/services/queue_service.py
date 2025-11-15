@@ -113,6 +113,41 @@ class QueueService:
         except Exception as e:
             logger.error(f"Failed to enqueue batch categorization: {e}")
             return None
+
+    async def enqueue_index_retry(
+        self,
+        document_id: str,
+        tenant_id: str,
+        user_id: Optional[str] = None,
+        priority: str = "default"
+    ) -> Optional[str]:
+        """
+        Enqueue a document for search index retry (Elasticsearch + Weaviate)
+        
+        Args:
+            document_id: Document ID to reindex
+            tenant_id: Tenant ID
+            user_id: Optional user that triggered the retry
+            priority: Job priority (high, default, low)
+        """
+        try:
+            pool = await self.connect()
+            job = await pool.enqueue_job(
+                'retry_document_indexing',
+                document_id,
+                tenant_id,
+                user_id,
+                _job_try=5
+            )
+
+            logger.info(
+                f"Enqueued document {document_id} for indexing retry "
+                f"(tenant={tenant_id}, job={job.job_id})"
+            )
+            return job.job_id
+        except Exception as e:
+            logger.error(f"Failed to enqueue indexing retry for {document_id}: {e}")
+            return None
     
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -150,7 +185,7 @@ class QueueService:
             pool = await self.connect()
             
             # Get queue lengths for all queues
-            queue_types = ["categorization", "preview", "email"]
+            queue_types = ["categorization", "preview", "email", "indexing"]
             priorities = ["high", "default", "low"]
             stats = {}
             

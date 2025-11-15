@@ -35,36 +35,36 @@ const Hero = () => {
                                 NEW
                             </span>
                             <span>
-                                Discover our latest AI-powered document analysis
+                                Plataforma IA especializada para asesorías laborales
                             </span>
                         </Badge>
                     </AnimationContainer>
                     <AnimationContainer delay={0.15}>
                         <h1 className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold text-center !leading-tight">
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                Transform your {" "}
+                                Automatiza tu {" "}
                             </span>
                             <span className="text-transparent bg-gradient-to-b from-primary to-primaryLight bg-clip-text">
-                                document management {" "}
+                                asesoría laboral {" "}
                             </span>
                             <span className="text-transparent bg-gradient-to-b from-neutral-50 to-neutral-500 bg-clip-text font-bold !leading-tight">
-                                with intelligent AI
+                                con IA especializada
                             </span>
                         </h1>
                     </AnimationContainer>
                     <AnimationContainer delay={0.2}>
                         <p className="max-w-xl mt-2 text-base text-center text-accent-foreground/60">
-                            Revolutionize your document workflow with AI-powered organization, analysis, and search. <span className="hidden lg:inline">NexusDocs360 provides intelligent document management with semantic search, automated categorization, and real-time insights.</span>
+                            Centraliza nóminas, contratos y modelos oficiales, detecta riesgos y responde a tus clientes en minutos. <span className="hidden lg:inline">NexusDocs360 clasifica documentos laborales, genera alertas antes de las inspecciones y ofrece búsqueda semántica sobre todos los expedientes.</span>
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
                             <Button size="lg" asChild>
                                 <Link href="/auth/sign-up">
-                                    Start for free
+                                    Solicitar demo
                                 </Link>
                             </Button>
                             <Button size="lg" variant="secondary" asChild>
                                 <Link href="/pricing" className="flex items-center">
-                                    See demo
+                                    Ver precios
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
                             </Button>
@@ -74,12 +74,12 @@ const Hero = () => {
                         <div className="flex items-center justify-center mt-6 lg:hidden gap-x-4">
                             <Button asChild>
                                 <Link href="/auth/sign-up">
-                                    Start for free
+                                    Empezar piloto
                                 </Link>
                             </Button>
                             <Button variant="secondary" asChild>
                                 <Link href="/pricing" className="flex items-center">
-                                    See demo
+                                    Ver demo
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
                             </Button>
@@ -88,7 +88,7 @@ const Hero = () => {
                             <div className="flex items-center gap-x-2">
                                 <History className="w-4 h-4 text-muted-foreground" />
                                 <span className="text-sm text-muted-foreground">
-                                    30-day free trial
+                                    Piloto gratuito 30 días
                                 </span>
                                 <span className="text-muted-foreground">
                                     •
@@ -97,7 +97,7 @@ const Hero = () => {
                             <div className="flex items-center gap-x-2">
                                 <CreditCard className="w-4 h-4 text-muted-foreground" />
                                 <span className="text-sm text-muted-foreground">
-                                    No card required
+                                    Sin tarjeta ni instalación
                                 </span>
                             </div>
                         </div>

@@ -1,6 +1,8 @@
 """Configuration for Temporalio Service"""
 import os
 from typing import List
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -10,7 +12,9 @@ class Settings(BaseSettings):
     # Service configuration
     service_name: str = "temporalio-service"
     service_port: int = 8010
-    api_key: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    MICROSERVICES_API_KEY: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     allowed_origins: List[str] = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
@@ -57,6 +61,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        case_sensitive = False
 
 
 settings = Settings()

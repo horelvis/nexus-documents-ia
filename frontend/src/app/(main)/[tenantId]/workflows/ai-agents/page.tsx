@@ -2,14 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useParams } from "next/navigation"
 import { useTemporalioService } from "@/lib/services/temporalio.service"
-import { 
-  IconArrowLeft, 
+import {
+  IconArrowLeft,
   IconRobot,
   IconBrain,
-  IconFileText,
-  IconUsers,
   IconClock,
   IconCheck,
   IconAlertTriangle,
@@ -26,36 +23,35 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
-import type { TemporalioTemplate, TemporalioExecution, TemporalioExecutionStatus } from "@/lib/services/temporalio.service"
+import type {
+  AIWorkflowTemplateMeta,
+  TemporalioExecution,
+  TemporalioExecutionStatus
+} from "@/lib/services/temporalio.service"
 
 export default function AIAgentsWorkflowsPage() {
   const router = useRouter()
-  const params = useParams()
-  const tenantId = params.tenantId as string
   const temporalioService = useTemporalioService()
 
-  const [templates, setTemplates] = useState<TemporalioTemplate[]>([])
+  const [templates, setTemplates] = useState<AIWorkflowTemplateMeta[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedTemplate, setSelectedTemplate] = useState<TemporalioTemplate | null>(null)
+  const [selectedTemplate, setSelectedTemplate] = useState<AIWorkflowTemplateMeta | null>(null)
   const [execution, setExecution] = useState<TemporalioExecution | null>(null)
   const [executionStatus, setExecutionStatus] = useState<TemporalioExecutionStatus | null>(null)
+  const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [inputError, setInputError] = useState<string | null>(null)
 
-  // Form data for legal advisory workflow
-  const [legalForm, setLegalForm] = useState({
-    clientName: '',
-    caseType: 'Laboral',
-    description: '',
-    priority: 'medium'
-  })
-
-  // Form data for document processing workflow  
-  const [documentForm, setDocumentForm] = useState({
-    documentContent: '',
-    documentType: 'contract',
-    analysisDepth: 'standard'
-  })
+  const buildInitialValues = (template: AIWorkflowTemplateMeta | null) => {
+    if (!template) {
+      return {}
+    }
+    return template.fields.reduce<Record<string, string>>((acc, field) => {
+      acc[field.name] = field.default_value ?? ""
+      return acc
+    }, {})
+  }
 
   useEffect(() => {
     loadTemplates()
@@ -86,43 +82,63 @@ export default function AIAgentsWorkflowsPage() {
     setError(null)
 
     try {
-      const allTemplates = await temporalioService.getTemplates()
-      // Filter for AI-enhanced templates
-      const aiTemplates = allTemplates.filter(t => 
-        t.name.toLowerCase().includes('inteligente') || 
-        t.name.toLowerCase().includes('ai') ||
-        t.id.includes('ai-')
-      )
-      setTemplates(aiTemplates)
-    } catch (err) {
-      setError(`Error loading templates: ${err.message}`)
+      const catalog = await temporalioService.getAIWorkflowCatalog()
+      setTemplates(catalog)
+
+      const previousId = selectedTemplate?.id
+      const nextSelection = catalog.find(t => t.id === previousId) || catalog[0] || null
+      setSelectedTemplate(nextSelection || null)
+
+      if (!previousId || nextSelection?.id !== previousId) {
+        setFormValues(buildInitialValues(nextSelection || null))
+        setInputError(null)
+      }
+    } catch (err: any) {
+      setError(`Error cargando workflows: ${err?.message || err}`)
+      setTemplates([])
+      setSelectedTemplate(null)
+      setFormValues({})
     } finally {
       setIsLoading(false)
     }
   }
 
-  const executeTemplate = async (templateId: string, inputData: any) => {
+  const executeTemplate = async (templateId: string, inputData: Record<string, any>) => {
     setIsExecuting(true)
     setError(null)
     setExecution(null)
     setExecutionStatus(null)
 
     try {
-      const result = await temporalioService.executeWorkflow(templateId, tenantId, inputData)
+      const result = await temporalioService.executeAIWorkflow(templateId, inputData)
       setExecution(result)
-    } catch (err) {
-      setError(`Error executing workflow: ${err.message}`)
+    } catch (err: any) {
+      setError(`Error ejecutando workflow: ${err?.message || err}`)
     } finally {
       setIsExecuting(false)
     }
   }
 
-  const executeLegalAdvisory = async () => {
-    await executeTemplate('ai-legal-advisory-template', legalForm)
-  }
+  const handleExecuteSelectedTemplate = async () => {
+    if (!selectedTemplate) {
+      setError("Selecciona un workflow para ejecutarlo")
+      return
+    }
 
-  const executeDocumentProcessing = async () => {
-    await executeTemplate('ai-document-processing-template', documentForm)
+    setInputError(null)
+    const missing = selectedTemplate.fields
+      .filter(field => field.required !== false)
+      .filter(field => {
+        const value = formValues[field.name]
+        return !value || value.trim() === ""
+      })
+
+    if (missing.length > 0) {
+      setInputError(`Faltan campos obligatorios: ${missing.map(f => f.label).join(", ")}`)
+      return
+    }
+
+    await executeTemplate(selectedTemplate.id, formValues)
   }
 
   const getStatusColor = (status: string) => {
@@ -194,206 +210,204 @@ export default function AIAgentsWorkflowsPage() {
 
       {/* Templates Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {templates.map((template) => (
-          <Card key={template.id} className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <CardTitle className="flex items-center text-lg">
-                <IconBrain className="h-5 w-5 mr-2 text-purple-600" />
-                {template.name}
-              </CardTitle>
-              <CardDescription>{template.description}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Complejidad:</span>
-                  <Badge variant={template.complexity_level === 'advanced' ? 'default' : 'secondary'}>
-                    {template.complexity_level || 'Medium'}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Duración:</span>
-                  <span>{template.estimated_duration || '15-45 min'}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Pasos:</span>
-                  <span>{template.workflow_definition?.steps?.length || 0}</span>
-                </div>
-                {template.agent_types_used && template.agent_types_used.length > 0 && (
-                  <div className="mt-3">
-                    <span className="text-xs text-gray-600 block mb-1">Agentes AI utilizados:</span>
-                    <div className="flex flex-wrap gap-1">
-                      {template.agent_types_used.slice(0, 2).map((agent, idx) => (
-                        <Badge key={idx} variant="outline" className="text-xs">
-                          {agent.replace('_', ' ').replace('agent', '').trim()}
-                        </Badge>
-                      ))}
-                      {template.agent_types_used.length > 2 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{template.agent_types_used.length - 2}
-                        </Badge>
-                      )}
-                    </div>
+        {templates.map((template) => {
+          const isSelected = selectedTemplate?.id === template.id
+          return (
+            <Card
+              key={template.id}
+              className={`cursor-pointer transition-all ${
+                isSelected ? 'border-purple-500 shadow-lg ring-2 ring-purple-200' : 'hover:shadow-lg'
+              }`}
+              onClick={() => {
+                setSelectedTemplate(template)
+                setFormValues(buildInitialValues(template))
+                setInputError(null)
+              }}
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center text-lg">
+                  <IconBrain className="h-5 w-5 mr-2 text-purple-600" />
+                  {template.name}
+                </CardTitle>
+                <CardDescription>{template.description}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Complejidad:</span>
+                    <Badge variant={template.complexity_level === 'advanced' ? 'default' : 'secondary'}>
+                      {template.complexity_level || 'Medium'}
+                    </Badge>
                   </div>
-                )}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Duración:</span>
+                    <span>{template.estimated_duration || '15-45 min'}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Pasos:</span>
+                    <span>{template.workflow_definition?.steps?.length || 0}</span>
+                  </div>
+                  {template.agent_types_used && template.agent_types_used.length > 0 && (
+                    <div className="mt-3">
+                      <span className="text-xs text-gray-600 block mb-1">Agentes AI utilizados:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {template.agent_types_used.slice(0, 2).map((agent, idx) => (
+                          <Badge key={idx} variant="outline" className="text-xs">
+                            {agent.replace('_', ' ').replace('agent', '').trim()}
+                          </Badge>
+                        ))}
+                        {template.agent_types_used.length > 2 && (
+                          <Badge variant="outline" className="text-xs">
+                            +{template.agent_types_used.length - 2}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      {/* Selected Template */}
+      {selectedTemplate ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <IconBrain className="h-5 w-5 mr-2 text-purple-600" />
+                {selectedTemplate.name}
+              </CardTitle>
+              <CardDescription>
+                {selectedTemplate.description || 'Workflow inteligente listo para instanciar'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-gray-600 space-y-1">
+                <p><span className="font-semibold">ID:</span> {selectedTemplate.id}</p>
+                <p><span className="font-semibold">Tenant:</span> {selectedTemplate.tenant_id}</p>
+                <p><span className="font-semibold">Pasos:</span> {selectedTemplate.workflow_definition?.steps?.length || 0}</p>
+              </div>
+              <div>
+                <Label>Estructura del workflow</Label>
+                <pre className="mt-2 max-h-64 overflow-auto rounded border bg-gray-50 p-3 text-xs text-gray-800">
+                  {JSON.stringify(selectedTemplate.workflow_definition, null, 2)}
+                </pre>
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
 
-      {/* Execution Forms */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Legal Advisory Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <IconUsers className="h-5 w-5 mr-2" />
-              Asesoría Legal Inteligente
-            </CardTitle>
-            <CardDescription>
-              Ejecutar consulta legal con análisis AI multi-agente
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="clientName">Nombre del Cliente</Label>
-              <Input
-                id="clientName"
-                value={legalForm.clientName}
-                onChange={(e) => setLegalForm({...legalForm, clientName: e.target.value})}
-                placeholder="Ej: María García"
-              />
-            </div>
-            <div>
-              <Label htmlFor="caseType">Tipo de Caso</Label>
-              <Select value={legalForm.caseType} onValueChange={(value) => setLegalForm({...legalForm, caseType: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Laboral">Laboral</SelectItem>
-                  <SelectItem value="Civil">Civil</SelectItem>
-                  <SelectItem value="Penal">Penal</SelectItem>
-                  <SelectItem value="Comercial">Comercial</SelectItem>
-                  <SelectItem value="Familiar">Familiar</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="priority">Prioridad</Label>
-              <Select value={legalForm.priority} onValueChange={(value) => setLegalForm({...legalForm, priority: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Baja</SelectItem>
-                  <SelectItem value="medium">Media</SelectItem>
-                  <SelectItem value="high">Alta</SelectItem>
-                  <SelectItem value="urgent">Urgente</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="description">Descripción del Caso</Label>
-              <Textarea
-                id="description"
-                value={legalForm.description}
-                onChange={(e) => setLegalForm({...legalForm, description: e.target.value})}
-                placeholder="Describe detalladamente el caso legal..."
-                rows={4}
-              />
-            </div>
-            <Button 
-              onClick={executeLegalAdvisory} 
-              disabled={isExecuting || !legalForm.clientName || !legalForm.description}
-              className="w-full"
-            >
-              {isExecuting ? (
-                <>
-                  <IconRefresh className="h-4 w-4 mr-2 animate-spin" />
-                  Ejecutando...
-                </>
-              ) : (
-                <>
-                  <IconPlayerPlay className="h-4 w-4 mr-2" />
-                  Ejecutar Asesoría Legal
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <IconRobot className="h-5 w-5 mr-2" />
+                Instanciar workflow
+              </CardTitle>
+              <CardDescription>
+                Completa los campos requeridos. Enviaremos los valores al backend para generar el payload correcto.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {selectedTemplate.fields.map((field) => {
+                const value = formValues[field.name] ?? ""
+                const isRequired = field.required !== false
 
-        {/* Document Processing Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <IconFileText className="h-5 w-5 mr-2" />
-              Procesamiento Inteligente de Documentos
-            </CardTitle>
-            <CardDescription>
-              Analizar documentos con agentes AI especializados
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="documentType">Tipo de Documento</Label>
-              <Select value={documentForm.documentType} onValueChange={(value) => setDocumentForm({...documentForm, documentType: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="contract">Contrato</SelectItem>
-                  <SelectItem value="legal_brief">Documento Legal</SelectItem>
-                  <SelectItem value="report">Informe</SelectItem>
-                  <SelectItem value="correspondence">Correspondencia</SelectItem>
-                  <SelectItem value="other">Otro</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="analysisDepth">Profundidad del Análisis</Label>
-              <Select value={documentForm.analysisDepth} onValueChange={(value) => setDocumentForm({...documentForm, analysisDepth: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="basic">Básico</SelectItem>
-                  <SelectItem value="standard">Estándar</SelectItem>
-                  <SelectItem value="deep">Profundo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="documentContent">Contenido del Documento</Label>
-              <Textarea
-                id="documentContent"
-                value={documentForm.documentContent}
-                onChange={(e) => setDocumentForm({...documentForm, documentContent: e.target.value})}
-                placeholder="Pega aquí el contenido del documento a analizar..."
-                rows={6}
-              />
-            </div>
-            <Button 
-              onClick={executeDocumentProcessing} 
-              disabled={isExecuting || !documentForm.documentContent}
-              className="w-full"
-            >
-              {isExecuting ? (
-                <>
-                  <IconRefresh className="h-4 w-4 mr-2 animate-spin" />
-                  Procesando...
-                </>
-              ) : (
-                <>
-                  <IconPlayerPlay className="h-4 w-4 mr-2" />
-                  Procesar Documento
-                </>
+                const renderFieldControl = () => {
+                  if (field.type === "textarea") {
+                    return (
+                      <Textarea
+                        value={value}
+                        onChange={(e) => {
+                          setFormValues(prev => ({ ...prev, [field.name]: e.target.value }))
+                          if (inputError) setInputError(null)
+                        }}
+                        rows={4}
+                        placeholder={field.placeholder}
+                      />
+                    )
+                  }
+
+                  if (field.type === "select" && field.options) {
+                    return (
+                      <Select
+                        value={value || field.default_value || ""}
+                        onValueChange={(val) => {
+                          setFormValues(prev => ({ ...prev, [field.name]: val }))
+                          if (inputError) setInputError(null)
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={field.placeholder || "Selecciona una opción"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {field.options.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )
+                  }
+
+                  return (
+                    <Input
+                      type={field.type === "number" ? "number" : "text"}
+                      value={value}
+                      placeholder={field.placeholder}
+                      onChange={(e) => {
+                        setFormValues(prev => ({ ...prev, [field.name]: e.target.value }))
+                        if (inputError) setInputError(null)
+                      }}
+                    />
+                  )
+                }
+
+                return (
+                  <div key={field.name} className="space-y-1">
+                    <Label>
+                      {field.label}
+                      {isRequired && <span className="text-red-500 ml-1">*</span>}
+                    </Label>
+                    {renderFieldControl()}
+                    {field.helper_text && (
+                      <p className="text-xs text-gray-500">{field.helper_text}</p>
+                    )}
+                  </div>
+                )
+              })}
+
+              {inputError && (
+                <p className="text-sm text-red-600">{inputError}</p>
               )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+
+              <Button
+                onClick={handleExecuteSelectedTemplate}
+                disabled={isExecuting}
+                className="w-full"
+              >
+                {isExecuting ? (
+                  <>
+                    <IconRefresh className="h-4 w-4 mr-2 animate-spin" />
+                    Ejecutando...
+                  </>
+                ) : (
+                  <>
+                    <IconPlayerPlay className="h-4 w-4 mr-2" />
+                    Ejecutar workflow
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <div className="text-center py-12 border border-dashed rounded-lg text-gray-500 mb-6">
+          Selecciona un workflow AI de la lista para visualizar su detalle y ejecutarlo.
+        </div>
+      )}
 
       {/* Execution Status */}
       {execution && (

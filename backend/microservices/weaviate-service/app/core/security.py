@@ -17,7 +17,7 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(se
             detail="Missing API key"
         )
     
-    if credentials.credentials != settings.api_key:
+    if credentials.credentials != settings.MICROSERVICES_API_KEY:
         logger.warning(f"⚠️ Invalid API key provided: {credentials.credentials[:10]}...")
         raise HTTPException(
             status_code=401,

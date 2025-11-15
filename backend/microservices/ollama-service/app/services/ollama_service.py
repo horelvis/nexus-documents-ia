@@ -1,8 +1,6 @@
 """
 Service for Ollama LLM operations
 """
-import asyncio
-import httpx
 from typing import List, Dict, Any, Optional
 from loguru import logger
 import ollama
@@ -16,14 +14,15 @@ class OllamaService:
         self.base_url = settings.OLLAMA_BASE_URL
         self.client = ollama.AsyncClient(host=self.base_url)
         self.timeout = settings.REQUEST_TIMEOUT
+        logger.info(f"OllamaService initialized with base URL: {self.base_url}")
         
     async def list_models(self) -> List[Dict[str, Any]]:
         """List available models"""
         try:
             response = await self.client.list()
             return response.get('models', [])
-        except Exception as e:
-            logger.error(f"Error listing models: {e}")
+        except Exception:
+            logger.exception(f"Error listing models via {self.base_url}")
             raise
     
     async def pull_model(self, model_name: str) -> bool:
@@ -33,8 +32,8 @@ class OllamaService:
             await self.client.pull(model_name)
             logger.info(f"Successfully pulled model: {model_name}")
             return True
-        except Exception as e:
-            logger.error(f"Error pulling model {model_name}: {e}")
+        except Exception:
+            logger.exception(f"Error pulling model {model_name} via {self.base_url}")
             raise
     
     async def delete_model(self, model_name: str) -> bool:
@@ -43,8 +42,8 @@ class OllamaService:
             await self.client.delete(model_name)
             logger.info(f"Successfully deleted model: {model_name}")
             return True
-        except Exception as e:
-            logger.error(f"Error deleting model {model_name}: {e}")
+        except Exception:
+            logger.exception(f"Error deleting model {model_name} via {self.base_url}")
             return False
     
     async def chat(
@@ -84,8 +83,8 @@ class OllamaService:
                     'prompt_eval_count': response.get('prompt_eval_count'),
                     'eval_count': response.get('eval_count')
                 }
-        except Exception as e:
-            logger.error(f"Error in chat with model {model}: {e}")
+        except Exception:
+            logger.exception(f"Error in chat with model {model} via {self.base_url}")
             raise
     
     async def generate(
@@ -125,8 +124,8 @@ class OllamaService:
                     'prompt_eval_count': response.get('prompt_eval_count'),
                     'eval_count': response.get('eval_count')
                 }
-        except Exception as e:
-            logger.error(f"Error generating with model {model}: {e}")
+        except Exception:
+            logger.exception(f"Error generating with model {model} via {self.base_url}")
             raise
     
     async def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
@@ -134,8 +133,8 @@ class OllamaService:
         try:
             response = await self.client.show(model_name)
             return response
-        except Exception as e:
-            logger.error(f"Error getting model info for {model_name}: {e}")
+        except Exception:
+            logger.exception(f"Error getting model info for {model_name} via {self.base_url}")
             return None
     
     async def get_status(self) -> Dict[str, Any]:
@@ -149,11 +148,11 @@ class OllamaService:
                 'base_url': self.base_url,
                 'available_models': [model.get('name', 'unknown') for model in models]
             }
-        except Exception as e:
-            logger.error(f"Error getting status: {e}")
+        except Exception:
+            logger.exception(f"Error getting status via {self.base_url}")
             return {
                 'status': 'unhealthy',
-                'error': str(e),
+                'error': 'Failed to reach Ollama backend. See logs for details.',
                 'base_url': self.base_url
             }
     
@@ -169,6 +168,6 @@ class OllamaService:
                 logger.warning(f"Model {model_name} not found, attempting to pull...")
                 await self.pull_model(model_name)
                 return True
-        except Exception as e:
-            logger.error(f"Error ensuring model {model_name} is loaded: {e}")
+        except Exception:
+            logger.exception(f"Error ensuring model {model_name} is loaded via {self.base_url}")
             return False

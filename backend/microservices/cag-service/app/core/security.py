@@ -25,7 +25,7 @@ async def verify_api_key(
         logger.warning("No API key provided")
         raise HTTPException(status_code=401, detail="API key required")
     
-    if api_key != settings.api_key:
+    if api_key != settings.MICROSERVICES_API_KEY:
         logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
         raise HTTPException(status_code=401, detail="Invalid API key")
     

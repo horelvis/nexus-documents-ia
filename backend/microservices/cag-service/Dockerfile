@@ -12,8 +12,11 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Install Python dependencies with higher timeout/retries
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5 \
+    PIP_NO_CACHE_DIR=1
+RUN pip install --prefer-binary --user -r requirements.txt
 
 # Runtime stage
 FROM python:3.11-slim
@@ -44,7 +47,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Start the service
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8008", "--log-level", "info"]
-
 
 
 

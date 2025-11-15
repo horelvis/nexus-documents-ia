@@ -14,11 +14,16 @@ class LLMService:
     """Servicio para generación de texto y RAG usando Ollama directo + Weaviate/Elysia"""
     
     def __init__(self):
-        logger.info("LLMService initialized with direct Ollama + Weaviate integration")
         self.ollama_base_url = settings.OLLAMA_BASE_URL
         self.weaviate_service_url = settings.WEAVIATE_SERVICE_URL
-        self.api_key = getattr(settings, 'MICROSERVICES_API_KEY', 'unified-microservices-key-12345')
-        self.default_model = "llama3.2:latest"
+        self.api_key = settings.MICROSERVICES_API_KEY
+        self.default_model = settings.OLLAMA_MODEL or "llama3.1:8b"
+        logger.info(
+            "LLMService initialized | ollama_base_url=%s weaviate_service_url=%s default_model=%s",
+            self.ollama_base_url,
+            self.weaviate_service_url,
+            self.default_model,
+        )
     
     async def generate_response(
         self,
@@ -40,7 +45,13 @@ class LLMService:
                 return await self._generate_direct_ollama(query, max_tokens)
                 
         except Exception as e:
-            logger.error(f"❌ LLM generation failed: {e}")
+            logger.exception(
+                "❌ LLM generation failed | use_rag=%s tenant_id=%s doc_ids=%s error=%s",
+                use_rag,
+                tenant_id,
+                doc_ids if doc_ids else "[]",
+                e,
+            )
             raise
     
     async def _generate_with_elysia_rag(
@@ -66,6 +77,14 @@ class LLMService:
                 if doc_ids:
                     payload["context"] = {"doc_ids": doc_ids}
                 
+                logger.debug(
+                    "Invocando Elysia RAG | url=%s tenant_id=%s doc_ids=%s max_tokens=%d",
+                    url,
+                    tenant_id,
+                    doc_ids if doc_ids else "[]",
+                    max_tokens,
+                )
+                
                 headers = {
                     'Authorization': f'Bearer {self.api_key}',
                     'Content-Type': 'application/json'
@@ -87,7 +106,13 @@ class LLMService:
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Elysia RAG generation failed: {e}")
+            logger.exception(
+                "❌ Elysia RAG generation failed | url=%s tenant_id=%s doc_ids=%s error=%s",
+                f"{self.weaviate_service_url}/elysia/query",
+                tenant_id,
+                doc_ids if doc_ids else "[]",
+                e,
+            )
             # Fallback to direct Ollama
             return await self._generate_direct_ollama(query, max_tokens)
     
@@ -107,6 +132,14 @@ class LLMService:
                     }
                 }
                 
+                logger.debug(
+                    "Invocando Ollama generate | url=%s model=%s prompt_chars=%d max_tokens=%d",
+                    url,
+                    self.default_model,
+                    len(query),
+                    max_tokens,
+                )
+                
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 
@@ -121,7 +154,12 @@ class LLMService:
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Direct Ollama generation failed: {e}")
+            logger.exception(
+                "❌ Direct Ollama generation failed | url=%s model=%s error=%s",
+                f"{self.ollama_base_url}/api/generate",
+                self.default_model,
+                e,
+            )
             raise
     
     async def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
@@ -158,7 +196,13 @@ Tags:"""
                 return tags[:num_tags]
                 
         except Exception as e:
-            logger.error(f"❌ Tag suggestion failed: {e}")
+            logger.exception(
+                "❌ Tag suggestion failed | url=%s model=%s prompt_chars=%d error=%s",
+                f"{self.ollama_base_url}/api/generate",
+                self.default_model,
+                len(text),
+                e,
+            )
             return []
     
     async def extract_metadata(self, text: str) -> Dict[str, Any]:
@@ -194,7 +238,7 @@ JSON:"""
                     import json
                     metadata = json.loads(metadata_text)
                     return metadata
-                except:
+                except Exception:
                     # If JSON parsing fails, return basic metadata
                     return {
                         "extracted_text": metadata_text,
@@ -203,7 +247,13 @@ JSON:"""
                     }
                     
         except Exception as e:
-            logger.error(f"❌ Metadata extraction failed: {e}")
+            logger.exception(
+                "❌ Metadata extraction failed | url=%s model=%s prompt_chars=%d error=%s",
+                f"{self.ollama_base_url}/api/generate",
+                self.default_model,
+                len(text),
+                e,
+            )
             return {"error": str(e)}
     
     async def summarize_text(self, text: str, max_length: int = 200) -> str:

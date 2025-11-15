@@ -11,7 +11,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Be resilient to slow PyPI: increase timeout and retries, prefer wheels
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5 \
+    PIP_NO_CACHE_DIR=1
+RUN pip install --prefer-binary -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/

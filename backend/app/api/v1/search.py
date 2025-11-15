@@ -173,11 +173,30 @@ async def search_documents(
                 )
 
                 # Ensure results is a list
-                if results and isinstance(results, list):
+                if results and isinstance(results, list) and len(results) > 0:
                     return results
                 elif results:
                     # If results is not a list, wrap it
-                    return [results] if isinstance(results, dict) else []
+                    wrapped = [results] if isinstance(results, dict) else []
+                    if wrapped:
+                        return wrapped
+
+                # No Elasticsearch hits found
+                if search_type == "auto":
+                    logger.info("🔍 Elasticsearch returned no results, trying semantic Weaviate fallback")
+                    try:
+                        search_service = SearchService(tenant_id=tenant_id)
+                        vector_results = await search_service.search_documents(
+                            query=query,
+                            limit=limit,
+                            search_type="semantic",
+                            filters=filters
+                        )
+                        if vector_results:
+                            logger.info(f"✅ Semantic fallback returned {len(vector_results)} results")
+                            return vector_results
+                    except Exception as vector_error:
+                        logger.warning(f"⚠️ Semantic fallback failed: {vector_error}")
 
             except Exception as es_error:
                 logger.warning(f"⚠️ Elasticsearch failed: {es_error}")

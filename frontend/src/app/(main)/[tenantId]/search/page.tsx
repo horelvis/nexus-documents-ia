@@ -23,36 +23,95 @@ import { useSearchFacets } from "@/lib/hooks/use-search-facets"
 import { toast } from "sonner"
 
 // Helper function to normalize search results from CAG/backend
-const normalizeSearchResult = (result: any) => {
-  console.log('Raw search result:', result)
-  
-  if (!result?.id) {
+const normalizeSearchResult = (rawResult: any) => {
+  console.log('Raw search result:', rawResult)
+
+  if (!rawResult) {
     return null
   }
-  
-  // Backend returns: { id, content, metadata, similarity_score, title }
-  const normalized = {
-    id: result.id,
-    filename: result.title,
-    title: result.title,
-    description: result.content ? result.content.substring(0, 200) + '...' : '',
-    score: result.similarity_score || 0,
-    matches: result.content ? [{ text: result.content.substring(0, 150) + '...' }] : [],
-    // Extract file info from title
-    file_type: result.title?.includes('.pdf') ? 'pdf' : 
-               result.title?.includes('.docx') ? 'docx' :
-               result.title?.includes('.doc') ? 'doc' : 'unknown',
-    mime_type: result.title?.includes('.pdf') ? 'application/pdf' : 
-               result.title?.includes('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
-               'application/octet-stream',
-    file_size: null, // Not available in search results
-    category: result.metadata?.category || null,
-    tags: result.metadata?.tags || [],
-    created_at: result.metadata?.created_at || null,
-    indexed: 'INDEXED', // Assumed if it's in search results
-    tenant_id: result.metadata?.tenant_id
+
+  // Support both legacy flat results and the new backend shape that wraps data inside "document"
+  const document = rawResult.document ?? rawResult
+  const metadata = rawResult.metadata ?? document.metadata ?? {}
+
+  const id =
+    document.id ??
+    metadata.doc_id ??
+    metadata._id
+
+  if (!id) {
+    console.warn('Search result missing identifier. Skipping item.', rawResult)
+    return null
   }
-  
+
+  const title =
+    document.title ??
+    metadata.title ??
+    document.filename ??
+    metadata.filename ??
+    'Untitled document'
+
+  const filename =
+    document.filename ??
+    metadata.filename ??
+    title
+
+  const baseDescription =
+    document.description ??
+    rawResult.description ??
+    document.content ??
+    rawResult.content ??
+    metadata.summary ??
+    ''
+
+  const description =
+    typeof baseDescription === 'string' && baseDescription.length > 0
+      ? `${baseDescription.slice(0, 200)}${baseDescription.length > 200 ? '...' : ''}`
+      : ''
+
+  const score =
+    rawResult.score ??
+    rawResult.similarity_score ??
+    metadata.score ??
+    null
+
+  const matchesSource =
+    Array.isArray(rawResult.matches) && rawResult.matches.length > 0
+      ? rawResult.matches
+      : Array.isArray(rawResult.highlights) && rawResult.highlights.length > 0
+        ? rawResult.highlights
+        : []
+
+  const matches = matchesSource.map((match: any) =>
+    typeof match === 'string'
+      ? { text: match }
+      : {
+          text: match?.text ?? '',
+          score: match?.score ?? null
+        }
+  )
+
+  const tags = document.tags ?? metadata.tags ?? []
+
+  const normalized = {
+    id,
+    filename,
+    title,
+    description,
+    score: score ?? undefined,
+    matches,
+    file_type: document.file_type ?? metadata.file_type ?? '',
+    mime_type: document.mime_type ?? metadata.mime_type ?? '',
+    file_size: document.file_size ?? metadata.file_size ?? null,
+    category: document.category ?? metadata.category ?? null,
+    tags,
+    created_at: document.created_at ?? metadata.created_at ?? null,
+    updated_at: document.updated_at ?? metadata.updated_at ?? null,
+    indexed: document.indexed ?? metadata.indexed ?? document.status ?? metadata.status ?? null,
+    tenant_id: document.tenant_id ?? metadata.tenant_id ?? null,
+    download_url: document.download_url ?? rawResult.download_url ?? null
+  }
+
   console.log('Normalized result:', normalized)
   return normalized
 }

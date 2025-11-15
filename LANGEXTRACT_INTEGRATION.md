@@ -97,7 +97,7 @@ async def _extract_entities_langextract(
 **Variables de entorno**:
 ```env
 LANGEXTRACT_SERVICE_URL=http://langextract-service:8009
-MICROSERVICES_API_KEY=your-api-key
+MICROSERVICES_API_KEY=<your-secure-microservices-api-key>
 ```
 
 **Docker Compose**: Servicio `langextract-service` en puerto 8009

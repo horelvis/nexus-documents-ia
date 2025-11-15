@@ -3,17 +3,22 @@
 Test de Integración para Temporalio Microservice
 Prueba la conectividad, endpoints y ejecución de workflows
 """
+import os
 import requests
 import time
 import json
 from typing import Dict, Any
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_temporalio_integration.py")
 
 
 class TemporalioIntegrationTest:
     def __init__(self, base_url: str = "http://localhost:8010"):
         self.base_url = base_url
         self.headers = {
-            "Authorization": "Bearer nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt",
+            "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json"
         }
         self.test_results = []

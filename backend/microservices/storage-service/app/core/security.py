@@ -16,7 +16,7 @@ def get_api_key_from_header(request: Request) -> str:
     api_key = request.headers.get("X-API-Key")
     logger.info(f"=== API KEY VALIDATION ===")
     logger.info(f"Received API key: {api_key[:10] if api_key else 'NONE'}...")
-    logger.info(f"Expected API key: {settings.API_KEY[:10]}...")
+    logger.info(f"Expected API key: {settings.MICROSERVICES_API_KEY[:10]}...")
     if not api_key:
         logger.error("Missing X-API-Key header")
         raise HTTPException(status_code=401, detail="Missing X-API-Key header")
@@ -44,7 +44,7 @@ def get_bucket_name_from_header(request: Request) -> Optional[str]:
 
 def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
     """Validate API key"""
-    if api_key != settings.API_KEY:
+    if api_key != settings.MICROSERVICES_API_KEY:
         logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
         raise HTTPException(status_code=401, detail="Invalid API key")
     return True

@@ -62,6 +62,16 @@ class DynamicWorkflow:
         """Execute dynamic workflow based on template definition"""
         
         workflow_id = workflow.info().workflow_id
+        # Ensure search attributes are set for tenant isolation and template filtering
+        try:
+            workflow.upsert_search_attributes({
+                "TenantId": input_data.tenant_id,
+                "TemplateId": input_data.template_id,
+                "TemplateName": input_data.template_name,
+            })
+        except Exception:
+            # Non-fatal if attributes are not registered
+            pass
         self._execution_context = input_data.context or {}
         self._execution_context.update({
             "workflow_id": workflow_id,
@@ -118,7 +128,7 @@ class DynamicWorkflow:
             # Send failure notification
             try:
                 await workflow.execute_activity(
-                    notification_activities.send_system_notification,
+                    "send_system_notification",
                     args=[{
                         "tenant_id": input_data.tenant_id,
                         "user_id": input_data.user_id,
@@ -213,33 +223,29 @@ class DynamicWorkflow:
         
         # Map activity types to actual activities - AI Agents Integration
         if activity_type == "emma_legal_advisor_agent":
-            from app.activities.ai_agent_activities import emma_legal_advisor_agent
             result = await workflow.execute_activity(
-                emma_legal_advisor_agent,
+                "emma_legal_advisor_agent",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=10),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "emma_document_analyzer_agent":
-            from app.activities.ai_agent_activities import emma_document_analyzer_agent
             result = await workflow.execute_activity(
-                emma_document_analyzer_agent,
+                "emma_document_analyzer_agent",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=8),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "multi_agent_coordinator":
-            from app.activities.ai_agent_activities import multi_agent_coordinator
             result = await workflow.execute_activity(
-                multi_agent_coordinator,
+                "multi_agent_coordinator",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=15),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "agent_state_persistence":
-            from app.activities.ai_agent_activities import agent_state_persistence
             result = await workflow.execute_activity(
-                agent_state_persistence,
+                "agent_state_persistence",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=RetryPolicy(maximum_attempts=3)
@@ -247,39 +253,36 @@ class DynamicWorkflow:
         # Legacy activity types for backward compatibility
         elif activity_type == "emma_ai_legal_analysis":
             # Map to new agent system
-            from app.activities.ai_agent_activities import emma_legal_advisor_agent
             result = await workflow.execute_activity(
-                emma_legal_advisor_agent,
+                "emma_legal_advisor_agent",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=10),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "legal_document_generation":
-            from app.activities.ai_agent_activities import emma_document_analyzer_agent
             result = await workflow.execute_activity(
-                emma_document_analyzer_agent,
+                "emma_document_analyzer_agent",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "emma_case_recommendation":
-            from app.activities.ai_agent_activities import emma_legal_advisor_agent
             result = await workflow.execute_activity(
-                emma_legal_advisor_agent,
+                "emma_legal_advisor_agent",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "case_documentation":
             result = await workflow.execute_activity(
-                dynamic_activities.create_case_documentation,
+                "create_case_documentation",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=3),
                 retry_policy=RetryPolicy(maximum_attempts=2)
             )
         elif activity_type == "send_notification":
             result = await workflow.execute_activity(
-                notification_activities.send_configured_notification,
+                "send_configured_notification",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=RetryPolicy(maximum_attempts=3)
@@ -287,7 +290,7 @@ class DynamicWorkflow:
         else:
             # Generic activity execution
             result = await workflow.execute_activity(
-                dynamic_activities.execute_generic_activity,
+                "execute_generic_activity",
                 args=[activity_input],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=RetryPolicy(maximum_attempts=2)
@@ -310,7 +313,7 @@ class DynamicWorkflow:
         
         # Create manual task
         task_result = await workflow.execute_activity(
-            dynamic_activities.create_manual_task,
+            "create_manual_task",
             args=[{
                 **self._execution_context,
                 "step_id": step_def["step_id"],
@@ -344,7 +347,7 @@ class DynamicWorkflow:
         
         # Execute decision logic
         decision_result = await workflow.execute_activity(
-            dynamic_activities.evaluate_decision_conditions,
+            "evaluate_decision_conditions",
             args=[{
                 **self._execution_context,
                 "conditions": decision_conditions,
@@ -361,7 +364,7 @@ class DynamicWorkflow:
         
         # Similar to manual step but with approval-specific logic
         approval_result = await workflow.execute_activity(
-            dynamic_activities.create_approval_request,
+            "create_approval_request",
             args=[{
                 **self._execution_context,
                 "step_config": step_def
@@ -387,7 +390,7 @@ class DynamicWorkflow:
         activity_tasks = []
         for activity_def in parallel_activities:
             task = workflow.execute_activity(
-                dynamic_activities.execute_generic_activity,
+                "execute_generic_activity",
                 args=[{
                     **self._execution_context,
                     **activity_def,

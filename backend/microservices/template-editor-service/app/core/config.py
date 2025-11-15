@@ -1,8 +1,10 @@
 """
 Template Editor Service Configuration
 """
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -20,7 +22,9 @@ class Settings(BaseSettings):
     google_drive_folder_id: Optional[str] = None  # Optional parent folder for temp docs
     
     # Security
-    microservices_api_key: str = "dev-api-key-2024"
+    microservices_api_key: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     
     # Redis for session management
     redis_host: str = "redis"
@@ -39,6 +43,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        case_sensitive = False
 
 
 settings = Settings()

@@ -3,12 +3,16 @@
 Test script to verify async endpoints are working correctly after migration
 """
 import asyncio
+import os
 import httpx
 from datetime import datetime
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
-API_KEY = "nxs_dev_0VIsZVY4uwvOXyeGu8A2MelI87yCSXyZDgVFZpY9"  # From .env.example
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_async_endpoints.py")
 
 # Test endpoints
 ENDPOINTS_TO_TEST = [

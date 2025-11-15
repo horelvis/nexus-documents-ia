@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # Servicio principal de la API - DEVELOPMENT MODE
@@ -25,6 +24,8 @@ services:
         condition: service_healthy
       elasticsearch-service:
         condition: service_healthy
+      textextract-service:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -32,14 +33,18 @@ services:
     environment:
       # Unified API Key for all microservices
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - SIGNATURE_ENCRYPTION_KEY=${SIGNATURE_ENCRYPTION_KEY}
+      - ALLOW_ALL_CORS=true
       # Services URLs
-      - STORAGE_SERVICE_URL=http://storage-service:8003
-      - CAG_SERVICE_URL=http://cag-service:8008
-      - WEAVIATE_SERVICE_URL=http://weaviate-service:8007
-      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8009
-      - ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8005
-      - TEMPORALIO_SERVICE_URL=http://temporalio-service:8010
-      - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8011
+      - STORAGE_SERVICE_URL=http://storage-service:8000
+      - STORAGE_SERVICE_INTERNAL_URL=http://storage-service:8000
+      - CAG_SERVICE_URL=http://cag-service:8000
+      - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
+      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
+      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+      - ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8000
+      - TEMPORALIO_SERVICE_URL=http://temporalio-service:8000
+      - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8000
       - OLLAMA_BASE_URL=http://genai-ollama:11434
       - GOTENBERG_BASE_URL=http://gotenberg:3000
       # Infrastructure
@@ -57,8 +62,8 @@ services:
       - ../alembic:/app/alembic:ro
       - ../migrations:/app/migrations:ro
       - ../tests:/app/tests:ro
-      # Montar credentials para desarrollo
-      - ../credentials:/app/credentials:ro
+      # Montar credentials para desarrollo (ruta corrected a la carpeta raíz)
+      - ../../credentials:/app/credentials:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -83,6 +88,8 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - ELASTICSEARCH_HOST=elasticsearch
       - ELASTICSEARCH_PORT=9200
       - ELASTICSEARCH_URL=http://elasticsearch:9200
@@ -140,11 +147,13 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/storage-service/app:/app/app:ro
-      # Montar credentials para GCS
-      - ../credentials:/app/credentials:ro
+      # Montar credentials para GCS (usar carpeta raíz)
+      - ../../credentials:/app/credentials:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -165,9 +174,32 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - OLLAMA_HOST=http://genai-ollama:11434
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/langextract-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Text Extraction Service - DEVELOPMENT MODE
+  textextract-service:
+    build:
+      context: ../microservices/textextract-service
+      dockerfile: Dockerfile
+    ports:
+      - "0.0.0.0:8012:8000"
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+    volumes:
+      - ../microservices/textextract-service/app:/app/app:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -264,9 +296,9 @@ services:
       timeout: 10s
       retries: 3
 
-  # TemporalIO Server - DEVELOPMENT MODE
+  # TemporalIO Server - DEVELOPMENT MODE (auto-setup to install schema)
   temporalio-server:
-    image: temporalio/server:1.24.2
+    image: temporalio/auto-setup:1.24.2
     ports:
       - "0.0.0.0:7233:7233"   # gRPC port
     depends_on:
@@ -279,14 +311,17 @@ services:
       - DB_PORT=5432
       - POSTGRES_USER=postgres
       - POSTGRES_PWD=password
-      - POSTGRES_SEEDS=localhost
-      - SKIP_DB_CREATE=true
+      - POSTGRES_SEEDS=db
+      - SKIP_DB_CREATE=false
+      # Explicit DB names so auto-setup runs migrations correctly
+      - DBNAME=temporal
+      - VISIBILITY_DBNAME=temporal_visibility
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
     volumes:
       - ./temporalio-config:/etc/temporal/config
       - temporalio_data:/etc/temporal/data
     healthcheck:
-      test: ["CMD", "temporal", "workflow", "list", "--address", "localhost:7233"]
+      test: ["CMD", "temporal", "workflow", "list", "--address", "temporalio-server:7233"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -323,7 +358,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-ollama-models.sh:/docker-entrypoint-initdb.d/init-ollama-models.sh
-      - ./scripts/init-temporal-schema.sql:/docker-entrypoint-initdb.d/init-temporal-schema.sql
+      - ./scripts/init-temporal-dbs.sh:/docker-entrypoint-initdb.d/init-temporal-dbs.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
       interval: 10s
@@ -349,7 +384,7 @@ services:
 
   # Weaviate para embeddings vectoriales
   weaviate:
-    image: semitechnologies/weaviate:1.24.0
+    image: semitechnologies/weaviate:1.28.3
     ports:
       - "0.0.0.0:8080:8080"
     environment:
@@ -364,7 +399,7 @@ services:
     volumes:
       - weaviate_data:/var/lib/weaviate
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/v1/meta"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/meta"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -402,7 +437,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -436,9 +471,8 @@ services:
     command:
       - "gotenberg"
       - "--api-port=3000"
-      - "--chromium-disable-web-security=true"
-      - "--chromium-allow-file-access-from-files=true"
-      - "--chromium-disable-dev-shm-usage=true"
+      - "--chromium-disable-web-security"
+      - "--chromium-allow-file-access-from-files"
       - "--log-level=info"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]

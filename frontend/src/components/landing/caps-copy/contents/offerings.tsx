@@ -21,14 +21,14 @@ const Offerings = () => {
                     <Badge size="lg" variant="outline">
                         <LifeBuoy className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            Document Intelligence
+                            Solución integral para asesorías laborales
                         </span>
                     </Badge>
                     <h2 className="text-2xl mt-6 lg:text-3xl font-semibold text-center xl:text-4xl">
-                        Comprehensive document management solutions
+                        Todo lo que necesita tu despacho en un solo lugar
                     </h2>
                     <p className="mt-6 text-center text-neutral-500 max-w-lg">
-                        Streamline your document workflows with intelligent organization, automated processing, and advanced search capabilities.
+                        Automatiza la ingesta de documentos, controla obligaciones y ofrece a tus clientes una experiencia digital con IA que entiende el lenguaje laboral.
                     </p>
                     <div className="flex items-center relative w-full">
                         <Images.offer className="w-full h-[350px] md:h-[450px]" />

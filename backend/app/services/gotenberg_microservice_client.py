@@ -24,7 +24,7 @@ class GotenbergMicroserviceClient:
     def _get_auth_headers(self, tenant_id: str = None, user_id: str = None) -> dict:
         """Get authentication headers for microservice requests"""
         headers = {
-            "X-API-Key": getattr(settings, 'API_KEY', 'your-secret-api-key-here'),
+            "X-API-Key": settings.MICROSERVICES_API_KEY,
             "X-Tenant-ID": tenant_id or self.tenant_id or getattr(settings, 'DEFAULT_TENANT', 'default')
         }
         

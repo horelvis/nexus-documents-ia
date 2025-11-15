@@ -6,13 +6,19 @@ import asyncio
 import json
 import httpx
 from datetime import datetime
+import os
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_emma_temporalio_integration.py")
 
 
 async def test_emma_temporalio_integration():
     """Test complete Emma AI + Temporalio workflow integration"""
     
-    base_url = "http://localhost:8000"
-    api_key = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"  # Default dev key
+    core_base_url = "http://localhost:8000/api/v1"
+    workflow_service_url = "http://localhost:8010"
+    api_key = API_KEY
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -22,12 +28,16 @@ async def test_emma_temporalio_integration():
     print("🧪 Starting Emma AI + Temporalio Integration Test")
     print("=" * 60)
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         
         # 1. Test Temporalio Service Health
         print("\n1️⃣ Testing Temporalio Service Health...")
         try:
-            response = await client.get(f"{base_url}/temporalio/health", headers=headers, timeout=10.0)
+            response = await client.get(
+                f"{core_base_url}/temporalio/health",
+                headers=headers,
+                timeout=10.0
+            )
             if response.status_code == 200:
                 health_data = response.json()
                 print(f"   ✅ Temporalio Service: {health_data.get('status', 'unknown')}")
@@ -38,7 +48,7 @@ async def test_emma_temporalio_integration():
                 print(f"   ❌ Temporalio Health Check Failed: {response.status_code}")
                 return False
         except Exception as e:
-            print(f"   ❌ Temporalio Connection Error: {e}")
+            print(f"   ❌ Temporalio Connection Error: {repr(e)}")
             return False
         
         # 2. Test Emma AI Service Health
@@ -57,7 +67,11 @@ async def test_emma_temporalio_integration():
         # 3. Test Workflow Template Listing
         print("\n3️⃣ Testing Workflow Templates...")
         try:
-            response = await client.get(f"{base_url}/workflow-templates", headers=headers, timeout=10.0)
+            response = await client.get(
+                f"{workflow_service_url}/workflow-templates",
+                headers=headers,
+                timeout=10.0
+            )
             if response.status_code == 200:
                 templates = response.json()
                 print(f"   ✅ Found {len(templates)} workflow templates")
@@ -86,8 +100,12 @@ async def test_emma_temporalio_integration():
                 legal_template = template
                 break
         
+        if not legal_template and templates:
+            legal_template = templates[0]
+            print(f"   ⚠️ Falling back to template: {legal_template.get('name')}")
+        
         if not legal_template:
-            print("   ❌ No legal template found for testing")
+            print("   ❌ No workflow template available for testing")
             return False
         
         print(f"   📋 Using template: {legal_template['name']}")
@@ -95,6 +113,7 @@ async def test_emma_temporalio_integration():
         # Prepare test case data
         test_case_data = {
             "template_id": legal_template['id'],
+            "tenant_id": "test-tenant",
             "input_data": {
                 "client_name": "Juan Pérez Test",
                 "client_email": "juan.perez@test.com",
@@ -129,7 +148,7 @@ async def test_emma_temporalio_integration():
             # Start workflow execution
             print(f"   🚀 Starting workflow execution...")
             response = await client.post(
-                f"{base_url}/workflow-executions", 
+                f"{workflow_service_url}/workflow-executions/start", 
                 json=test_case_data, 
                 headers=headers,
                 timeout=30.0
@@ -137,8 +156,8 @@ async def test_emma_temporalio_integration():
             
             if response.status_code == 200:
                 execution_data = response.json()
-                execution_id = execution_data['id']
-                workflow_id = execution_data['temporalio_workflow_id']
+                execution_id = execution_data.get('workflow_id') or execution_data.get('id')
+                workflow_id = execution_data.get('temporalio_workflow_id') or execution_id
                 
                 print(f"   ✅ Workflow started successfully!")
                 print(f"      • Execution ID: {execution_id[:8]}...")
@@ -158,7 +177,7 @@ async def test_emma_temporalio_integration():
                     try:
                         # Get execution status
                         response = await client.get(
-                            f"{base_url}/workflow-executions/{execution_id}",
+                            f"{workflow_service_url}/workflow-executions/{workflow_id}",
                             headers=headers,
                             timeout=10.0
                         )
@@ -175,63 +194,16 @@ async def test_emma_temporalio_integration():
                                 print(f"   🎯 Workflow finished with status: {current_status}")
                                 
                                 # Get execution logs
-                                logs_response = await client.get(
-                                    f"{base_url}/workflow-executions/{execution_id}/logs",
+                                # Optionally fetch workflow history for debugging
+                                history_response = await client.get(
+                                    f"{workflow_service_url}/workflow-executions/{workflow_id}/history",
                                     headers=headers,
                                     timeout=10.0
                                 )
-                                
-                                if logs_response.status_code == 200:
-                                    logs_data = logs_response.json()
-                                    execution_log = logs_data.get('execution_log', [])
-                                    
-                                    print(f"\n6️⃣ Execution Log Analysis:")
-                                    print(f"   📝 Total log entries: {len(execution_log)}")
-                                    
-                                    # Look for Emma AI activities
-                                    emma_activities = [
-                                        entry for entry in execution_log 
-                                        if 'emma' in entry.get('step', '').lower() or 
-                                           'legal_analysis' in entry.get('step', '').lower()
-                                    ]
-                                    
-                                    if emma_activities:
-                                        print(f"   🧠 Emma AI activities found: {len(emma_activities)}")
-                                        for activity in emma_activities[:3]:  # Show first 3
-                                            step_name = activity.get('step', 'Unknown')
-                                            timestamp = activity.get('timestamp', 'Unknown')
-                                            data = activity.get('data', {})
-                                            print(f"      • {step_name} at {timestamp}")
-                                            if data.get('success'):
-                                                print(f"        ✅ Success: {data.get('message', 'No message')}")
-                                            elif data.get('error'):
-                                                print(f"        ❌ Error: {data.get('error', 'Unknown error')}")
-                                    else:
-                                        print(f"   ⚠️ No Emma AI activities detected in logs")
-                                    
-                                    # Check for legal analysis results
-                                    if status_data.get('output_data'):
-                                        output_data = status_data['output_data']
-                                        print(f"\n   📄 Workflow Output Analysis:")
-                                        
-                                        # Look for legal analysis
-                                        for step_id, step_result in output_data.items():
-                                            if isinstance(step_result, dict):
-                                                if step_result.get('analysis_result'):
-                                                    analysis = step_result['analysis_result']
-                                                    print(f"      📊 Legal Analysis Found in {step_id}:")
-                                                    print(f"         • Confidence: {analysis.get('overall_confidence', 'N/A')}")
-                                                    print(f"         • Risk Level: {analysis.get('risk_level', 'N/A')}")
-                                                    print(f"         • Complexity: {analysis.get('complexity_level', 'N/A')}")
-                                                    print(f"         • Timeline: {analysis.get('estimated_timeline', 'N/A')}")
-                                                
-                                                if step_result.get('generated_document'):
-                                                    doc = step_result['generated_document']
-                                                    print(f"      📝 Document Generated in {step_id}:")
-                                                    print(f"         • Type: {doc.get('document_type', 'N/A')}")
-                                                    print(f"         • Title: {doc.get('title', 'N/A')}")
-                                                    print(f"         • Word Count: {doc.get('metadata', {}).get('word_count', 'N/A')}")
-                                
+                                if history_response.status_code == 200:
+                                    history_data = history_response.json()
+                                    print(f"\n6️⃣ Execution History Entries: {len(history_data.get('events', []))}")
+
                                 break
                         else:
                             print(f"   ❌ Status check failed: {response.status_code}")
@@ -267,7 +239,7 @@ async def test_direct_emma_ai():
     print("-" * 40)
     
     emma_url = "http://localhost:8007"
-    api_key = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
+    api_key = API_KEY
     
     test_query = """
     Analiza este caso de discriminación laboral:

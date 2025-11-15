@@ -7,7 +7,7 @@ echo ""
 
 # Set API base URL
 API_URL="http://192.168.1.42:8000"
-API_KEY="unified-microservices-key-12345"
+API_KEY="${MICROSERVICES_API_KEY:?MICROSERVICES_API_KEY not set}"
 
 # 1. Test basic search (title/description only)
 echo "1️⃣ Testing basic search (title/description)..."

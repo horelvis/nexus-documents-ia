@@ -20,7 +20,12 @@ function CheckoutContent() {
   const [sessionCreated, setSessionCreated] = useState(false)
   
   const planId = searchParams.get('plan')
-  const interval = searchParams.get('interval') || 'month'
+  const rawInterval = (searchParams.get('interval') || 'month').toLowerCase()
+  const interval = rawInterval === 'yearly'
+    ? 'year'
+    : rawInterval === 'monthly'
+      ? 'month'
+      : rawInterval
 
   const createCheckoutSession = async () => {
     if (!planId || sessionCreated) return
@@ -63,7 +68,7 @@ function CheckoutContent() {
     } else {
       router.push('/pricing')
     }
-  }, [isLoaded, isSignedIn, planId])
+  }, [isLoaded, isSignedIn, planId, interval])
 
   const plan = planId ? getPlan(planId) : null
 

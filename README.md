@@ -600,6 +600,8 @@ Consulta [DEPLOYMENT.md](DEPLOYMENT.md) para guía completa de despliegue.
 - **[LANGEXTRACT_INTEGRATION.md](LANGEXTRACT_INTEGRATION.md)**: Guía completa de extracción automática de entidades
 - **[EMMA_ARCHITECTURE.md](EMMA_ARCHITECTURE.md)**: Arquitectura técnica de Emma AI y Chain of Thought
 - **[CLAUDE.md](CLAUDE.md)**: Guía para desarrollo con Claude Code
+- **[TEMPORALIO_INTEGRATION.md](TEMPORALIO_INTEGRATION.md)**: Integración de Temporalio (workflows durables)
+- **[WORKFLOW_UI_TEST_PLAN.md](WORKFLOW_UI_TEST_PLAN.md)**: Guía paso a paso para probar workflows desde la UI
 
 ## 🔐 Seguridad
 

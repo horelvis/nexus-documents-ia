@@ -386,7 +386,7 @@ export default function DocumentPreviewPage() {
                   {preview && getPreviewStatusBadge(preview)}
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col min-h-0">
+              <CardContent className="flex-1 flex flex-col min-h-[75vh]">
                 {isLoadingPreview && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
@@ -406,23 +406,25 @@ export default function DocumentPreviewPage() {
                     {preview.pdf_available && document?.file_type === 'pdf' && (
                       <div className="space-y-4">
                         <h3 className="text-lg font-semibold">PDF Document</h3>
-                        <div className="h-[800px] border rounded-lg overflow-hidden">
-                          {pdfUrl ? (
+                        {pdfUrl ? (
+                          <div className="border rounded-lg overflow-hidden">
                             <PDFViewer
                               url={pdfUrl}
                               fileName={document.filename}
                               showToolbar={true}
                               initialScale={0.9}
+                              height="75vh"
+                              className="bg-white"
                             />
-                          ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <div className="text-center">
-                                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-                                <p className="text-muted-foreground">Loading PDF...</p>
-                              </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-[60vh] border rounded-lg">
+                            <div className="text-center">
+                              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                              <p className="text-muted-foreground">Loading PDF...</p>
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

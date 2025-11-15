@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
-from app.db.models.workflow_template import WorkflowTemplate, WorkflowTemplateField
+from app.db.workflow_template_models import WorkflowTemplate, WorkflowTemplateField
 import uuid
 
 

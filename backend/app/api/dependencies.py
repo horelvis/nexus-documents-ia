@@ -12,7 +12,8 @@ from app.core.config import settings
 
 def get_current_user(
     db: Session = Depends(get_db),
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
 ) -> User:
     """
     Gets the current authenticated user from the token.
@@ -22,6 +23,22 @@ def get_current_user(
     logger = logging.getLogger(__name__)
     
     logger.info(f"🔑 [DEPENDENCIES] get_current_user called with authorization: {'Yes' if authorization else 'No'}")
+    
+    # Development helper: allow X-User-Id override
+    if settings.DEBUG and x_user_id:
+        logger.info(f"🔧 [DEPENDENCIES] Development mode: Using X-User-Id: {x_user_id}")
+        from sqlalchemy.orm import selectinload
+        user = (
+            db.query(User)
+            .options(selectinload(User.roles), selectinload(User.image))
+            .filter(User.clerk_user_id == x_user_id)
+            .first()
+        )
+        if user:
+            logger.info(f"✅ [DEPENDENCIES] Found user via X-User-Id: {user.email}")
+            return user
+        else:
+            logger.warning(f"⚠️ [DEPENDENCIES] User not found with X-User-Id: {x_user_id}")
     
     if not authorization:
         logger.warning("⚠️ No Authorization header provided")

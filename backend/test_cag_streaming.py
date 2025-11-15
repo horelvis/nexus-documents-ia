@@ -4,9 +4,15 @@ Test script for CAG Service Streaming
 NO DUMMY DATA - REAL PROCESSING ONLY
 """
 import asyncio
+import os
 import httpx
 import json
 import time
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_cag_streaming.py")
 
 
 async def test_streaming_query():
@@ -29,7 +35,7 @@ async def test_streaming_query():
                 "POST",
                 "http://cag-service:8008/api/v1/cag/query/stream",
                 json=request_data,
-                headers={"X-API-Key": "unified-microservices-key-12345"},
+                headers={"X-API-Key": API_KEY},
                 timeout=60.0
             ) as response:
                 print(f"Status: {response.status_code}")
@@ -104,7 +110,7 @@ async def test_streaming_document_analysis():
                 "POST",
                 "http://cag-service:8008/api/v1/cag/analyze/stream",
                 json=request_data,
-                headers={"X-API-Key": "unified-microservices-key-12345"},
+                headers={"X-API-Key": API_KEY},
                 timeout=120.0
             ) as response:
                 print(f"Status: {response.status_code}")
@@ -155,7 +161,7 @@ async def test_direct_cag_endpoints():
                     "tenant_id": "1",
                     "user_id": "1"
                 },
-                headers={"X-API-Key": "unified-microservices-key-12345"},
+                headers={"X-API-Key": API_KEY},
                 timeout=30.0
             )
             print(f"Direct query status: {response.status_code}")

@@ -3,7 +3,7 @@
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, agent_management, signatures, webhooks, search, teams, users, entities, dashboard,
-    simple_auth, assistant, migration, weaviate, bpmn_ai, lgpd
+    simple_auth, assistant, migration, weaviate, bpmn_ai, lgpd, temporalio_integration, workflow_executions
     # REMOVED: langgraph - migrated to Weaviate/Elysia
     # document_analyzer, contract_intelligence, compliance_checker
 )
@@ -50,6 +50,10 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"]
 
 # Weaviate microservice gateway (includes Elysia)
 api_router.include_router(weaviate.router, prefix="/weaviate", tags=["weaviate"])
+
+# Temporal workflows gateway
+api_router.include_router(workflow_executions.router, tags=["workflow-executions"])
+api_router.include_router(temporalio_integration.router, tags=["temporalio"])
 
 # Teams management routes
 api_router.include_router(teams.router, prefix="/teams", tags=["teams"])

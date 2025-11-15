@@ -11,7 +11,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_user, require_admin_role
-from app.db.models.workflow_template import WorkflowTemplate, WorkflowTemplateField
+from app.db.workflow_template_models import WorkflowTemplate, WorkflowTemplateField
 from app.schemas.user import User
 
 logger = logging.getLogger(__name__)

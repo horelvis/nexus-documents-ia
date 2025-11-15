@@ -74,6 +74,15 @@ class EmployeeOnboardingWorkflow:
         """Main onboarding workflow execution"""
         
         workflow_id = workflow.info().workflow_id
+        # Upsert search attributes for tenant isolation and type
+        try:
+            workflow.upsert_search_attributes({
+                "TenantId": input_data.tenant_id,
+                "WorkflowType": "employee_onboarding",
+                "EmployeeId": input_data.employee_id,
+            })
+        except Exception:
+            pass
         self._log_step("onboarding_started", {"workflow_id": workflow_id})
         
         try:

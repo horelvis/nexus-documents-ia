@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 
 from app.core.config import settings
+import httpx
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,31 +36,52 @@ class WorkflowTemplateResponse(BaseModel):
 
 @router.get("/", response_model=List[WorkflowTemplateResponse])
 async def get_workflow_templates(tenant_id: Optional[str] = None):
-    """Get all workflow templates for a tenant"""
+    """Get workflow templates, preferring Core DB, with AI static fallback"""
     try:
-        # Import AI-enhanced templates
+        response_templates: List[Dict[str, Any]] = []
+
+        # Try Core first (service-to-service, if allowed)
+        core_url = f"{settings.api_core_url}/api/v1/workflow-templates?limit=100"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+                resp = await client.get(core_url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for tpl in data:
+                        response_templates.append({
+                            "id": tpl.get("id"),
+                            "name": tpl.get("name"),
+                            "description": tpl.get("description"),
+                            "workflow_definition": tpl.get("workflow_definition", {}),
+                            "tenant_id": tpl.get("tenant_id", tenant_id or "default"),
+                            "is_active": tpl.get("status", "draft") != "deprecated",
+                            "created_at": tpl.get("created_at", datetime.now().isoformat()),
+                            "updated_at": tpl.get("updated_at", datetime.now().isoformat()),
+                        })
+                    logger.info(f"Loaded {len(response_templates)} templates from Core")
+                else:
+                    logger.info(f"Core template list unavailable ({resp.status_code}); falling back to local AI templates")
+        except Exception as core_err:
+            logger.info(f"Core template list fetch failed: {core_err}; using local AI templates")
+
+        # Always include AI-enhanced templates as fallback/supplement
         from app.data.workflow_templates_ai import get_all_ai_enhanced_templates
-        
-        # Get AI-enhanced templates
         ai_templates = get_all_ai_enhanced_templates()
-        
-        # Convert to response format
-        response_templates = []
-        
         for template in ai_templates:
             response_templates.append({
                 "id": template["id"],
                 "name": template["name"],
                 "description": template["description"],
                 "workflow_definition": template["workflow_definition"],
-                "tenant_id": template["tenant_id"],
+                "tenant_id": template.get("tenant_id", tenant_id or "default"),
                 "is_active": True,
                 "created_at": template.get("created_at", datetime.now().isoformat()),
                 "updated_at": template.get("updated_at", datetime.now().isoformat())
             })
-        
-        # Also include legacy template for backward compatibility
-        legacy_template = {
+
+        # Include legacy example template
+        response_templates.append({
             "id": "legal-advisory-template",
             "name": "Asesoría Legal (Legacy)",
             "description": "Template legacy para consultas de asesoría legal",
@@ -76,9 +98,7 @@ async def get_workflow_templates(tenant_id: Optional[str] = None):
                             "client_name": "{{user_input_data.client_name}}",
                             "description": "{{user_input_data.description}}"
                         },
-                        "next_steps": {
-                            "success": "end"
-                        }
+                        "next_steps": {"success": "end"}
                     }
                 ]
             },
@@ -86,13 +106,11 @@ async def get_workflow_templates(tenant_id: Optional[str] = None):
             "is_active": True,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
-        }
-        
-        response_templates.append(legacy_template)
-        
-        logger.info(f"Returning {len(response_templates)} workflow templates (including {len(ai_templates)} AI-enhanced)")
+        })
+
+        logger.info(f"Returning {len(response_templates)} workflow templates (Core+AI)")
         return response_templates
-        
+
     except Exception as e:
         logger.error(f"Error getting workflow templates: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get workflow templates: {str(e)}")
@@ -100,15 +118,32 @@ async def get_workflow_templates(tenant_id: Optional[str] = None):
 
 @router.get("/{template_id}", response_model=WorkflowTemplateResponse)
 async def get_workflow_template(template_id: str):
-    """Get a specific workflow template"""
+    """Get specific workflow template, preferring Core, with AI/legacy fallback"""
     try:
-        # Import AI-enhanced templates
+        # Try Core
+        core_url = f"{settings.api_core_url}/api/v1/workflow-templates/{template_id}"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+                resp = await client.get(core_url, headers=headers)
+                if resp.status_code == 200:
+                    tpl = resp.json()
+                    return {
+                        "id": tpl.get("id", template_id),
+                        "name": tpl.get("name", template_id),
+                        "description": tpl.get("description"),
+                        "workflow_definition": tpl.get("workflow_definition", {}),
+                        "tenant_id": tpl.get("tenant_id", "default"),
+                        "is_active": tpl.get("status", "draft") != "deprecated",
+                        "created_at": tpl.get("created_at", datetime.now().isoformat()),
+                        "updated_at": tpl.get("updated_at", datetime.now().isoformat()),
+                    }
+        except Exception as core_err:
+            logger.info(f"Core template fetch failed: {core_err}; trying local AI templates")
+
+        # Try local AI templates
         from app.data.workflow_templates_ai import get_all_ai_enhanced_templates
-        
-        # Get all available templates
         ai_templates = get_all_ai_enhanced_templates()
-        
-        # Search for the requested template
         for template in ai_templates:
             if template["id"] == template_id:
                 return {
@@ -116,13 +151,13 @@ async def get_workflow_template(template_id: str):
                     "name": template["name"],
                     "description": template["description"],
                     "workflow_definition": template["workflow_definition"],
-                    "tenant_id": template["tenant_id"],
+                    "tenant_id": template.get("tenant_id", "default"),
                     "is_active": True,
                     "created_at": template.get("created_at", datetime.now().isoformat()),
-                    "updated_at": template.get("updated_at", datetime.now().isoformat())
+                    "updated_at": template.get("updated_at", datetime.now().isoformat()),
                 }
-        
-        # Handle legacy template
+
+        # Legacy fallback
         if template_id == "legal-advisory-template":
             return {
                 "id": "legal-advisory-template",
@@ -141,20 +176,18 @@ async def get_workflow_template(template_id: str):
                                 "client_name": "{{user_input_data.client_name}}",
                                 "description": "{{user_input_data.description}}"
                             },
-                            "next_steps": {
-                                "success": "end"
-                            }
+                            "next_steps": {"success": "end"}
                         }
                     ]
                 },
                 "tenant_id": "default",
                 "is_active": True,
                 "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat()
+                "updated_at": datetime.now().isoformat(),
             }
-        else:
-            raise HTTPException(status_code=404, detail="Template not found")
-            
+
+        raise HTTPException(status_code=404, detail="Template not found")
+
     except HTTPException:
         raise
     except Exception as e:

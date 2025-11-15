@@ -4,13 +4,8 @@ import uuid
 import datetime
 import io
 import asyncio
-from typing import List, Dict, Any, Optional, BinaryIO, Union
+from typing import List, Dict, Any, Optional
 from fastapi import UploadFile, HTTPException
-import PyPDF2
-from docx import Document as DocxDocument
-import csv
-import openpyxl
-import chardet
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -19,8 +14,9 @@ from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
 from app.services.embedding_service import EmbeddingService
-from app.services.vector_service import VectorService # Added VectorService import
+from app.services.vector_service import VectorService  # Added VectorService import
 from app.services.llm_service import LLMService
+from app.services.text_extraction_client import TextExtractionClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +60,8 @@ class DocumentService:
             
         self.user_id = user_id
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorService(self.tenant_id, self.user_id) # Pass user_id to VectorService
+        self.vector_service = VectorService(self.tenant_id, self.user_id)  # Pass user_id to VectorService
+        self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
         self.llm_service = LLMService()
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -186,58 +183,72 @@ class DocumentService:
         Extracts text and indexes it directly via LangChain/Qdrant.
         Also extracts entities from the document content.
         """
-        file_obj_for_text = io.BytesIO(file_contents)
-        document_text = await asyncio.to_thread(self._extract_text, file_obj_for_text, file_ext)
-        
-        if document_text:
-            # Store the extracted text content in the document
-            db_document.content = document_text[:10000]  # Store first 10k chars for preview
-            
-            # Extract entities from the document text
-            try:
-                # Use LLM service for entity extraction (migrated from LangChain)
-                from app.services.llm_service import LLMService
-                llm_service = LLMService()
-                entities = await llm_service.extract_entities(document_text)
-                
-                if entities:
-                    # Store extracted entities in the document
-                    db_document.extracted_entities = entities
-                    logger.info(f"Extracted {len(entities)} entities from document {db_document.id}")
-                else:
-                    db_document.extracted_entities = []
-                    
-            except Exception as e:
-                logger.error(f"Failed to extract entities from document {db_document.id}: {str(e)}")
-                db_document.extracted_entities = []
-            
-            # Prepare comprehensive metadata for the document
-            document_metadata = {
-                "doc_id": str(db_document.id),
-                "tenant_id": self.tenant_id,
-                "title": title,
-                "filename": db_document.filename,
-                "description": db_document.description,
-                "file_type": file_ext,
-                "created_at": db_document.created_at.isoformat() if db_document.created_at else None,
-                "updated_at": db_document.updated_at.isoformat() if db_document.updated_at else None,
-                "file_size": db_document.file_size,
-                "mime_type": db_document.mime_type,
-                "category": db_document.category,
-                "created_by": self.user_id or "system"
-            }
-
-            # Let LangChain handle chunking, embeddings, and vector storage
-            indexing_success = await self.vector_service.add_document(
-                doc_id=str(db_document.id),
-                text=document_text,
-                metadata=document_metadata
+        try:
+            extraction = await self.text_extraction_client.extract_text(
+                file_bytes=file_contents,
+                filename=db_document.filename or f"{db_document.id}.{file_ext}",
+                file_extension=file_ext,
             )
-            db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
-        else:
+            document_text = extraction.text
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Failed to extract text for document %s: %s", db_document.id, exc)
             db_document.indexed = IndexingStatus.INDEXING_ERROR
             db_document.extracted_entities = []
-    
+            raise
+
+        if not document_text:
+            db_document.indexed = IndexingStatus.INDEXING_ERROR
+            db_document.extracted_entities = []
+            return
+
+        # Store the extracted text preview
+        db_document.content = document_text[:10000]
+
+        # Store metadata from extraction
+        extraction_metadata = {
+            "language": extraction.language,
+            "characters": extraction.characters,
+            **(extraction.metadata or {}),
+        }
+        current_metadata = db_document.document_metadata or {}
+        current_metadata["text_extraction"] = extraction_metadata
+        db_document.document_metadata = current_metadata
+
+        # Extract entities using existing LLM service
+        try:
+            llm_service = LLMService()
+            entities = await llm_service.extract_entities(document_text)
+            db_document.extracted_entities = entities or []
+            if entities:
+                logger.info("Extracted %s entities from document %s", len(entities), db_document.id)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("Failed to extract entities from document %s: %s", db_document.id, exc)
+            db_document.extracted_entities = []
+
+        # Prepare metadata for downstream services
+        document_metadata = {
+            "doc_id": str(db_document.id),
+            "tenant_id": self.tenant_id,
+            "title": title,
+            "filename": db_document.filename,
+            "description": db_document.description,
+            "file_type": file_ext,
+            "created_at": db_document.created_at.isoformat() if db_document.created_at else None,
+            "updated_at": db_document.updated_at.isoformat() if db_document.updated_at else None,
+            "file_size": db_document.file_size,
+            "mime_type": db_document.mime_type,
+            "category": db_document.category,
+            "created_by": self.user_id or "system",
+        }
+
+        # Index into vector store
+        indexing_success = await self.vector_service.add_document(
+            doc_id=str(db_document.id),
+            text=document_text,
+            metadata=document_metadata,
+        )
+        db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
+   
     async def process_document(
         self, 
         db: Session,
@@ -596,107 +607,6 @@ class DocumentService:
     # get_signed_upload_url method removed for security reasons
     # Use direct upload via /upload endpoint instead
 
-    def _extract_text(self, file: BinaryIO, file_type: str) -> str:
-        """
-        Extrae texto de un archivo según su tipo.
-        """
-        try:
-            file.seek(0)
-            
-            if file_type == 'pdf':
-                return self._extract_pdf_text(file)
-            elif file_type in ['docx', 'doc']:
-                return self._extract_docx_text(file)
-            elif file_type == 'txt':
-                content = file.read()
-                detected = chardet.detect(content)
-                encoding = detected['encoding'] or 'utf-8'
-                return content.decode(encoding, errors='ignore')
-            elif file_type == 'csv':
-                return self._extract_csv_text(file)
-            elif file_type in ['xlsx', 'xls']:
-                return self._extract_excel_text(file)
-            elif file_type == 'md':
-                content = file.read()
-                return content.decode('utf-8', errors='ignore')
-            else:
-                logger.warning(f"Unsupported file type for text extraction: {file_type}")
-                return ""
-                
-        except Exception as e:
-            logger.exception(f"Error extracting text from document: {str(e)}")
-            return ""
-    
-    def _extract_pdf_text(self, file: BinaryIO) -> str:
-        """Extrae texto de un archivo PDF"""
-        text = ""
-        try:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                text += page.extract_text() + "\n\n"
-            return text
-        except Exception as e:
-            logger.exception(f"Error extracting text from PDF: {str(e)}")
-            return ""
-    
-    def _extract_docx_text(self, file: BinaryIO) -> str:
-        """Extrae texto de un archivo DOCX"""
-        try:
-            doc = DocxDocument(file)
-            text = ""
-            for para in doc.paragraphs:
-                text += para.text + "\n"
-            return text
-        except Exception as e:
-            logger.exception(f"Error extracting text from DOCX: {str(e)}")
-            return ""
-    
-    def _extract_csv_text(self, file: BinaryIO) -> str:
-        """Extrae texto de un archivo CSV"""
-        try:
-            text = ""
-            file.seek(0)
-            sample = file.read(4096)
-            detected = chardet.detect(sample)
-            encoding = detected['encoding'] or 'utf-8'
-            
-            file.seek(0)
-            content = file.read().decode(encoding, errors='ignore')
-            file_content = io.StringIO(content)
-            
-            dialect = csv.Sniffer().sniff(file_content.read(1024))
-            file_content.seek(0)
-            
-            csv_reader = csv.reader(file_content, dialect)
-            for row in csv_reader:
-                text += ", ".join(row) + "\n"
-            return text
-        except Exception as e:
-            logger.exception(f"Error extracting text from CSV: {str(e)}")
-            return ""
-    
-    def _extract_excel_text(self, file: BinaryIO) -> str:
-        """Extrae texto de un archivo Excel"""
-        try:
-            text = ""
-            workbook = openpyxl.load_workbook(file, read_only=True)
-            
-            for sheet_name in workbook.sheetnames:
-                sheet = workbook[sheet_name]
-                text += f"Sheet: {sheet_name}\n"
-                
-                for row in sheet.iter_rows(values_only=True):
-                    row_text = ", ".join([str(cell) if cell is not None else "" for cell in row])
-                    text += row_text + "\n"
-                
-                text += "\n"
-            
-            return text
-        except Exception as e:
-            logger.exception(f"Error extracting text from Excel: {str(e)}")
-            return ""
-    
     def get_documents(
         self, 
         db: "Session", # Added db: Session

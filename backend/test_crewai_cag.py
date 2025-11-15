@@ -4,6 +4,7 @@ Test CrewAI CAG Service - Verificar que todo funciona
 NO más reinventar la rueda!
 """
 import asyncio
+import os
 import httpx
 from datetime import datetime
 import json
@@ -12,7 +13,9 @@ async def test_crewai():
     """Test CrewAI CAG implementation"""
     
     base_url = "http://cag-service:8008"
-    api_key = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
+    api_key = os.getenv("MICROSERVICES_API_KEY")
+    if not api_key:
+        raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_crewai_cag.py")
     
     print("🚀 Testing CrewAI CAG Service...")
     print("=" * 50)

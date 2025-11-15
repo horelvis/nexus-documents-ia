@@ -1,5 +1,7 @@
 """Configuration for CAG Service"""
 import os
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -9,7 +11,9 @@ class Settings(BaseSettings):
     # Service configuration
     service_name: str = "cag-service"
     service_port: int = 8008
-    api_key: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    MICROSERVICES_API_KEY: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     
     # Ollama configuration
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama-service:11434")

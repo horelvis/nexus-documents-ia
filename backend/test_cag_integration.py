@@ -4,8 +4,14 @@ Script de prueba para CAG integration
 Ejecutar dentro del contenedor API
 """
 import asyncio
+import os
 import httpx
 import json
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_cag_integration.py")
 
 
 class FakeUser:
@@ -50,7 +56,7 @@ async def test_document_analysis():
                 # Verificar que LangGraph esté activo
                 response = await client.get(
                     "http://langgraph-service:8007/health",
-                    headers={"X-API-Key": "unified-microservices-key-12345"}
+                    headers={"X-API-Key": API_KEY}
                 )
                 
                 if response.status_code == 200:
@@ -73,7 +79,7 @@ async def test_document_analysis():
                     response = await client.post(
                         "http://langgraph-service:8007/api/v1/graphs/run",
                         json=cag_request,
-                        headers={"X-API-Key": "unified-microservices-key-12345"},
+                        headers={"X-API-Key": API_KEY},
                         timeout=30.0
                     )
                     
@@ -131,7 +137,7 @@ async def test_chat_with_cag():
             response = await client.post(
                 "http://langgraph-service:8007/api/v1/graphs/run",
                 json=chat_request,
-                headers={"X-API-Key": "unified-microservices-key-12345"},
+                headers={"X-API-Key": API_KEY},
                 timeout=30.0
             )
             

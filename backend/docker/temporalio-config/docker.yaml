@@ -47,6 +47,7 @@ services:
       grpcPort: 7233
       membershipPort: 6933
       bindOnLocalHost: false
+      bindOnIP: "0.0.0.0"
       httpPort: 7243
     metrics:
       prometheus:
@@ -58,6 +59,7 @@ services:
       grpcPort: 7234
       membershipPort: 6934
       bindOnLocalHost: false
+      bindOnIP: "0.0.0.0"
     metrics:
       prometheus:
         timerType: "histogram"
@@ -68,6 +70,7 @@ services:
       grpcPort: 7235
       membershipPort: 6935
       bindOnLocalHost: false
+      bindOnIP: "0.0.0.0"
     metrics:
       prometheus:
         timerType: "histogram"
@@ -78,6 +81,7 @@ services:
       grpcPort: 7239
       membershipPort: 6939
       bindOnLocalHost: false
+      bindOnIP: "0.0.0.0"
     metrics:
       prometheus:
         timerType: "histogram"

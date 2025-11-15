@@ -20,6 +20,11 @@ else:
     DATABASE_URL = "postgresql+asyncpg://postgres:password@localhost:5432/nexus_db"
     LANGCHAIN_SERVICE_URL = "http://localhost:8001"
 
+MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not MICROSERVICES_API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for update_document_summaries.py")
+
 # Create async engine
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -82,7 +87,7 @@ async def generate_llm_summary(text: str, filename: str) -> str:
                     "temperature": 0.3
                 },
                 headers={
-                    "X-API-Key": "dev-api-key-2024",
+                    "X-API-Key": MICROSERVICES_API_KEY,
                     "Content-Type": "application/json"
                 },
                 timeout=20.0

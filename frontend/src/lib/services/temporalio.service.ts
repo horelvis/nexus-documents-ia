@@ -5,6 +5,9 @@
  * Direct connection to the Temporalio microservice for AI-enhanced workflows
  */
 
+import { useApiClient } from "../api-client"
+import type { ApiResponse } from "../api-client"
+
 export interface TemporalioTemplate {
   id: string
   name: string
@@ -70,146 +73,140 @@ export interface TemporalioHealthStatus {
   }
 }
 
-class TemporalioService {
-  private baseURL: string
-  private apiKey: string
+export interface AIWorkflowFieldOption {
+  label: string
+  value: string
+}
 
-  constructor() {
-    // Direct connection to Temporalio microservice
-    this.baseURL = process.env.NEXT_PUBLIC_TEMPORALIO_SERVICE_URL || 'http://localhost:8010'
-    this.apiKey = process.env.NEXT_PUBLIC_API_KEY || 'nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt'
+export type AIWorkflowFieldType = 'text' | 'textarea' | 'select' | 'number'
+
+export interface AIWorkflowField {
+  name: string
+  label: string
+  type: AIWorkflowFieldType
+  required?: boolean
+  placeholder?: string
+  helper_text?: string
+  default_value?: string
+  options?: AIWorkflowFieldOption[]
+}
+
+export interface AIWorkflowTemplateMeta {
+  id: string
+  name: string
+  description: string
+  template_id: string
+  tags?: string[]
+  estimated_duration?: string
+  complexity?: string
+  fields: AIWorkflowField[]
+}
+
+const TEMPORALIO_BASE = "/temporalio"
+
+function ensureData<T>(response: ApiResponse<T>, fallbackMessage: string): T {
+  if (response.error || !response.data) {
+    throw new Error(response.error || fallbackMessage)
   }
 
-  private async makeRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`
-    
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    })
+  return response.data
+}
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Temporalio API error ${response.status}: ${errorText}`)
-    }
+export function useTemporalioService() {
+  const apiClient = useApiClient()
 
-    return response.json()
+  const get = async <T>(endpoint: string, errorMessage: string) => {
+    const response = await apiClient.get<T>(endpoint)
+    return ensureData(response, errorMessage)
   }
 
-  async checkHealth(): Promise<TemporalioHealthStatus> {
-    return this.makeRequest<TemporalioHealthStatus>('/health')
+  const post = async <T>(endpoint: string, data?: any, errorMessage?: string) => {
+    const response = await apiClient.post<T>(endpoint, data)
+    return ensureData(response, errorMessage || "Temporalio request failed")
   }
 
-  async getTemplates(): Promise<TemporalioTemplate[]> {
-    return this.makeRequest<TemporalioTemplate[]>('/workflow-templates')
-  }
+  const checkHealth = () =>
+    get<TemporalioHealthStatus>(`${TEMPORALIO_BASE}/health`, "No fue posible obtener la salud del servicio Temporalio")
 
-  async getTemplate(templateId: string): Promise<TemporalioTemplate> {
-    return this.makeRequest<TemporalioTemplate>(`/workflow-templates/${templateId}`)
-  }
+  const getTemplates = () =>
+    get<TemporalioTemplate[]>(
+      `${TEMPORALIO_BASE}/workflow-templates`,
+      "No fue posible cargar los workflows inteligentes"
+    )
 
-  async executeWorkflow(
-    templateId: string, 
-    tenantId: string, 
+  const getTemplate = (templateId: string) =>
+    get<TemporalioTemplate>(
+      `${TEMPORALIO_BASE}/workflow-templates/${templateId}`,
+      "No fue posible cargar el workflow solicitado"
+    )
+
+  const executeWorkflow = (
+    templateId: string,
+    tenantId: string,
     inputData: Record<string, any>
-  ): Promise<TemporalioExecution> {
-    return this.makeRequest<TemporalioExecution>('/workflow-executions/start', {
-      method: 'POST',
-      body: JSON.stringify({
+  ) =>
+    post<TemporalioExecution>(
+      `${TEMPORALIO_BASE}/workflow-executions/start`,
+      {
         template_id: templateId,
         tenant_id: tenantId,
         input_data: inputData,
-      }),
-    })
-  }
+      },
+      "No fue posible iniciar el workflow"
+    )
 
-  async getExecutionStatus(workflowId: string): Promise<TemporalioExecutionStatus> {
-    return this.makeRequest<TemporalioExecutionStatus>(`/workflow-executions/${workflowId}`)
-  }
+  const getExecutionStatus = (workflowId: string) =>
+    get<TemporalioExecutionStatus>(
+      `${TEMPORALIO_BASE}/workflow-executions/${workflowId}`,
+      "No fue posible obtener el estado del workflow"
+    )
 
-  async cancelExecution(workflowId: string): Promise<{ message: string }> {
-    return this.makeRequest<{ message: string }>(`/workflow-executions/${workflowId}/cancel`, {
-      method: 'POST',
-    })
-  }
+  const cancelExecution = (workflowId: string, reason?: string) =>
+    post<{ message: string }>(
+      `${TEMPORALIO_BASE}/workflow-executions/${workflowId}/cancel`,
+      reason ? { reason } : undefined,
+      "No fue posible cancelar el workflow"
+    )
 
-  async getExecutionHistory(workflowId: string): Promise<any> {
-    return this.makeRequest(`/workflow-executions/${workflowId}/history`)
-  }
+  const getExecutionHistory = (workflowId: string) =>
+    get<any>(
+      `${TEMPORALIO_BASE}/workflow-executions/${workflowId}/history`,
+      "No fue posible obtener el historial del workflow"
+    )
 
-  // Enhanced workflow helpers
-  async getAIEnhancedTemplates(): Promise<TemporalioTemplate[]> {
-    const templates = await this.getTemplates()
-    return templates.filter(t => 
-      t.name.toLowerCase().includes('inteligente') || 
-      t.name.toLowerCase().includes('ai') ||
-      t.agent_types_used?.length > 0
+  const getAIEnhancedTemplates = async () => {
+    const templates = await getTemplates()
+    return templates.filter(
+      (t) =>
+        t.name.toLowerCase().includes("inteligente") ||
+        t.name.toLowerCase().includes("ai") ||
+        (t.agent_types_used?.length ?? 0) > 0
     )
   }
 
-  async executeLegalAdvisoryWorkflow(
-    tenantId: string, 
-    clientName: string, 
-    caseType: string, 
-    description: string,
-    priority: 'low' | 'medium' | 'high' | 'urgent' = 'medium'
-  ): Promise<TemporalioExecution> {
-    return this.executeWorkflow('ai-legal-advisory-template', tenantId, {
-      client_name: clientName,
-      case_type: caseType,
-      description: description,
-      priority: priority,
-      case_value: priority === 'urgent' ? 'high' : 'medium'
-    })
-  }
+  const getAIWorkflowCatalog = () =>
+    get<AIWorkflowTemplateMeta[]>(
+      `${TEMPORALIO_BASE}/ai-workflows`,
+      "No fue posible obtener los workflows AI disponibles"
+    )
 
-  async executeDocumentProcessingWorkflow(
-    tenantId: string,
-    documentContent: string,
-    documentType: 'contract' | 'legal_brief' | 'report' | 'correspondence' | 'other',
-    analysisDepth: 'basic' | 'standard' | 'deep' = 'standard'
-  ): Promise<TemporalioExecution> {
-    return this.executeWorkflow('ai-document-processing-template', tenantId, {
-      document_content: documentContent,
-      document_type: documentType,
-      analysis_depth: analysisDepth
-    })
-  }
-}
+  const executeAIWorkflow = (workflowId: string, payload: Record<string, any>) =>
+    post<TemporalioExecution>(
+      `${TEMPORALIO_BASE}/ai-workflows/${workflowId}/execute`,
+      { payload },
+      "No fue posible ejecutar el workflow AI"
+    )
 
-// Export singleton instance
-export const temporalioService = new TemporalioService()
-
-// React hook for using Temporalio service
-export function useTemporalioService() {
   return {
-    checkHealth: () => temporalioService.checkHealth(),
-    getTemplates: () => temporalioService.getTemplates(),
-    getTemplate: (templateId: string) => temporalioService.getTemplate(templateId),
-    executeWorkflow: (templateId: string, tenantId: string, inputData: any) => 
-      temporalioService.executeWorkflow(templateId, tenantId, inputData),
-    getExecutionStatus: (workflowId: string) => temporalioService.getExecutionStatus(workflowId),
-    cancelExecution: (workflowId: string) => temporalioService.cancelExecution(workflowId),
-    getExecutionHistory: (workflowId: string) => temporalioService.getExecutionHistory(workflowId),
-    
-    // Enhanced methods
-    getAIEnhancedTemplates: () => temporalioService.getAIEnhancedTemplates(),
-    executeLegalAdvisoryWorkflow: (
-      tenantId: string, 
-      clientName: string, 
-      caseType: string, 
-      description: string,
-      priority?: 'low' | 'medium' | 'high' | 'urgent'
-    ) => temporalioService.executeLegalAdvisoryWorkflow(tenantId, clientName, caseType, description, priority),
-    executeDocumentProcessingWorkflow: (
-      tenantId: string,
-      documentContent: string,
-      documentType: 'contract' | 'legal_brief' | 'report' | 'correspondence' | 'other',
-      analysisDepth?: 'basic' | 'standard' | 'deep'
-    ) => temporalioService.executeDocumentProcessingWorkflow(tenantId, documentContent, documentType, analysisDepth),
+    checkHealth,
+    getTemplates,
+    getTemplate,
+    executeWorkflow,
+    getExecutionStatus,
+    cancelExecution,
+    getExecutionHistory,
+    getAIEnhancedTemplates,
+    getAIWorkflowCatalog,
+    executeAIWorkflow,
   }
 }

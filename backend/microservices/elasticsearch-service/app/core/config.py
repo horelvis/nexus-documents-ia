@@ -15,10 +15,13 @@ class Settings:
     ELASTICSEARCH_PASSWORD: Optional[str] = os.getenv("ELASTICSEARCH_PASSWORD")
 
     # Security
-    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "dev-api-key-2024")
+    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "")
 
     # Environment
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     TESTING: bool = os.getenv("TESTING", "false").lower() == "true"
 
 settings = Settings()
+
+if not settings.MICROSERVICES_API_KEY:
+    raise EnvironmentError("MICROSERVICES_API_KEY environment variable is required for elasticsearch-service")

@@ -141,9 +141,11 @@ def create_app() -> FastAPI:
     
     # Include API routers
     from app.api.workflow_templates import router as templates_router
+    from app.api.workflows import router as workflows_router
     from app.api.workflow_executions import router as executions_router
     
     app.include_router(templates_router, prefix="/workflow-templates", tags=["Workflow Templates"])
+    app.include_router(workflows_router, prefix="/workflows", tags=["Workflows"])
     app.include_router(executions_router, prefix="/workflow-executions", tags=["Workflow Executions"])
     
     return app

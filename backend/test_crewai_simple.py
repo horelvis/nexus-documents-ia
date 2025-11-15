@@ -3,11 +3,15 @@
 Test simplificado de CrewAI - Prueba rápida sin búsqueda de documentos
 """
 import asyncio
+import os
 import httpx
 import json
 
 BASE_URL = "http://localhost:8008"
-API_KEY = "unified-microservices-key-12345"
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_crewai_simple.py")
 
 async def main():
     print("=" * 60)

@@ -3,6 +3,8 @@ Configuration for Gotenberg Service
 """
 import os
 from typing import List
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -15,8 +17,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     
     # Security
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
-    API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    SECRET_KEY: str
+    MICROSERVICES_API_KEY: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     
     # Gotenberg configuration (local instance in same container)
     GOTENBERG_BASE_URL: str = os.getenv("GOTENBERG_BASE_URL", "http://localhost:3000")
@@ -47,6 +51,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
-
+        case_sensitive = False
+    
 
 settings = Settings()

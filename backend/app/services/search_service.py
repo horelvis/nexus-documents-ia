@@ -1,7 +1,7 @@
 """
-Hybrid Search Service combining Weaviate and Elasticsearch
-- Weaviate: Fast semantic search (80% cases)
-- Elasticsearch: Complex hybrid search + analytics (20% cases)
+Hybrid Search Service combining Elasticsearch and Weaviate
+- Elasticsearch: Hybrid/keyword primary engine (80% cases)
+- Weaviate: Semantic specialization (20% cases)
 """
 import logging
 from typing import List, Dict, Any, Optional
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class SearchService:
-    """Hybrid Search Service: Weaviate (primary) + Elasticsearch (specialized)"""
+    """Hybrid Search Service: Elasticsearch (primary) + Weaviate (specialized)"""
     
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
@@ -27,7 +27,7 @@ class SearchService:
         # Elasticsearch is now a microservice - no local initialization needed
         
         logger.info(f"SearchService initialized for tenant: {tenant_id}")
-        logger.info("Using hybrid architecture: Weaviate (primary) + Elasticsearch (specialized)")
+        logger.info("Using hybrid architecture: Elasticsearch (primary) + Weaviate (semantic specialized)")
     
     async def chat_with_documents(
         self, 
@@ -70,7 +70,7 @@ class SearchService:
         query: str, 
         limit: int = 10,
         doc_ids: List[str] = None,
-        search_type: str = "semantic",  # "semantic", "hybrid", "keyword"
+        search_type: str = "hybrid",  # "hybrid" (default, Elasticsearch), "semantic", "keyword"
         filters: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -80,7 +80,7 @@ class SearchService:
             query: Search query
             limit: Maximum results
             doc_ids: Optional document ID filter
-            search_type: "semantic" (Weaviate), "hybrid" (Elasticsearch), "keyword" (Elasticsearch)
+            search_type: "hybrid"/"keyword" (Elasticsearch), "semantic" (Weaviate)
             filters: Additional filters (tags, dates, etc.)
             
         Returns:
@@ -101,8 +101,8 @@ class SearchService:
                 )
                 
             else:
-                # Use Weaviate for semantic search (default, faster)
-                logger.info("🚀 Using Weaviate for semantic search")
+                # Use Weaviate for semantic search when explicitly requested
+                logger.info("🚀 Using Weaviate for semantic search (specialized mode)")
                 if doc_ids:
                     vector_results = await self.vector_service.search_by_document_ids(
                         doc_ids=doc_ids,
@@ -434,8 +434,8 @@ class SearchService:
             
             # Add some computed metrics
             analytics["search_engines"] = {
-                "weaviate": {"status": "active", "role": "primary_semantic"},
-                "elasticsearch": {"status": "active", "role": "hybrid_analytics"}
+                "elasticsearch": {"status": "active", "role": "primary_hybrid"},
+                "weaviate": {"status": "active", "role": "semantic_specialized"}
             }
             
             return analytics
@@ -482,5 +482,5 @@ class SearchService:
         if any(indicator in query_lower for indicator in complex_indicators):
             return "hybrid"
             
-        # Default to semantic (fastest, best for most queries)
-        return "semantic"
+        # Default to hybrid (Elasticsearch primary engine)
+        return "hybrid"

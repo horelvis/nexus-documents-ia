@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useApiClient } from "@/lib/api-client";
 
 export interface Workflow {
   workflow_id: string;
@@ -38,38 +39,33 @@ export function useWorkflows(tenantId: string) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  const apiClient = useApiClient();
 
-  const apiCall = useCallback(async (endpoint: string, options?: RequestInit) => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const url = `${baseUrl}${endpoint}`;
+  const apiCall = useCallback(
+    async <T,>(method: "GET" | "POST", endpoint: string, body?: any): Promise<T> => {
+      const response =
+        method === "GET"
+          ? await apiClient.get<T>(endpoint)
+          : await apiClient.post<T>(endpoint, body);
 
-    try {
-      const response = await fetch(url, {
-        headers: {
-          "Content-Type": "application/json",
-          ...options?.headers,
-        },
-        ...options,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (response.error) {
+        throw new Error(response.error);
       }
 
-      return await response.json();
-    } catch (error) {
-      console.error(`API call failed: ${endpoint}`, error);
-      throw error;
-    }
-  }, []);
+      return response.data as T;
+    },
+    [apiClient]
+  );
 
   const refreshWorkflows = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const data = await apiCall(`/api/v1/temporalio/workflows`);
-      setWorkflows(data.workflows || []);
+      const data = await apiCall<Workflow[] | { workflows: Workflow[] }>("GET", `/temporalio/workflows`);
+      const workflowList = Array.isArray(data) ? data : data?.workflows || [];
+      setWorkflows(workflowList);
+      return workflowList;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Error loading workflows";
       setError(errorMessage);
@@ -78,6 +74,7 @@ export function useWorkflows(tenantId: string) {
         description: errorMessage,
         variant: "destructive",
       });
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +91,7 @@ export function useWorkflows(tenantId: string) {
       // Map workflow types to specific endpoints
       switch (workflowType) {
         case "contract_renewal":
-          endpoint = "/api/v1/temporalio/contract-renewal";
+          endpoint = "/temporalio/contract-renewal";
           payload = {
             contract_id: inputData.contract_id,
             tenant_id: tenantId,
@@ -110,7 +107,7 @@ export function useWorkflows(tenantId: string) {
           break;
 
         case "employee_onboarding":
-          endpoint = "/api/v1/temporalio/employee-onboarding";
+          endpoint = "/temporalio/employee-onboarding";
           payload = {
             employee_id: inputData.employee_id,
             tenant_id: tenantId,
@@ -131,10 +128,7 @@ export function useWorkflows(tenantId: string) {
           throw new Error(`Unknown workflow type: ${workflowType}`);
       }
 
-      const result = await apiCall(endpoint, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const result = await apiCall("POST", endpoint, payload);
 
       toast({
         title: "Workflow Iniciado",
@@ -161,7 +155,7 @@ export function useWorkflows(tenantId: string) {
 
   const getWorkflowStatus = useCallback(async (workflowId: string) => {
     try {
-      const result = await apiCall(`/api/v1/temporalio/workflow/${workflowId}/status`);
+      const result = await apiCall("GET", `/temporalio/workflow/${workflowId}/status`);
       return result;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Error getting workflow status";
@@ -176,10 +170,7 @@ export function useWorkflows(tenantId: string) {
 
   const cancelWorkflow = useCallback(async (workflowId: string, reason?: string) => {
     try {
-      const result = await apiCall(`/api/v1/temporalio/workflow/${workflowId}/cancel`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      });
+      const result = await apiCall("POST", `/temporalio/workflow/${workflowId}/cancel`, { reason });
 
       toast({
         title: "Workflow Cancelado",
@@ -200,12 +191,9 @@ export function useWorkflows(tenantId: string) {
 
   const queryWorkflow = useCallback(async (workflowId: string, queryType: string, queryArgs?: any) => {
     try {
-      const result = await apiCall(`/api/v1/temporalio/workflow/${workflowId}/query`, {
-        method: "POST",
-        body: JSON.stringify({
-          query_type: queryType,
-          query_args: queryArgs,
-        }),
+      const result = await apiCall("POST", `/temporalio/workflow/${workflowId}/query`, {
+        query_type: queryType,
+        query_args: queryArgs,
       });
 
       return result;

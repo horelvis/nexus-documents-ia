@@ -4,6 +4,12 @@ Simple test for LangExtract service using curl
 """
 import json
 import subprocess
+import os
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_langextract_simple.py")
 
 def test_extraction(doc_type, text):
     """Test extraction for a specific document type"""
@@ -23,7 +29,7 @@ def test_extraction(doc_type, text):
         "curl", "-s", "-X", "POST",
         "http://localhost:8009/api/v1/extraction/extract",
         "-H", "Content-Type: application/json",
-        "-H", "X-API-Key: dev-api-key-2024",
+        "-H", f"X-API-Key: {API_KEY}",
         "-d", json.dumps(data)
     ]
     
@@ -190,7 +196,7 @@ print("=" * 60)
 stats_cmd = [
     "curl", "-s", "-X", "GET",
     "http://localhost:8009/api/v1/extraction/stats",
-    "-H", "X-API-Key: dev-api-key-2024"
+    "-H", f"X-API-Key: {API_KEY}"
 ]
 
 try:

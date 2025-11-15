@@ -1,5 +1,7 @@
 """Configuration for Weaviate Service"""
 import os
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -9,7 +11,9 @@ class Settings(BaseSettings):
     # Service configuration
     service_name: str = "weaviate-service"
     service_port: int = 8007
-    api_key: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    MICROSERVICES_API_KEY: str = Field(
+        validation_alias=AliasChoices("MICROSERVICES_API_KEY")
+    )
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
     
     # Weaviate configuration

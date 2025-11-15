@@ -31,10 +31,9 @@ def get_user_id_from_header(request: Request) -> Optional[str]:
 
 def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
     """Validate API key"""
-    # For Ollama service, we might have a different API key or no API key requirement
-    # This is a simplified implementation
-    if hasattr(settings, 'API_KEY') and settings.API_KEY:
-        if api_key != settings.API_KEY:
+    expected_key = getattr(settings, "MICROSERVICES_API_KEY", None)
+    if expected_key:
+        if api_key != expected_key:
             logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
             raise HTTPException(status_code=401, detail="Invalid API key")
     return True

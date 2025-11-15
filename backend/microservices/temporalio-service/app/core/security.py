@@ -21,10 +21,10 @@ def verify_api_key(api_key: str) -> bool:
     
     # For development, use simple string comparison
     if settings.debug:
-        return api_key == settings.api_key
+        return api_key == settings.MICROSERVICES_API_KEY
     
     # For production, use secure comparison
-    expected_key = settings.api_key
+    expected_key = settings.MICROSERVICES_API_KEY
     return hmac.compare_digest(api_key, expected_key)
 
 

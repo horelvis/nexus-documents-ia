@@ -159,7 +159,7 @@ OLLAMA_BASE_URL=http://genai-ollama:11434
 MODEL_NAME=gpt-oss:20b
 
 # API Security
-MICROSERVICES_API_KEY=nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt
+MICROSERVICES_API_KEY=<your-secure-microservices-api-key>
 ```
 
 ### Desarrollo Local
@@ -169,7 +169,7 @@ cd backend/docker
 ./start-dev.sh
 
 # Verificar herramientas disponibles
-curl -H "Authorization: Bearer nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt" \
+curl -H "Authorization: Bearer ${MICROSERVICES_API_KEY}" \
      http://localhost:8007/elysia/tools
 ```
 

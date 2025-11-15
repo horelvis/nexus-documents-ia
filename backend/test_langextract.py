@@ -3,6 +3,7 @@
 Test LangExtract service with sample documents
 """
 import asyncio
+import os
 import httpx
 import json
 
@@ -12,7 +13,9 @@ async def test_langextract_service():
     
     # Service URL
     base_url = "http://localhost:8009"
-    api_key = "dev-api-key-2024"
+    api_key = os.getenv("MICROSERVICES_API_KEY")
+    if not api_key:
+        raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_langextract.py")
     
     # Test documents
     test_documents = [

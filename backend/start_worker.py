@@ -34,25 +34,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def startup(ctx):
-    """Startup function for worker"""
-    logger.info(f"Starting {worker_name}...")
-    logger.info(f"Redis: {settings.REDIS_HOST}:{settings.REDIS_PORT}")
-    logger.info(f"Microservices API: {settings.LANGCHAIN_SERVICE_URL}")
-    logger.info(f"Worker type: {worker_type}")
-
-
-async def shutdown(ctx):
-    """Shutdown function for worker"""
-    logger.info(f"Shutting down {worker_name}...")
-
-
 if __name__ == "__main__":
     logger.info(f"{worker_name} Starting...")
     
     # Run worker
-    run_worker(
-        WorkerSettings,
-        startup=startup,
-        shutdown=shutdown
-    )
+    run_worker(WorkerSettings)

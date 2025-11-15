@@ -30,7 +30,7 @@ def get_user_id_from_header(request: Request) -> Optional[str]:
 
 def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool:
     """Validate API key"""
-    if api_key != settings.API_KEY:
+    if api_key != settings.MICROSERVICES_API_KEY:
         logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
         raise HTTPException(status_code=401, detail="Invalid API key")
     return True

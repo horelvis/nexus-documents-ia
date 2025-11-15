@@ -7,10 +7,10 @@ import { Button } from '../../ui/button';
 import Icons from './ui/icons';
 
 const navigation = [
-  { name: 'Features', href: '#features' },
-  { name: 'Services', href: '#services' },
-  { name: 'Pricing', href: '#pricing' },
-  { name: 'About', href: '#about' },
+  { name: 'Solución', href: '#features' },
+  { name: 'Casos de uso', href: '#services' },
+  { name: 'Planes', href: '#pricing' },
+  { name: 'Recursos', href: '#about' },
 ];
 
 const CapsNavbar = () => {
@@ -48,12 +48,12 @@ const CapsNavbar = () => {
           <div className="items-center hidden lg:flex gap-x-4">
             <Button size="sm" variant="secondary" asChild>
               <Link href="/auth/sign-in">
-                Login
+                Iniciar sesión
               </Link>
             </Button>
             <Button size="sm" asChild>
               <Link href="/auth/sign-up">
-                Start for free
+                Solicitar demo
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Link>
             </Button>
@@ -114,12 +114,12 @@ const CapsNavbar = () => {
                 <div className="py-6 space-y-2">
                   <Button variant="secondary" asChild className="w-full">
                     <Link href="/auth/sign-in">
-                      Login
+                      Iniciar sesión
                     </Link>
                   </Button>
                   <Button asChild className="w-full">
                     <Link href="/auth/sign-up">
-                      Start for free
+                      Solicitar demo
                       <ArrowRight className="w-4 h-4 ml-2" />
                     </Link>
                   </Button>

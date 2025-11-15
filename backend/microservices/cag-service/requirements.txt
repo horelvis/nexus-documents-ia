@@ -8,9 +8,11 @@ crewai[tools]==0.86.0
 # Vector DB y Ollama  
 ollama
 langchain-ollama>=0.2.0
+langchain-community
 qdrant-client
 
 # Dependencias básicas
 pydantic
+pydantic-settings
 requests
 loguru

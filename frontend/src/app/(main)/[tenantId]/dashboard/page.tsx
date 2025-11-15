@@ -1,17 +1,61 @@
 "use client"
 
 import { useParams } from "next/navigation"
-import { Suspense } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { DocumentStats } from "@/components/dashboard/document-stats"
 import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { QuickActions } from "@/components/dashboard/quick-actions"
 import { SharedDocumentsPanel } from "@/components/dashboard/shared-documents-panel"
 import { AIInsightsPanel } from "@/components/dashboard/ai-insights-panel"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import Link from "next/link"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useApiClient } from "@/lib/api-client"
 export default function DashboardPage() {
   const params = useParams()
   const tenantId = params.tenantId as string
+  const [activeWorkflows, setActiveWorkflows] = useState<number>(0)
+  const [loadingWorkflows, setLoadingWorkflows] = useState<boolean>(false)
+  const apiClient = useApiClient()
+
+  useEffect(() => {
+    let isMounted = true
+
+    const fetchWorkflowSummary = async () => {
+      try {
+        setLoadingWorkflows(true)
+        const response = await apiClient.get<any>('/temporalio/workflows/summary')
+        if (!response.data || !isMounted) return
+
+        const data = response.data
+        const active = typeof data.active === 'number'
+          ? data.active
+          : Array.isArray(data.workflows)
+            ? data.workflows.filter((w: any) => (w.status || '').toLowerCase() === 'running').length
+            : 0
+
+        setActiveWorkflows(active)
+      } catch (err) {
+        if (isMounted) {
+          setActiveWorkflows(0)
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingWorkflows(false)
+        }
+      }
+    }
+
+    fetchWorkflowSummary()
+    const id = setInterval(fetchWorkflowSummary, 60000)
+
+    return () => {
+      isMounted = false
+      clearInterval(id)
+    }
+  }, [apiClient])
 
   return (
     <div className="flex flex-col gap-6 py-4 md:py-6">
@@ -21,6 +65,26 @@ export default function DashboardPage() {
         <p className="text-muted-foreground">
           Welcome back! Here's an overview of your document workspace.
         </p>
+      </div>
+
+      {/* Quick CTA to Workflows */}
+      <div className="px-4 lg:px-6">
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div>
+              <CardTitle className="text-lg">Workflows con TemporalIO</CardTitle>
+              <CardDescription>Orquesta procesos durables con Emma AI</CardDescription>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="text-xs">
+                {loadingWorkflows ? 'Cargando…' : `Activos: ${activeWorkflows}`}
+              </Badge>
+              <Link href={`/${tenantId}/workflows`}>
+                <Button>Ir a Workflows</Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Document Stats */}

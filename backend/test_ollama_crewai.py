@@ -4,12 +4,16 @@ Test específico de CrewAI con Ollama como LLM principal
 Verifica que el microservicio use modelos locales correctamente
 """
 import asyncio
+import os
 import requests
 import json
 import time
 
 CAG_SERVICE_URL = "http://localhost:8008"
-API_KEY = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_ollama_crewai.py")
 
 def test_health():
     """Test health check del microservicio"""

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 -- Insert initial schema version
 INSERT INTO schema_version (version_partition, db_name, creation_time, curr_version, min_compatible_version)
-VALUES (0, 'temporal', NOW(), '1.0.0', '1.0.0')
+VALUES (0, 'nexus_db', NOW(), '1.0.0', '1.0.0')
 ON CONFLICT (version_partition, db_name) DO NOTHING;
 
 -- Create schema_update_history table

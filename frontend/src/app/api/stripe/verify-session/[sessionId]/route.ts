@@ -25,6 +25,14 @@ export async function GET(
     const subscription = session.subscription as Stripe.Subscription
     const customer = session.customer as Stripe.Customer
 
+    const rawInterval = session.metadata?.interval || 'month'
+    const interval =
+      rawInterval === 'monthly'
+        ? 'month'
+        : rawInterval === 'yearly'
+          ? 'year'
+          : rawInterval
+
     return NextResponse.json({
       success: true,
       session_id: session.id,
@@ -32,7 +40,7 @@ export async function GET(
       customer_email: customer?.email || session.customer_email,
       subscription_id: subscription?.id,
       plan: session.metadata?.plan || 'free',
-      interval: session.metadata?.interval || 'monthly',
+      interval,
       payment_status: session.payment_status,
       amount_total: session.amount_total,
       currency: session.currency,

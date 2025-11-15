@@ -3,10 +3,15 @@
 Test del microservicio CAG con implementación funcional de CrewAI
 """
 import asyncio
+import os
 import requests
 import json
 
 CAG_SERVICE_URL = "http://localhost:8008"
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_microservice_functional.py")
 
 def test_health():
     """Test health check del microservicio"""
@@ -39,7 +44,7 @@ def test_chat_endpoint(message: str):
         }
         
         headers = {
-            "X-API-Key": "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
+            "X-API-Key": API_KEY
         }
         
         response = requests.post(

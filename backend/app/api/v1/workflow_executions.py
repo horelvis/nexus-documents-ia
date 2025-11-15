@@ -12,7 +12,11 @@ import httpx
 
 from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_user
-from app.db.models.workflow_template import WorkflowTemplate, WorkflowExecution, WorkflowExecutionStep
+from app.db.workflow_template_models import (
+    WorkflowTemplate,
+    WorkflowExecution,
+    WorkflowExecutionStep,
+)
 from app.schemas.user import User
 from app.core.config import settings
 
@@ -72,7 +76,7 @@ class ManualTaskCompletion(BaseModel):
 async def _call_temporalio_service(endpoint: str, method: str = "GET", data: Dict = None) -> Dict[str, Any]:
     """Helper to call Temporalio service"""
     
-    temporalio_url = settings.TEMPORALIO_SERVICE_URL or "http://temporalio-service:8010"
+    temporalio_url = settings.TEMPORALIO_SERVICE_URL or "http://temporalio-service:8000"
     
     try:
         async with httpx.AsyncClient() as client:

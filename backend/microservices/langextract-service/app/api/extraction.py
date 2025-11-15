@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/v1/extraction", tags=["extraction"])
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)) -> bool:
     """Verify API key for authentication"""
-    if not x_api_key or x_api_key != settings.api_key:
+    if not x_api_key or x_api_key != settings.MICROSERVICES_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return True
 

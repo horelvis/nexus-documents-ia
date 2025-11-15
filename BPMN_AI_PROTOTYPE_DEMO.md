@@ -206,12 +206,12 @@ pip install transformers torch
 ### **3. Probar Endpoints:**
 ```bash
 # Health check
-curl -H "Authorization: Bearer nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt" \
+curl -H "Authorization: Bearer ${MICROSERVICES_API_KEY}" \
      http://localhost:8007/bpmn-ai/health
 
 # Demo completo
 curl -X POST \
-     -H "Authorization: Bearer nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt" \
+     -H "Authorization: Bearer ${MICROSERVICES_API_KEY}" \
      -H "Content-Type: application/json" \
      http://localhost:8007/bpmn-ai/demo/contract-renewal
 ```

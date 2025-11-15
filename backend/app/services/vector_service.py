@@ -17,9 +17,14 @@ class VectorService:
     def __init__(self, tenant_id: str = None, user_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         self.user_id = user_id
-        self.collection_name = f"nexus_{self.tenant_id}_documents".lower().replace("-", "_")
-        logger.info(f"VectorService initialized for tenant: {self.tenant_id}")
-        logger.info(f"Using Weaviate collection: {self.collection_name}")
+        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
+        self.weaviate_base_url = getattr(weaviate_client, "base_url", "unknown")
+        logger.info(
+            "VectorService initialized | tenant_id=%s collection=%s weaviate_base_url=%s",
+            self.tenant_id,
+            self.collection_name,
+            self.weaviate_base_url,
+        )
     
     async def add_documents(self, texts: List[str], metadatas: List[Dict[str, Any]]) -> bool:
         """
@@ -50,13 +55,24 @@ class VectorService:
                 documents.append(doc)
             
             # Usar batch add del cliente Weaviate
+            logger.debug(
+                "Batch adding documents | collection=%s count=%d weaviate_base_url=%s",
+                self.collection_name,
+                len(documents),
+                self.weaviate_base_url,
+            )
             result = await weaviate_client.batch_add_documents(self.collection_name, documents)
             
             logger.info(f"✅ Added {len(documents)} documents to Weaviate collection {self.collection_name}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to add documents to Weaviate: {e}")
+            logger.exception(
+                "❌ Failed to batch add documents | collection=%s weaviate_base_url=%s error=%s",
+                self.collection_name,
+                self.weaviate_base_url,
+                e,
+            )
             return False
     
     async def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any]) -> bool:
@@ -88,7 +104,13 @@ class VectorService:
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to add document {doc_id} to Weaviate: {e}")
+            logger.exception(
+                "❌ Failed to add document | doc_id=%s collection=%s weaviate_base_url=%s error=%s",
+                doc_id,
+                self.collection_name,
+                self.weaviate_base_url,
+                e,
+            )
             return False
     
     async def search_similar(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -128,7 +150,13 @@ class VectorService:
             return documents
             
         except Exception as e:
-            logger.error(f"❌ Search failed in Weaviate: {e}")
+            logger.exception(
+                "❌ Search failed in Weaviate | collection=%s weaviate_base_url=%s query_chars=%d error=%s",
+                self.collection_name,
+                self.weaviate_base_url,
+                len(query),
+                e,
+            )
             return []
     
     async def search_by_document_ids(self, doc_ids: List[str], query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -174,7 +202,13 @@ class VectorService:
             return documents
             
         except Exception as e:
-            logger.error(f"❌ Search by IDs failed in Weaviate: {e}")
+            logger.exception(
+                "❌ Search by IDs failed | collection=%s doc_ids=%s weaviate_base_url=%s error=%s",
+                self.collection_name,
+                doc_ids,
+                self.weaviate_base_url,
+                e,
+            )
             return []
     
     async def delete_document(self, doc_id: str) -> bool:
@@ -194,7 +228,12 @@ class VectorService:
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to delete document {doc_id} from Weaviate: {e}")
+            logger.exception(
+                "❌ Failed to delete document from Weaviate | doc_id=%s collection=%s error=%s",
+                doc_id,
+                self.collection_name,
+                e,
+            )
             return False
     
     def get_collection_info(self) -> Dict[str, Any]:
@@ -214,7 +253,11 @@ class VectorService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Failed to get collection info from Weaviate: {e}")
+            logger.exception(
+                "❌ Failed to get collection info from Weaviate | collection=%s error=%s",
+                self.collection_name,
+                e,
+            )
             return {}
     
     def _recreate_collection_if_needed(self) -> bool:

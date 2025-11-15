@@ -3,8 +3,14 @@
 Simple CAG test with minimal configuration
 """
 import asyncio
+import os
 import httpx
 import time
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_simple_cag.py")
 
 async def test_simple_cag():
     """Test CAG with simplest possible query"""
@@ -29,7 +35,7 @@ async def test_simple_cag():
             response = await client.post(
                 "http://langgraph-service:8007/api/v1/graphs/run",
                 json=request,
-                headers={"X-API-Key": "unified-microservices-key-12345"}
+                headers={"X-API-Key": API_KEY}
             )
             
             elapsed = time.time() - start_time

@@ -26,7 +26,7 @@ export default function PricingPage() {
 
     // For paid plans, redirect to signup with plan info
     // The checkout session will be created after authentication
-    const interval = isYearly ? 'yearly' : 'monthly'
+    const interval = isYearly ? 'year' : 'month'
     window.location.href = `/auth/sign-up?plan=${plan.id}&interval=${interval}`
   }
 

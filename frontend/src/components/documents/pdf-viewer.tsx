@@ -51,6 +51,7 @@ interface PDFViewerProps {
   className?: string
   showToolbar?: boolean
   initialScale?: number
+  height?: string | number
 }
 
 export default function PDFViewer({ 
@@ -58,7 +59,8 @@ export default function PDFViewer({
   fileName = 'document.pdf', 
   className,
   showToolbar = true,
-  initialScale = 1.0
+  initialScale = 1.0,
+  height = '600px'
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0)
   const [pageNumber, setPageNumber] = useState<number>(1)
@@ -68,6 +70,9 @@ export default function PDFViewer({
   const [error, setError] = useState<string | null>(null)
   const [signatures, setSignatures] = useState<DigitalSignature[]>([])
   const [showSignatureInfo, setShowSignatureInfo] = useState<boolean>(false)
+
+  const resolvedHeight =
+    typeof height === 'number' ? `${height}px` : height || '600px'
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages)
@@ -184,28 +189,31 @@ export default function PDFViewer({
 
   if (error) {
     return (
-      <Card className={cn("p-8 text-center", className)}>
-        <div className="text-red-500 mb-4">
-          <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.692-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
+      <Card className={cn("h-full flex items-center justify-center p-6 text-center", className)}>
+        <div>
+          <div className="text-red-500 mb-4">
+            <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.692-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold mb-2">Error loading PDF</h3>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()} variant="outline">
+            Try Again
+          </Button>
         </div>
-        <h3 className="text-lg font-semibold mb-2">Error loading PDF</h3>
-        <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={() => window.location.reload()} variant="outline">
-          Try Again
-        </Button>
       </Card>
     )
   }
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
-      {/* Toolbar */}
+    <div
+      className={cn("flex flex-col", className)}
+      style={{ minHeight: resolvedHeight, height: resolvedHeight }}
+    >
       {showToolbar && (
         <div className="flex items-center justify-between p-4 border-b bg-background">
           <div className="flex items-center space-x-2">
-            {/* Navigation */}
             <Button
               variant="outline"
               size="sm"
@@ -238,7 +246,6 @@ export default function PDFViewer({
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* Zoom controls */}
             <Button variant="outline" size="sm" onClick={zoomOut} disabled={scale <= 0.5}>
               <ZoomOut className="h-4 w-4" />
             </Button>
@@ -257,7 +264,6 @@ export default function PDFViewer({
 
             <Separator orientation="vertical" className="h-6" />
 
-            {/* Additional controls */}
             <Button variant="outline" size="sm" onClick={rotate}>
               <RotateCw className="h-4 w-4" />
             </Button>
@@ -270,7 +276,6 @@ export default function PDFViewer({
               <Maximize2 className="h-4 w-4" />
             </Button>
 
-            {/* Digital Signatures Indicator */}
             {signatures.length > 0 && (
               <>
                 <Separator orientation="vertical" className="h-6" />
@@ -289,7 +294,6 @@ export default function PDFViewer({
         </div>
       )}
 
-      {/* Digital Signatures Info Panel */}
       {showSignatureInfo && signatures.length > 0 && (
         <div className="border-b bg-blue-50 dark:bg-blue-950 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -361,9 +365,7 @@ export default function PDFViewer({
         </div>
       )}
 
-      {/* PDF Content */}
-      <div className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900">
-        <div className="flex justify-center p-4">
+      <div className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 flex justify-center p-4">
           {isLoading && (
             <div className="flex items-center justify-center h-96">
               <Loader2 className="h-8 w-8 animate-spin" />
@@ -371,27 +373,28 @@ export default function PDFViewer({
             </div>
           )}
           
-          <Document
-            file={url}
-            onLoadSuccess={onDocumentLoadSuccess}
-            onLoadError={onDocumentLoadError}
-            loading={null}
-            className="flex justify-center"
-          >
-            <Page
-              pageNumber={pageNumber}
-              scale={scale}
-              rotate={rotation}
-              className="shadow-lg"
-              loading={
-                <div className="flex items-center justify-center h-96 bg-white border">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              }
-            />
-          </Document>
+          <div className="w-full flex justify-center">
+            <Document
+              file={url}
+              onLoadSuccess={onDocumentLoadSuccess}
+              onLoadError={onDocumentLoadError}
+              loading={null}
+              className="flex justify-center w-full"
+            >
+              <Page
+                pageNumber={pageNumber}
+                scale={scale}
+                rotate={rotation}
+                className="shadow-lg max-w-full"
+                loading={
+                  <div className="flex items-center justify-center h-96 bg-white border">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                }
+              />
+            </Document>
+          </div>
         </div>
-      </div>
 
       {/* Status bar */}
       {showToolbar && (

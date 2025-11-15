@@ -3,6 +3,7 @@
 Test Simple de Temporalio Microservice
 Solo prueba los componentes básicos sin depender del servidor Temporal
 """
+import os
 import requests
 import json
 import time
@@ -11,7 +12,9 @@ import time
 class SimpleTemporalioTest:
     def __init__(self):
         self.base_url = "http://localhost:8010"
-        self.api_key = "nxs_dev_GYCa7km7zmibtf54yzA9NwPMj4fAYFGt"
+        self.api_key = os.getenv("MICROSERVICES_API_KEY")
+        if not self.api_key:
+            raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_temporalio_simple.py")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"

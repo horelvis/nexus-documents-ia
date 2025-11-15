@@ -4,9 +4,15 @@ Test script for CAG Service
 Execute inside Docker network
 """
 import asyncio
+import os
 import httpx
 import json
 import time
+
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_cag_service.py")
 
 
 async def test_cag_health():
@@ -62,7 +68,7 @@ async def test_document_analysis():
             response = await client.post(
                 "http://cag-service:8008/api/v1/cag/analyze",
                 json=request_data,
-                headers={"X-API-Key": "unified-microservices-key-12345"}
+                headers={"X-API-Key": API_KEY}
             )
             
             elapsed = time.time() - start_time
@@ -106,7 +112,7 @@ async def test_query_processing():
             response = await client.post(
                 "http://cag-service:8008/api/v1/cag/query",
                 json=request_data,
-                headers={"X-API-Key": "unified-microservices-key-12345"}
+                headers={"X-API-Key": API_KEY}
             )
             
             elapsed = time.time() - start_time

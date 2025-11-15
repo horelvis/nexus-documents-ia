@@ -12,6 +12,7 @@ from app.schemas.weaviate import (
     DocumentCreate, DocumentResponse, SearchRequest, SearchResponse,
     CollectionInfo, VectorQuery
 )
+from weaviate.exceptions import UnexpectedStatusCodeException
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ class WeaviateService:
             doc_data = {
                 "title": document.title,
                 "content": document.content,
-                "document_id": document.id,  # Store PostgreSQL document ID as property
+                "document_id": doc_id,  # Store PostgreSQL document ID as property
                 "tenant_id": document.tenant_id,
                 "document_type": document.document_type,
                 "tags": document.tags,
@@ -258,13 +259,30 @@ class WeaviateService:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not generate embedding via Ollama: {e}")
             
-            # Add document to collection
-            result = collection.data.insert(
-                properties=doc_data,
-                uuid=doc_id
-            )
+            # Insert document; if it exists already, replace it
+            try:
+                result = collection.data.insert(
+                    properties=doc_data,
+                    uuid=doc_id
+                )
+                logger.info(f"✅ Inserted document {doc_id} to {collection_name}")
+            except UnexpectedStatusCodeException as exc:
+                if exc.status_code == 422 and "already exists" in str(exc):
+                    logger.info(f"♻️ Document {doc_id} already exists in {collection_name}, replacing")
+                    result = collection.data.replace(
+                        properties=doc_data,
+                        uuid=doc_id
+                    )
+                    logger.info(f"✅ Replaced document {doc_id} in {collection_name}")
+                else:
+                    raise
             
-            logger.info(f"✅ Added document {doc_id} to {collection_name}")
+            vector_identifier = doc_id
+            if result is not None:
+                try:
+                    vector_identifier = str(result)
+                except Exception:
+                    vector_identifier = doc_id
             
             return DocumentResponse(
                 id=doc_id,
@@ -276,7 +294,7 @@ class WeaviateService:
                 tags=document.tags,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
-                vector_id=str(result)
+                vector_id=vector_identifier
             )
             
         except Exception as e:

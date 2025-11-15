@@ -29,14 +29,14 @@ const Features = () => {
                     <Badge size="lg" variant="outline">
                         <Icons.bolt className="w-4 h-4" />
                         <span className="ml-2 text-sm">
-                            AI-Powered Document Features
+                            Capacidades clave para asesorías
                         </span>
                     </Badge>
                     <h2 className="mt-6 text-2xl font-semibold text-center lg:text-3xl xl:text-4xl">
-                        Intelligent document management made simple
+                        Gestión documental laboral impulsada por IA
                     </h2>
                     <p className="max-w-lg mt-6 text-center text-neutral-500">
-                        Transform how you organize, search, and analyze documents with our AI-powered features designed for modern workflows.
+                        Digitaliza nóminas, contratos y modelos fiscales con clasificación automática, búsqueda semántica y alertas proactivas para tu cartera de clientes.
                     </p>
                 </div>
             </AnimationContainer>
@@ -110,7 +110,7 @@ const Features = () => {
                                 40.9k
                             </h3>
                             <span className="text-sm text-muted-foreground">
-                                Teams
+                                Expedientes activos
                             </span>
                         </AnimationContainer>
                         <AnimationContainer delay={0.35} className="flex flex-col items-center">
@@ -118,7 +118,7 @@ const Features = () => {
                                 21.2k
                             </h3>
                             <span className="text-sm text-muted-foreground">
-                                Users
+                                Asesores conectados
                             </span>
                         </AnimationContainer>
                         <AnimationContainer delay={0.4} className="flex flex-col items-center">
@@ -126,7 +126,7 @@ const Features = () => {
                                 10.5k
                             </h3>
                             <span className="text-sm text-muted-foreground">
-                                Projects
+                                Flujos automatizados
                             </span>
                         </AnimationContainer>
                     </div>

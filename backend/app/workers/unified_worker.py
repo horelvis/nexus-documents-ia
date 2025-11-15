@@ -2,7 +2,7 @@
 Unified Worker
 Combines all worker functions into a single worker process
 """
-from arq import run_worker
+from arq import cron, run_worker
 from arq.connections import RedisSettings
 
 from app.core.config import settings
@@ -27,6 +27,10 @@ from app.workers.email_worker import (
     send_password_reset,
     send_bulk_emails,
     process_pending_notifications
+)
+from app.workers.indexing_worker import (
+    retry_document_indexing,
+    auto_retry_failed_indexing
 )
 
 # Redis settings
@@ -59,15 +63,18 @@ class WorkerSettings:
         send_document_share_notification,
         send_password_reset,
         send_bulk_emails,
+
+        # Indexing functions
+        retry_document_indexing,
     ]
     
     # All cron jobs
     cron_jobs = [
-        # Run at different times to spread load
-        ("*/30 * * * *", process_pending_notifications),  # Every 30 minutes
-        ("0 */6 * * *", auto_categorize_pending_documents),  # Every 6 hours
-        ("0 2 * * *", auto_generate_missing_previews),  # Daily at 2 AM
-        ("0 3 1 * *", cleanup_old_previews),  # Monthly at 3 AM
+        cron(process_pending_notifications, minute={0, 30}),
+        cron(auto_categorize_pending_documents, hour={0, 6, 12, 18}, minute=0),
+        cron(auto_generate_missing_previews, hour=2, minute=0),
+        cron(cleanup_old_previews, day=1, hour=3, minute=0),
+        cron(auto_retry_failed_indexing, minute={0, 30}),
     ]
     
     # Increased limits for unified worker

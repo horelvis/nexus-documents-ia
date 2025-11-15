@@ -29,7 +29,7 @@ class AsyncStorageClient:
         # Try internal URL first, then fallback to external URL
         self.base_url = getattr(settings, 'STORAGE_SERVICE_INTERNAL_URL', 
                                getattr(settings, 'STORAGE_SERVICE_URL', 'http://storage-service:8001'))
-        self.api_key = getattr(settings, 'STORAGE_API_KEY', 'your-secret-api-key-here')
+        self.api_key = settings.STORAGE_API_KEY
         
         # Common headers for all requests
         self.headers = {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { 
   IconPlus, 
@@ -83,14 +83,14 @@ export default function DocumentsPage() {
   }
   
   // Store user preference
-  const storePreference = (key: string, value: any) => {
+  const storePreference = useCallback((key: string, value: any) => {
     if (typeof window === 'undefined') return
     try {
       localStorage.setItem(`documents_${tenantId}_${key}`, JSON.stringify(value))
     } catch {
       // Ignore localStorage errors
     }
-  }
+  }, [tenantId])
   
   // Initialize states with stored preferences
   const [selectedFilter, setSelectedFilter] = useState(() => 
@@ -109,16 +109,26 @@ export default function DocumentsPage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
-  const { openUploadDialog, setOnUploadComplete } = useUpload()
+  const { openUploadDialog, closeUploadDialog, setOnUploadComplete } = useUpload()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
   const searchService = useSearchService()
+  const documentServiceRef = useRef(documentService)
+  const searchServiceRef = useRef(searchService)
+
+  useEffect(() => {
+    documentServiceRef.current = documentService
+  }, [documentService])
+
+  useEffect(() => {
+    searchServiceRef.current = searchService
+  }, [searchService])
 
 
 
 
   // Load documents from API - simple pattern
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     
@@ -128,7 +138,7 @@ export default function DocumentsPage() {
       // Usar búsqueda semántica por contenido cuando hay un query de búsqueda
       if (useDeepSearch && searchQuery && searchQuery.trim()) {
         // Use semantic search for content
-        const searchResults = await searchService.searchDocuments({
+        const searchResults = await searchServiceRef.current.searchDocuments({
           query: searchQuery,
           limit: viewMode === 'table' ? 100 : perPage
         })
@@ -136,7 +146,7 @@ export default function DocumentsPage() {
         if (searchResults.error) {
           console.warn('Semantic search failed, falling back to regular search:', searchResults.error)
           // Fallback to regular document search instead of showing error
-          response = await documentService.getDocuments({
+          response = await documentServiceRef.current.getDocuments({
             search: searchQuery || undefined,
             status: selectedFilter !== 'all' ? selectedFilter : undefined,
             per_page: viewMode === 'table' ? 100 : perPage,
@@ -187,7 +197,7 @@ export default function DocumentsPage() {
       } else {
         // Use regular document listing
         const itemsPerPage = viewMode === 'table' ? 100 : perPage
-        response = await documentService.getDocuments({
+        response = await documentServiceRef.current.getDocuments({
           search: searchQuery || undefined,
           status: selectedFilter !== 'all' ? selectedFilter : undefined,
           per_page: itemsPerPage,
@@ -221,12 +231,12 @@ export default function DocumentsPage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage])
 
   // Reload when dependencies change
   useEffect(() => {
     loadDocuments()
-  }, [selectedFilter, currentPage, viewMode])
+  }, [loadDocuments])
   
   // Reset to page 1 when filter or search query changes
   useEffect(() => {
@@ -237,22 +247,37 @@ export default function DocumentsPage() {
   // Documents are already filtered server-side
   const filteredDocuments = documents || []
 
-  const handleUploadComplete = (uploadedFiles: Array<{file: File, id: string, status: string}>) => {
-    // Reload documents from server to get the latest data
-    loadDocuments()
-    
-    // Show success notification
+  const handleUploadComplete = useCallback((uploadedFiles: Array<{file: File, id: string, status: string}>) => {
+    if (!uploadedFiles || uploadedFiles.length === 0) return
+
+    const successfulUploads = uploadedFiles.filter(file => file.status === 'success')
+    if (successfulUploads.length === 0) return
+
+    closeUploadDialog()
+
+    // Notify user
     addNotification({
       type: 'upload',
       title: 'Upload Complete',
-      message: `${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''} uploaded successfully`,
-      fileCount: uploadedFiles.length,
+      message: `${successfulUploads.length} file${successfulUploads.length > 1 ? 's' : ''} uploaded successfully`,
+      fileCount: successfulUploads.length,
       action: {
         label: 'View Documents',
         href: '/documents'
       }
     })
-  }
+
+    // Reset filters/search so new documents are visible
+    setSearchQuery('')
+    setSelectedFilter('all')
+    storePreference('filter', 'all')
+    setCurrentPage(1)
+
+    // Reload documents after a brief delay to allow backend processing/indexing
+    setTimeout(() => {
+      loadDocuments()
+    }, 750)
+  }, [addNotification, closeUploadDialog, loadDocuments, storePreference])
 
   // Register upload completion handler for this page
   useEffect(() => {
@@ -261,7 +286,7 @@ export default function DocumentsPage() {
     return () => {
       setOnUploadComplete(undefined)
     }
-  }, [])
+  }, [handleUploadComplete, setOnUploadComplete])
 
   // Document operations
   const handleViewDocument = (document: ApiDocument) => {

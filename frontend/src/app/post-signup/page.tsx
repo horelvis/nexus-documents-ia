@@ -33,7 +33,16 @@ export default function PostSignUpPage() {
   
   // Obtener plan desde metadata o params
   const plan = user?.unsafeMetadata?.plan as string || searchParams.get('plan') || 'free'
-  const interval = user?.unsafeMetadata?.interval as string || searchParams.get('interval') || 'monthly'
+  const rawInterval =
+    (user?.unsafeMetadata?.interval as string) ||
+    searchParams.get('interval') ||
+    'month'
+  const interval =
+    rawInterval?.toLowerCase() === 'yearly'
+      ? 'year'
+      : rawInterval?.toLowerCase() === 'monthly'
+        ? 'month'
+        : rawInterval?.toLowerCase() ?? 'month'
   const isPaidPlan = plan !== 'free' && plan !== 'enterprise'
   
   // Definir los pasos del proceso
@@ -262,7 +271,7 @@ export default function PostSignUpPage() {
           {plan !== 'free' && !error && (
             <div className="mt-3">
               <Badge variant="default" className="text-sm">
-                Plan {plan} - {interval === 'yearly' ? 'Anual' : 'Mensual'}
+                Plan {plan} - {interval === 'year' ? 'Anual' : 'Mensual'}
               </Badge>
             </div>
           )}

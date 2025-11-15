@@ -78,7 +78,7 @@ class EmmaAIAgentClient:
                         "tenant_id": context.get("tenant_id", "default"),
                         "user_id": context.get("user_id", "system")
                     },
-                    headers={"Authorization": f"Bearer {settings.api_key}"}
+                    headers={"Authorization": f"Bearer {settings.MICROSERVICES_API_KEY}"}
                 )
                 
                 if response.status_code == 200:

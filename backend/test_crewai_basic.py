@@ -2,12 +2,16 @@
 """
 Test básico de CrewAI con query simple
 """
+import os
 import requests
 import json
 import time
 
 BASE_URL = "http://localhost:8008"
-API_KEY = "unified-microservices-key-12345"
+API_KEY = os.getenv("MICROSERVICES_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MICROSERVICES_API_KEY environment variable is required for test_crewai_basic.py")
 
 def test_simple_query():
     """Test con query simple que no debería buscar documentos"""

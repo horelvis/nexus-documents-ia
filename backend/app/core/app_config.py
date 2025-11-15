@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 from app.core.config import settings
+from app.core.env_validator import validate_environment
 from app.core.logging import setup_logging
 from app.core.security_validator import validate_security_on_startup
 from app.core.structured_logging import setup_structured_logging
@@ -124,6 +125,9 @@ def configure_static_files(app: FastAPI) -> None:
 
 def create_application() -> FastAPI:
     """Create and configure FastAPI application"""
+    # Ensure critical environment variables are present before bootstrapping
+    validate_environment()
+
     # Setup logging
     setup_logging()
 

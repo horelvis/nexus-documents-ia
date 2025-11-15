@@ -12,6 +12,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.core.config import settings
+import httpx
 from app.core.temporalio_client import temporalio_client
 from app.workflows.dynamic_workflow import DynamicWorkflow, DynamicWorkflowInput
 
@@ -60,19 +61,38 @@ async def start_workflow_execution(request: WorkflowExecutionRequest):
         # Generate workflow ID if not provided
         workflow_id = request.workflow_id or f"{request.template_id}-{uuid.uuid4().hex[:8]}"
         
-        # Get template definition
-        from app.data.workflow_templates_ai import get_all_ai_enhanced_templates
-        
+        # Resolve template definition: try Core API first, fallback to local AI templates
         template_definition = None
-        ai_templates = get_all_ai_enhanced_templates()
-        
-        # Find the template
-        for template in ai_templates:
-            if template["id"] == request.template_id:
-                template_definition = template
-                break
-        
-        # Fallback to legacy template if not found in AI templates
+
+        # Attempt fetch from Core (service-to-service)
+        core_url = f"{settings.api_core_url}/api/v1/workflow-templates/{request.template_id}"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                # Prefer X-API-Key header (some core routes support microservice keys)
+                headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+                resp = await client.get(core_url, headers=headers)
+                if resp.status_code == 200:
+                    core_tpl = resp.json()
+                    template_definition = {
+                        "id": core_tpl.get("id", request.template_id),
+                        "name": core_tpl.get("name", request.template_id),
+                        "version": core_tpl.get("version", "1.0"),
+                        "workflow_definition": core_tpl.get("workflow_definition"),
+                    }
+                else:
+                    logger.info(f"Core template fetch not available ({resp.status_code}); using local templates")
+        except Exception as core_err:
+            logger.info(f"Core template fetch failed: {core_err}. Falling back to local templates")
+
+        if not template_definition:
+            from app.data.workflow_templates_ai import get_all_ai_enhanced_templates
+            ai_templates = get_all_ai_enhanced_templates()
+            for template in ai_templates:
+                if template["id"] == request.template_id:
+                    template_definition = template
+                    break
+
+        # Fallback to legacy template if still not found
         if not template_definition and request.template_id == "legal-advisory-template":
             template_definition = {
                 "id": "legal-advisory-template",
@@ -91,7 +111,7 @@ async def start_workflow_execution(request: WorkflowExecutionRequest):
                     ]
                 }
             }
-        
+
         if not template_definition:
             raise HTTPException(status_code=404, detail=f"Template {request.template_id} not found")
         
@@ -111,11 +131,21 @@ async def start_workflow_execution(request: WorkflowExecutionRequest):
         # Start the workflow
         task_queue = request.task_queue or settings.temporalio_task_queue
         
+        search_attributes = {}
+        if request.tenant_id:
+            search_attributes["TenantId"] = [request.tenant_id]
+            # Provide fallback for clusters where TenantId is not registered yet
+            search_attributes["CustomStringField"] = [request.tenant_id]
+        if request.template_id:
+            search_attributes["TemplateId"] = [request.template_id]
+
         handle = await temporalio_client.client.start_workflow(
             DynamicWorkflow.run,
             workflow_input,
             id=workflow_id,
             task_queue=task_queue,
+            # Search Attributes to enable tenant-level isolation in queries
+            search_attributes=search_attributes,
             retry_policy=RetryPolicy(
                 initial_interval=timedelta(seconds=1),
                 backoff_coefficient=2.0,
@@ -237,16 +267,87 @@ async def cancel_workflow_execution(workflow_id: str):
 async def list_workflow_executions(
     tenant_id: Optional[str] = None,
     status: Optional[str] = None,
+    workflow_type: Optional[str] = None,
     limit: int = 50
 ):
-    """List workflow executions with optional filtering"""
+    """List workflow executions with optional filtering via Temporal Visibility API"""
     try:
-        # TODO: Implement actual workflow listing from Temporalio
-        # This would require querying Temporalio's visibility APIs
-        # For now, return empty list
-        logger.info(f"Listing workflows for tenant {tenant_id} with status {status}")
-        return []
+        if not temporalio_client.is_initialized:
+            raise HTTPException(status_code=503, detail="Temporalio client not initialized")
 
+        # Build Temporal visibility query
+        clauses = []
+        if workflow_type:
+            # Temporal expects the registered type name
+            clauses.append(f"WorkflowType = '{workflow_type}'")
+        if status:
+            clauses.append(f"ExecutionStatus = '{status.upper()}'")
+        # If tenant_id tagging is used as search attribute, filter it (optional)
+        # This will be effective only if workflows set Search Attributes like CustomStringField
+        if tenant_id:
+            # Prefer dedicated search attribute TenantId; include fallback to CustomStringField
+            tenant_clause = f"(TenantId = '{tenant_id}' OR CustomStringField = '{tenant_id}')"
+            clauses.append(tenant_clause)
+
+        query = " AND ".join(clauses)
+
+        results: List[WorkflowStatusResponse] = []
+        async for wf in temporalio_client.client.list_workflows(query=query):
+            try:
+                # Describe to enrich with times and status when possible
+                handle = temporalio_client.client.get_workflow_handle(wf.id, run_id=wf.run_id)
+                desc = await handle.describe()
+                # Map status
+                if desc.status.name == "RUNNING":
+                    st = "running"
+                elif desc.status.name == "COMPLETED":
+                    st = "completed"
+                elif desc.status.name == "FAILED":
+                    st = "failed"
+                elif desc.status.name == "CANCELLED":
+                    st = "cancelled"
+                else:
+                    st = desc.status.name.lower()
+
+                results.append(
+                    WorkflowStatusResponse(
+                        workflow_id=wf.id,
+                        template_id="unknown",
+                        tenant_id="unknown",
+                        status=st,
+                        result=None,
+                        error=None,
+                        created_at=(desc.start_time.isoformat() if desc.start_time else datetime.utcnow().isoformat()),
+                        completed_at=(desc.close_time.isoformat() if desc.close_time else None),
+                        progress=None,
+                    )
+                )
+                if len(results) >= limit:
+                    break
+            except Exception as enrich_err:
+                logger.warning(f"Could not enrich workflow {wf.id}: {enrich_err}")
+                # Fallback minimal info
+                results.append(
+                    WorkflowStatusResponse(
+                        workflow_id=wf.id,
+                        template_id="unknown",
+                        tenant_id="unknown",
+                        status=wf.status.name.lower() if hasattr(wf.status, 'name') else "unknown",
+                        result=None,
+                        error=None,
+                        created_at=(wf.start_time.isoformat() if getattr(wf, 'start_time', None) else datetime.utcnow().isoformat()),
+                        completed_at=None,
+                        progress=None,
+                    )
+                )
+                if len(results) >= limit:
+                    break
+
+        logger.info(f"Visibility list returned {len(results)} items. Query='{query}'")
+        return results
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing workflow executions: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list workflow executions: {str(e)}")
@@ -254,24 +355,50 @@ async def list_workflow_executions(
 
 @router.get("/{workflow_id}/history")
 async def get_workflow_history(workflow_id: str):
-    """Get the execution history of a workflow"""
+    """Get the execution history (raw events) via Temporal service API"""
     try:
         if not temporalio_client.is_initialized:
             raise HTTPException(status_code=503, detail="Temporalio client not initialized")
 
-        # Get workflow handle
         handle = temporalio_client.client.get_workflow_handle(workflow_id)
-        
-        # TODO: Implement history retrieval
-        # This would require accessing Temporalio's history APIs
-        logger.info(f"Getting history for workflow {workflow_id}")
-        
+        # Try to obtain run_id via describe
+        desc = await handle.describe()
+        run_id = desc.run_id
+
+        # Use the underlying workflow service to fetch history events
+        from temporalio.api.workflowservice.v1 import GetWorkflowExecutionHistoryRequest
+        from temporalio.api.common.v1 import WorkflowExecution
+
+        svc = temporalio_client.client.workflow_service
+        req = GetWorkflowExecutionHistoryRequest(
+            namespace=temporalio_client.client.namespace,
+            execution=WorkflowExecution(workflow_id=workflow_id, run_id=run_id),
+            history_event_filter_type=1,  # HISTORY_EVENT_FILTER_TYPE_ALL_EVENT
+            skip_archival=True,
+        )
+        resp = await svc.get_workflow_execution_history(req)
+
+        events_simplified: List[Dict[str, Any]] = []
+        for ev in resp.history.events:
+            ev_type = ev.event_type.name if hasattr(ev.event_type, 'name') else str(ev.event_type)
+            ts = ev.event_time.ToDatetime().isoformat() if hasattr(ev, 'event_time') and ev.event_time is not None else None
+            events_simplified.append({
+                "event_id": getattr(ev, 'event_id', None),
+                "type": ev_type,
+                "time": ts,
+                # Store which attributes field is set for quick inspection
+                "attributes": (ev.WhichOneof("attributes") if hasattr(ev, 'WhichOneof') else None),
+            })
+
         return {
             "workflow_id": workflow_id,
-            "history": [],
-            "message": "History retrieval not yet implemented"
+            "run_id": run_id,
+            "count": len(events_simplified),
+            "events": events_simplified,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workflow history for {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get workflow history: {str(e)}")

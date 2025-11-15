@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { CheckCircle, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { getAllPlans } from '@/lib/stripe-plans'
+import { STRIPE_PLANS, type PlanId } from '@/lib/stripe-plans'
 
 export default function SignUpPage() {
   const searchParams = useSearchParams()
@@ -17,13 +17,18 @@ export default function SignUpPage() {
   const [processingCheckout, setProcessingCheckout] = useState(false)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
   
-  const plan = searchParams.get('plan') || 'free'
-  const interval = searchParams.get('interval') || 'monthly'
+  const rawPlan = (searchParams.get('plan') || 'free').toLowerCase()
+  const planId = (rawPlan in STRIPE_PLANS ? rawPlan : 'free') as PlanId
+  const rawInterval = (searchParams.get('interval') || 'month').toLowerCase()
+  const interval = rawInterval === 'yearly'
+    ? 'year'
+    : rawInterval === 'monthly'
+      ? 'month'
+      : rawInterval
   const invitation = searchParams.get('invitation')
   const tenantId = searchParams.get('tenant')
 
-  const plans = getAllPlans()
-  const selectedPlan = plans.find(p => p.id === plan) || plans.find(p => p.id === 'free')!
+  const selectedPlan = STRIPE_PLANS[planId]
 
   useEffect(() => {
     // Si el usuario ya está autenticado y la sesión está cargada, redirigir según el flujo
@@ -34,7 +39,7 @@ export default function SignUpPage() {
 
   const handlePostSignUp = async () => {
     // Para planes de pago, crear sesión de Stripe
-    if (plan !== 'free' && plan !== 'enterprise') {
+    if (planId !== 'free' && planId !== 'enterprise') {
       setProcessingCheckout(true)
       setCheckoutError(null)
       
@@ -51,7 +56,7 @@ export default function SignUpPage() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            plan,
+            plan: planId,
             interval,
             userEmail,
             successUrl: `${window.location.origin}/onboarding?session_id={CHECKOUT_SESSION_ID}`,
@@ -176,7 +181,7 @@ export default function SignUpPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Precio:</span>
                       <span className="font-semibold">
-                        ${selectedPlan.price}/{interval === 'yearly' ? 'año' : 'mes'}
+                        ${selectedPlan.price}/{interval === 'year' ? 'año' : 'mes'}
                       </span>
                     </div>
                   </div>
@@ -198,7 +203,7 @@ export default function SignUpPage() {
                       <p className="text-muted-foreground">Regístrate con email o redes sociales</p>
                     </div>
                   </li>
-                  {plan !== 'free' && (
+                  {planId !== 'free' && (
                     <li className="flex items-start">
                       <span className="bg-gray-400 dark:bg-gray-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">2</span>
                       <div>
@@ -209,7 +214,7 @@ export default function SignUpPage() {
                   )}
                   <li className="flex items-start">
                     <span className="bg-gray-400 dark:bg-gray-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">
-                      {plan !== 'free' ? '3' : '2'}
+                      {planId !== 'free' ? '3' : '2'}
                     </span>
                     <div>
                       <span className="font-medium">Completa el onboarding</span>
@@ -218,7 +223,7 @@ export default function SignUpPage() {
                   </li>
                   <li className="flex items-start">
                     <span className="bg-gray-400 dark:bg-gray-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">
-                      {plan !== 'free' ? '4' : '3'}
+                      {planId !== 'free' ? '4' : '3'}
                     </span>
                     <div>
                       <span className="font-medium">¡Comienza a usar Nexus!</span>
@@ -251,9 +256,9 @@ export default function SignUpPage() {
                     card: "shadow-none p-0",
                   }
                 }}
-                afterSignUpUrl={`/post-signup?plan=${plan}&interval=${interval}`}
+                afterSignUpUrl={`/post-signup?plan=${planId}&interval=${interval}`}
                 unsafeMetadata={{
-                  plan: plan,
+                  plan: planId,
                   interval: interval,
                   invitation_code: invitation || undefined,
                   tenant_id: tenantId || undefined

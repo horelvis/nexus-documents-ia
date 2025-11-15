@@ -6,13 +6,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with higher timeout/retries
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5 \
+    PIP_NO_CACHE_DIR=1
+RUN pip install --prefer-binary -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/

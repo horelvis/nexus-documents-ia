@@ -66,6 +66,15 @@ class ContractRenewalWorkflow:
         """Main workflow execution"""
         
         workflow_id = workflow.info().workflow_id
+        # Upsert search attributes for tenant and type
+        try:
+            workflow.upsert_search_attributes({
+                "TenantId": input_data.tenant_id,
+                "WorkflowType": "contract_renewal",
+                "ContractId": input_data.contract_id,
+            })
+        except Exception:
+            pass
         self._log_step("workflow_started", {"workflow_id": workflow_id})
         
         try:

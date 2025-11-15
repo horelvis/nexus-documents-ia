@@ -26,7 +26,7 @@ class StorageClient:
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.base_url = getattr(settings, 'STORAGE_SERVICE_URL', 'http://storage-service:8001')
-        self.api_key = getattr(settings, 'STORAGE_API_KEY', 'your-secret-api-key-here')
+        self.api_key = settings.STORAGE_API_KEY
         
         # Headers comunes para todas las requests
         self.headers = {

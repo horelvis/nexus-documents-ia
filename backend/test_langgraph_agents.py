@@ -7,6 +7,7 @@ import asyncio
 import httpx
 import json
 from datetime import datetime
+import os
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
@@ -14,6 +15,10 @@ LANGGRAPH_URL = "http://localhost:8007"
 
 # Test user credentials (you'll need to replace with actual test user token)
 AUTH_TOKEN = "your-test-token-here"  # Replace with actual Clerk token
+LANGGRAPH_API_KEY = os.getenv("LANGGRAPH_API_KEY") or os.getenv("MICROSERVICES_API_KEY")
+
+if not LANGGRAPH_API_KEY:
+    raise RuntimeError("LANGGRAPH_API_KEY or MICROSERVICES_API_KEY environment variable is required for test_langgraph_agents.py")
 
 async def test_langgraph_health():
     """Test if LangGraph service is healthy"""
@@ -106,7 +111,7 @@ async def test_document_analysis():
                     },
                     "mode": "run"
                 },
-                headers={"X-API-Key": "langgraph-secret-key-12345"},
+                headers={"X-API-Key": LANGGRAPH_API_KEY},
                 timeout=30.0
             )
             
@@ -147,7 +152,7 @@ async def test_tag_generation():
                     },
                     "mode": "run"
                 },
-                headers={"X-API-Key": "langgraph-secret-key-12345"},
+                headers={"X-API-Key": LANGGRAPH_API_KEY},
                 timeout=10.0
             )
             

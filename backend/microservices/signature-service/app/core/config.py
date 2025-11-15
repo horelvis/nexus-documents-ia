@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # Security
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")
-    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
+    SECRET_KEY: str
+    MICROSERVICES_API_KEY: str
     
     # Encryption for credentials
     SIGNATURE_ENCRYPTION_KEY: Optional[str] = os.getenv("SIGNATURE_ENCRYPTION_KEY")

@@ -125,6 +125,15 @@ GET  /workflows/list
 POST /workflows/contract-renewal/demo
 ```
 
+### Service Direct - Visibility (`temporalio-service:8010/workflow-executions`)
+
+```http
+GET  /workflow-executions                       # Listado real (Visibility API)
+GET  /workflow-executions?status=RUNNING        # Filtrado por estado
+GET  /workflow-executions?workflow_type=...     # Filtrado por tipo
+GET  /workflow-executions/{workflow_id}/history # Historial de eventos (raw)
+```
+
 ---
 
 ## 🚀 Comandos de Desarrollo
@@ -411,6 +420,44 @@ curl http://localhost:8000/temporalio/workflow/{id}/status
 - [ ] Advanced scheduling
 - [ ] Metrics dashboard
 
+---
+
+## 🧩 Plantillas de Workflow (Consolidación)
+
+- El microservicio ahora intenta consumir plantillas desde el Core (`/api/v1/workflow-templates`) usando clave de microservicios.
+- Si el Core no está disponible o deniega acceso, hace fallback a plantillas AI locales estáticas.
+- Recomendación: exponer en Core un endpoint service-to-service para plantillas (aceptando `X-API-Key`) o que el microservicio lea directamente de la DB compartida.
+
+---
+
+## 🆕 Proceso de Alta para Workflows AI (Catálogo Curado)
+
+Para exponer un flujo AI en el frontend sin manejar JSON a mano:
+
+1. **Definir el template Temporalio**
+   - Implementa la lógica en `backend/microservices/temporalio-service/app/data/workflow_templates_ai.py` (o crea el template en la DB estándar).
+   - Usa un `template_id` único (`ai-<nombre>-template` recomendado).
+
+2. **Registrar la ficha en el catálogo curado**
+   - Edita `backend/app/data/ai_workflow_catalog.py`.
+   - Añade una entrada con:
+     - `id`: identificador corto mostrado en UI (ej. `ai-legal-advisory`).
+     - `template_id`: apunta al template real.
+     - `fields`: describe los inputs del formulario (tipos `text`, `textarea`, `select`, `number` con `options`, `placeholder`, etc.).
+     - Metadatos opcionales (`tags`, `estimated_duration`, `complexity`).
+
+3. **Normalizar payloads (si aplica)**
+   - Si necesitas completar valores calculados, usa `build_workflow_payload()` en el mismo archivo para agregar defaults o transformar datos antes de llamar a Temporalio.
+
+4. **Reiniciar el backend**
+   - FastAPI sirve los endpoints `/api/v1/temporalio/ai-workflows` (listado) y `/api/v1/temporalio/ai-workflows/{id}/execute` (instancia).
+   - El frontend consume automáticamente el catálogo; basta refrescar la página de “Workflows con Agentes AI”.
+
+5. **Checklist final**
+   - Verifica que el template exista (`GET /temporalio/workflow-templates` o `tctl namespace describe`).
+   - Confirma que `tenant_id` se resuelve (lo aporta el usuario autenticado si no se incluye en el formulario).
+   - Documenta cualquier dependencia adicional (ej. credenciales externas) en la ficha del catálogo.
+
 ### **Phase 3** (Futuro)
 - [ ] Workflow versioning strategy
 - [ ] A/B testing workflows
@@ -418,6 +465,32 @@ curl http://localhost:8000/temporalio/workflow/{id}/status
 - [ ] Integration con servicios externos
 - [ ] SLA monitoring
 - [ ] Compliance reporting
+
+---
+
+## 🛡️ Aislamiento por Tenant (Search Attributes)
+
+- Los workflows establecen `TenantId` (y `TemplateId`) como Search Attributes al iniciarse.
+- Los listados usan filtro por `TenantId` para aislar resultados por organización.
+
+Registro de Search Attributes (una vez por clúster Temporal):
+
+```bash
+# Ejemplos usando tctl (Temporal OSS)
+tctl --namespace nexus-workflows admin cluster register-search-attribute \
+  --name TenantId --type Keyword
+
+tctl --namespace nexus-workflows admin cluster register-search-attribute \
+  --name TemplateId --type Keyword
+
+# Opcionales
+tctl --namespace nexus-workflows admin cluster register-search-attribute \
+  --name WorkflowType --type Keyword
+```
+
+Notas:
+- Si los atributos no están registrados, los workflows seguirán funcionando pero el filtrado por tenant no se aplicará en Visibility.
+- Alternativamente, puede usarse un atributo genérico existente (p. ej. `CustomStringField`), pero se recomienda `TenantId` dedicado.
 
 ---
 

@@ -9,7 +9,7 @@ import uuid
 
 from temporalio.client import WorkflowHandle
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import WorkflowAlreadyStartedException
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.core.config import settings
 from app.core.temporalio_client import temporalio_client
@@ -95,11 +95,26 @@ async def start_workflow(
             )
         
         # Start the workflow
+        # Extract tenant_id if present in input
+        tenant_id = None
+        try:
+            if isinstance(request.input_data, dict):
+                tenant_id = request.input_data.get("tenant_id")
+        except Exception:
+            tenant_id = None
+
+        search_attributes = {}
+        if tenant_id:
+            search_attributes["TenantId"] = [tenant_id]
+        if request.workflow_type:
+            search_attributes["WorkflowType"] = [request.workflow_type]
+
         handle = await temporalio_client.client.start_workflow(
             workflow_class.run,
             workflow_input,
             id=workflow_id,
             task_queue=task_queue,
+            search_attributes=search_attributes,
             retry_policy=RetryPolicy(maximum_attempts=3)
         )
         
@@ -114,7 +129,7 @@ async def start_workflow(
             started_at=started_at
         )
         
-    except WorkflowAlreadyStartedException:
+    except WorkflowAlreadyStartedError:
         raise HTTPException(
             status_code=409,
             detail=f"Workflow with ID {workflow_id} is already running"

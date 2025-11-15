@@ -1,9 +1,12 @@
+import logging
 import os
 import secrets
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -129,7 +132,11 @@ class Settings(BaseSettings):
     # NEW: Weaviate Service with Elysia integration (DEFAULT VECTOR ENGINE)
     WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
     USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
-    
+
+    # Text extraction microservice
+    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8012")
+    TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
+
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
     ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
     ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
@@ -139,10 +146,13 @@ class Settings(BaseSettings):
     
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
+    
+    # Temporalio Service
+    TEMPORALIO_SERVICE_URL: str = os.getenv("TEMPORALIO_SERVICE_URL", "http://temporalio-service:8000")
 
     # Ollama
-    OLLAMA_BASE_URL: str = "http://ollama-service:11434"
-    OLLAMA_MODEL: str = "llama3.2"
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
     # Gotenberg Service (direct container)
@@ -169,11 +179,8 @@ class Settings(BaseSettings):
     MULTI_TENANT: bool = True
     DEFAULT_TENANT: str = "default"
 
-    # Unified API Key for all microservices
-    MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "unified-microservices-key-12345")
-    
-    # Legacy API Key (for backward compatibility)
-    API_KEY: str = os.getenv("API_KEY", "your-secret-api-key-here") # Default value, should be overridden by env var
+    # Unified API Key for all microservices (required)
+    MICROSERVICES_API_KEY: str
     
     # Clerk Configuration
     CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")

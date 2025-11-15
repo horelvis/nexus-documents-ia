@@ -27,16 +27,16 @@ const Banner = () => {
 
                 <div className="flex flex-col items-center justify-center max-w-2xl mx-auto py-5 lg:py-8">
                     <h2 className="text-2xl lg:text-4xl xl:text-5xl font-semibold text-center !leading-tight">
-                        Transform Your Document Management with AI
+                        La plataforma IA que necesitan las asesorías laborales
                     </h2>
                     <p className="mt-6 text-center text-muted-foreground max-w-lg">
-                        Harness the power of AI to organize, analyze, and optimize your documents like never before. <span className="hidden lg:inline-flex">
-                            Experience intelligent search, automated workflows, and comprehensive insights.
+                        Digitaliza expedientes, vigila convenios y ofrece a tus clientes respuestas inmediatas. <span className="hidden lg:inline-flex">
+                            Combina clasificación automática, firma electrónica y alertas inteligentes en un solo flujo.
                         </span>
                     </p>
                     <Button size="lg" className="mt-6" asChild>
                         <Link href="/auth/sign-up">
-                            Get Started - It&apos;s Free
+                            Agenda una demo
                         </Link>
                     </Button>
                 </div>
