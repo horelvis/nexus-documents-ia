@@ -22,8 +22,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let isMounted = true
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const SUCCESS_INTERVAL = 60_000
+    const FAILURE_INTERVAL = 5 * 60_000
 
     const fetchWorkflowSummary = async () => {
+      let nextDelay = SUCCESS_INTERVAL
       try {
         setLoadingWorkflows(true)
         const response = await apiClient.get<any>('/temporalio/workflows/summary')
@@ -37,23 +41,27 @@ export default function DashboardPage() {
             : 0
 
         setActiveWorkflows(active)
+        nextDelay = SUCCESS_INTERVAL
       } catch (err) {
         if (isMounted) {
           setActiveWorkflows(0)
         }
+        nextDelay = FAILURE_INTERVAL
       } finally {
         if (isMounted) {
           setLoadingWorkflows(false)
+          timeoutId = setTimeout(fetchWorkflowSummary, nextDelay)
         }
       }
     }
 
     fetchWorkflowSummary()
-    const id = setInterval(fetchWorkflowSummary, 60000)
 
     return () => {
       isMounted = false
-      clearInterval(id)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
     }
   }, [apiClient])
 
