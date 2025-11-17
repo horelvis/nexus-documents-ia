@@ -61,7 +61,10 @@ async def create_edit_session(
             db=db,
             template_id=session_data.template_id,
             template_name=session_data.template_name,
+            template_file_base64=session_data.template_file_base64,
             template_content=session_data.template_content,
+            template_file_name=session_data.template_file_name,
+            template_file_mime=session_data.template_file_mime,
             user_id=session_data.user_id,
             user_email=session_data.user_email,
             tenant_id=session_data.tenant_id
@@ -137,7 +140,8 @@ async def finish_edit_session(
         result = await edit_session_service.finish_edit_session(
             db=db,
             session_id=session_id,
-            user_id=finish_data.user_id
+            user_id=finish_data.user_id,
+            force_sync=finish_data.force_sync
         )
         
         return result

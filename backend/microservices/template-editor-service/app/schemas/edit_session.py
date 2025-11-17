@@ -1,7 +1,7 @@
 """
 Pydantic schemas for Edit Sessions API
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, root_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -11,7 +11,22 @@ class EditSessionCreate(BaseModel):
     """Schema for creating new edit session"""
     template_id: str = Field(..., description="ID of the template to edit")
     template_name: str = Field(..., description="Name of the template")
-    template_content: str = Field(..., description="Current template content (HTML)")
+    template_file_base64: Optional[str] = Field(
+        None,
+        description="Template file payload (Base64 ODT). Required if template_content is not provided."
+    )
+    template_content: Optional[str] = Field(
+        None,
+        description="HTML template content. Used when there is no ODT payload available."
+    )
+    template_file_name: Optional[str] = Field(
+        None,
+        description="Original template filename (.odt) or generated name for HTML templates"
+    )
+    template_file_mime: Optional[str] = Field(
+        None,
+        description="MIME type for the template payload"
+    )
     user_id: str = Field(..., description="ID of the user who will edit")
     user_email: str = Field(..., description="Email of the user (for Google Docs permissions)")
     tenant_id: str = Field(..., description="Tenant ID for multi-tenant isolation")
@@ -22,6 +37,16 @@ class EditSessionCreate(BaseModel):
         if '@' not in v:
             raise ValueError('Invalid email format')
         return v.lower()
+    
+    @root_validator
+    def ensure_template_payload(cls, values):
+        """Ensure at least one template source is provided."""
+        file_b64 = values.get("template_file_base64")
+        template_content = values.get("template_content")
+        
+        if not file_b64 and not template_content:
+            raise ValueError("Provide template_file_base64 or template_content")
+        return values
 
 
 class EditSessionResponse(BaseModel):
@@ -29,6 +54,8 @@ class EditSessionResponse(BaseModel):
     id: UUID = Field(..., description="Session ID")
     template_id: UUID = Field(..., description="Template ID")
     template_name: str = Field(..., description="Template name")
+    template_file_name: Optional[str] = Field(None, description="Origin ODT filename")
+    template_file_mime: Optional[str] = Field(None, description="Origin ODT MIME type")
     user_id: str = Field(..., description="User ID")
     user_email: str = Field(..., description="User email")
     tenant_id: str = Field(..., description="Tenant ID")

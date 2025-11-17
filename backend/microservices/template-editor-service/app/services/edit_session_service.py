@@ -2,6 +2,8 @@
 Edit Session Service - Manages temporary Google Docs editing sessions
 """
 import asyncio
+import base64
+import binascii
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
@@ -10,10 +12,11 @@ from sqlalchemy.future import select
 from sqlalchemy import update, delete
 
 from app.models.edit_session import EditSession
-from app.services.google_docs_service import google_docs_service
+from app.services.google_docs_service import google_docs_service, ODT_MIME_TYPE
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+DEFAULT_TEMPLATE_MIME = ODT_MIME_TYPE
 
 
 class EditSessionService:
@@ -29,7 +32,10 @@ class EditSessionService:
         db: AsyncSession,
         template_id: str,
         template_name: str,
-        template_content: str,
+        template_file_base64: Optional[str],
+        template_content: Optional[str],
+        template_file_name: Optional[str],
+        template_file_mime: Optional[str],
         user_id: str,
         user_email: str,
         tenant_id: str
@@ -63,18 +69,44 @@ class EditSessionService:
                     await db.delete(existing_session)
                     await db.commit()
             
-            # 2. Create temporary Google Doc
+            # Determine whether we are using an ODT payload or HTML content
+            template_file_bytes: Optional[bytes] = None
+            html_content: Optional[str] = None
+            if template_file_base64:
+                template_file_bytes = self._decode_template_payload(template_file_base64)
+            else:
+                html_content = template_content or "<p></p>"
+            
+            file_name = template_file_name
+            file_mime = template_file_mime
+            if template_file_bytes:
+                file_name = file_name or f"{template_name}.odt"
+                file_mime = file_mime or DEFAULT_TEMPLATE_MIME
+            else:
+                file_name = file_name or f"{template_name}.html"
+                file_mime = file_mime or "text/html"
+            
+            # 2. Create temporary Google Doc from provided payload
             doc_info = await google_docs_service.create_temporary_document(
                 title=template_name,
-                content=template_content,
+                content=html_content,
                 user_email=user_email,
-                template_id=template_id
+                template_id=template_id,
+                file_bytes=template_file_bytes,
+                file_mime_type=file_mime,
+                original_filename=file_name
             )
+            doc_original_name = doc_info.get('original_file_name') or file_name
+            doc_mime = doc_info.get('file_mime_type') or file_mime
+            payload_size = template_file_bytes or (html_content.encode('utf-8') if html_content else b"")
+            doc_size = doc_info.get('file_size') or len(payload_size)
             
             # 3. Create edit session record
             edit_session = EditSession(
                 template_id=template_id,
                 template_name=template_name,
+                template_file_name=doc_original_name,
+                template_file_mime=doc_mime,
                 user_id=user_id,
                 user_email=user_email,
                 tenant_id=tenant_id,
@@ -82,6 +114,7 @@ class EditSessionService:
                 google_doc_url=doc_info['view_url'],
                 google_doc_edit_url=doc_info['edit_url'],
                 original_content_hash=doc_info['content_hash'],
+                content_size_bytes=doc_size,
                 status="active"
             )
             
@@ -149,7 +182,8 @@ class EditSessionService:
         self,
         db: AsyncSession,
         session_id: str,
-        user_id: str
+        user_id: str,
+        force_sync: bool = False
     ) -> Dict[str, Any]:
         """
         Finish editing session - sync changes and cleanup
@@ -166,20 +200,21 @@ class EditSessionService:
             if session.status != "active":
                 raise ValueError(f"Session is not active (status: {session.status})")
             
-            # 2. Get updated content from Google Doc
-            updated_content, new_content_hash = await google_docs_service.get_document_content(
+            # 2. Get updated ODT payload from Google Doc
+            updated_file_bytes, new_content_hash = await google_docs_service.export_document(
                 session.google_doc_id
             )
             
             # 3. Check if changes were made
             changes_detected = new_content_hash != session.original_content_hash
+            should_sync = changes_detected or force_sync
             
             # 4. Update template in main system (if changes detected)
             sync_result = None
-            if changes_detected:
+            if should_sync:
                 sync_result = await self._sync_changes_to_template(
                     session.template_id,
-                    updated_content,
+                    updated_file_bytes,
                     session.tenant_id,
                     user_id
                 )
@@ -195,6 +230,18 @@ class EditSessionService:
             session.cleanup_completed = deletion_success
             
             await db.commit()
+
+            updated_file_payload = None
+            if should_sync and updated_file_bytes:
+                file_name = session.template_file_name or f"{session.template_name}.odt"
+                mime_type = session.template_file_mime or DEFAULT_TEMPLATE_MIME
+                updated_file_payload = {
+                    "base64": base64.b64encode(updated_file_bytes).decode("utf-8"),
+                    "mime_type": mime_type,
+                    "file_name": file_name,
+                    "content_hash": new_content_hash,
+                    "size": len(updated_file_bytes)
+                }
             
             result = {
                 "session_id": str(session.id),
@@ -202,7 +249,8 @@ class EditSessionService:
                 "changes_detected": changes_detected,
                 "sync_result": sync_result,
                 "cleanup_success": deletion_success,
-                "completed_at": session.completed_at.isoformat()
+                "completed_at": session.completed_at.isoformat(),
+                "updated_file": updated_file_payload
             }
             
             logger.info(f"✅ Edit session completed: {session_id}")
@@ -216,7 +264,7 @@ class EditSessionService:
     async def _sync_changes_to_template(
         self,
         template_id: str,
-        updated_content: str,
+        updated_file_bytes: bytes,
         tenant_id: str,
         user_id: str
     ) -> Dict[str, Any]:
@@ -230,7 +278,7 @@ class EditSessionService:
                 "template_id": template_id,
                 "updated_at": datetime.utcnow().isoformat(),
                 "updated_by": user_id,
-                "content_size": len(updated_content),
+                "content_size": len(updated_file_bytes),
                 "success": True
             }
             
@@ -373,6 +421,17 @@ class EditSessionService:
         """Mark session as expired"""
         session.mark_expired()
         # Note: db.commit() should be called by the caller
+    
+    def _decode_template_payload(self, payload: str) -> bytes:
+        """Decode Base64 ODT payload coming from core API."""
+        try:
+            data = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("Invalid template file payload") from exc
+        
+        if not data:
+            raise ValueError("Template file payload is empty")
+        return data
     
     async def get_user_sessions(
         self,

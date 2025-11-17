@@ -259,21 +259,21 @@ jobs:
       run: |
         # Tests de performance básicos
         echo "🚀 Running performance tests..."
-        python3 -c "
+        python3 - <<'PY'
 import time
 import requests
-import concurrent.futures
+
 
 def test_endpoint_load(url, num_requests=10):
     response_times = []
-    for i in range(num_requests):
+    for _ in range(num_requests):
         start = time.time()
         try:
             response = requests.get(url, timeout=5)
             end = time.time()
             if response.status_code == 200:
                 response_times.append(end - start)
-        except:
+        except Exception:
             pass
 
     if response_times:
@@ -288,10 +288,10 @@ def test_endpoint_load(url, num_requests=10):
         return avg_time < 1.0  # Debe ser < 1 segundo
     return False
 
-# Test health endpoint
+
 success = test_endpoint_load('http://localhost:8000/api/v1/health', 5)
-print(f'✅ Health check performance: {\"PASS\" if success else \"FAIL\"}')
-        "
+print(f'✅ Health check performance: {"PASS" if success else "FAIL"}')
+PY
 
   security-test:
     name: Security Tests
