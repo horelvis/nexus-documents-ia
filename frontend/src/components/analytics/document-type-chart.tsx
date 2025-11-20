@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts"
-import { IconFile, IconPieChart } from "@tabler/icons-react"
+import { IconFile, IconChartPie } from "@tabler/icons-react"
 
 interface FacetBucket {
   key: string
@@ -106,7 +106,7 @@ export function DocumentTypeChart({ data, totalDocuments }: DocumentTypeChartPro
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <IconPieChart className="h-5 w-5" />
+            <IconChartPie className="h-5 w-5" />
             Document Types
           </CardTitle>
         </CardHeader>
@@ -126,7 +126,7 @@ export function DocumentTypeChart({ data, totalDocuments }: DocumentTypeChartPro
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <IconPieChart className="h-5 w-5" />
+          <IconChartPie className="h-5 w-5" />
           Document Types
         </CardTitle>
       </CardHeader>

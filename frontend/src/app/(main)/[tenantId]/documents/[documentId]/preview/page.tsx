@@ -92,8 +92,8 @@ export default function DocumentPreviewPage() {
       } else if (response.data) {
         setPreview(response.data)
         
-        // For PDF files, get signed URL for PDF viewer
-        if (response.data.pdf_available && document?.file_type === 'pdf') {
+        // For PDF files or converted documents, get signed URL for PDF viewer
+        if (response.data.pdf_available) {
           await loadPdfUrl()
         }
         
@@ -116,16 +116,28 @@ export default function DocumentPreviewPage() {
     if (!document) return
     
     try {
-      // Use new streaming endpoint
-      const downloadResult = await documentService.downloadDocument(document.id)
-      if (downloadResult.blob) {
-        const localUrl = URL.createObjectURL(downloadResult.blob)
-        setPdfUrl(localUrl)
+      console.log('[DocumentPreviewPage] Attempting to load PDF URL for document:', document.id, 'file_type:', document.file_type)
+      let result
+      
+      if (document.file_type === 'pdf' || document.mime_type === 'application/pdf') {
+         result = await documentService.downloadDocument(document.id)
       } else {
-        console.error('Failed to fetch PDF:', downloadResult.error)
+         // For non-PDFs (like ODT), fetch the converted PDF
+         result = await documentService.downloadConvertedDocument(document.id)
+      }
+
+      if ('blob' in result && result.blob) {
+        console.log('[DocumentPreviewPage] Received blob for PDF, type:', result.blob.type, 'size:', result.blob.size)
+        const localUrl = URL.createObjectURL(result.blob)
+        setPdfUrl(localUrl)
+        console.log('[DocumentPreviewPage] Created object URL:', localUrl)
+      } else {
+        console.error('[DocumentPreviewPage] Failed to download PDF blob:', 'error' in result ? result.error : 'Unknown error')
+        setError('Failed to load PDF preview') // Set error state to be displayed in UI
       }
     } catch (err) {
-      console.error('Failed to get PDF URL:', err)
+      console.error('[DocumentPreviewPage] Error in loadPdfUrl:', err)
+      setError('An unexpected error occurred while loading PDF') // Set error state for unexpected exceptions
     }
   }
 
@@ -244,6 +256,16 @@ export default function DocumentPreviewPage() {
     }
   }, [document])
 
+  useEffect(() => {
+    // Poll for preview if it's pending
+    if (preview?.conversion_method === 'pending') {
+      const timer = setTimeout(() => {
+        generatePreview(false)
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [preview])
+
   // Track view start time for potential future metrics
   useEffect(() => {
     if (document?.id) {
@@ -342,9 +364,9 @@ export default function DocumentPreviewPage() {
             variant="outline" 
             size="sm" 
             onClick={() => generatePreview(true)}
-            disabled={isLoadingPreview}
+            disabled={isLoadingPreview || preview?.conversion_method === 'pending'}
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview || preview?.conversion_method === 'pending' ? 'animate-spin' : ''}`} />
             Regenerate
           </Button>
         </div>
@@ -387,12 +409,14 @@ export default function DocumentPreviewPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col min-h-[75vh]">
-                {isLoadingPreview && (
+                {(isLoadingPreview || preview?.conversion_method === 'pending') && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
                       <RefreshCw className="h-4 w-4 animate-spin" />
                       <span className="text-sm text-muted-foreground">
-                        Generating preview with Gotenberg...
+                        {preview?.conversion_method === 'pending' 
+                          ? 'Generating preview in background...' 
+                          : 'Checking preview status...'}
                       </span>
                     </div>
                     <Skeleton className="h-32 w-full" />
@@ -400,10 +424,10 @@ export default function DocumentPreviewPage() {
                   </div>
                 )}
 
-                {preview && !isLoadingPreview && (
+                {preview && !isLoadingPreview && preview.conversion_method !== 'pending' && (
                   <div className="space-y-6">
                     {/* PDF Viewer */}
-                    {preview.pdf_available && document?.file_type === 'pdf' && (
+                    {preview.pdf_available && (
                       <div className="space-y-4">
                         <h3 className="text-lg font-semibold">PDF Document</h3>
                         {pdfUrl ? (

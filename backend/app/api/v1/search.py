@@ -395,14 +395,15 @@ async def reindex_all_documents_background(tenant_id: str, force: bool = False):
     """Background task to reindex all documents"""
     try:
         reindex_service = ReindexService(tenant_id=tenant_id)
+        
         if force:
             # Force reindex all documents
             logger.info(f"Starting forced reindex for tenant {tenant_id}")
-            # You would implement force reindex logic here
+            await reindex_service.reindex_all_force()
         else:
             # Regular reindex of missing documents
             await reindex_service.reindex_all_missing()
-        
+            
         logger.info(f"Reindexing completed for tenant {tenant_id}")
     except Exception as e:
         logger.error(f"Error in background reindexing: {e}")

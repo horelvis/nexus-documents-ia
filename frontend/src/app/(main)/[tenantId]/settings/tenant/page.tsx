@@ -46,6 +46,12 @@ export default function TenantSettingsPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [isDeleting, setIsDeleting] = useState(false)
 
+  // Reindex Dialog States
+  const [reindexDialogOpen, setReindexDialogOpen] = useState(false)
+  const [reindexPhase, setReindexPhase] = useState<'confirm' | 'starting' | 'progress' | 'complete' | 'error'>('confirm')
+  const [reindexProgress, setReindexProgress] = useState({ processed: 0, total: 0, percentage: 0 })
+  const [reindexError, setReindexError] = useState<string | null>(null)
+
   // Check if user is admin (tenant owner, admin role, or superuser)
   const isAdmin = Boolean(
     user &&
@@ -58,6 +64,11 @@ export default function TenantSettingsPage() {
 
   // Load initial data
   const loadTenantData = useCallback(async () => {
+    // ... existing loadTenantData logic ...
+    // We'll reuse the existing logic but wrap it here to keep the context clean if needed, 
+    // but for this replace block, we assume the existing function is fine.
+    // Just need to ensure we refresh status if reindexing is happening in background? 
+    // No, let's stick to the requested change.
     setIsLoading(true)
     try {
       const [infoResponse, statsResponse, indexResponse] = await Promise.all([
@@ -94,6 +105,60 @@ export default function TenantSettingsPage() {
     loadTenantData()
   }, [isAdmin, loadTenantData, user])
 
+  // Polling for reindex progress
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout
+
+    if (reindexDialogOpen && (reindexPhase === 'starting' || reindexPhase === 'progress')) {
+      const pollStatus = async () => {
+        try {
+          const statusResponse = await tenantService.getReindexStatus()
+          if (!statusResponse.error && statusResponse.data) {
+            const status = statusResponse.data
+            // Calculate progress
+            // Note: During force reindex, total documents might be the target
+            // We can estimate progress based on indexed_documents vs total_documents
+            // But initially indexed might be high if we are re-indexing.
+            // Ideally backend would provide a job ID and specific progress, 
+            // but here we rely on the general stats.
+            
+            const total = status.total_documents || 1
+            const indexed = status.indexed_documents || 0
+            const percentage = Math.min(Math.round((indexed / total) * 100), 100)
+
+            setReindexProgress({
+              processed: indexed,
+              total: total,
+              percentage: percentage
+            })
+            
+            setReindexStatus(status)
+
+            // Check completion conditions
+            // This heuristic might need adjustment based on exact backend behavior during reindex
+            // If we are in 'progress' and missing is 0 (or very low) and status is 'ready', we are done?
+            // Or we just let the user close it when they see 100%?
+            if (reindexPhase === 'progress' && percentage === 100 && status.missing_documents === 0) {
+               setReindexPhase('complete')
+            }
+          }
+        } catch (error) {
+          console.error("Polling error", error)
+        }
+      }
+
+      // Poll every 2 seconds
+      intervalId = setInterval(pollStatus, 2000)
+      // Initial poll
+      pollStatus()
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [reindexDialogOpen, reindexPhase, tenantService])
+
+
   // Reindex operations
   const handleReindexMissing = async () => {
     setIsReindexing(true)
@@ -124,12 +189,16 @@ export default function TenantSettingsPage() {
     }
   }
 
-  const handleForceReindex = async () => {
-    if (!confirm('Esto reindexará TODOS los documentos y puede tardar varios minutos. ¿Deseas continuar?')) {
-      return
-    }
+  const openReindexDialog = () => {
+    setReindexPhase('confirm')
+    setReindexProgress({ processed: 0, total: reindexStatus?.total_documents || 0, percentage: 0 })
+    setReindexError(null)
+    setReindexDialogOpen(true)
+  }
 
-    setIsReindexing(true)
+  const handleStartForceReindex = async () => {
+    setReindexPhase('starting')
+    
     try {
       const response = await tenantService.forceReindexAll()
       
@@ -137,20 +206,25 @@ export default function TenantSettingsPage() {
         throw new Error(response.error)
       }
 
+      setReindexPhase('progress')
+      // Initial progress update based on response if available, 
+      // otherwise polling will pick it up
+      
       addNotification({
         type: 'success',
         title: 'Reindexado iniciado',
-        message: 'La reconstrucción completa se está ejecutando en segundo plano'
+        message: 'El proceso se está ejecutando en segundo plano.'
       })
     } catch (error) {
-      addNotification({
-        type: 'error',
-        title: 'No se pudo iniciar el reindexado',
-        message: (error as Error).message || 'Intenta nuevamente en unos segundos'
-      })
-    } finally {
-      setIsReindexing(false)
+      setReindexPhase('error')
+      setReindexError((error as Error).message || 'No se pudo iniciar el proceso.')
     }
+  }
+  
+  const handleCloseReindexDialog = () => {
+      setReindexDialogOpen(false)
+      // Refresh data one last time
+      loadTenantData()
   }
 
   // Delete operations
@@ -395,7 +469,7 @@ export default function TenantSettingsPage() {
 
                 <Button
                   variant="outline"
-                  onClick={handleForceReindex}
+                  onClick={openReindexDialog}
                   disabled={isReindexing}
                   className="flex-1"
                 >
@@ -515,6 +589,108 @@ export default function TenantSettingsPage() {
           </CardContent>
         </Card>
       </section>
+
+      {/* Reindex Dialog */}
+      <Dialog open={reindexDialogOpen} onOpenChange={reindexPhase === 'progress' || reindexPhase === 'starting' ? undefined : setReindexDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Reindexado Completo</DialogTitle>
+            <DialogDescription>
+              Reconstrucción del índice de búsqueda y base vectorial
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            {reindexPhase === 'confirm' && (
+              <div className="space-y-4">
+                 <Alert variant="default" className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/10">
+                  <IconAlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
+                  <AlertTitle className="text-yellow-800 dark:text-yellow-500">Atención</AlertTitle>
+                  <AlertDescription className="text-yellow-700 dark:text-yellow-400">
+                    Esta operación procesará <strong>TODOS</strong> los documentos existentes ({reindexStatus?.total_documents || 0}) nuevamente.
+                    <br /><br />
+                    • El rendimiento del sistema puede verse afectado.<br />
+                    • Puede tardar varios minutos dependiendo del volumen.<br />
+                  </AlertDescription>
+                </Alert>
+                <p className="text-sm text-muted-foreground">
+                  Utiliza esta opción si experimentas problemas con la búsqueda o si has cambiado la configuración de los modelos de IA.
+                </p>
+              </div>
+            )}
+
+            {(reindexPhase === 'starting' || reindexPhase === 'progress') && (
+              <div className="space-y-6">
+                 <div className="flex flex-col items-center justify-center gap-2 py-4">
+                    <div className="relative">
+                       <IconRefresh className="h-12 w-12 animate-spin text-primary" />
+                    </div>
+                    <p className="text-lg font-medium">Procesando documentos...</p>
+                 </div>
+                 
+                 <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                       <span>Progreso</span>
+                       <span className="font-medium">{reindexProgress.percentage}%</span>
+                    </div>
+                    <Progress value={reindexProgress.percentage} className="h-2" />
+                    <p className="text-center text-xs text-muted-foreground">
+                       {reindexProgress.processed} de {reindexProgress.total} documentos procesados
+                    </p>
+                 </div>
+              </div>
+            )}
+
+            {reindexPhase === 'complete' && (
+               <div className="flex flex-col items-center justify-center space-y-4 py-4">
+                  <div className="rounded-full bg-green-100 p-3 dark:bg-green-900/20">
+                     <div className="h-8 w-8 text-green-600 dark:text-green-400">✓</div>
+                  </div>
+                  <h3 className="text-lg font-medium">¡Reindexado completado!</h3>
+                  <p className="text-center text-sm text-muted-foreground">
+                     El índice de búsqueda ha sido actualizado exitosamente. Todos los documentos están disponibles para búsqueda.
+                  </p>
+               </div>
+            )}
+
+            {reindexPhase === 'error' && (
+               <div className="space-y-4">
+                  <Alert variant="destructive">
+                     <IconAlertTriangle className="h-4 w-4" />
+                     <AlertTitle>Error</AlertTitle>
+                     <AlertDescription>{reindexError}</AlertDescription>
+                  </Alert>
+               </div>
+            )}
+          </div>
+
+          <DialogFooter className="sm:justify-between">
+            {reindexPhase === 'confirm' ? (
+              <>
+                <Button variant="outline" onClick={() => setReindexDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleStartForceReindex}>
+                  <IconRefresh className="mr-2 h-4 w-4" />
+                  Comenzar reindexado
+                </Button>
+              </>
+            ) : reindexPhase === 'complete' ? (
+               <Button className="w-full" onClick={handleCloseReindexDialog}>
+                  Cerrar
+               </Button>
+            ) : reindexPhase === 'error' ? (
+               <Button variant="outline" className="w-full" onClick={() => setReindexPhase('confirm')}>
+                  Intentar de nuevo
+               </Button>
+            ) : (
+               <Button disabled variant="ghost" className="w-full cursor-not-allowed opacity-50">
+                  Por favor espere...
+               </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

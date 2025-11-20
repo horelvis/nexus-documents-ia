@@ -17,8 +17,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [onUploadComplete, setOnUploadComplete] = useState<((files: any[]) => void) | undefined>(undefined)
 
-  const openUploadDialog = () => setUploadDialogOpen(true)
-  const closeUploadDialog = () => setUploadDialogOpen(false)
+  const openUploadDialog = () => {
+    console.log('[DEBUG] UploadContext: Opening dialog')
+    setUploadDialogOpen(true)
+  }
+  const closeUploadDialog = () => {
+    console.log('[DEBUG] UploadContext: Closing dialog')
+    setUploadDialogOpen(false)
+  }
 
   const handleSetOnUploadComplete = useCallback((callback?: (files: any[]) => void) => {
     setOnUploadComplete(() => callback)

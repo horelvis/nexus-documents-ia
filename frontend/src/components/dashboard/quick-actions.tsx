@@ -110,7 +110,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
   }
 
   return (
-    <Card className="h-full">
+    <Card className="h-full quick-actions-panel">
       <CardHeader>
         <CardTitle>Quick Actions</CardTitle>
         <CardDescription>Common tasks and shortcuts</CardDescription>

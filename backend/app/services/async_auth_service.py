@@ -380,6 +380,8 @@ class AsyncAuthService:
         if preferred_plan:
             logger.info(f"🗂️ User indicated preferred plan '{preferred_plan}' during signup; waiting for explicit activation")
         
+        logger.info(f"🧪 Creating user with plan={subscription_plan} status={subscription_status}")
+
         # Crear usuario con password temporal (no se usará con Clerk)
         new_user = User(
             id=uuid4(),

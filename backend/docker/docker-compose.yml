@@ -279,13 +279,13 @@ services:
     environment:
       - DB=postgres12
       - DB_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PWD=password
+      - POSTGRES_USER=${POSTGRES_USER:-nexus_user}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-nexus_password}
       - POSTGRES_SEEDS=db
       - SKIP_DB_CREATE=false
       # Explicit DB names so auto-setup runs migrations correctly
-      - DBNAME=temporal
-      - VISIBILITY_DBNAME=temporal_visibility
+      - DBNAME=temporalio-nexus
+      - VISIBILITY_DBNAME=temporalio-nexus_visibility
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
     volumes:
       - ./temporalio-config:/etc/temporal/config

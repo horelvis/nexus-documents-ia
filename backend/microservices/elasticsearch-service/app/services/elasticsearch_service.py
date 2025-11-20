@@ -247,6 +247,14 @@ class ElasticsearchService:
                     if filters.get("date_to"):
                         date_filter["range"]["created_at"]["lte"] = filters["date_to"]
                     filter_clauses.append(date_filter)
+                # File Size Filter
+                if filters.get("file_size_min") is not None or filters.get("file_size_max") is not None:
+                    size_filter = {"range": {"file_size": {}}}
+                    if filters.get("file_size_min") is not None:
+                        size_filter["range"]["file_size"]["gte"] = filters["file_size_min"]
+                    if filters.get("file_size_max") is not None:
+                        size_filter["range"]["file_size"]["lte"] = filters["file_size_max"]
+                    filter_clauses.append(size_filter)
 
             search_body = {
                 "query": {
@@ -259,6 +267,15 @@ class ElasticsearchService:
                 "sort": ["_score"],
                 "_source": {
                     "excludes": ["content_vector"]  # Don't return vectors
+                },
+                "highlight": {
+                    "fields": {
+                        "content": {"fragment_size": 150, "number_of_fragments": 3},
+                        "title": {"number_of_fragments": 0},
+                        "description": {"number_of_fragments": 0}
+                    },
+                    "pre_tags": ["<mark>"],
+                    "post_tags": ["</mark>"]
                 }
             }
 
@@ -269,6 +286,17 @@ class ElasticsearchService:
 
             results = []
             for hit in response["hits"]["hits"]:
+                # Extract highlights
+                highlights = hit.get("highlight", {})
+                
+                # Prepare matches from content highlights or fallback to start of content
+                matches = []
+                if "content" in highlights:
+                    for fragment in highlights["content"]:
+                        matches.append({"text": fragment, "score": hit["_score"]})
+                else:
+                    matches.append({"text": hit["_source"]["content"][:200] + "...", "score": hit["_score"]})
+
                 result = {
                     "document": {
                         "id": hit["_source"]["doc_id"],
@@ -281,13 +309,17 @@ class ElasticsearchService:
                         "tenant_id": hit["_source"]["tenant_id"]
                     },
                     "score": hit["_score"],
-                    "matches": [{"text": hit["_source"]["content"][:200] + "...", "score": hit["_score"]}]
+                    "matches": matches,
+                    "highlights": highlights # Return full highlights for frontend flexibility
                 }
                 results.append(result)
 
             logger.info(f"✅ Hybrid search returned {len(results)} results")
             return results
 
+        except NotFoundError:
+            logger.info(f"ℹ️ Index {self.index_name} not found (no documents yet). Returning empty results.")
+            return []
         except Exception as e:
             logger.error(f"❌ Hybrid search failed: {e}")
             return []
@@ -349,6 +381,8 @@ class ElasticsearchService:
 
             return results
 
+        except NotFoundError:
+            return []
         except Exception as e:
             logger.error(f"❌ Semantic search failed: {e}")
             return []
@@ -393,6 +427,14 @@ class ElasticsearchService:
                     if filters.get("date_to"):
                         date_filter["range"]["created_at"]["lte"] = filters["date_to"]
                     filter_clauses.append(date_filter)
+                # File Size Filter
+                if filters.get("file_size_min") is not None or filters.get("file_size_max") is not None:
+                    size_filter = {"range": {"file_size": {}}}
+                    if filters.get("file_size_min") is not None:
+                        size_filter["range"]["file_size"]["gte"] = filters["file_size_min"]
+                    if filters.get("file_size_max") is not None:
+                        size_filter["range"]["file_size"]["lte"] = filters["file_size_max"]
+                    filter_clauses.append(size_filter)
 
             # Default facet fields if not specified
             if not facet_fields:

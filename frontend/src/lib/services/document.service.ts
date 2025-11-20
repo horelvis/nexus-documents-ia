@@ -216,6 +216,44 @@ export class DocumentService {
     }
   }
 
+  /**
+   * Download converted PDF document (e.g. from ODT).
+   */
+  async downloadConvertedDocument(id: string): Promise<{ blob: Blob; filename: string } | { error: string }> {
+    try {
+      const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}/${id}/converted-pdf`
+      console.log('[DocumentService] Requesting converted PDF from endpoint:', endpoint)
+      
+      const response = await this.apiClient.fetchRaw(endpoint)
+      console.log('[DocumentService] Converted PDF Response Status:', response.status, response.statusText)
+      console.log('[DocumentService] Converted PDF Content-Type:', response.headers.get('content-type'))
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[DocumentService] Download converted PDF failed with error:', errorText)
+        return { error: `Download failed: ${response.status} ${response.statusText}` }
+      }
+
+      const blob = await response.blob()
+      console.log('[DocumentService] Converted PDF Blob received, size:', blob.size, 'type:', blob.type)
+      
+      let filename = 'document_converted.pdf'
+      const disposition = response.headers.get('content-disposition')
+      
+      if (disposition) {
+        const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '')
+        }
+      }
+      
+      return { blob, filename }
+    } catch (error) {
+      console.error('[DocumentService] Download converted exception:', error)
+      return { error: error instanceof Error ? error.message : 'Download failed' }
+    }
+  }
+
   async getDocumentSummary(id: string) {
     const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_SUMMARY(id)
     return this.apiClient.get<{ summary: string }>(endpoint)

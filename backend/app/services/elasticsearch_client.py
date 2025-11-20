@@ -21,6 +21,23 @@ class ElasticsearchClient:
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make HTTP request to elasticsearch service"""
         url = f"{self.base_url}/api/v1/elasticsearch{endpoint}"
+        
+        # Log request details for debugging
+        payload_preview = "No payload"
+        if "json" in kwargs:
+            import json
+            try:
+                # Create a safe preview of the payload (truncate content)
+                safe_payload = kwargs["json"].copy()
+                if "content" in safe_payload:
+                    safe_payload["content"] = safe_payload["content"][:50] + "..."
+                if "content_vector" in safe_payload:
+                    safe_payload["content_vector"] = "[VECTOR]"
+                payload_preview = json.dumps(safe_payload)
+            except:
+                payload_preview = "Payload parsing error"
+                
+        logger.info(f"📡 ES Client Request: {method} {url} | Payload: {payload_preview}")
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -50,6 +67,7 @@ class ElasticsearchClient:
         metadata: Dict[str, Any] = None
     ) -> bool:
         """Index a document via microservice"""
+        logger.info(f"📝 Indexing document {doc_id} for tenant {tenant_id} via microservice")
         try:
             payload = {
                 "doc_id": doc_id,
@@ -82,6 +100,7 @@ class ElasticsearchClient:
         boost_keyword: float = 1.0
     ) -> List[Dict[str, Any]]:
         """Perform hybrid search via microservice with fallback to direct ES"""
+        logger.info(f"🔍 Searching tenant {tenant_id} query='{query}' via microservice")
         try:
             payload = {
                 "query": query,

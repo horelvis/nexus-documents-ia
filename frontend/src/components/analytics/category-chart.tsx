@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { IconFolder, IconBarChart3 } from "@tabler/icons-react"
+import { IconFolder, IconChartBar } from "@tabler/icons-react"
 
 interface FacetBucket {
   key: string
@@ -28,7 +28,7 @@ export function CategoryChart({ data, totalDocuments }: CategoryChartProps) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <IconBarChart3 className="h-5 w-5" />
+            <IconChartBar className="h-5 w-5" />
             Document Categories
           </CardTitle>
         </CardHeader>
@@ -50,7 +50,7 @@ export function CategoryChart({ data, totalDocuments }: CategoryChartProps) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <IconBarChart3 className="h-5 w-5" />
+          <IconChartBar className="h-5 w-5" />
           Document Categories
         </CardTitle>
       </CardHeader>

@@ -26,6 +26,8 @@ interface SearchFilters {
   tags?: string[]
   date_from?: string
   date_to?: string
+  file_size_min?: number
+  file_size_max?: number
 }
 
 export function useSearchFacets(tenantId: string) {
@@ -79,6 +81,8 @@ export function useSearchFacets(tenantId: string) {
     if (filters.tags?.length) params.set("tags", filters.tags.join(","))
     if (filters.date_from) params.set("date_from", filters.date_from)
     if (filters.date_to) params.set("date_to", filters.date_to)
+    if (filters.file_size_min !== undefined) params.set("file_size_min", filters.file_size_min.toString())
+    if (filters.file_size_max !== undefined) params.set("file_size_max", filters.file_size_max.toString())
 
     const newUrl = `/search?${params.toString()}`
     router.replace(newUrl, { scroll: false })
@@ -134,6 +138,8 @@ export function useSearchFacets(tenantId: string) {
     const tagsParam = searchParams.get("tags")
     const dateFrom = searchParams.get("date_from") || undefined
     const dateTo = searchParams.get("date_to") || undefined
+    const fileSizeMinParam = searchParams.get("file_size_min")
+    const fileSizeMaxParam = searchParams.get("file_size_max")
 
     const filters: SearchFilters = {}
     if (fileType) filters.file_type = fileType
@@ -141,6 +147,8 @@ export function useSearchFacets(tenantId: string) {
     if (tagsParam) filters.tags = tagsParam.split(",").map(t => t.trim())
     if (dateFrom) filters.date_from = dateFrom
     if (dateTo) filters.date_to = dateTo
+    if (fileSizeMinParam) filters.file_size_min = parseInt(fileSizeMinParam)
+    if (fileSizeMaxParam) filters.file_size_max = parseInt(fileSizeMaxParam)
 
     setSearchQuery(query)
     setCurrentFilters(filters)
@@ -157,6 +165,7 @@ export function useSearchFacets(tenantId: string) {
     if (currentFilters.tags?.length) count += currentFilters.tags.length
     if (currentFilters.date_from) count++
     if (currentFilters.date_to) count++
+    if (currentFilters.file_size_min !== undefined || currentFilters.file_size_max !== undefined) count++
     return count
   }, [currentFilters])
 
@@ -168,6 +177,15 @@ export function useSearchFacets(tenantId: string) {
     if (currentFilters.tags?.length) summary.push(`Tags: ${currentFilters.tags.join(", ")}`)
     if (currentFilters.date_from) summary.push(`From: ${currentFilters.date_from}`)
     if (currentFilters.date_to) summary.push(`To: ${currentFilters.date_to}`)
+    
+    if (currentFilters.file_size_min !== undefined && currentFilters.file_size_max !== undefined) {
+      summary.push(`Size: ${currentFilters.file_size_min} - ${currentFilters.file_size_max} B`)
+    } else if (currentFilters.file_size_min !== undefined) {
+      summary.push(`Size: > ${currentFilters.file_size_min} B`)
+    } else if (currentFilters.file_size_max !== undefined) {
+      summary.push(`Size: < ${currentFilters.file_size_max} B`)
+    }
+    
     return summary
   }, [currentFilters])
 

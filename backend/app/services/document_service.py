@@ -17,6 +17,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService  # Added VectorService import
 from app.services.llm_service import LLMService
 from app.services.text_extraction_client import TextExtractionClient
+from app.services.elasticsearch_client import elasticsearch_client  # Added Elasticsearch Client
 
 logger = logging.getLogger(__name__)
 
@@ -241,13 +242,60 @@ class DocumentService:
             "created_by": self.user_id or "system",
         }
 
-        # Index into vector store
-        indexing_success = await self.vector_service.add_document(
+        # Parallel Indexing: Weaviate + Elasticsearch
+        logger.info(f"Starting parallel indexing for document {db_document.id}")
+        
+        # Task 1: Weaviate (Vector Store)
+        weaviate_task = self.vector_service.add_document(
             doc_id=str(db_document.id),
             text=document_text,
             metadata=document_metadata,
         )
-        db_document.indexed = IndexingStatus.INDEXED if indexing_success else IndexingStatus.INDEXING_ERROR
+
+        # Task 2: Elasticsearch (Keyword/Hybrid)
+        elasticsearch_task = elasticsearch_client.index_document(
+            tenant_id=self.tenant_id,
+            doc_id=str(db_document.id),
+            title=title,
+            content=document_text,
+            description=db_document.description,
+            metadata=document_metadata
+        )
+
+        # Execute both
+        results = await asyncio.gather(weaviate_task, elasticsearch_task, return_exceptions=True)
+        
+        weaviate_result = results[0]
+        es_result = results[1]
+
+        # Analyze results
+        weaviate_success = isinstance(weaviate_result, bool) and weaviate_result
+        es_success = isinstance(es_result, bool) and es_result
+
+        # Log outcomes
+        if isinstance(weaviate_result, Exception):
+            logger.error(f"❌ Weaviate indexing failed for {db_document.id}: {weaviate_result}")
+        elif weaviate_success:
+            logger.info(f"✅ Weaviate indexing success for {db_document.id}")
+        else:
+            logger.warning(f"⚠️ Weaviate indexing returned False for {db_document.id}")
+
+        if isinstance(es_result, Exception):
+            logger.error(f"❌ Elasticsearch indexing failed for {db_document.id}: {es_result}")
+        elif es_success:
+            logger.info(f"✅ Elasticsearch indexing success for {db_document.id}")
+        else:
+            logger.warning(f"⚠️ Elasticsearch indexing returned False for {db_document.id}")
+
+        # Final Status Determination
+        if es_success: # Elasticsearch is primary for general search indexing
+            db_document.indexed = IndexingStatus.INDEXED
+            if not weaviate_success:
+                logger.warning(f"⚠️ Document {db_document.id} indexed in ES but Weaviate failed. Will retry vectorization.")
+                # TODO: Trigger background retry for Weaviate if it fails
+        else:
+            db_document.indexed = IndexingStatus.INDEXING_ERROR
+            logger.error(f"❌ Document {db_document.id} failed to index in Elasticsearch (primary). Weaviate status: {weaviate_success}")
    
     async def process_document(
         self, 

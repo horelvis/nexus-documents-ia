@@ -73,6 +73,14 @@ export interface TemporalioHealthStatus {
   }
 }
 
+export interface WorkflowSummary {
+  total_workflows: number;
+  active_workflows: number;
+  completed_today: number;
+  failed_workflows: number;
+  avg_completion_time: string;
+}
+
 export interface AIWorkflowFieldOption {
   label: string
   value: string
@@ -197,6 +205,12 @@ export function useTemporalioService() {
       "No fue posible ejecutar el workflow AI"
     )
 
+  const getWorkflowSummary = () =>
+    get<WorkflowSummary>(
+      `${TEMPORALIO_BASE}/workflows/summary`,
+      "No fue posible obtener el resumen de workflows"
+    )
+
   return {
     checkHealth,
     getTemplates,
@@ -208,5 +222,6 @@ export function useTemporalioService() {
     getAIEnhancedTemplates,
     getAIWorkflowCatalog,
     executeAIWorkflow,
+    getWorkflowSummary,
   }
 }

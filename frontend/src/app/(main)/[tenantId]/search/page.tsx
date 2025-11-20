@@ -129,7 +129,14 @@ export default function SimpleSearchPage() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
-  const [searchType, setSearchType] = useState<'semantic' | 'hybrid' | 'keyword'>('semantic')
+  const [searchType, setSearchType] = useState<'semantic' | 'hybrid' | 'keyword'>('keyword')
+
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [tags, setTags] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [fileSizeMin, setFileSizeMin] = useState('')
+  const [fileSizeMax, setFileSizeMax] = useState('')
 
   // Use the faceting hook
   const {
@@ -146,37 +153,71 @@ export default function SimpleSearchPage() {
   
   const searchService = useSearchService()
 
+  // Local state for input to decouple typing from searching
+  const [localQuery, setLocalQuery] = useState(searchQuery)
+
+  // Sync local state with URL state (e.g. on back button or initial load)
+  useEffect(() => {
+    setLocalQuery(searchQuery)
+  }, [searchQuery])
+
+  // Sync local filter state with URL filters
+  useEffect(() => {
+    if (currentFilters.date_from) setDateFrom(currentFilters.date_from)
+    if (currentFilters.date_to) setDateTo(currentFilters.date_to)
+    if (currentFilters.tags) setTags(currentFilters.tags.join(', '))
+    if (currentFilters.file_size_min) setFileSizeMin(currentFilters.file_size_min)
+    if (currentFilters.file_size_max) setFileSizeMax(currentFilters.file_size_max)
+  }, [currentFilters])
+
   // Auto-search if returning from preview with search context
   useEffect(() => {
     const queryFromUrl = searchParams.get('q')
     if (queryFromUrl && queryFromUrl.trim()) {
-      performSearch()
+      performSearch(queryFromUrl)
     }
   }, []) // Only run once on mount
 
-  const performSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
+  const performSearch = useCallback(async (queryOverride?: string) => {
+    const queryToUse = queryOverride !== undefined ? queryOverride : searchQuery;
+
+    if (!queryToUse.trim()) {
       toast.error("Please enter a search query")
+      return
+    }
+
+    if (queryToUse.trim().length < 3) {
+      toast.error("Please enter at least 3 characters")
       return
     }
 
     setIsSearching(true)
     setSearchError(null)
 
+    const activeFilters = {
+      ...currentFilters,
+      tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+      file_size_min: fileSizeMin ? parseInt(fileSizeMin) : undefined,
+      file_size_max: fileSizeMax ? parseInt(fileSizeMax) : undefined
+    }
+
     try {
       console.log('Starting search with params:', {
-        query: searchQuery,
+        query: queryToUse,
         limit: 20,
         search_type: searchType,
-        filters: currentFilters
+        filters: activeFilters
       })
 
       const response = await searchService.searchDocuments({
-        query: searchQuery,
+        query: queryToUse,
         limit: 20,
         search_type: searchType,
-        ...currentFilters
+        ...activeFilters
       })
+
 
       console.log('Search response:', response)
 
@@ -188,7 +229,7 @@ export default function SimpleSearchPage() {
 
         if (response.data && response.data.length > 0) {
           console.log('First result sample:', response.data[0])
-          console.log('Search results structure check:', response.data?.map(r => ({
+          console.log('Search results structure check:', response.data?.map((r: any) => ({
             hasDocument: !!r?.document,
             hasId: !!r?.document?.id || !!r?.id,
             documentKeys: r?.document ? Object.keys(r.document) : [],
@@ -209,9 +250,14 @@ export default function SimpleSearchPage() {
     }
   }, [searchQuery, searchType, currentFilters, searchService])
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleSearchConfirm = () => {
+    updateSearchQuery(localQuery)
+    performSearch(localQuery)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isSearching) {
-      performSearch()
+      handleSearchConfirm()
     }
   }
 
@@ -228,6 +274,7 @@ export default function SimpleSearchPage() {
 
   const clearSearch = () => {
     updateSearchQuery("")
+    setLocalQuery("")
     setSearchResults([])
     setSearchError(null)
     clearAllFilters()
@@ -295,10 +342,10 @@ export default function SimpleSearchPage() {
                 <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                 <Input
                   placeholder="Search documents..."
-                  value={searchQuery}
-                  onChange={(e) => updateSearchQuery(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  className="pl-10"
+                  value={localQuery}
+                  onChange={(e) => setLocalQuery(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  className="pl-10 border bg-background shadow-sm"
                 />
               </div>
               <Select value={searchType} onValueChange={(value: 'semantic' | 'hybrid' | 'keyword') => setSearchType(value)}>
@@ -326,7 +373,7 @@ export default function SimpleSearchPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <Button onClick={performSearch} disabled={isSearching || !searchQuery.trim()}>
+              <Button onClick={handleSearchConfirm} disabled={isSearching || localQuery.trim().length < 3}>
                 {isSearching ? (
                   <IconLoader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -412,6 +459,28 @@ export default function SimpleSearchPage() {
                   onChange={(e) => setDateTo(e.target.value)}
                   className="text-sm"
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <IconFile className="h-4 w-4" />
+                  Size (Bytes)
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Min"
+                    value={fileSizeMin}
+                    onChange={(e) => setFileSizeMin(e.target.value)}
+                    className="text-sm"
+                  />
+                  <Input
+                    type="number"
+                    placeholder="Max"
+                    value={fileSizeMax}
+                    onChange={(e) => setFileSizeMax(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
               </div>
             </div>
           )}

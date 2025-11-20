@@ -192,23 +192,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
           ))
         }
       }
-
-      // Check if all uploads completed successfully
-      const updatedFiles = [...files]
-      const allSuccess = updatedFiles.every(f => {
-        const currentFile = pendingFiles.find(pf => pf.id === f.id)
-        return !currentFile || f.status === 'success'
-      })
-      
-      if (allSuccess && pendingFiles.length > 0) {
-        setUploadCompleted(true)
-        setShowSuccess(true)
-        // Auto-close dialog after a short delay to show success status
-        setTimeout(() => {
-          onOpenChange(false)
-        }, 2000)
-      }
-
+      // Logic for completion moved to useEffect
     } catch (error) {
       console.error('Upload error:', error)
     } finally {
@@ -217,20 +201,56 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
     }
   }
 
-  // Handle upload completion in useEffect to avoid setState during render
+  // Effect to detect when all uploads are finished
   useEffect(() => {
-    if (uploadCompleted && !isUploading) {
+    if (files.length === 0) return
+
+    const pendingCount = files.filter(f => f.status === 'pending' || f.status === 'uploading').length
+    const successCount = files.filter(f => f.status === 'success').length
+    const errorCount = files.filter(f => f.status === 'error').length
+    const total = files.length
+
+    console.log('[DEBUG] UploadDialog Monitoring:', { 
+        total, 
+        pending: pendingCount, 
+        success: successCount, 
+        error: errorCount,
+        isUploading,
+        uploadCompleted 
+    })
+
+    // If nothing is pending or uploading, and we have at least one finished file (success or error)
+    if (pendingCount === 0 && (successCount + errorCount === total) && total > 0) {
+       // Only trigger once if we haven't marked it as completed yet
+       if (!uploadCompleted && !isUploading) {
+          console.log('[DEBUG] UploadDialog: All files processed. Setting uploadCompleted=true')
+          
+          if (successCount > 0) {
+             setUploadCompleted(true)
+             setShowSuccess(true)
+          }
+       } else {
+           console.log('[DEBUG] UploadDialog: completion ignored (already completed or uploading flag stuck)', { uploadCompleted, isUploading })
+       }
+    }
+  }, [files, isUploading, uploadCompleted])
+
+  // Handle upload completion notification to parent
+  useEffect(() => {
+    if (uploadCompleted) {
+      console.log('[DEBUG] UploadDialog: notifying parent of completion')
       const successFiles = files.filter((f: UploadFile) => f.status === 'success')
+      
       if (successFiles.length > 0 && onUploadComplete) {
         try {
           onUploadComplete(successFiles)
+          setUploadCompleted(false) // Reset internal state after notifying parent
         } catch (error) {
           console.error('Error calling onUploadComplete:', error)
         }
       }
-      setUploadCompleted(false)
     }
-  }, [uploadCompleted, isUploading, files, onUploadComplete])
+  }, [uploadCompleted, files, onUploadComplete])
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes'

@@ -153,12 +153,7 @@ export function UserProvider({ children }: UserProviderProps) {
           clerkUser.fullName || '',
           selectedPlan
        ).then(async (syncedUser) => {
-          if (syncedUser && !syncedUser.onboarding_completed) {
-             console.log('[UserContext] Auto-completing onboarding...')
-             await apiClient.post('/auth/complete-onboarding', {
-                selected_plan: selectedPlan
-             })
-          }
+          // Removed auto-completion of onboarding to force plan selection
           reloadUser()
        }).catch(err => {
           console.error('[UserContext] Auto-sync failed', err)

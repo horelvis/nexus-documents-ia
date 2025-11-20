@@ -190,7 +190,10 @@ export function DocumentsDataTable({
           <div>
             <div 
               className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
-              onClick={() => onViewDocument(document)}
+              onClick={(e) => {
+                e.stopPropagation()
+                onFullPagePreview(document)
+              }}
             >
               {document.title || document.filename}
             </div>
@@ -269,7 +272,7 @@ export function DocumentsDataTable({
         const document = row.original
 
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             {/* 3 Main Actions */}
             <Button
               variant="ghost"
@@ -416,6 +419,8 @@ export function DocumentsDataTable({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => onViewDocument(row.original)}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

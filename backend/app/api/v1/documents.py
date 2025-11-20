@@ -9,6 +9,7 @@ import tempfile
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -86,7 +87,7 @@ async def create_document(
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
     
     document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
-    return await document_service.upload_document(
+    new_doc = await document_service.upload_document(
         db=db,
         file=file,
         title=title,
@@ -94,6 +95,20 @@ async def create_document(
         tags=tag_list,
         category=category
     )
+    
+    # Proactive Preview Generation: Enqueue background task
+    try:
+        await queue_service.enqueue_preview_generation(
+            document_id=str(new_doc.id),
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            preview_type="all",
+            priority="default"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to enqueue proactive preview generation for {new_doc.id}: {e}")
+        
+    return new_doc
 
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
@@ -157,43 +172,57 @@ async def stream_document(
         "X-User-ID": str(current_user.id)
     }
     
+    client = httpx.AsyncClient(timeout=60.0)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            request = client.build_request("GET", storage_url, headers=headers)
-            response = await client.send(request, stream=True)
+        request = client.build_request("GET", storage_url, headers=headers)
+        response = await client.send(request, stream=True)
+        
+        if response.status_code == 404:
+            await response.aclose()
+            await client.aclose()
+            logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
+            raise HTTPException(status_code=404, detail="Document file not found in storage")
+        elif response.status_code != 200:
+            await response.aread()
+            logger.error(f"Storage error {response.status_code}: {response.text}")
+            await response.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
+        
+        # Preparar headers para el cliente
+        content_headers = {
+            "Content-Type": response.headers.get("content-type", "application/octet-stream"),
+            "Content-Disposition": f'inline; filename="{document.filename}"'
+        }
+        
+        # Añadir headers de cache info si están disponibles
+        if "x-cache" in response.headers:
+            content_headers["X-Cache"] = response.headers["x-cache"]
+        
+        if "content-length" in response.headers:
+            content_headers["Content-Length"] = response.headers["content-length"]
             
-            if response.status_code == 404:
-                await response.aclose()
-                logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
-                raise HTTPException(status_code=404, detail="Document file not found in storage")
-            elif response.status_code != 200:
-                await response.aclose()
-                logger.error(f"Storage error {response.status_code}: {response.text}")
-                raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
-            
-            # Preparar headers para el cliente
-            content_headers = {
-                "Content-Type": response.headers.get("content-type", "application/octet-stream"),
-                "Content-Disposition": f'inline; filename="{document.filename}"'
-            }
-            
-            # Añadir headers de cache info si están disponibles
-            if "x-cache" in response.headers:
-                content_headers["X-Cache"] = response.headers["x-cache"]
-            
-            if "content-length" in response.headers:
-                content_headers["Content-Length"] = response.headers["content-length"]
-            
-            return StreamingResponse(
-                response.aiter_bytes(chunk_size=8192),
-                headers=content_headers,
-                media_type=response.headers.get("content-type", "application/octet-stream"),
-                background=None  # Let FastAPI handle closing the response
-            )
+        async def iterate_file():
+            try:
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    yield chunk
+            except Exception as e:
+                logger.error(f"Error streaming document {doc_id} from storage: {e}")
+                # Stop yielding to close the stream gracefully from client perspective
+                # (although it will look truncated)
+        
+        return StreamingResponse(
+            iterate_file(),
+            headers=content_headers,
+            media_type=response.headers.get("content-type", "application/octet-stream"),
+            background=BackgroundTask(client.aclose)
+        )
             
     except httpx.TimeoutException:
+        await client.aclose()
         raise HTTPException(status_code=408, detail="Request timeout")
     except Exception as e:
+        await client.aclose()
         logger.error(f"Error streaming document {doc_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Error streaming document")
 
@@ -402,7 +431,34 @@ async def get_document_preview(
         document = await document_service.get_document(db=db, doc_id=doc_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
+
+        # Optimización: Verificar cache antes de descargar el archivo
+        if not force_regenerate:
+            cached_preview = await preview_service.get_preview_info(doc_id)
+            if cached_preview:
+                return cached_preview
+            
+            # Si no hay cache y no forzamos, generar en background y devolver pending
+            await queue_service.enqueue_preview_generation(
+                document_id=doc_id,
+                tenant_id=tenant_id,
+                user_id=str(current_user.id),
+                preview_type="all",
+                priority="high"
+            )
+            
+            return {
+                "type": "pending",
+                "conversion_method": "pending",
+                "pdf_available": False,
+                "message": "Preview generation started in background",
+                "original_format": document.file_type,
+                "file_size": document.file_size,
+                "generated_at": None,
+                "thumbnails": []
+            }
         
+        # Si force_regenerate=True, ejecutamos síncronamente (fallback/debug)
         # Descargar archivo para procesamiento usando el storage interno del servicio
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, document.filename or 'document')
@@ -454,7 +510,9 @@ async def get_document_preview(
         # Cleanup
         try:
             await preview_service.cleanup()
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            # Check if temp_dir is defined before trying to remove it (in case of early return)
+            if 'temp_dir' in locals():
+                shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
             logger.warning(f"Cleanup failed: {e}")
 

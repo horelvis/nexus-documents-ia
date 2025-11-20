@@ -287,7 +287,7 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
   const navData = getNavData();
 
   return (
-    <Sidebar collapsible="icon" {...props}>
+    <Sidebar collapsible="icon" id="main-sidebar" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>

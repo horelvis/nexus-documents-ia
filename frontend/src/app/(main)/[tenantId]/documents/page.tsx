@@ -161,9 +161,22 @@ export default function DocumentsPage() {
   // Siempre usar búsqueda semántica por contenido
   const useDeepSearch = true
 
+  // Local state for search input
+  const [localSearchQuery, setLocalSearchQuery] = useState(searchQuery)
+
   const handleFilterChange = (value: DocumentFilterOption) => {
     setSelectedFilter(value)
     storePreference('filter', value)
+  }
+
+  const handleSearchConfirm = () => {
+    setSearchQuery(localSearchQuery)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearchConfirm()
+    }
   }
   
   // Dialog states
@@ -239,12 +252,14 @@ export default function DocumentsPage() {
 
       let response;
       const statusFilter = selectedFilter !== 'all' && selectedFilter !== 'recent' ? selectedFilter : undefined
+      const trimmedQuery = searchQuery.trim()
+      const shouldSearch = useDeepSearch && trimmedQuery.length >= 3
       
-      // Usar búsqueda semántica por contenido cuando hay un query de búsqueda
-      if (useDeepSearch && searchQuery && searchQuery.trim()) {
+      // Usar búsqueda semántica por contenido cuando hay un query de búsqueda válido (>= 3 chars)
+      if (shouldSearch) {
         // Use semantic search for content
         const searchResults = await searchServiceRef.current.searchDocuments({
-          query: searchQuery,
+          query: trimmedQuery,
           limit: viewMode === 'table' ? 100 : perPage
         })
         
@@ -252,7 +267,7 @@ export default function DocumentsPage() {
           console.warn('Semantic search failed, falling back to regular search:', searchResults.error)
           // Fallback to regular document search instead of showing error
           response = await documentServiceRef.current.getDocuments({
-            search: searchQuery || undefined,
+            search: trimmedQuery,
             status: statusFilter,
             per_page: viewMode === 'table' ? 100 : perPage,
             page: viewMode === 'table' ? 1 : currentPage
@@ -300,10 +315,14 @@ export default function DocumentsPage() {
         }
         }
       } else {
-        // Use regular document listing
+        // Use regular document listing (or fallback if query too short)
+        // Only pass search param if it meets the length requirement (logic for SQL fallback)
+        // If < 3 chars, effectiveSearch is undefined, so we load all docs.
+        const effectiveSearch = trimmedQuery.length >= 3 ? trimmedQuery : undefined
         const itemsPerPage = viewMode === 'table' ? 100 : perPage
+        
         response = await documentServiceRef.current.getDocuments({
-          search: searchQuery || undefined,
+          search: effectiveSearch,
           status: statusFilter,
           per_page: itemsPerPage,
           page: viewMode === 'table' ? 1 : currentPage
@@ -359,22 +378,28 @@ export default function DocumentsPage() {
   }, [])
 
   const handleDocumentsUpdated = useCallback((payload?: DocumentsUpdatedPayload) => {
+    console.log('[DEBUG] DocumentsPage: handleDocumentsUpdated received payload:', payload)
+
     if (payload?.tenantId && payload.tenantId !== tenantId) {
+      console.log('[DEBUG] DocumentsPage: Tenant ID mismatch, ignoring event')
       return
     }
 
     if (payload?.source === 'upload') {
+      console.log('[DEBUG] DocumentsPage: Processing upload event')
       const uploadedFiles = payload.files || []
       if (!uploadedFiles.length) {
+        console.log('[DEBUG] DocumentsPage: No files in payload, skipping')
         return
       }
 
       const successfulUploads = uploadedFiles.filter(file => file.status === 'success')
       if (!successfulUploads.length) {
+         console.log('[DEBUG] DocumentsPage: No successful uploads, skipping')
         return
       }
 
-      closeUploadDialog()
+      // closeUploadDialog is now handled in GlobalUploadDialog
 
       addNotification({
         type: 'upload',
@@ -387,18 +412,20 @@ export default function DocumentsPage() {
         }
       })
 
+      console.log('[DEBUG] DocumentsPage: Resetting filters and search')
       setSearchQuery('')
       setSelectedFilter('all')
       storePreference('filter', 'all')
       setCurrentPage(1)
 
-      setTimeout(() => {
-        loadDocuments()
-      }, 750)
+      // Wait a bit for Elasticsearch to index the new documents (now removed, refreshing immediately)
+      console.log('[DEBUG] DocumentsPage: Executing immediate loadDocuments')
+      loadDocuments()
 
       return
     }
-
+    
+    console.log('[DEBUG] DocumentsPage: Generic update event, reloading documents immediately')
     loadDocuments()
   }, [addNotification, closeUploadDialog, loadDocuments, setCurrentPage, setSearchQuery, setSelectedFilter, storePreference, tenantId])
 
@@ -711,21 +738,21 @@ export default function DocumentsPage() {
                   <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
                   <RichTextInput
                     placeholder="Search documents... (usa @ para mencionar entidades)"
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    onKeyDown={(e) => e.key === 'Enter' && loadDocuments()}
-                    className="pl-10"
+                    value={localSearchQuery}
+                    onChange={setLocalSearchQuery}
+                    onKeyDown={handleKeyDown}
+                    className="pl-10 border bg-background shadow-sm"
                     documentId="general"
                     onEntitySelect={(entity) => {
                       console.log("Entity selected in document search:", entity)
                       // Optionally trigger search when entity is selected
-                      loadDocuments()
+                      handleSearchConfirm() // Trigger search on entity select
                     }}
                   />
                 </div>
                 
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Button onClick={loadDocuments} variant="outline" className="flex-shrink-0">
+                  <Button onClick={handleSearchConfirm} variant="outline" className="flex-shrink-0">
                     Search
                   </Button>
                 <DropdownMenu>
@@ -812,7 +839,7 @@ export default function DocumentsPage() {
               <Card 
                 key={document.id} 
                 className="hover:shadow-lg transition-shadow cursor-pointer group"
-                onClick={() => handleFullPagePreview(document)}
+                onClick={() => handleViewDocument(document)}
               >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
@@ -828,7 +855,10 @@ export default function DocumentsPage() {
                           <h3 
                             className="text-base font-medium truncate cursor-pointer hover:text-blue-600 transition-colors" 
                             title={document.title || document.filename}
-                            onClick={() => handleViewDocument(document)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleFullPagePreview(document)
+                            }}
                           >
                             {document.title || document.filename}
                           </h3>

@@ -33,7 +33,9 @@ class ReindexService:
     
     async def get_documents_needing_reindex(self, db: Session) -> List[Document]:
         """
-        Find documents that are marked as INDEXED but don't exist in vector store.
+        Find documents that need reindexing:
+        1. Documents marked as INDEXED but missing from vector store
+        2. Documents marked as INDEXING_ERROR
         
         Args:
             db: Database session
@@ -42,7 +44,18 @@ class ReindexService:
             List of documents that need reindexing
         """
         try:
-            # Get all documents marked as indexed for this tenant
+            documents_needing_reindex = []
+
+            # 1. Get documents in ERROR state
+            error_documents = db.query(Document).filter(
+                and_(
+                    Document.tenant_id == self.tenant_id,
+                    Document.indexed == IndexingStatus.INDEXING_ERROR
+                )
+            ).all()
+            documents_needing_reindex.extend(error_documents)
+
+            # 2. Get documents marked as INDEXED
             indexed_documents = db.query(Document).filter(
                 and_(
                     Document.tenant_id == self.tenant_id,
@@ -50,11 +63,9 @@ class ReindexService:
                 )
             ).all()
             
-            logger.info(f"Found {len(indexed_documents)} documents marked as INDEXED")
+            logger.info(f"Found {len(error_documents)} ERROR docs and {len(indexed_documents)} INDEXED docs")
             
-            # Check which ones are missing from vector store
-            documents_needing_reindex = []
-            
+            # Check which INDEXED ones are missing from vector store
             for doc in indexed_documents:
                 # Try to search for this specific document in vector store
                 results = await self.vector_service.search_by_document_ids(
@@ -66,9 +77,9 @@ class ReindexService:
                 # If no results found, document needs reindexing
                 if not results:
                     documents_needing_reindex.append(doc)
-                    logger.debug(f"Document {doc.id} ({doc.filename}) needs reindexing")
+                    logger.debug(f"Document {doc.id} ({doc.filename}) missing from vector store")
             
-            logger.info(f"Found {len(documents_needing_reindex)} documents needing reindexing")
+            logger.info(f"Found {len(documents_needing_reindex)} total documents needing reindexing")
             return documents_needing_reindex
             
         except Exception as e:
@@ -252,6 +263,82 @@ class ReindexService:
                 
         except Exception as e:
             logger.error(f"Error in bulk reindexing: {str(e)}")
+            return {
+                "total_documents": 0,
+                "success_count": 0,
+                "error_count": 1,
+                "error": str(e)
+            }
+
+    async def reindex_all_force(self, max_concurrent: int = 3) -> Dict[str, Any]:
+        """
+        Force reindex ALL documents for the tenant, regardless of their status.
+        
+        Args:
+            max_concurrent: Maximum number of concurrent reindexing operations
+            
+        Returns:
+            Dictionary with reindexing results
+        """
+        try:
+            logger.info(f"Starting FORCED bulk reindexing for tenant {self.tenant_id}")
+            
+            with SessionLocal() as db:
+                # Get ALL documents for this tenant
+                all_documents = db.query(Document).filter(
+                    Document.tenant_id == self.tenant_id
+                ).all()
+                
+                if not all_documents:
+                    return {
+                        "total_documents": 0,
+                        "success_count": 0,
+                        "error_count": 0,
+                        "message": "No documents found to reindex"
+                    }
+                
+                logger.info(f"Found {len(all_documents)} documents to force reindex")
+                
+                # Process documents in batches
+                semaphore = asyncio.Semaphore(max_concurrent)
+                success_count = 0
+                error_count = 0
+                
+                async def reindex_with_semaphore(doc):
+                    async with semaphore:
+                        # Create new DB session for each document
+                        with SessionLocal() as doc_db:
+                            # Refresh document
+                            doc_refreshed = doc_db.query(Document).filter(Document.id == doc.id).first()
+                            if doc_refreshed:
+                                return await self.reindex_document(doc_db, doc_refreshed)
+                            return False
+                
+                # Start all tasks
+                tasks = [reindex_with_semaphore(doc) for doc in all_documents]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Count results
+                for result in results:
+                    if isinstance(result, Exception):
+                        error_count += 1
+                        logger.error(f"Reindexing task failed: {result}")
+                    elif result:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                
+                logger.info(f"Forced reindexing completed: {success_count} success, {error_count} errors")
+                
+                return {
+                    "total_documents": len(all_documents),
+                    "success_count": success_count,
+                    "error_count": error_count,
+                    "message": f"Force reindexed {success_count} of {len(all_documents)} documents"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in force reindexing: {str(e)}")
             return {
                 "total_documents": 0,
                 "success_count": 0,

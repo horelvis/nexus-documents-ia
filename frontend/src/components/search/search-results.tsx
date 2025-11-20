@@ -230,13 +230,17 @@ function SearchResultItem({
               <div className="mb-3">
                 <p className="text-xs text-muted-foreground mb-2 font-medium">Matches found:</p>
                 <div className="space-y-1">
-                  {result.matches.slice(0, 3).map((match: any, idx: number) => (
-                    <div key={idx} className="bg-yellow-50 border-l-4 border-yellow-300 p-2 rounded-r">
-                      <p className="text-sm text-gray-700 line-clamp-2">
-                        ...{typeof match === 'string' ? match : (match.text || match)}...
-                      </p>
-                    </div>
-                  ))}
+                  {result.matches.slice(0, 3).map((match: any, idx: number) => {
+                    const textContent = typeof match === 'string' ? match : (match.text || match);
+                    return (
+                      <div key={idx} className="bg-yellow-50 border-l-4 border-yellow-300 p-2 rounded-r">
+                        <p 
+                          className="text-sm text-gray-700 line-clamp-2"
+                          dangerouslySetInnerHTML={{ __html: textContent }}
+                        />
+                      </div>
+                    );
+                  })}
                   {result.matches.length > 3 && (
                     <p className="text-xs text-muted-foreground font-medium">
                       +{result.matches.length - 3} more matches

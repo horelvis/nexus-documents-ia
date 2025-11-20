@@ -25,6 +25,12 @@ import {
 } from "@tabler/icons-react"
 import { Document } from "@/lib/types"
 import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
+import dynamic from "next/dynamic"
+
+const PDFViewer = dynamic(() => import("@/components/documents/pdf-viewer"), {
+  ssr: false,
+  loading: () => <div className="flex justify-center p-4"><IconLoader2 className="animate-spin" /></div>
+})
 
 interface DocumentViewerDialogProps {
   document: Document | null
@@ -43,7 +49,7 @@ export function DocumentViewerDialog({
   onGetSummary,
   onDownload 
 }: DocumentViewerDialogProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'content' | 'summary'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'preview' | 'content' | 'summary'>('info')
   const [content, setContent] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
@@ -103,7 +109,7 @@ export function DocumentViewerDialog({
     }
   }
 
-  const handleTabChange = (tab: 'info' | 'content' | 'summary') => {
+  const handleTabChange = (tab: 'info' | 'preview' | 'content' | 'summary') => {
     setActiveTab(tab)
     
     if (tab === 'content' && !content && !loadingContent) {
@@ -115,9 +121,25 @@ export function DocumentViewerDialog({
 
   if (!document) return null
 
+  let previewUrl = ''
+  if (document) {
+    if (document.mime_type === 'application/pdf' || document.file_type?.toLowerCase() === 'pdf') {
+      previewUrl = `/${document.tenant_id}/api/documents/${document.id}/pdf`
+    } else if (document.mime_type?.includes('opendocument') || document.file_type?.toLowerCase() === 'odt') {
+      previewUrl = `/${document.tenant_id}/api/documents/${document.id}/converted-pdf`
+    }
+  }
+
+  const isPreviewable = document && (
+    document.mime_type === 'application/pdf' || 
+    document.file_type?.toLowerCase() === 'pdf' ||
+    document.file_type?.toLowerCase() === 'odt' ||
+    document.mime_type?.includes('opendocument')
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] max-h-[80vh]">
+      <DialogContent className="sm:max-w-[800px] max-h-[90vh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center gap-3">
             {getFileIcon(document.file_type, document.mime_type, document.filename, 'lg')}
@@ -155,6 +177,17 @@ export function DocumentViewerDialog({
             <IconEye className="mr-2 h-4 w-4" />
             Info
           </Button>
+          {isPreviewable && (
+            <Button
+              variant={activeTab === 'preview' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => handleTabChange('preview')}
+              className="rounded-none border-0"
+            >
+              <IconFileTypePdf className="mr-2 h-4 w-4" />
+              Preview
+            </Button>
+          )}
           <Button
             variant={activeTab === 'content' ? 'default' : 'ghost'}
             size="sm"
@@ -175,149 +208,162 @@ export function DocumentViewerDialog({
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 max-h-[400px]">
-          <div className="p-4">
-            {/* Info Tab */}
-            {activeTab === 'info' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <IconFile className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">Filename:</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground pl-6">
-                      {document.filename}
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <IconClock className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">Created:</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground pl-6">
-                      {new Date(document.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                {document.description && (
-                  <>
-                    <Separator />
+        <div className="flex-1 overflow-hidden min-h-[300px]">
+          <ScrollArea className="h-full">
+            <div className="p-4">
+              {/* Info Tab */}
+              {activeTab === 'info' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <h4 className="font-medium">Description</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {document.description}
+                      <div className="flex items-center gap-2 text-sm">
+                        <IconFile className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">Filename:</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground pl-6">
+                        {document.filename}
                       </p>
                     </div>
-                  </>
-                )}
-
-                {document.category && (
-                  <>
-                    <Separator />
+                    
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <IconFolder className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-medium">Category:</span>
+                      <div className="flex items-center gap-2 text-sm">
+                        <IconClock className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">Created:</span>
                       </div>
-                      <Badge variant="outline">{document.category}</Badge>
+                      <p className="text-sm text-muted-foreground pl-6">
+                        {new Date(document.created_at).toLocaleString()}
+                      </p>
                     </div>
-                  </>
-                )}
-
-                {document.tags && document.tags.length > 0 && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <IconTag className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-medium">Tags:</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {document.tags.map((tag) => (
-                          <Badge key={tag} variant="outline" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <Separator />
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <IconUser className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Created by:</span>
                   </div>
-                  <p className="text-sm text-muted-foreground pl-6">
-                    {typeof document.created_by === 'object' && document.created_by !== null
-                      ? document.created_by.full_name || document.created_by.email
-                      : document.created_by}
-                  </p>
+
+                  {document.description && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <h4 className="font-medium">Description</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {document.description}
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {document.category && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <IconFolder className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">Category:</span>
+                        </div>
+                        <Badge variant="outline">{document.category}</Badge>
+                      </div>
+                    </>
+                  )}
+
+                  {document.tags && document.tags.length > 0 && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <IconTag className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">Tags:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {document.tags.map((tag) => (
+                            <Badge key={tag} variant="outline" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <Separator />
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <IconUser className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Created by:</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground pl-6">
+                      {typeof document.created_by === 'object' && document.created_by !== null
+                        ? document.created_by.full_name || document.created_by.email
+                        : document.created_by}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Content Tab */}
-            {activeTab === 'content' && (
-              <div className="space-y-4">
-                {loadingContent && (
-                  <div className="flex items-center justify-center py-8">
-                    <IconLoader2 className="h-6 w-6 animate-spin mr-2" />
-                    <span>Loading content...</span>
-                  </div>
-                )}
+              {/* Preview Tab */}
+              {activeTab === 'preview' && isPreviewable && (
+                <div className="h-full min-h-[400px]">
+                   <PDFViewer 
+                     url={previewUrl} 
+                     fileName={document.filename}
+                     height="400px"
+                   />
+                </div>
+              )}
 
-                {contentError && (
-                  <div className="text-center py-8">
-                    <p className="text-red-600 mb-4">{contentError}</p>
-                    <Button onClick={handleLoadContent} variant="outline" size="sm">
-                      Try Again
-                    </Button>
-                  </div>
-                )}
+              {/* Content Tab */}
+              {activeTab === 'content' && (
+                <div className="space-y-4">
+                  {loadingContent && (
+                    <div className="flex items-center justify-center py-8">
+                      <IconLoader2 className="h-6 w-6 animate-spin mr-2" />
+                      <span>Loading content...</span>
+                    </div>
+                  )}
 
-                {content && !loadingContent && (
-                  <div className="bg-muted/50 p-4 rounded-lg">
-                    <pre className="whitespace-pre-wrap text-sm font-mono">
-                      {content}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            )}
+                  {contentError && (
+                    <div className="text-center py-8">
+                      <p className="text-red-600 mb-4">{contentError}</p>
+                      <Button onClick={handleLoadContent} variant="outline" size="sm">
+                        Try Again
+                      </Button>
+                    </div>
+                  )}
 
-            {/* Summary Tab */}
-            {activeTab === 'summary' && (
-              <div className="space-y-4">
-                {loadingSummary && (
-                  <div className="flex items-center justify-center py-8">
-                    <IconLoader2 className="h-6 w-6 animate-spin mr-2" />
-                    <span>Loading summary...</span>
-                  </div>
-                )}
+                  {content && !loadingContent && (
+                    <div className="bg-muted/50 p-4 rounded-lg">
+                      <pre className="whitespace-pre-wrap text-sm font-mono">
+                        {content}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
 
-                {summaryError && (
-                  <div className="text-center py-8">
-                    <p className="text-red-600 mb-4">{summaryError}</p>
-                    <Button onClick={handleLoadSummary} variant="outline" size="sm">
-                      Try Again
-                    </Button>
-                  </div>
-                )}
+              {/* Summary Tab */}
+              {activeTab === 'summary' && (
+                <div className="space-y-4">
+                  {loadingSummary && (
+                    <div className="flex items-center justify-center py-8">
+                      <IconLoader2 className="h-6 w-6 animate-spin mr-2" />
+                      <span>Loading summary...</span>
+                    </div>
+                  )}
 
-                {summary && !loadingSummary && (
-                  <div className="bg-muted/50 p-4 rounded-lg">
-                    <p className="text-sm leading-relaxed">{summary}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+                  {summaryError && (
+                    <div className="text-center py-8">
+                      <p className="text-red-600 mb-4">{summaryError}</p>
+                      <Button onClick={handleLoadSummary} variant="outline" size="sm">
+                        Try Again
+                      </Button>
+                    </div>
+                  )}
+
+                  {summary && !loadingSummary && (
+                    <div className="bg-muted/50 p-4 rounded-lg">
+                      <p className="text-sm leading-relaxed">{summary}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   )

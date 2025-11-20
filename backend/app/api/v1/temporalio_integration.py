@@ -180,8 +180,17 @@ async def _get_workflow_summary() -> Dict[str, Any]:
     if cached:
         return cached
 
-    data = await _call_temporalio_service("/workflows")
-    workflows = data if isinstance(data, list) else data.get("workflows", []) or []
+    try:
+        # Call /workflows/list instead of /workflows (which doesn't exist)
+        data = await _call_temporalio_service("/workflows/list?limit=100")
+        workflows = data.get("workflows", [])
+    except HTTPException as e:
+        # If service is down or error, return empty summary to avoid crashing dashboard
+        logger.error(f"Error fetching workflows for summary: {e}")
+        workflows = []
+    except Exception as e:
+        logger.error(f"Unexpected error fetching workflows for summary: {e}")
+        workflows = []
 
     active_count = 0
     for workflow in workflows:

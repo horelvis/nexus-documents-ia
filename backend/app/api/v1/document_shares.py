@@ -428,12 +428,13 @@ async def access_shared_document(
         await db.commit()
         
         # Generate temporary access URL
-        from app.services.storage_service import StorageService
-        storage_service = StorageService(str(share.tenant_id), str(share.created_by))
+        from app.services.async_storage_service import AsyncStorageService
+        storage_service = AsyncStorageService(str(share.tenant_id), str(share.created_by))
         
         # Get signed URL for document access
         if share.share_type == "download":
-            signed_url = storage_service.generate_download_url(document.file_path, expiration_minutes=60)
+            url, _ = await storage_service.generate_download_signed_url(document.file_path, expiration=3600)
+            signed_url = url
         else:  # view
             signed_url = f"/api/v1/shares/view/{share_token}?token={secrets.token_urlsafe(32)}"
         
@@ -489,10 +490,10 @@ async def view_shared_document(
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Stream document through storage service
-        from app.services.storage_service import StorageService
-        storage_service = StorageService(str(share.tenant_id), str(share.created_by))
+        from app.services.async_storage_service import AsyncStorageService
+        storage_service = AsyncStorageService(str(share.tenant_id), str(share.created_by))
         
-        file_content = storage_service.download_file(document.file_path)
+        file_content = await storage_service.download_file(document.file_path)
         if not file_content:
             raise HTTPException(status_code=500, detail="Could not retrieve document")
         

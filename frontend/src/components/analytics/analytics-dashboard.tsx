@@ -12,8 +12,8 @@ import {
   IconDatabase,
   IconTrendingUp,
   IconTrendingDown,
-  IconBarChart3,
-  IconPieChart,
+  IconChartBar,
+  IconChartPie,
   IconCalendar,
   IconTag,
   IconLoader2,
@@ -163,7 +163,7 @@ export function AnalyticsDashboard({ tenantId }: AnalyticsDashboardProps) {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <IconBarChart3 className="h-5 w-5" />
+                  <IconChartBar className="h-5 w-5" />
                   Detailed Analytics
                 </CardTitle>
               </CardHeader>

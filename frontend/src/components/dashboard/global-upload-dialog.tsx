@@ -7,7 +7,7 @@ import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentEvents } from "@/contexts/document-events-context"
 
 export function GlobalUploadDialog() {
-  const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete } = useUpload()
+  const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete, closeUploadDialog } = useUpload()
   const { addNotification } = useNotifications()
   const { emitDocumentEvent } = useDocumentEvents()
   const params = useParams()
@@ -15,10 +15,10 @@ export function GlobalUploadDialog() {
   const tenantId = Array.isArray(tenantIdParam) ? tenantIdParam[0] : tenantIdParam
 
   const handleUploadComplete = (uploadedFiles: Array<{file: File, id: string, status: string}>) => {
-    console.log('GlobalUploadDialog handleUploadComplete called with:', uploadedFiles)
+    console.log('[DEBUG] GlobalUploadDialog: handleUploadComplete called', { filesCount: uploadedFiles?.length })
     
     if (!uploadedFiles || !Array.isArray(uploadedFiles)) {
-      console.error('Invalid uploadedFiles received:', uploadedFiles)
+      console.error('[DEBUG] Invalid uploadedFiles received:', uploadedFiles)
       return
     }
 
@@ -33,6 +33,11 @@ export function GlobalUploadDialog() {
       }
     })
 
+    // Close dialog immediately
+    console.log('[DEBUG] GlobalUploadDialog: Calling closeUploadDialog()')
+    closeUploadDialog()
+
+    console.log('[DEBUG] GlobalUploadDialog: Emitting documents:updated event')
     emitDocumentEvent("documents:updated", {
       tenantId,
       source: "upload",

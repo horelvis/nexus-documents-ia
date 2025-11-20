@@ -4,6 +4,7 @@ import { AuthGuard, ProfileVerificationGuard } from "@/components/auth"
 import { GlobalUploadDialog } from "@/components/dashboard/global-upload-dialog"
 import { NavigationProgress } from "@/components/layout/navigation-progress"
 import { VirtualAssistant } from "@/components/virtual-assistant/virtual-assistant"
+import { TourGuide } from "@/components/tour/TourGuide"
 import { ChatUIProvider } from "@/contexts/chat-ui-context"
 import { DocumentEventsProvider } from "@/contexts/document-events-context"
 import { NotificationsProvider } from "@/contexts/notifications-context"
@@ -34,22 +35,24 @@ export default async function TenantLayout({
                   } as React.CSSProperties
                 }
               >
-                <AppSidebar variant="inset" tenantId={tenantId} />
-                <SidebarInset>
-                  <NavigationProgress />
-                  <SiteHeader tenantId={tenantId} />
-                  <div className="flex flex-1 flex-col">
-                    <div className="@container/main flex flex-1 flex-col gap-2">
-                      {children}
+                <TourGuide>
+                  <AppSidebar variant="inset" tenantId={tenantId} />
+                  <SidebarInset>
+                    <NavigationProgress />
+                    <SiteHeader tenantId={tenantId} />
+                    <div className="flex flex-1 flex-col">
+                      <div className="@container/main flex flex-1 flex-col gap-2">
+                        {children}
+                      </div>
                     </div>
-                  </div>
-                </SidebarInset>
-                
-                {/* Global Upload Dialog */}
-                <GlobalUploadDialog />
-                
-                {/* Virtual Assistant */}
-                <VirtualAssistant />
+                  </SidebarInset>
+                  
+                  {/* Global Upload Dialog */}
+                  <GlobalUploadDialog />
+                  
+                  {/* Virtual Assistant */}
+                  <VirtualAssistant />
+                </TourGuide>
               </SidebarProvider>
             </DocumentEventsProvider>
           </ChatUIProvider>
