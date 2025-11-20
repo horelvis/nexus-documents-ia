@@ -8,6 +8,7 @@ import { useApiClient, apiClient as globalApiClient } from '@/lib/api-client'
 import { fetcher } from '@/lib/fetcher'
 import { ConnectionError } from '@/components/errors/connection-error'
 import { Button } from '@/components/ui/button'
+import { syncUserWithBackend } from '@/lib/sync-user'
 
 import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
 
@@ -134,11 +135,38 @@ export function UserProvider({ children }: UserProviderProps) {
 
   // ... (rest of syncUserWithBackend and other functions)
 
-  // Redirect Logic
+  // Auto-sync and Redirect Logic
   useEffect(() => {
-    // Skip redirect if we are in the auth flow or on the pricing page
+    // Skip if auth flow or pricing
     if (pathname.startsWith('/auth/') || pathname === '/pricing') return
 
+    // Auto-sync for new users (Direct Flow)
+    // If we have a clerk user but no backend user (and no loading/error), it means the user needs to be synced/created
+    if (isClerkLoaded && isSignedIn && clerkUser && !backendUser && !userLoading && !userError) {
+       const unsafeMetadata = clerkUser.unsafeMetadata as any
+       const selectedPlan = unsafeMetadata?.selected_plan || 'free'
+       
+       console.log('[UserContext] Auto-syncing new user...')
+       syncUserWithBackend(
+          clerkUser.id, 
+          clerkUser.primaryEmailAddress?.emailAddress || '', 
+          clerkUser.fullName || '',
+          selectedPlan
+       ).then(async (syncedUser) => {
+          if (syncedUser && !syncedUser.onboarding_completed) {
+             console.log('[UserContext] Auto-completing onboarding...')
+             await apiClient.post('/auth/complete-onboarding', {
+                selected_plan: selectedPlan
+             })
+          }
+          reloadUser()
+       }).catch(err => {
+          console.error('[UserContext] Auto-sync failed', err)
+       })
+    }
+    
+    // Redirect to onboarding is DISABLED for direct flow
+    /*
     if (backendUser && !backendUser.onboarding_completed && !isOnboardingPath()) {
        // Check for invalid/default tenant ID
        const isInvalidTenantId = !backendUser.tenant_id || 
@@ -154,7 +182,8 @@ export function UserProvider({ children }: UserProviderProps) {
          router.push(getOnboardingPath(backendUser))
       }
     }
-  }, [backendUser, isOnboardingPath, getOnboardingPath, router])
+    */
+  }, [backendUser, isOnboardingPath, getOnboardingPath, router, isClerkLoaded, isSignedIn, userLoading, userError, clerkUser, apiClient, reloadUser])
 
 
   // Actions

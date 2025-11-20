@@ -31,15 +31,9 @@ function SignUpContent() {
   const selectedPlan = STRIPE_PLANS[planId]
 
     useEffect(() => {
-      // Si el usuario ya está autenticado y la sesión está cargada, redirigir al onboarding
+      // Si el usuario ya está autenticado y la sesión está cargada, redirigir al dashboard
       if (isLoaded && isSignedIn && user) {
-        const params = new URLSearchParams()
-        if (rawPlan) params.set('plan', rawPlan)
-        if (rawInterval) params.set('interval', rawInterval)
-        if (invitation) params.set('invitation', invitation)
-        
-        const queryString = params.toString()
-        router.push(`/onboarding-simple${queryString ? `?${queryString}` : ''}`)
+        router.push('/dashboard')
         return
       }
 
@@ -264,35 +258,35 @@ function SignUpContent() {
 
               <div className="w-full max-w-md">
 
-                <SignUp 
+                                <SignUp 
 
-                  appearance={{
+                                  appearance={{
 
-                    elements: {
+                                    elements: {
 
-                      rootBox: "w-full",
+                                      rootBox: "w-full",
 
-                      card: "shadow-none p-0",
+                                      card: "shadow-none p-0",
 
-                    }
+                                    }
 
-                  }}
+                                  }}
 
-                  afterSignUpUrl={'/onboarding-simple'}
+                                  afterSignUpUrl={'/dashboard'}
 
-                                    unsafeMetadata={{
+                                                    unsafeMetadata={{
 
-                                      invitation_code: invitation || undefined,
+                                                      invitation_code: invitation || undefined,
 
-                                      tenant_id: tenantId || undefined,
+                                                      tenant_id: tenantId || undefined,
 
-                                      selected_plan: planId,
+                                                      selected_plan: planId,
 
-                                      selected_interval: interval
+                                                      selected_interval: interval
 
-                                    }}
+                                                    }}
 
-                />
+                                />
 
               </div>
 
