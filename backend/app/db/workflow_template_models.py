@@ -15,7 +15,7 @@ class WorkflowTemplate(Base):
     """
     Workflow Template - Configurable workflow definitions by tenant admins
     """
-    __tablename__ = "workflow_templates"
+    __tablename__ = "engine_templates"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     
@@ -36,6 +36,22 @@ class WorkflowTemplate(Base):
     input_schema = Column(JSONB, nullable=False)         # Required/optional fields for execution
     validation_rules = Column(JSONB, default={})        # Business rules and constraints
     notification_config = Column(JSONB, default={})     # Who gets notified and when
+    
+    # Template file info (stored in tenant storage)
+    template_file_path = Column(String, nullable=True)
+    template_file_name = Column(String, nullable=True)
+    template_file_mime = Column(String, nullable=True)
+    template_file_size = Column(Integer, nullable=True)
+    template_file_updated_at = Column(DateTime)
+    template_source_document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
+    
+    # Template file info (ODT stored in tenant storage)
+    template_file_path = Column(String, nullable=True)
+    template_file_name = Column(String, nullable=True)
+    template_file_mime = Column(String, nullable=True)
+    template_file_size = Column(Integer, nullable=True)
+    template_file_updated_at = Column(DateTime)
+    template_source_document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
     
     # Template Metadata
     estimated_duration = Column(String)  # "2 days", "1 week", etc.
@@ -72,7 +88,7 @@ class WorkflowExecution(Base):
     tenant_id = Column(String, nullable=False, index=True)
     
     # Template Reference
-    template_id = Column(UUID(as_uuid=True), ForeignKey("workflow_templates.id"), nullable=False)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("engine_templates.id"), nullable=False)
     template_version = Column(String, nullable=False)
     
     # Temporalio Integration
@@ -153,12 +169,12 @@ class WorkflowTemplateField(Base):
     """
     Configurable input fields for workflow templates
     """
-    __tablename__ = "workflow_template_fields"
+    __tablename__ = "engine_template_fields"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     
     # Template Reference
-    template_id = Column(UUID(as_uuid=True), ForeignKey("workflow_templates.id"), nullable=False)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("engine_templates.id"), nullable=False)
     
     # Field Definition
     field_name = Column(String, nullable=False)      # "employee_name", "contract_type", etc.

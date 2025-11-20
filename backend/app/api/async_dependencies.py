@@ -85,53 +85,11 @@ async def get_current_user_async(
         
         if not user:
             logger.warning(f"⚠️ [ASYNC_DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
-            logger.info("🔄 [ASYNC_DEPENDENCIES] Attempting auto-sync from Clerk...")
-            
-            try:
-                # Auto-sync: obtener datos del usuario desde Clerk
-                from clerk_backend_api import Clerk
-                clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
-                
-                # Obtener información del usuario desde Clerk
-                clerk_user = clerk.users.get(user_id=clerk_user_id)
-                
-                if clerk_user and clerk_user.email_addresses:
-                    primary_email = next((email.email_address for email in clerk_user.email_addresses if email.id == clerk_user.primary_email_address_id), None)
-                    
-                    if primary_email:
-                        logger.info(f"📧 [ASYNC_DEPENDENCIES] Auto-syncing user: {primary_email}")
-                        
-                        # Create user using AsyncAuthService
-                        user = await AsyncAuthService.sync_user_from_clerk(
-                            db=db,
-                            clerk_user_id=clerk_user_id,
-                            email=primary_email,
-                            full_name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or primary_email
-                        )
-                        logger.info(f"✅ [ASYNC_DEPENDENCIES] User auto-synced successfully: {user.email}")
-                        return user
-                    else:
-                        logger.error("❌ [ASYNC_DEPENDENCIES] No primary email found in Clerk user")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Unable to sync user - no email found",
-                            headers={"WWW-Authenticate": "Bearer"},
-                        )
-                else:
-                    logger.error("❌ [ASYNC_DEPENDENCIES] Unable to fetch user from Clerk")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Unable to sync user from Clerk",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-                    
-            except Exception as sync_error:
-                logger.error(f"❌ [ASYNC_DEPENDENCIES] Auto-sync failed: {str(sync_error)}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="User not found. Please register first.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not registered in Nexus. Complete the signup flow first.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
         logger.info(f"✅ [ASYNC_DEPENDENCIES] User authenticated: {user.email}")
         return user
@@ -293,3 +251,19 @@ def require_subscription_permission_async(permission: str):
         return current_user
     
     return permission_checker
+
+
+async def get_document_service(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Dependency to get an instance of AsyncDocumentService
+    """
+    from app.services.async_document_service import AsyncDocumentService
+    return await AsyncDocumentService.create(
+        tenant_id=tenant_id,
+        user_id=str(current_user.id),
+        db=db
+    )

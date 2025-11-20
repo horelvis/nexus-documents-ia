@@ -9,6 +9,7 @@ from sqlalchemy.orm import relationship
 
 from sqlalchemy.sql import func
 from app.db.base_class import Base
+from app.db.edit_session_models import TemplateEditSession  # noqa: F401
 
 # Import agent models
 from app.db.agent_models import (
@@ -167,6 +168,29 @@ class User(Base):
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
         Index('idx_users_email_active', 'email', 'is_active'),
     )
+
+    @property
+    def is_admin(self) -> bool:
+        """
+        Convenience flag used across the API to determine if the user
+        should be treated as a tenant administrator. By definition:
+        - Superusers are always admins
+        - Tenant owners (is_team_member == False) are admins
+        - Users with a role named 'admin' are admins
+        """
+        if self.is_superuser:
+            return True
+        if not self.is_team_member:
+            return True
+        try:
+            return any((role.name or "").lower() == "admin" for role in (self.roles or []))
+        except Exception:  # pragma: no cover - relationship issues should not block checks
+            return False
+
+    @property
+    def is_tenant_admin(self) -> bool:
+        """Alias used by some parts of the API."""
+        return self.is_admin
 
 
 class UserImage(Base):
@@ -529,6 +553,26 @@ class DocumentShareAccessLog(Base):
         Index('idx_share_access_logs_accessed', 'accessed_at'),
         Index('idx_share_access_logs_tenant', 'tenant_id'),
     )
+
+
+class GoogleDriveToken(Base):
+    """OAuth tokens per user for Google Drive/Docs integration."""
+    __tablename__ = "google_drive_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    google_user_id = Column(String, nullable=False)
+    google_email = Column(String, nullable=False)
+    scopes = Column(JSONB, default=list)
+    access_token_encrypted = Column(LargeBinary, nullable=False)
+    refresh_token_encrypted = Column(LargeBinary, nullable=True)
+    token_expiry = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User")
+    tenant = relationship("Tenant")
 
 
 class DocumentShareRecipient(Base):

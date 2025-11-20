@@ -32,14 +32,7 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     // Subscription redirects are now handled by middleware.ts
     // Only handle onboarding redirects here if needed
     if (!isAllowedPath && backendUser) {
-      // Check if user needs onboarding
-      // Only redirect to onboarding if:
-      // 1. Has not completed onboarding
-      // 2. Has an active subscription (including trial)
-      const hasActiveSubscription = backendUser.subscription_plan && 
-        (backendUser.subscription_plan !== 'free' || backendUser.subscription_status === 'trialing')
-      
-      if (!backendUser.onboarding_completed && hasActiveSubscription) {
+      if (!backendUser.onboarding_completed) {
         const tenantId = backendUser.tenant_id || 'temp'
         router.push(`/${tenantId}/onboarding`)
         return

@@ -2,20 +2,23 @@
 Google Docs Service - Temporary document creation and management
 Following Alfresco ECM pattern: create temp, edit, sync, delete
 """
-import json
 import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Tuple
+import io
+from datetime import datetime
+from typing import Dict, Any, Optional, Tuple, Union
 import logging
 
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+ODT_MIME_TYPE = "application/vnd.oasis.opendocument.text"
 
 
 class GoogleDocsService:
@@ -28,6 +31,15 @@ class GoogleDocsService:
         self._drive_service = None
         self._credentials = None
         self._initialize_services()
+
+    def _resolve_services(self, user_token: Optional[Dict[str, Any]]):
+        """Return Docs/Drive services for either service account or user token."""
+        if user_token and user_token.get("access_token"):
+            creds = Credentials(token=user_token["access_token"])
+            docs_service = build('docs', 'v1', credentials=creds)
+            drive_service = build('drive', 'v3', credentials=creds)
+            return docs_service, drive_service
+        return self._docs_service, self._drive_service
     
     def _initialize_services(self):
         """Initialize Google API services"""
@@ -67,7 +79,7 @@ class GoogleDocsService:
             else:
                 raise
     
-    async def _share_document_with_user(self, doc_id: str, user_email: str):
+    async def _share_document_with_user(self, doc_id: str, user_email: str, drive_service):
         """Share document with user as editor"""
         try:
             # Give editor access to the user
@@ -77,7 +89,7 @@ class GoogleDocsService:
                 'emailAddress': user_email
             }
             
-            self._drive_service.permissions().create(
+            drive_service.permissions().create(
                 fileId=doc_id,
                 body=permission,
                 sendNotificationEmail=False  # Don't spam user with notification
@@ -89,9 +101,9 @@ class GoogleDocsService:
             logger.error(f"❌ Failed to share document with user {user_email}: {e}")
             # Continue - not critical, user might still be able to access via other means
     
-    async def _transfer_document_ownership(self, doc_id: str, user_email: str):
+    async def _transfer_document_ownership(self, doc_id: str, user_email: str, drive_service):
         """Transfer document ownership to the editing user if enabled."""
-        if not settings.google_transfer_ownership or not self._drive_service:
+        if not settings.google_transfer_ownership or not drive_service:
             return
         
         try:
@@ -100,7 +112,7 @@ class GoogleDocsService:
                 'role': 'owner',
                 'emailAddress': user_email
             }
-            self._drive_service.permissions().create(
+            drive_service.permissions().create(
                 fileId=doc_id,
                 body=permission,
                 transferOwnership=True,
@@ -115,81 +127,87 @@ class GoogleDocsService:
     async def create_temporary_document(
         self,
         title: str,
-        content: str,
+        content: Optional[str],
         user_email: str,
-        template_id: str
+        template_id: str,
+        file_bytes: Optional[bytes] = None,
+        file_mime_type: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        user_token: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Create temporary Google Doc for editing
-        
-        Args:
-            title: Document title
-            content: Initial HTML content
-            user_email: User who will edit the document
-            template_id: Original template ID for tracking
-            
-        Returns:
-            Dictionary with document info and URLs
+        Create temporary Google Doc for editing.
+        Supports either HTML content or direct ODT payloads.
         """
         try:
             logger.info(f"🔄 Creating temporary Google Doc for template {template_id}")
-            
-            # Mock response in debug mode or when APIs not available
-            if settings.debug or not self._docs_service:
+            docs_service, drive_service = self._resolve_services(user_token)
+
+            # Mock response when services are unavailable
+            if not docs_service or not drive_service:
                 logger.info("🔧 Creating MOCK Google Doc for development")
                 mock_doc_id = f"mock_doc_{template_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                payload = file_bytes or (content.encode('utf-8') if content else b"")
                 result = {
                     'document_id': mock_doc_id,
                     'title': f"MOCK_EDIT_{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     'view_url': f"https://docs.google.com/document/d/{mock_doc_id}/view",
                     'edit_url': f"https://docs.google.com/document/d/{mock_doc_id}/edit",
-                    'content_hash': self._calculate_content_hash(content),
+                    'content_hash': self._calculate_content_hash(payload),
                     'created_at': datetime.utcnow().isoformat(),
                     'user_email': user_email,
-                    'mock': True
+                    'mock': True,
+                    'file_size': len(payload),
+                    'file_mime_type': file_mime_type or (ODT_MIME_TYPE if file_bytes else 'text/html'),
+                    'original_file_name': original_filename or f"{template_id}.odt"
                 }
                 logger.info(f"✅ Mock document created successfully: {mock_doc_id}")
                 return result
             
-            # 1. Create empty Google Doc with service account
             doc_title = f"TEMP_EDIT_{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             logger.info(f"📄 Creating Google Doc with service account: {doc_title}")
             
-            # Create via Drive API with service account
             file_metadata = {
                 'name': doc_title,
                 'mimeType': 'application/vnd.google-apps.document'
             }
             
-            doc = self._drive_service.files().create(body=file_metadata).execute()
+            if file_bytes:
+                media = MediaIoBaseUpload(
+                    io.BytesIO(file_bytes),
+                    mimetype=file_mime_type or ODT_MIME_TYPE,
+                    resumable=False
+                )
+                doc = drive_service.files().create(
+                    body=file_metadata,
+                    media_body=media
+                ).execute()
+            else:
+                doc = drive_service.files().create(body=file_metadata).execute()
             doc_id = doc.get('id')
             
             logger.info(f"📄 Created Google Doc: {doc_id}")
             
-            # 2. Insert initial content if provided
-            if content:
-                await self._insert_html_content(doc_id, content)
+            if content and not file_bytes:
+                await self._insert_html_content(doc_id, content, docs_service)
             
-            # 3. Share document with user as editor
-            await self._share_document_with_user(doc_id, user_email)
+            if not user_token:
+                await self._share_document_with_user(doc_id, user_email, drive_service)
+                await self._transfer_document_ownership(doc_id, user_email, drive_service)
             
-            # 3b. Attempt to transfer ownership so the doc lives in the user's Drive
-            await self._transfer_document_ownership(doc_id, user_email)
-            
-            # 4. Get document URLs
             doc_urls = self._get_document_urls(doc_id)
-            
-            # 5. Calculate content hash for change detection
-            content_hash = self._calculate_content_hash(content)
-            
+            payload = file_bytes or (content.encode('utf-8') if content else b"")
             result = {
                 'document_id': doc_id,
                 'title': doc_title,
                 'view_url': doc_urls['view_url'],
                 'edit_url': doc_urls['edit_url'],
-                'content_hash': content_hash,
+                'content_hash': self._calculate_content_hash(payload),
                 'created_at': datetime.utcnow().isoformat(),
-                'user_email': user_email
+                'user_email': user_email,
+                'file_size': len(payload),
+                'file_mime_type': file_mime_type or (ODT_MIME_TYPE if file_bytes else 'text/html'),
+                'original_file_name': original_filename or f"{template_id}.odt"
             }
             
             logger.info(f"✅ Temporary document created successfully: {doc_id}")
@@ -212,16 +230,20 @@ class GoogleDocsService:
                 
                 # Create mock document as fallback
                 mock_doc_id = f"fallback_doc_{template_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                payload = file_bytes or (content.encode('utf-8') if content else b"")
                 result = {
                     'document_id': mock_doc_id,
                     'title': f"FALLBACK_EDIT_{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     'view_url': f"https://docs.google.com/document/d/{mock_doc_id}/view",
                     'edit_url': f"https://docs.google.com/document/d/{mock_doc_id}/edit",
-                    'content_hash': self._calculate_content_hash(content),
+                    'content_hash': self._calculate_content_hash(payload),
                     'created_at': datetime.utcnow().isoformat(),
                     'user_email': user_email,
                     'mock': True,
-                    'fallback_reason': fallback_reason
+                    'fallback_reason': fallback_reason,
+                    'file_size': len(payload),
+                    'file_mime_type': file_mime_type or (ODT_MIME_TYPE if file_bytes else 'text/html'),
+                    'original_file_name': original_filename or f"{template_id}.odt"
                 }
                 logger.info(f"✅ Fallback document created: {mock_doc_id}")
                 return result
@@ -287,57 +309,46 @@ class GoogleDocsService:
             'edit_url': f"{base_url}/edit"
         }
     
-    def _calculate_content_hash(self, content: str) -> str:
+    def _calculate_content_hash(self, content: Union[str, bytes]) -> str:
         """Calculate MD5 hash of content for change detection"""
-        return hashlib.md5(content.encode('utf-8')).hexdigest()
+        if isinstance(content, str):
+            payload = content.encode('utf-8')
+        else:
+            payload = content or b""
+        return hashlib.md5(payload).hexdigest()
     
-    async def get_document_content(self, doc_id: str) -> Tuple[str, str]:
+    async def export_document(
+        self,
+        doc_id: str,
+        mime_type: str = ODT_MIME_TYPE,
+        user_token: Optional[Dict[str, Any]] = None
+    ) -> Tuple[bytes, str]:
         """
-        Get document content and calculate hash
-        
-        Returns:
-            Tuple of (content, content_hash)
+        Export Google Doc as binary payload and calculate hash.
+        Returns tuple(bytes, md5_hash)
         """
         try:
-            # Get document
-            document = self._docs_service.documents().get(documentId=doc_id).execute()
+            _, drive_service = self._resolve_services(user_token)
+
+            if not drive_service:
+                logger.info("🔧 DEBUG export for Google Doc %s", doc_id)
+                return b"", self._calculate_content_hash(b"")
             
-            # Extract text content
-            content = self._extract_text_from_doc(document)
-            content_hash = self._calculate_content_hash(content)
-            
-            return content, content_hash
-            
+            request = drive_service.files().export_media(
+                fileId=doc_id,
+                mimeType=mime_type
+            )
+            file_bytes = request.execute()
+            content_hash = self._calculate_content_hash(file_bytes)
+            return file_bytes, content_hash
         except HttpError as e:
-            logger.error(f"❌ Failed to get document content: {e}")
+            logger.error(f"❌ Failed to export document {doc_id}: {e}")
             raise Exception(f"Google API error: {e}")
         except Exception as e:
-            logger.error(f"❌ Failed to get document content: {e}")
+            logger.error(f"❌ Failed to export document {doc_id}: {e}")
             raise
     
-    def _extract_text_from_doc(self, document: Dict[str, Any]) -> str:
-        """Extract plain text from Google Docs document structure"""
-        try:
-            content = document.get('body', {}).get('content', [])
-            text_parts = []
-            
-            for element in content:
-                if 'paragraph' in element:
-                    paragraph = element['paragraph']
-                    elements = paragraph.get('elements', [])
-                    
-                    for elem in elements:
-                        if 'textRun' in elem:
-                            text_content = elem['textRun'].get('content', '')
-                            text_parts.append(text_content)
-            
-            return ''.join(text_parts)
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to extract text from document: {e}")
-            return ""
-    
-    async def delete_document(self, doc_id: str) -> bool:
+    async def delete_document(self, doc_id: str, user_token: Optional[Dict[str, Any]] = None) -> bool:
         """
         Delete temporary Google Doc
         
@@ -347,7 +358,11 @@ class GoogleDocsService:
         try:
             logger.info(f"🗑️ Deleting temporary document: {doc_id}")
             
-            self._drive_service.files().delete(fileId=doc_id).execute()
+            _, drive_service = self._resolve_services(user_token)
+            if not drive_service:
+                logger.warning("⚠️ Cannot delete document %s without Drive service", doc_id)
+                return False
+            drive_service.files().delete(fileId=doc_id).execute()
             
             logger.info(f"✅ Successfully deleted document: {doc_id}")
             return True
@@ -363,7 +378,7 @@ class GoogleDocsService:
             logger.error(f"❌ Failed to delete document {doc_id}: {e}")
             return False
     
-    async def check_document_exists(self, doc_id: str) -> bool:
+    async def check_document_exists(self, doc_id: str, user_token: Optional[Dict[str, Any]] = None) -> bool:
         """Check if document still exists"""
         try:
             # For mock/fallback documents, always return False to force recreation
@@ -372,11 +387,12 @@ class GoogleDocsService:
                 return False
             
             # For real documents, check via Google API
-            if not self._drive_service:
+            _, drive_service = self._resolve_services(user_token)
+            if not drive_service:
                 logger.warning("⚠️ No Google Drive service available - assuming document doesn't exist")
                 return False
-                
-            self._drive_service.files().get(fileId=doc_id).execute()
+            
+            drive_service.files().get(fileId=doc_id).execute()
             return True
         except HttpError as e:
             if e.resp.status == 404:

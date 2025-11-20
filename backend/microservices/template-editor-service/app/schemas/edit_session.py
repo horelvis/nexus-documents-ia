@@ -1,7 +1,7 @@
 """
 Pydantic schemas for Edit Sessions API
 """
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, validator, model_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -38,14 +38,16 @@ class EditSessionCreate(BaseModel):
             raise ValueError('Invalid email format')
         return v.lower()
     
-    @root_validator
+    @model_validator(mode="after")
     def ensure_template_payload(cls, values):
         """Ensure at least one template source is provided."""
-        file_b64 = values.get("template_file_base64")
-        template_content = values.get("template_content")
+        file_b64 = values.template_file_base64
+        template_content = values.template_content
         
+        # If neither payload is provided, we'll create an empty Google Doc.
+        # This enables editing newly created templates without HTML stubs.
         if not file_b64 and not template_content:
-            raise ValueError("Provide template_file_base64 or template_content")
+            values.template_content = None
         return values
 
 

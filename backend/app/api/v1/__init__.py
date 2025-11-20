@@ -12,7 +12,7 @@ from app.api.v1.entities import router as entities_router
 # Import all modules needed by api.py
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, agent_management, signatures, webhooks, search, teams, users, entities, dashboard,
+    agents, signatures, webhooks, search, teams, users, entities, dashboard,
     simple_auth, assistant, migration
 )
 # from app.api.v1.document_analyzer import router as document_analyzer_router

@@ -134,6 +134,7 @@ export interface BackendUser {
   is_active: boolean
   is_superuser: boolean
   is_team_member?: boolean
+  is_admin?: boolean
   onboarding_completed: boolean
   tenant_id: string
   clerk_user_id?: string
@@ -144,6 +145,7 @@ export interface BackendUser {
   subscription_plan?: string
   subscription_status?: string
   trial_ends_at?: string
+  selected_plan?: string
 }
 
 export interface OnboardingStatus {

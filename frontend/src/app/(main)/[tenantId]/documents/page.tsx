@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { 
   IconPlus, 
@@ -8,6 +8,7 @@ import {
   IconFilter,
   IconFile,
   IconFileText,
+  IconFileTypeDoc,
   IconFileTypePdf,
   IconClock,
   IconEye,
@@ -40,9 +41,13 @@ import {
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
 import { useUpload } from "@/contexts/upload-context"
+import { useDocumentEvent, useDocumentEvents, DocumentsUpdatedPayload } from "@/contexts/document-events-context"
 import { useNotifications } from "@/contexts/app-state-context"
+import { useUserContext } from "@/contexts/user-context"
 import { useDocumentService } from "@/lib/services/document.service"
 import { useSearchService } from "@/lib/services/search.service"
+import { useDocumentInsightsService, type RecentDocument } from "@/lib/services/document-insights.service"
+import { useApiClient } from "@/lib/api-client"
 import { Document as ApiDocument } from "@/lib/types"
 import { 
   EditDocumentDialog, 
@@ -54,17 +59,67 @@ import { ShareDocumentDialog } from "@/components/documents/share-document-dialo
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 import { useTranslation } from "@/lib/i18n/hooks"
 
+const DOCUMENT_FILTERS = [
+  { value: 'all', label: 'All Documents' },
+  { value: 'recent', label: 'Recent Documents' },
+] as const
+
+type DocumentFilterOption = typeof DOCUMENT_FILTERS[number]['value']
+
+const isDocumentFilterOption = (value: unknown): value is DocumentFilterOption =>
+  DOCUMENT_FILTERS.some(filter => filter.value === value)
+
+const mapRecentDocumentToApiDocument = (doc: RecentDocument): ApiDocument => ({
+  id: doc.id,
+  filename: doc.filename,
+  original_filename: doc.filename,
+  title: doc.title || doc.filename || 'Untitled',
+  description: doc.description || '',
+  file_size: doc.file_size || 0,
+  file_type: doc.file_type || 'unknown',
+  mime_type: doc.mime_type || 'application/octet-stream',
+  category: doc.category || '',
+  tags: doc.tags || [],
+  indexed: doc.indexed ? 'INDEXED' : 'PENDING',
+  status: 'processed',
+  tenant_id: doc.tenant_id,
+  created_by: (doc as any).created_by || {},
+  user_id: (doc as any).user_id,
+  created_at: doc.created_at,
+  updated_at: doc.updated_at || doc.created_at,
+  processed_at: doc.updated_at || doc.created_at,
+})
+
 export default function DocumentsPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.tenantId as string
   const { t } = useTranslation()
+  const { backendUser } = useUserContext()
+  const apiClient = useApiClient()
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+  const [convertingDocumentId, setConvertingDocumentId] = useState<string | null>(null)
+
+  const isTenantAdmin = useMemo(() => {
+    if (!backendUser) return false
+    if (backendUser.is_superuser) return true
+    if (backendUser.is_team_member === false) return true
+    try {
+      const roles = (backendUser as any)?.roles
+      if (Array.isArray(roles)) {
+        return roles.some(
+          (role: any) => typeof role?.name === 'string' && role.name.toLowerCase() === 'admin'
+        )
+      }
+    } catch {
+      return false
+    }
+    return false
+  }, [backendUser])
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -93,14 +148,23 @@ export default function DocumentsPage() {
   }, [tenantId])
   
   // Initialize states with stored preferences
-  const [selectedFilter, setSelectedFilter] = useState(() => 
-    getStoredPreference('filter', 'all')
-  )
+  const [selectedFilter, setSelectedFilter] = useState<DocumentFilterOption>(() => {
+    const storedFilter = getStoredPreference('filter', 'all')
+    return isDocumentFilterOption(storedFilter) ? storedFilter : 'all'
+  })
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => 
     getStoredPreference('viewMode', 'grid')
   )
+  const selectedFilterLabel = useMemo(() => {
+    return DOCUMENT_FILTERS.find(option => option.value === selectedFilter)?.label ?? 'All Documents'
+  }, [selectedFilter])
   // Siempre usar búsqueda semántica por contenido
   const useDeepSearch = true
+
+  const handleFilterChange = (value: DocumentFilterOption) => {
+    setSelectedFilter(value)
+    storePreference('filter', value)
+  }
   
   // Dialog states
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
@@ -109,12 +173,15 @@ export default function DocumentsPage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
   
-  const { openUploadDialog, closeUploadDialog, setOnUploadComplete } = useUpload()
+  const { openUploadDialog, closeUploadDialog } = useUpload()
+  const { emitDocumentEvent } = useDocumentEvents()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
   const searchService = useSearchService()
+  const documentInsightsService = useDocumentInsightsService()
   const documentServiceRef = useRef(documentService)
   const searchServiceRef = useRef(searchService)
+  const documentInsightsServiceRef = useRef(documentInsightsService)
 
   useEffect(() => {
     documentServiceRef.current = documentService
@@ -123,6 +190,10 @@ export default function DocumentsPage() {
   useEffect(() => {
     searchServiceRef.current = searchService
   }, [searchService])
+
+  useEffect(() => {
+    documentInsightsServiceRef.current = documentInsightsService
+  }, [documentInsightsService])
 
 
 
@@ -133,7 +204,41 @@ export default function DocumentsPage() {
     setError(null)
     
     try {
+      if (selectedFilter === 'recent') {
+        const limit = viewMode === 'table' ? 100 : perPage
+        const insightsResponse = await documentInsightsServiceRef.current.getRecentlyViewedDocuments(limit, true)
+
+        if (insightsResponse?.error) {
+          setError(insightsResponse.error)
+          setDocuments([])
+          setTotalDocuments(0)
+          setTotalPages(1)
+          return
+        }
+
+        const rawRecentDocuments = insightsResponse?.data || []
+        const normalizedQuery = searchQuery.trim().toLowerCase()
+        const filteredRecentDocuments = normalizedQuery
+          ? rawRecentDocuments.filter(doc => {
+              const haystack = [
+                doc.title || '',
+                doc.filename || '',
+                doc.description || '',
+                (doc.tags || []).join(' ')
+              ].join(' ').toLowerCase()
+              return haystack.includes(normalizedQuery)
+            })
+          : rawRecentDocuments
+
+        const mappedRecentDocuments = filteredRecentDocuments.map(mapRecentDocumentToApiDocument)
+        setDocuments(mappedRecentDocuments)
+        setTotalDocuments(mappedRecentDocuments.length)
+        setTotalPages(1)
+        return
+      }
+
       let response;
+      const statusFilter = selectedFilter !== 'all' && selectedFilter !== 'recent' ? selectedFilter : undefined
       
       // Usar búsqueda semántica por contenido cuando hay un query de búsqueda
       if (useDeepSearch && searchQuery && searchQuery.trim()) {
@@ -148,7 +253,7 @@ export default function DocumentsPage() {
           // Fallback to regular document search instead of showing error
           response = await documentServiceRef.current.getDocuments({
             search: searchQuery || undefined,
-            status: selectedFilter !== 'all' ? selectedFilter : undefined,
+            status: statusFilter,
             per_page: viewMode === 'table' ? 100 : perPage,
             page: viewMode === 'table' ? 1 : currentPage
           })
@@ -199,7 +304,7 @@ export default function DocumentsPage() {
         const itemsPerPage = viewMode === 'table' ? 100 : perPage
         response = await documentServiceRef.current.getDocuments({
           search: searchQuery || undefined,
-          status: selectedFilter !== 'all' ? selectedFilter : undefined,
+          status: statusFilter,
           per_page: itemsPerPage,
           page: viewMode === 'table' ? 1 : currentPage
         })
@@ -247,46 +352,57 @@ export default function DocumentsPage() {
   // Documents are already filtered server-side
   const filteredDocuments = documents || []
 
-  const handleUploadComplete = useCallback((uploadedFiles: Array<{file: File, id: string, status: string}>) => {
-    if (!uploadedFiles || uploadedFiles.length === 0) return
+  const isOdtDocument = useCallback((document: ApiDocument) => {
+    const fileType = (document.file_type || '').toLowerCase()
+    const mimeType = (document.mime_type || '').toLowerCase()
+    return fileType === 'odt' || mimeType.includes('opendocument')
+  }, [])
 
-    const successfulUploads = uploadedFiles.filter(file => file.status === 'success')
-    if (successfulUploads.length === 0) return
-
-    closeUploadDialog()
-
-    // Notify user
-    addNotification({
-      type: 'upload',
-      title: 'Upload Complete',
-      message: `${successfulUploads.length} file${successfulUploads.length > 1 ? 's' : ''} uploaded successfully`,
-      fileCount: successfulUploads.length,
-      action: {
-        label: 'View Documents',
-        href: '/documents'
-      }
-    })
-
-    // Reset filters/search so new documents are visible
-    setSearchQuery('')
-    setSelectedFilter('all')
-    storePreference('filter', 'all')
-    setCurrentPage(1)
-
-    // Reload documents after a brief delay to allow backend processing/indexing
-    setTimeout(() => {
-      loadDocuments()
-    }, 750)
-  }, [addNotification, closeUploadDialog, loadDocuments, storePreference])
-
-  // Register upload completion handler for this page
-  useEffect(() => {
-    setOnUploadComplete(handleUploadComplete)
-    
-    return () => {
-      setOnUploadComplete(undefined)
+  const handleDocumentsUpdated = useCallback((payload?: DocumentsUpdatedPayload) => {
+    if (payload?.tenantId && payload.tenantId !== tenantId) {
+      return
     }
-  }, [handleUploadComplete, setOnUploadComplete])
+
+    if (payload?.source === 'upload') {
+      const uploadedFiles = payload.files || []
+      if (!uploadedFiles.length) {
+        return
+      }
+
+      const successfulUploads = uploadedFiles.filter(file => file.status === 'success')
+      if (!successfulUploads.length) {
+        return
+      }
+
+      closeUploadDialog()
+
+      addNotification({
+        type: 'upload',
+        title: 'Upload Complete',
+        message: `${successfulUploads.length} file${successfulUploads.length > 1 ? 's' : ''} uploaded successfully`,
+        fileCount: successfulUploads.length,
+        action: {
+          label: 'View Documents',
+          href: '/documents'
+        }
+      })
+
+      setSearchQuery('')
+      setSelectedFilter('all')
+      storePreference('filter', 'all')
+      setCurrentPage(1)
+
+      setTimeout(() => {
+        loadDocuments()
+      }, 750)
+
+      return
+    }
+
+    loadDocuments()
+  }, [addNotification, closeUploadDialog, loadDocuments, setCurrentPage, setSearchQuery, setSelectedFilter, storePreference, tenantId])
+
+  useDocumentEvent("documents:updated", handleDocumentsUpdated)
 
   // Document operations
   const handleViewDocument = (document: ApiDocument) => {
@@ -312,6 +428,98 @@ export default function DocumentsPage() {
     setSelectedDocument(document)
     setShareDialogOpen(true)
   }
+
+  const openTemplateInGoogleDocs = useCallback(
+    async (templateId: string, templateName: string) => {
+      try {
+        const response = await apiClient.post(`/engine-templates/${templateId}/edit-sessions`, {
+          reason: 'Template created from document conversion'
+        })
+
+        if (response.error || !response.data) {
+          throw new Error(response.error || 'Failed to start Google Docs session')
+        }
+
+        const editUrl = (response.data as any).google_doc_edit_url
+        if (!editUrl) {
+          throw new Error('Google Docs URL not available yet')
+        }
+
+        const editorWindow = window.open(
+          editUrl,
+          'googledocs',
+          'width=1200,height=800,scrollbars=yes,resizable=yes'
+        )
+
+        if (editorWindow) {
+          addNotification({
+            type: 'success',
+            title: 'Google Docs',
+            message: `Abriendo Google Docs para "${templateName}".`
+          })
+        } else {
+          addNotification({
+            type: 'warning',
+            title: 'Permite ventanas emergentes',
+            message: 'Activa los pop-ups para abrir Google Docs.'
+          })
+        }
+      } catch (error) {
+        addNotification({
+          type: 'error',
+          title: 'Google Docs no disponible',
+          message: error instanceof Error ? error.message : 'No pudimos abrir Google Docs.'
+        })
+      }
+    },
+    [apiClient, addNotification]
+  )
+
+  const handleConvertToTemplate = useCallback(async (document: ApiDocument) => {
+    if (!isTenantAdmin) return
+    if (!isOdtDocument(document)) {
+      addNotification({
+        type: 'error',
+        title: 'Formato no soportado',
+        message: 'Solo se pueden convertir documentos ODT en plantillas.'
+      })
+      return
+    }
+
+    setConvertingDocumentId(document.id)
+    try {
+      const response = await documentService.convertDocumentToTemplate(document.id, {
+        name: document.title || document.filename,
+        description: document.description,
+        category: document.category,
+        tags: document.tags
+      })
+
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'No se pudo crear la plantilla')
+      }
+
+      const template = response.data as any
+      if (!template?.id) {
+        throw new Error('Invalid template response')
+      }
+      addNotification({
+        type: 'success',
+        title: 'Plantilla creada',
+        message: `Abriremos Google Docs para "${template.name || document.title || document.filename}".`
+      })
+
+      await openTemplateInGoogleDocs(template.id, template.name || document.title || document.filename)
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Conversión fallida',
+        message: error instanceof Error ? error.message : 'No se pudo convertir el documento.'
+      })
+    } finally {
+      setConvertingDocumentId(null)
+    }
+  }, [isTenantAdmin, documentService, addNotification, openTemplateInGoogleDocs, isOdtDocument])
 
   const handleRequestSignature = (document: ApiDocument) => {
     router.push(`/${tenantId}/documents/${document.id}/signature-request`)
@@ -434,6 +642,11 @@ export default function DocumentsPage() {
         title: 'Document Deleted',
         message: 'Document has been deleted successfully'
       })
+
+      emitDocumentEvent("documents:updated", {
+        tenantId,
+        source: "delete"
+      })
     } catch (error) {
       addNotification({
         type: 'error',
@@ -519,22 +732,18 @@ export default function DocumentsPage() {
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline">
                       <IconFilter className="mr-2 h-4 w-4" />
-                      Filter: {selectedFilter === 'all' ? 'All' : selectedFilter}
+                      Filter: {selectedFilterLabel}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('all')
-                      storePreference('filter', 'all')
-                    }}>
-                      All Documents
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      setSelectedFilter('INDEXING_ERROR')
-                      storePreference('filter', 'INDEXING_ERROR')
-                    }}>
-                      Error
-                    </DropdownMenuItem>
+                    {DOCUMENT_FILTERS.map(option => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onClick={() => handleFilterChange(option.value)}
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 
@@ -711,6 +920,23 @@ export default function DocumentsPage() {
                                 <IconEdit className="mr-2 h-4 w-4" />
                                 Edit
                               </DropdownMenuItem>
+                              {isTenantAdmin && (
+                                <DropdownMenuItem
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    handleConvertToTemplate(document)
+                                  }}
+                                  disabled={convertingDocumentId === document.id}
+                                >
+                                  {convertingDocumentId === document.id ? (
+                                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <IconFileTypeDoc className="mr-2 h-4 w-4" />
+                                  )}
+                                  Convert to Template
+                                </DropdownMenuItem>
+                              )}
                               
                               
                               <DropdownMenuSeparator />
@@ -757,6 +983,9 @@ export default function DocumentsPage() {
             onFullPagePreview={handleFullPagePreview}
             onShareDocument={handleShareDocument}
             onRequestSignature={handleRequestSignature}
+            canConvertToTemplate={isTenantAdmin}
+            onConvertToTemplate={handleConvertToTemplate}
+            convertLoadingId={convertingDocumentId}
           />
         )}
 

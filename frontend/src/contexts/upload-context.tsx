@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, ReactNode } from "react"
+import { createContext, useContext, useState, ReactNode, useCallback } from "react"
 
 interface UploadContextType {
   uploadDialogOpen: boolean
@@ -20,9 +20,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const openUploadDialog = () => setUploadDialogOpen(true)
   const closeUploadDialog = () => setUploadDialogOpen(false)
 
-  const handleSetOnUploadComplete = (callback?: (files: any[]) => void) => {
+  const handleSetOnUploadComplete = useCallback((callback?: (files: any[]) => void) => {
     setOnUploadComplete(() => callback)
-  }
+  }, [])
 
   return (
     <UploadContext.Provider value={{

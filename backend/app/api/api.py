@@ -2,8 +2,9 @@
 
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
-    agents, agent_management, signatures, webhooks, search, teams, users, entities, dashboard,
-    simple_auth, assistant, migration, weaviate, bpmn_ai, lgpd, temporalio_integration, workflow_executions
+    agents, signatures, webhooks, search, teams, users, entities, dashboard,
+    simple_auth, assistant, migration, weaviate, bpmn_ai, lgpd, temporalio_integration, workflow_executions,
+    internal_template_edit_sessions, internal_google_drive_tokens, google_drive, engine_templates,
     # REMOVED: langgraph - migrated to Weaviate/Elysia
     # document_analyzer, contract_intelligence, compliance_checker
 )
@@ -31,10 +32,12 @@ api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(assistant.router, tags=["assistant"])
+api_router.include_router(google_drive.router)
+api_router.include_router(engine_templates.router, prefix="/engine-templates", tags=["engine-templates"])
+api_router.include_router(engine_templates.router, prefix="/workflow-templates", tags=["workflow-templates"])
 
 # AI Agents and Digital Signature routes
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
-api_router.include_router(agent_management.router, prefix="/agent-management", tags=["agent-management"])
 api_router.include_router(signatures.router, prefix="/signatures", tags=["signatures"])
 
 # AI-powered signature placement
@@ -54,6 +57,18 @@ api_router.include_router(weaviate.router, prefix="/weaviate", tags=["weaviate"]
 # Temporal workflows gateway
 api_router.include_router(workflow_executions.router, tags=["workflow-executions"])
 api_router.include_router(temporalio_integration.router, tags=["temporalio"])
+internal_router = APIRouter(prefix="/internal", tags=["internal"])
+internal_router.include_router(
+    internal_template_edit_sessions.router,
+    prefix="/template-edit-sessions",
+    tags=["internal-template-edit-sessions"],
+)
+internal_router.include_router(
+    internal_google_drive_tokens.router,
+    prefix="/google-drive-tokens",
+    tags=["internal-google-drive-tokens"],
+)
+api_router.include_router(internal_router)
 
 # Teams management routes
 api_router.include_router(teams.router, prefix="/teams", tags=["teams"])

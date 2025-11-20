@@ -156,7 +156,7 @@ class LGPDTestSuite:
                 db=db,
                 user_id=str(self.test_user_id),
                 requested_by_user_id=str(self.test_user_id), # Self-deletion
-                confirmation_token="DELETE MY ACCOUNT PERMANENTLY",
+                confirmation_token="DELETE",
                 reason="LGPD compliance test"
             )
             

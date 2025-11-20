@@ -6,7 +6,16 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
+try:
+    from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
+except Exception as fastapi_mail_error:  # pragma: no cover - module import guard
+    FastMail = None
+    MessageSchema = None
+    ConnectionConfig = None
+    MessageType = None
+else:
+    fastapi_mail_error = None
+
 from pydantic import EmailStr, BaseModel
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 import logging
@@ -28,23 +37,27 @@ class EmailSettings(BaseModel):
     USE_CREDENTIALS: bool = settings.MAIL_USE_CREDENTIALS
     VALIDATE_CERTS: bool = settings.MAIL_VALIDATE_CERTS
 
-# Configure email connection
-conf = ConnectionConfig(
-    MAIL_USERNAME=EmailSettings().MAIL_USERNAME,
-    MAIL_PASSWORD=EmailSettings().MAIL_PASSWORD,
-    MAIL_FROM=EmailSettings().MAIL_FROM,
-    MAIL_FROM_NAME=EmailSettings().MAIL_FROM_NAME,
-    MAIL_PORT=EmailSettings().MAIL_PORT,
-    MAIL_SERVER=EmailSettings().MAIL_SERVER,
-    MAIL_STARTTLS=EmailSettings().MAIL_STARTTLS,
-    MAIL_SSL_TLS=EmailSettings().MAIL_SSL_TLS,
-    USE_CREDENTIALS=EmailSettings().USE_CREDENTIALS,
-    VALIDATE_CERTS=EmailSettings().VALIDATE_CERTS,
-    TEMPLATE_FOLDER=Path(__file__).parent.parent / "templates" / "email"
-)
-
-# Initialize FastMail
-fm = FastMail(conf)
+# Configure email connection when FastMail is available
+if FastMail and ConnectionConfig:
+    conf = ConnectionConfig(
+        MAIL_USERNAME=EmailSettings().MAIL_USERNAME,
+        MAIL_PASSWORD=EmailSettings().MAIL_PASSWORD,
+        MAIL_FROM=EmailSettings().MAIL_FROM,
+        MAIL_FROM_NAME=EmailSettings().MAIL_FROM_NAME,
+        MAIL_PORT=EmailSettings().MAIL_PORT,
+        MAIL_SERVER=EmailSettings().MAIL_SERVER,
+        MAIL_STARTTLS=EmailSettings().MAIL_STARTTLS,
+        MAIL_SSL_TLS=EmailSettings().MAIL_SSL_TLS,
+        USE_CREDENTIALS=EmailSettings().USE_CREDENTIALS,
+        VALIDATE_CERTS=EmailSettings().VALIDATE_CERTS,
+        TEMPLATE_FOLDER=Path(__file__).parent.parent / "templates" / "email"
+    )
+    fm = FastMail(conf)
+else:  # pragma: no cover - configuration warning
+    conf = None
+    fm = None
+    if fastapi_mail_error:
+        logger.warning("FastMail is not available: %s", fastapi_mail_error)
 
 # Initialize Jinja2 for template rendering
 template_dir = Path(__file__).parent.parent / "templates" / "email"
@@ -56,6 +69,19 @@ env = Environment(
 
 class EmailService:
     """Service for sending emails with templates"""
+
+    @staticmethod
+    def _get_mail_client() -> "FastMail":
+        """Ensure FastMail is configured before sending."""
+        if fm is None:
+            message = (
+                "FastMail is not configured. Please verify the fastapi-mail dependency "
+                "and email environment variables."
+            )
+            if fastapi_mail_error:
+                raise RuntimeError(message) from fastapi_mail_error
+            raise RuntimeError(message)
+        return fm
     
     @staticmethod
     async def send_user_invitation(
@@ -84,7 +110,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Invitation email sent to {email}")
             return True
             
@@ -119,7 +146,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Team invitation email sent to {email}")
             return True
             
@@ -152,7 +180,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Password reset email sent to {email}")
             return True
             
@@ -185,7 +214,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Welcome email sent to {email}")
             return True
             
@@ -222,7 +252,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message_obj)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message_obj)
             logger.info(f"Document shared email sent to {email}")
             return True
             
@@ -257,7 +288,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Share notification email sent to {to_email}")
             return True
             
@@ -288,7 +320,8 @@ class EmailService:
                 subtype=MessageType.html
             )
             
-            await fm.send_message(message)
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
             logger.info(f"Bulk email sent to {len(recipients)} recipients")
             return True
             

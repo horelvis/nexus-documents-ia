@@ -65,7 +65,7 @@ async def start_workflow_execution(request: WorkflowExecutionRequest):
         template_definition = None
 
         # Attempt fetch from Core (service-to-service)
-        core_url = f"{settings.api_core_url}/api/v1/workflow-templates/{request.template_id}"
+        core_url = f"{settings.api_core_url}/api/v1/engine-templates/{request.template_id}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 # Prefer X-API-Key header (some core routes support microservice keys)

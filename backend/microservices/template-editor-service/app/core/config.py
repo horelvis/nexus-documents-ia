@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Service Configuration
     service_name: str = "template-editor-service"
     service_port: int = 8011
-    debug: bool = True
+    debug: bool = Field(default=True, validation_alias="TEMPLATE_EDITOR_DEBUG")
     log_level: str = "INFO"
     
     # Database
@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     
     # Main API Integration
     main_api_url: str = "http://api:8000"
+    api_prefix: str = "/api/v1"
     
     class Config:
         env_file = ".env"

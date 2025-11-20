@@ -21,19 +21,18 @@ async def index_document(
 ):
     """Index a document in Elasticsearch"""
     try:
-        service = ElasticsearchService(tenant_id)
+        async with ElasticsearchService(tenant_id) as service:
+            # Create index if it doesn't exist
+            service.create_index_if_not_exists()
 
-        # Create index if it doesn't exist
-        service.create_index_if_not_exists()
-
-        success = await service.index_document(
-            doc_id=request.doc_id,
-            title=request.title,
-            content=request.content,
-            description=request.description,
-            content_vector=request.content_vector,
-            metadata=request.metadata
-        )
+            success = await service.index_document(
+                doc_id=request.doc_id,
+                title=request.title,
+                content=request.content,
+                description=request.description,
+                content_vector=request.content_vector,
+                metadata=request.metadata
+            )
 
         if success:
             return {"status": "success", "message": f"Document {request.doc_id} indexed"}
@@ -52,14 +51,14 @@ async def hybrid_search(
 ):
     """Perform hybrid search"""
     try:
-        service = ElasticsearchService(tenant_id)
-        results = await service.hybrid_search(
-            query=request.query,
-            limit=request.limit,
-            filters=request.filters.dict() if request.filters else None,
-            boost_semantic=request.boost_semantic,
-            boost_keyword=request.boost_keyword
-        )
+        async with ElasticsearchService(tenant_id) as service:
+            results = await service.hybrid_search(
+                query=request.query,
+                limit=request.limit,
+                filters=request.filters.dict() if request.filters else None,
+                boost_semantic=request.boost_semantic,
+                boost_keyword=request.boost_keyword
+            )
 
         return SearchResponse(
             results=results,
@@ -79,13 +78,13 @@ async def semantic_search(
 ):
     """Perform semantic search with vector"""
     try:
-        service = ElasticsearchService(tenant_id)
-        results = await service.semantic_search_with_vector(
-            query_vector=request.query_vector,
-            limit=request.limit,
-            filters=request.filters.dict() if request.filters else None,
-            min_score=request.min_score
-        )
+        async with ElasticsearchService(tenant_id) as service:
+            results = await service.semantic_search_with_vector(
+                query_vector=request.query_vector,
+                limit=request.limit,
+                filters=request.filters.dict() if request.filters else None,
+                min_score=request.min_score
+            )
 
         return SearchResponse(
             results=results,
@@ -105,11 +104,11 @@ async def get_analytics(
 ):
     """Get search and document analytics"""
     try:
-        service = ElasticsearchService(tenant_id)
-        analytics = await service.get_analytics(
-            date_from=request.date_from,
-            date_to=request.date_to
-        )
+        async with ElasticsearchService(tenant_id) as service:
+            analytics = await service.get_analytics(
+                date_from=request.date_from,
+                date_to=request.date_to
+            )
 
         return AnalyticsResponse(**analytics)
 
@@ -125,13 +124,13 @@ async def get_facets(
 ):
     """Get facets for search results"""
     try:
-        service = ElasticsearchService(tenant_id)
-        facets = await service.get_facets(
-            query=request.query,
-            filters=request.filters.dict() if request.filters else None,
-            facet_fields=request.facet_fields,
-            max_facet_values=request.max_facet_values
-        )
+        async with ElasticsearchService(tenant_id) as service:
+            facets = await service.get_facets(
+                query=request.query,
+                filters=request.filters.dict() if request.filters else None,
+                facet_fields=request.facet_fields,
+                max_facet_values=request.max_facet_values
+            )
 
         return FacetResponse(**facets)
 
@@ -147,8 +146,8 @@ async def delete_document(
 ):
     """Delete a document from Elasticsearch"""
     try:
-        service = ElasticsearchService(tenant_id)
-        success = await service.delete_document(doc_id)
+        async with ElasticsearchService(tenant_id) as service:
+            success = await service.delete_document(doc_id)
 
         if success:
             return {"status": "success", "message": f"Document {doc_id} deleted"}
@@ -166,8 +165,8 @@ async def create_index(
 ):
     """Create Elasticsearch index for tenant"""
     try:
-        service = ElasticsearchService(tenant_id)
-        success = service.create_index_if_not_exists()
+        async with ElasticsearchService(tenant_id) as service:
+            success = service.create_index_if_not_exists()
 
         if success:
             return {"status": "success", "message": f"Index created for tenant {tenant_id}"}

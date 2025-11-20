@@ -1272,6 +1272,84 @@ class AsyncDocumentService:
             logger.warning(f"Failed to route document {doc_info['id']} with Agent Router: {e}")
             # Don't fail the whole process if routing fails
     
+    async def get_document_agents(self, db: AsyncSession, doc_id: str) -> Dict[str, Any]:
+        """
+        Get agents assigned to a specific document based on its type and tags.
+        """
+        # Get document details
+        document = await self.get_document(db, doc_id)
+        
+        # Determine document type and tags
+        doc_tags = [tag.name for tag in document.tags] if document.tags else []
+        doc_type = document.category or "general"
+        
+        # Map document characteristics to agent types
+        assigned_agents = []
+        
+        # Check if document is signable
+        is_signable = any(tag in ["signable", "contract", "agreement"] for tag in doc_tags)
+        if is_signable:
+            assigned_agents.append({
+                "id": f"sig-{doc_id}",
+                "name": "Digital Signature Agent",
+                "type": "digital_signature",
+                "status": "ready",
+                "description": "Manages digital signature workflows",
+                "capabilities": ["signature_requests", "status_tracking", "signer_management"]
+            })
+        
+        # Check if document needs legal compliance
+        is_legal = any(tag in ["legal", "contract", "compliance"] for tag in doc_tags) or doc_type == "legal"
+        if is_legal:
+            assigned_agents.append({
+                "id": f"legal-{doc_id}",
+                "name": "Legal Compliance Agent",
+                "type": "legal_compliance",
+                "status": "ready",
+                "description": "Validates legal requirements",
+                "capabilities": ["compliance_check", "risk_assessment", "regulatory_analysis"]
+            })
+        
+        # Check if document is financial
+        is_financial = any(tag in ["financial", "invoice", "report"] for tag in doc_tags) or doc_type == "financial"
+        if is_financial:
+            assigned_agents.append({
+                "id": f"fin-{doc_id}",
+                "name": "Financial Analysis Agent",
+                "type": "financial_analyzer",
+                "status": "ready",
+                "description": "Analyzes financial documents",
+                "capabilities": ["financial_metrics", "trend_analysis", "report_generation"]
+            })
+        
+        # Document analyzer is always available
+        assigned_agents.append({
+            "id": f"doc-{doc_id}",
+            "name": "Document Analyzer",
+            "type": "document_analyzer",
+            "status": "ready",
+            "description": "Analyzes document content and structure",
+            "capabilities": ["content_analysis", "extraction", "summarization"]
+        })
+        
+        # RAG assistant for Q&A
+        assigned_agents.append({
+            "id": f"rag-{doc_id}",
+            "name": "RAG Assistant",
+            "type": "rag_assistant",
+            "status": "ready",
+            "description": "Answers questions about the document",
+            "capabilities": ["document_search", "context_qa", "knowledge_retrieval"]
+        })
+        
+        return {
+            "document_id": doc_id,
+            "document_type": doc_type,
+            "tags": doc_tags,
+            "assigned_agents": assigned_agents,
+            "total_agents": len(assigned_agents)
+        }
+
     async def _extract_entities_langextract(
         self, 
         text: str, 

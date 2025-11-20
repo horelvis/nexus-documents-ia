@@ -2,25 +2,27 @@
 
 # Alembic utility commands for Docker environment
 
+COMPOSE="docker compose -f docker/docker-compose.yml"
+
 case "$1" in
     "current")
         echo "📊 Current Alembic revision:"
-        docker compose exec api python -m alembic current
+        $COMPOSE exec api bash -lc "cd /app && alembic current"
         ;;
     
     "history")
         echo "📜 Alembic migration history:"
-        docker compose exec api python -m alembic history
+        $COMPOSE exec api bash -lc "cd /app && alembic history"
         ;;
     
     "heads")
         echo "🎯 Alembic heads:"
-        docker compose exec api python -m alembic heads
+        $COMPOSE exec api bash -lc "cd /app && alembic heads"
         ;;
     
     "upgrade")
         echo "⬆️ Upgrading to head..."
-        docker compose exec api python -m alembic upgrade head
+        $COMPOSE exec api bash -lc "cd /app && alembic upgrade head"
         ;;
     
     "stamp")
@@ -29,19 +31,19 @@ case "$1" in
             exit 1
         fi
         echo "📌 Stamping revision: $2"
-        docker compose exec api python -m alembic stamp $2
+        $COMPOSE exec api bash -lc "cd /app && alembic stamp $2"
         ;;
     
     "fix")
         echo "🔧 Fixing Alembic state..."
         # First check current state
-        docker compose exec api python check_alembic_state.py
+        $COMPOSE exec api python check_alembic_state.py
         
         # Try to fix
         echo ""
         read -p "Do you want to fix the revision chain? (y/N): " confirm
         if [ "$confirm" = "y" ]; then
-            docker compose exec api python fix_alembic_chain.py
+            $COMPOSE exec api python fix_alembic_chain.py
         fi
         ;;
     
@@ -51,7 +53,7 @@ case "$1" in
             exit 1
         fi
         echo "📝 Creating migration: $2"
-        docker compose exec api python -m alembic revision --autogenerate -m "$2"
+        $COMPOSE exec api bash -lc "cd /app && alembic revision --autogenerate -m \"$2\""
         ;;
     
     *)

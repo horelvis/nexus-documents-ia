@@ -81,52 +81,11 @@ def get_current_user(
         ).filter(User.clerk_user_id == clerk_user_id).first()
         if not user:
             logger.warning(f"⚠️ [DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
-            logger.info("🔄 [DEPENDENCIES] Attempting auto-sync from Clerk...")
-            
-            try:
-                # Auto-sync: obtener datos del usuario desde Clerk
-                from clerk_backend_api import Clerk
-                clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
-                
-                # Obtener información del usuario desde Clerk
-                clerk_user = clerk.users.get(user_id=clerk_user_id)
-                
-                if clerk_user and clerk_user.email_addresses:
-                    primary_email = next((email.email_address for email in clerk_user.email_addresses if email.id == clerk_user.primary_email_address_id), None)
-                    
-                    if primary_email:
-                        logger.info(f"📧 [DEPENDENCIES] Auto-syncing user: {primary_email}")
-                        
-                        # Crear usuario usando AuthService
-                        user = AuthService.sync_user_from_clerk(
-                            db=db,
-                            clerk_user_id=clerk_user_id,
-                            email=primary_email,
-                            full_name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or primary_email
-                        )
-                        logger.info(f"✅ [DEPENDENCIES] User auto-synced successfully: {user.email}")
-                    else:
-                        logger.error("❌ [DEPENDENCIES] No primary email found in Clerk user")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Unable to sync user - no email found",
-                            headers={"WWW-Authenticate": "Bearer"},
-                        )
-                else:
-                    logger.error("❌ [DEPENDENCIES] Unable to fetch user from Clerk")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Unable to sync user from Clerk",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-                    
-            except Exception as sync_error:
-                logger.error(f"❌ [DEPENDENCIES] Auto-sync failed: {str(sync_error)}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="User not found. Please register first.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not registered in Nexus. Complete the signup flow first.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
         logger.info(f"✅ [DEPENDENCIES] User authenticated: {user.email}")
         return user
@@ -202,6 +161,26 @@ def get_current_active_user( # This is a more specific version of get_current_us
     if not current_user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
     return current_user
+
+
+def require_microservice_api_key(
+    authorization: str = Header(..., alias="Authorization"),
+) -> str:
+    """
+    Validates internal microservice calls using the shared API key.
+    """
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format",
+        )
+    api_key = authorization.split(" ")[1]
+    if api_key != settings.MICROSERVICES_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid microservice API key",
+        )
+    return api_key
 
 def get_current_active_superuser(
     current_user: User = Depends(get_current_active_user), # Depends on active user check
@@ -279,6 +258,21 @@ def require_subscription_permission(permission: str):
         return current_user
     
     return permission_checker
+
+
+def require_admin_role(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """
+    Ensures the current user has tenant admin privileges.
+    Owners (non team members), users with the 'admin' role or superusers pass.
+    """
+    if getattr(current_user, "is_admin", False):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Administrative privileges required",
+    )
 
 
 def require_document_upload_permission(

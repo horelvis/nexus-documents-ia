@@ -132,6 +132,7 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = None
+    category: Optional[str] = None
 
 # Esquemas para respuestas
 class Tag(TagBase):

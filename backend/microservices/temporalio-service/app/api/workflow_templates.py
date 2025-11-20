@@ -41,7 +41,7 @@ async def get_workflow_templates(tenant_id: Optional[str] = None):
         response_templates: List[Dict[str, Any]] = []
 
         # Try Core first (service-to-service, if allowed)
-        core_url = f"{settings.api_core_url}/api/v1/workflow-templates?limit=100"
+        core_url = f"{settings.api_core_url}/api/v1/engine-templates?limit=100"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
@@ -121,7 +121,7 @@ async def get_workflow_template(template_id: str):
     """Get specific workflow template, preferring Core, with AI/legacy fallback"""
     try:
         # Try Core
-        core_url = f"{settings.api_core_url}/api/v1/workflow-templates/{template_id}"
+        core_url = f"{settings.api_core_url}/api/v1/engine-templates/{template_id}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}

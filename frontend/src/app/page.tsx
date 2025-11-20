@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
 import { InitialLoader } from '@/components/ui/unified-loader'
-import { CapsNavbar, SectionContainer, HomeSection } from "@/components/landing/caps-copy"
+import { NexusNavbar, SectionContainer, HomeSection } from "@/components/landing/nexus-theme"
 
 export default function Home() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -30,7 +30,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      <CapsNavbar />
+      <NexusNavbar />
       <SectionContainer>
         <div className="relative flex flex-col items-center justify-center px-4 pt-20">
           <HomeSection />

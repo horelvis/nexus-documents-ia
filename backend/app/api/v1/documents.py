@@ -1,26 +1,36 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import datetime
+import logging
+import io
+import shutil
+import tempfile
+
+import httpx
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
 
 from app.services.async_document_service import AsyncDocumentService
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, Body, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from app.services.document_preview_service import DocumentPreviewService
+from app.services.queue_service import queue_service
+from app.services.elasticsearch_client import elasticsearch_client
+from app.services.storage_service import StorageService
+from app.core.config import settings
 
 from app.api.async_dependencies import (
     get_current_user_async, 
-    get_current_active_user_async,
     get_current_tenant_id_async,
-    require_document_upload_permission_async
+    require_document_upload_permission_async,
+    get_document_service,
+    get_async_db
 )
-from app.db.async_database import get_async_db
 from app.db.models import User, Document as DBDocument, Tag
 from app.schemas.document import (
     Document, DocumentDetail,
-    UploadRequest
+    UploadRequest, DocumentUpdate
 )
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,8 +39,7 @@ router = APIRouter()
 @router.get("", response_model=dict)
 async def list_documents(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None),
@@ -42,8 +51,6 @@ async def list_documents(
     """
     Obtiene lista paginada de documentos con filtros opcionales.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.get_documents(
         db=db,
         page=page,
@@ -65,7 +72,11 @@ async def create_document(
     category: Optional[str] = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(require_document_upload_permission_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    # Note: We manually create service here because require_document_upload_permission_async
+    # might consume the body stream if not handled carefully, but here we use Form/File
+    # We can use the factory manually or add a dependency that doesn't conflict.
+    # For safety with UploadFile, we'll construct it manually to ensure strict control.
 ):
     """
     Sube un nuevo documento al sistema.
@@ -74,7 +85,6 @@ async def create_document(
     tag_list = tags.split(",") if tags else []
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
     
-    from app.services.async_document_service import AsyncDocumentService
     document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
     return await document_service.upload_document(
         db=db,
@@ -86,25 +96,24 @@ async def create_document(
     )
 
 
-# Upload signed URL endpoint removed for security reasons
-# Use direct upload via /upload endpoint instead
-
-
 @router.get("/{doc_id}", response_model=DocumentDetail)
 async def get_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Obtiene detalles de un documento específico.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     doc = await document_service.get_document(db=db, doc_id=doc_id)
     
     # Convert to DocumentDetail schema
+    # Note: Tags are already loaded via selectinload in the service
+    tags_list = [
+        Tag(id=tag.id, name=tag.name, tenant_id=tag.tenant_id, created_at=tag.created_at) 
+        for tag in doc.tags
+    ] if hasattr(doc, 'tags') else []
+
     return DocumentDetail(
         id=str(doc.id),
         title=doc.title,
@@ -113,17 +122,14 @@ async def get_document(
         file_type=doc.file_type,
         file_size=doc.file_size,
         mime_type=doc.mime_type,
-        tenant_id=doc.tenant_id,  # Add tenant_id
-        created_by=doc.created_by,  # Use the UUID directly
-        indexed=doc.indexed,  # Add indexed status
+        tenant_id=doc.tenant_id,
+        created_by=doc.created_by,
+        indexed=doc.indexed,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
-        tags=[Tag(id=tag.id, name=tag.name, tenant_id=tag.tenant_id, created_at=tag.created_at) for tag in doc.tags] if hasattr(doc, 'tags') else []
+        tags=tags_list,
+        extracted_entities=doc.extracted_entities
     )
-
-
-# Signed URL endpoint removed for security reasons
-# Use /stream endpoint instead for all document access
 
 
 @router.get("/{doc_id}/stream")
@@ -131,26 +137,18 @@ async def stream_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Sirve documentos a través del proxy con cache Redis.
-    Reemplaza tanto /pdf como /download-url con una sola ruta optimizada.
     """
-    from fastapi.responses import StreamingResponse
-    from fastapi import HTTPException
-    import httpx
-    
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    
     # Obtener información del documento
     document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Llamar al storage service proxy endpoint
-    from app.core.config import settings
     storage_url = f"{settings.STORAGE_SERVICE_URL}/api/v1/storage/proxy/{document.file_path}"
     
     headers = {
@@ -161,12 +159,15 @@ async def stream_document(
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(storage_url, headers=headers)
+            request = client.build_request("GET", storage_url, headers=headers)
+            response = await client.send(request, stream=True)
             
             if response.status_code == 404:
+                await response.aclose()
                 logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
                 raise HTTPException(status_code=404, detail="Document file not found in storage")
             elif response.status_code != 200:
+                await response.aclose()
                 logger.error(f"Storage error {response.status_code}: {response.text}")
                 raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
             
@@ -183,15 +184,11 @@ async def stream_document(
             if "content-length" in response.headers:
                 content_headers["Content-Length"] = response.headers["content-length"]
             
-            # Stream la respuesta
-            async def stream_response():
-                async for chunk in response.aiter_bytes(chunk_size=8192):
-                    yield chunk
-            
             return StreamingResponse(
-                stream_response(),
+                response.aiter_bytes(chunk_size=8192),
                 headers=content_headers,
-                media_type=response.headers.get("content-type", "application/octet-stream")
+                media_type=response.headers.get("content-type", "application/octet-stream"),
+                background=None  # Let FastAPI handle closing the response
             )
             
     except httpx.TimeoutException:
@@ -200,23 +197,19 @@ async def stream_document(
         logger.error(f"Error streaming document {doc_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Error streaming document")
 
+
 @router.get("/{doc_id}/pdf")
 async def serve_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Sirve el PDF directamente para visualización en el navegador.
     Solo funciona para documentos que ya son PDF.
     """
-    from fastapi.responses import StreamingResponse
-    from fastapi import HTTPException
-    
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    
     # Obtener información del documento
     document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
@@ -226,24 +219,18 @@ async def serve_pdf(
     if document.file_type.lower() != 'pdf':
         raise HTTPException(status_code=400, detail="Document is not a PDF")
     
-    # Obtener el archivo desde storage
-    from app.services.storage_service import StorageService
-    storage_service = StorageService(tenant_id, str(current_user.id))
-    
+    # Obtener el archivo desde storage (usando el servicio de storage interno del document_service)
     try:
         # Descargar archivo como bytes
-        file_content = storage_service.download_file(document.file_path)
+        file_content = await document_service.storage_service.download_file(document.file_path)
         
         if not file_content:
             raise HTTPException(status_code=500, detail="Could not retrieve PDF")
         
-        # Crear streaming response directamente desde bytes
-        from io import BytesIO
-        
         def iterfile():
             yield file_content
         
-        response = StreamingResponse(
+        return StreamingResponse(
             iterfile(),
             media_type='application/pdf',
             headers={
@@ -251,8 +238,6 @@ async def serve_pdf(
                 'Content-Type': 'application/pdf'
             }
         )
-        
-        return response
         
     except Exception as e:
         logger.error(f"Error serving PDF {doc_id}: {str(e)}")
@@ -264,17 +249,12 @@ async def serve_converted_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Sirve el PDF convertido para documentos no-PDF que han sido convertidos a PDF.
     """
-    from fastapi.responses import StreamingResponse
-    from fastapi import HTTPException
-    from app.services.document_preview_service import DocumentPreviewService
-    from app.services.async_document_service import AsyncDocumentService
-    
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
     
     # Obtener información del documento
@@ -282,7 +262,7 @@ async def serve_converted_pdf(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Verificar que NO sea un PDF original (para PDFs originales usar /pdf endpoint)
+    # Verificar que NO sea un PDF original
     if document.file_type.lower() == 'pdf':
         raise HTTPException(status_code=400, detail="Use /pdf endpoint for original PDF documents")
     
@@ -298,21 +278,16 @@ async def serve_converted_pdf(
         if not pdf_storage_path:
             raise HTTPException(status_code=404, detail="Converted PDF not found in storage")
         
-        # Obtener el archivo PDF desde storage
-        from app.services.storage_service import StorageService
-        storage_service = StorageService(tenant_id, str(current_user.id))
-        
         # Descargar archivo PDF convertido
-        file_content = storage_service.download_file(pdf_storage_path)
+        file_content = await document_service.storage_service.download_file(pdf_storage_path)
         
         if not file_content:
             raise HTTPException(status_code=500, detail="Could not retrieve converted PDF")
         
-        # Crear streaming response
         def iterfile():
             yield file_content
         
-        response = StreamingResponse(
+        return StreamingResponse(
             iterfile(),
             media_type='application/pdf',
             headers={
@@ -320,8 +295,6 @@ async def serve_converted_pdf(
                 'Content-Type': 'application/pdf'
             }
         )
-        
-        return response
         
     except HTTPException:
         raise
@@ -333,27 +306,22 @@ async def serve_converted_pdf(
 @router.put("/{doc_id}", response_model=Document)
 async def update_document(
     doc_id: str,
-    update_data: dict,
+    update_data: DocumentUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Actualiza los metadatos de un documento (título, descripción, tags, categoría).
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-    
     # Obtener el documento existente
     document = await document_service.get_document(db=db, doc_id=doc_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Actualizar solo los campos permitidos
-    allowed_fields = ['title', 'description', 'tags', 'category']
-    for field in allowed_fields:
-        if field in update_data:
-            setattr(document, field, update_data[field])
+    # Actualizar campos usando Pydantic model
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for field, value in update_dict.items():
+        setattr(document, field, value)
     
     # Guardar cambios
     db.add(document)
@@ -369,14 +337,11 @@ async def update_document(
 async def delete_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Elimina un documento y sus datos asociados.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.delete_document(db=db, doc_id=doc_id)
 
 
@@ -384,13 +349,11 @@ async def delete_document(
 async def get_document_summary(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Genera un resumen del documento utilizando LLM.
     """
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     return await document_service.generate_summary(db=db, doc_id=doc_id)
 
 
@@ -399,15 +362,12 @@ async def add_document_tag(
     doc_id: str,
     tag: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Añade una etiqueta a un documento.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    return await document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag) # Pass db
+    return await document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag)
 
 
 @router.delete("/{doc_id}/tag/{tag_name}", response_model=dict)
@@ -415,15 +375,12 @@ async def remove_document_tag(
     doc_id: str,
     tag_name: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Elimina una etiqueta de un documento.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    return await document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name) # Pass db
+    return await document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name)
 
 
 @router.get("/{doc_id}/preview", response_model=dict)
@@ -432,16 +389,12 @@ async def get_document_preview(
     force_regenerate: bool = Query(False, description="Force regeneration of preview"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Genera preview del documento usando Gotenberg.
-    Soporta conversión de documentos Office, texto, markdown y más a PDF.
     """
-    from app.services.document_preview_service import DocumentPreviewService
-    from app.services.async_document_service import AsyncDocumentService
-    
-    document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
     preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
     
     try:
@@ -450,17 +403,12 @@ async def get_document_preview(
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        # Descargar archivo para procesamiento
-        from app.services.storage_service import StorageService
-        storage_service = StorageService(tenant_id, str(current_user.id))
-        
-        import tempfile
-        import os
+        # Descargar archivo para procesamiento usando el storage interno del servicio
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, document.filename or 'document')
         
         # Descargar archivo como bytes
-        file_content = storage_service.download_file(document.file_path or '')
+        file_content = await document_service.storage_service.download_file(document.file_path or '')
         
         if not file_content:
             raise HTTPException(status_code=500, detail="Could not download document for preview")
@@ -481,7 +429,7 @@ async def get_document_preview(
             force_regenerate=force_regenerate
         )
         
-        # Marcar documento como visualizado cuando se obtiene preview por primera vez
+        # Marcar documento como visualizado
         if not force_regenerate:
             try:
                 await document_service.mark_document_viewed(
@@ -503,19 +451,12 @@ async def get_document_preview(
             detail="Preview generation failed. Please try again later."
         )
     finally:
-        # Cleanup preview service resources
+        # Cleanup
         try:
             await preview_service.cleanup()
+            shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
-            logger.warning(f"Preview service cleanup failed: {e}")
-        
-        # Cleanup temp directory
-        try:
-            import shutil
-            if 'temp_dir' in locals():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception as e:
-            logger.warning(f"Temp directory cleanup failed: {e}")
+            logger.warning(f"Cleanup failed: {e}")
 
 
 @router.get("/{doc_id}/preview/info", response_model=dict)
@@ -527,23 +468,15 @@ async def get_preview_info(
     """
     Obtiene información de preview existente sin regenerar.
     """
-    from app.services.document_preview_service import DocumentPreviewService
-    
     preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
     
     try:
         preview_info = await preview_service.get_preview_info(doc_id)
-        
-        if preview_info:
-            return {
-                "has_preview": True,
-                "preview_info": preview_info
-            }
-        else:
-            return {
-                "has_preview": False,
-                "message": "No preview available. Generate one with /preview endpoint."
-            }
+        return {
+            "has_preview": bool(preview_info),
+            "preview_info": preview_info,
+            "message": "No preview available" if not preview_info else None
+        }
             
     except Exception as e:
         logger.error(f"Preview info retrieval failed for document {doc_id}: {str(e)}")
@@ -552,101 +485,21 @@ async def get_preview_info(
             "error": "Could not retrieve preview information"
         }
     finally:
-        # Cleanup preview service resources
-        try:
-            await preview_service.cleanup()
-        except Exception as e:
-            logger.warning(f"Preview service cleanup failed: {e}")
+        await preview_service.cleanup()
+
 
 @router.get("/{doc_id}/agents")
 async def get_document_agents(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
     Get agents assigned to a specific document based on its type and tags.
+    Logic delegated to service.
     """
     try:
-        # Get document details
-        document_service = AsyncDocumentService(tenant_id=tenant_id, user_id=str(current_user.id))
-        document = await document_service.get_document(db, doc_id)
-        
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Determine document type and tags
-        doc_tags = [tag.name for tag in document.tags] if document.tags else []
-        doc_type = document.category or "general"
-        
-        # Map document characteristics to agent types
-        assigned_agents = []
-        
-        # Check if document is signable
-        is_signable = any(tag in ["signable", "contract", "agreement"] for tag in doc_tags)
-        if is_signable:
-            assigned_agents.append({
-                "id": f"sig-{doc_id}",
-                "name": "Digital Signature Agent",
-                "type": "digital_signature",
-                "status": "ready",
-                "description": "Manages digital signature workflows",
-                "capabilities": ["signature_requests", "status_tracking", "signer_management"]
-            })
-        
-        # Check if document needs legal compliance
-        is_legal = any(tag in ["legal", "contract", "compliance"] for tag in doc_tags) or doc_type == "legal"
-        if is_legal:
-            assigned_agents.append({
-                "id": f"legal-{doc_id}",
-                "name": "Legal Compliance Agent",
-                "type": "legal_compliance",
-                "status": "ready",
-                "description": "Validates legal requirements",
-                "capabilities": ["compliance_check", "risk_assessment", "regulatory_analysis"]
-            })
-        
-        # Check if document is financial
-        is_financial = any(tag in ["financial", "invoice", "report"] for tag in doc_tags) or doc_type == "financial"
-        if is_financial:
-            assigned_agents.append({
-                "id": f"fin-{doc_id}",
-                "name": "Financial Analysis Agent",
-                "type": "financial_analyzer",
-                "status": "ready",
-                "description": "Analyzes financial documents",
-                "capabilities": ["financial_metrics", "trend_analysis", "report_generation"]
-            })
-        
-        # Document analyzer is always available
-        assigned_agents.append({
-            "id": f"doc-{doc_id}",
-            "name": "Document Analyzer",
-            "type": "document_analyzer",
-            "status": "ready",
-            "description": "Analyzes document content and structure",
-            "capabilities": ["content_analysis", "extraction", "summarization"]
-        })
-        
-        # RAG assistant for Q&A
-        assigned_agents.append({
-            "id": f"rag-{doc_id}",
-            "name": "RAG Assistant",
-            "type": "rag_assistant",
-            "status": "ready",
-            "description": "Answers questions about the document",
-            "capabilities": ["document_search", "context_qa", "knowledge_retrieval"]
-        })
-        
-        return {
-            "document_id": doc_id,
-            "document_type": doc_type,
-            "tags": doc_tags,
-            "assigned_agents": assigned_agents,
-            "total_agents": len(assigned_agents)
-        }
-        
+        return await document_service.get_document_agents(db, doc_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -662,15 +515,12 @@ async def recategorize_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
-    Recategoriza un documento específico (lo agrega a la cola de procesamiento)
+    Recategoriza un documento específico.
     """
-    from app.services.async_document_service import AsyncDocumentService
-    from app.services.queue_service import queue_service
-    
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
     doc = await document_service.get_document(db=db, doc_id=doc_id)
     
     # Check if document has content
@@ -681,12 +531,11 @@ async def recategorize_document(
             "error": "Document has no extracted content"
         }
     
-    # Queue for categorization
     job_id = await queue_service.enqueue_document_categorization(
         document_id=doc_id,
         tenant_id=tenant_id,
         user_id=str(current_user.id),
-        priority="high"  # High priority for manual requests
+        priority="high"
     )
     
     if job_id:
@@ -697,11 +546,7 @@ async def recategorize_document(
             "message": "Document queued for recategorization"
         }
     else:
-        return {
-            "document_id": doc_id,
-            "status": "failed",
-            "error": "Failed to queue document for categorization"
-        }
+        return {"status": "failed", "error": "Failed to queue document"}
 
 
 @router.post("/recategorize-all")
@@ -709,19 +554,15 @@ async def recategorize_all_documents(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
     tenant_id: str = Depends(get_current_tenant_id_async),
-    only_uncategorized: bool = Query(True, description="Only recategorize documents without category"),
-    batch_size: int = Query(10, ge=1, le=50, description="Batch size for processing")
+    only_uncategorized: bool = Query(True),
+    batch_size: int = Query(10, ge=1, le=50)
 ):
     """
-    Recategoriza todos los documentos del tenant (los agrega a la cola por lotes)
+    Recategoriza todos los documentos del tenant.
     """
-    from app.services.queue_service import queue_service
-    from sqlalchemy import or_
-    
-    # Get documents to recategorize
     query = select(DBDocument.id).filter(
         DBDocument.tenant_id == tenant_id,
-        DBDocument.indexed > 0  # Only documents that have been indexed
+        DBDocument.indexed > 0
     )
     
     if only_uncategorized:
@@ -737,12 +578,8 @@ async def recategorize_all_documents(
     document_ids = [str(row[0]) for row in result.fetchall()]
     
     if not document_ids:
-        return {
-            "total_documents": 0,
-            "message": "No documents found to categorize"
-        }
+        return {"total_documents": 0, "message": "No documents found"}
     
-    # Queue in batches
     job_id = await queue_service.enqueue_batch_categorization(
         document_ids=document_ids,
         tenant_id=tenant_id,
@@ -755,49 +592,29 @@ async def recategorize_all_documents(
         return {
             "total_documents": len(document_ids),
             "status": "queued",
-            "job_id": job_id,
-            "batch_size": batch_size,
-            "message": f"Queued {len(document_ids)} documents for batch categorization"
+            "job_id": job_id
         }
     else:
-        return {
-            "status": "failed",
-            "error": "Failed to queue documents for categorization"
-        }
+        return {"status": "failed", "error": "Failed to queue documents"}
 
 
 @router.get("/categorization/job/{job_id}")
-async def get_categorization_job_status(
-    job_id: str,
-    current_user: User = Depends(get_current_user_async)
-):
+async def get_categorization_job_status(job_id: str):
     """
-    Obtiene el estado de un trabajo de categorización
+    Obtiene el estado de un trabajo de categorización.
     """
-    from app.services.queue_service import queue_service
-    
     status = await queue_service.get_job_status(job_id)
-    
     if status:
         return status
-    else:
-        raise HTTPException(
-            status_code=404,
-            detail="Job not found"
-        )
+    raise HTTPException(status_code=404, detail="Job not found")
 
 
 @router.get("/categorization/queue-stats")
-async def get_categorization_queue_stats(
-    current_user: User = Depends(get_current_user_async)
-):
+async def get_categorization_queue_stats():
     """
-    Obtiene estadísticas de la cola de categorización
+    Obtiene estadísticas de la cola de categorización.
     """
-    from app.services.queue_service import queue_service
-    
     stats = await queue_service.get_queue_stats()
-    
     return {
         "queues": stats,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -807,23 +624,19 @@ async def get_categorization_queue_stats(
 @router.post("/{doc_id}/preview/generate")
 async def queue_preview_generation(
     doc_id: str,
-    preview_type: str = Query("all", description="Type of preview: pdf, thumbnail, or all"),
-    force_regenerate: bool = Query(False, description="Force regeneration even if preview exists"),
+    preview_type: str = Query("all"),
+    force_regenerate: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
-    Queue document preview generation (asynchronous)
+    Queue document preview generation.
     """
-    from app.services.queue_service import queue_service
-    from app.services.async_document_service import AsyncDocumentService
+    # Verify document exists via service
+    await document_service.get_document(db=db, doc_id=doc_id)
     
-    # Verify document exists
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    doc = await document_service.get_document(db=db, doc_id=doc_id)
-    
-    # Queue preview generation
     job_id = await queue_service.enqueue_preview_generation(
         document_id=doc_id,
         tenant_id=tenant_id,
@@ -837,51 +650,36 @@ async def queue_preview_generation(
         return {
             "document_id": doc_id,
             "status": "queued",
-            "job_id": job_id,
-            "preview_type": preview_type,
-            "message": f"Preview generation queued for document"
+            "job_id": job_id
         }
     else:
-        return {
-            "document_id": doc_id,
-            "status": "failed",
-            "error": "Failed to queue preview generation"
-        }
+        return {"status": "failed", "error": "Failed to queue preview"}
 
 
 @router.post("/preview/generate-batch")
 async def queue_batch_preview_generation(
-    document_ids: List[str] = Body(..., description="List of document IDs"),
-    preview_type: str = Query("all", description="Type of preview: pdf, thumbnail, or all"),
-    batch_size: int = Query(5, ge=1, le=20, description="Concurrent processing size"),
+    document_ids: List[str] = Body(...),
+    preview_type: str = Query("all"),
+    batch_size: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
-    Queue batch preview generation for multiple documents
+    Queue batch preview generation.
     """
-    from app.services.queue_service import queue_service
-    from app.services.async_document_service import AsyncDocumentService
-    
-    # Verify documents exist and belong to tenant
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id))
-    
     valid_ids = []
     for doc_id in document_ids:
         try:
-            doc = await document_service.get_document(db=db, doc_id=doc_id)
+            await document_service.get_document(db=db, doc_id=doc_id)
             valid_ids.append(doc_id)
         except:
-            pass  # Skip invalid documents
+            pass
     
     if not valid_ids:
-        return {
-            "status": "failed",
-            "error": "No valid documents found"
-        }
+        return {"status": "failed", "error": "No valid documents found"}
     
-    # Queue batch processing
     job_id = await queue_service.enqueue_preview_batch(
         document_ids=valid_ids,
         tenant_id=tenant_id,
@@ -895,36 +693,24 @@ async def queue_batch_preview_generation(
         return {
             "total_documents": len(valid_ids),
             "status": "queued",
-            "job_id": job_id,
-            "preview_type": preview_type,
-            "batch_size": batch_size,
-            "message": f"Queued {len(valid_ids)} documents for preview generation"
+            "job_id": job_id
         }
     else:
-        return {
-            "status": "failed",
-            "error": "Failed to queue batch preview generation"
-        }
+        return {"status": "failed", "error": "Failed to queue batch"}
 
 
 @router.post("/facets", response_model=dict)
 async def get_document_facets(
-    query: Optional[str] = Body(None, description="Search query to filter facets"),
-    filters: Optional[dict] = Body(None, description="Current filters to apply"),
-    facet_fields: Optional[List[str]] = Body(["file_type", "category", "tags"], description="Fields to facet on"),
-    max_facet_values: int = Body(10, ge=1, le=50, description="Maximum values per facet"),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    query: Optional[str] = Body(None),
+    filters: Optional[dict] = Body(None),
+    facet_fields: Optional[List[str]] = Body(["file_type", "category", "tags"]),
+    max_facet_values: int = Body(10, ge=1, le=50),
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Get facets for document search results
-    Returns aggregated counts for filtering options
+    Get facets for document search results via Elasticsearch.
     """
     try:
-        from app.services.elasticsearch_client import elasticsearch_client
-
-        # Get facets from Elasticsearch
         facets_data = await elasticsearch_client.get_facets(
             tenant_id=tenant_id,
             query=query,
@@ -955,7 +741,4 @@ async def get_document_facets(
 
     except Exception as e:
         logger.error(f"Failed to get document facets: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve facets: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve facets: {str(e)}")

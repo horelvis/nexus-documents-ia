@@ -27,7 +27,6 @@ POOL_CONFIG = {
     "pool_timeout": 30,  # Timeout para obtener conexión del pool
     "pool_recycle": 3600,  # Reciclar conexiones cada hora
     "pool_pre_ping": True,  # Verificar conexión antes de usar
-    "echo": settings.DEBUG,  # Log SQL queries in debug mode
 }
 
 # Configuración específica para producción
@@ -41,29 +40,31 @@ if not settings.DEBUG:
 # Crear motor de base de datos con configuración optimizada
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URI,
+    echo=settings.DEBUG,
     **POOL_CONFIG
 )
 
-# Configurar logging de conexiones
-@event.listens_for(engine, "connect")
-def connect_event(connection, connection_record):
-    """Log successful database connections"""
-    logger.debug("🔗 Database connection established")
+if settings.DEBUG:
+    # Configurar logging de conexiones sólo en modo debug
+    @event.listens_for(engine, "connect")
+    def connect_event(connection, connection_record):
+        """Log successful database connections"""
+        logger.debug("🔗 Database connection established")
 
-@event.listens_for(engine, "checkout")
-def checkout_event(dbapi_connection, connection_record, connection_proxy):
-    """Log connection checkout from pool"""
-    logger.debug("📤 Connection checked out from pool")
+    @event.listens_for(engine, "checkout")
+    def checkout_event(dbapi_connection, connection_record, connection_proxy):
+        """Log connection checkout from pool"""
+        logger.debug("📤 Connection checked out from pool")
 
-@event.listens_for(engine, "checkin")
-def checkin_event(dbapi_connection, connection_record):
-    """Log connection checkin to pool"""
-    logger.debug("📥 Connection checked in to pool")
+    @event.listens_for(engine, "checkin")
+    def checkin_event(dbapi_connection, connection_record):
+        """Log connection checkin to pool"""
+        logger.debug("📥 Connection checked in to pool")
 
-@event.listens_for(engine, "close")
-def close_event(connection, connection_record):
-    """Log connection close"""
-    logger.debug("🔌 Database connection closed")
+    @event.listens_for(engine, "close")
+    def close_event(connection, connection_record):
+        """Log connection close"""
+        logger.debug("🔌 Database connection closed")
 
 # Crear fábrica de sesiones con configuración optimizada
 SessionLocal = sessionmaker(

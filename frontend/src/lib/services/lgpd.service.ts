@@ -267,7 +267,7 @@ class LGPDService {
    * Validate deletion confirmation text
    */
   validateConfirmationText(text: string): boolean {
-    return text === "DELETE MY ACCOUNT PERMANENTLY"
+    return text === "DELETE"
   }
 
   /**

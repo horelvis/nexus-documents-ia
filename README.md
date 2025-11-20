@@ -59,7 +59,7 @@
 
 ### Plantillas Inteligentes Reutilizables
 - **Process Library por tenant**: En la ruta `/{tenantId}/workflows` encontrarás plantillas curadas como Renovación de Contratos u Onboarding con formularios dinámicos y validación en vivo.
-- **Catálogo híbrido**: El Core sirve `/api/v1/workflow-templates` (DB multi-tenant); si falla, el sistema usa el catálogo AI (`backend/app/data/ai_workflow_catalog.py`) para mantener operativa la librería.
+- **Catálogo híbrido**: El Core sirve `/api/v1/engine-templates` (DB multi-tenant); si falla, el sistema usa el catálogo AI (`backend/app/data/ai_workflow_catalog.py`) para mantener operativa la librería.
 - **Schemas ricos**: Cada plantilla define pasos, campos condicionales, tags, complejidad y duración estimada, por lo que el frontend se configura automáticamente sin código adicional.
 - **Payloads normalizados**: `build_workflow_payload()` agrega defaults y transforma inputs antes de enviar la ejecución a Temporalio, reduciendo errores por datos incompletos.
 

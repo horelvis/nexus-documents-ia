@@ -94,6 +94,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       'application/msword': ['.doc'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
       'text/plain': ['.txt'],
+      'application/vnd.oasis.opendocument.text': ['.odt'],
       'image/*': ['.png', '.jpg', '.jpeg', '.gif'],
     },
     maxSize: 50 * 1024 * 1024, // 50MB

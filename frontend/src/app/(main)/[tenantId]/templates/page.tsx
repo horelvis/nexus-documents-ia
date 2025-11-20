@@ -1,161 +1,199 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
-import { useBackendUser } from "@/contexts/user-context"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { 
-  IconFileText, 
+import { useParams, useRouter } from "next/navigation"
+import {
+  IconFileText,
   IconEdit,
-  IconPlus,
   IconClock,
   IconUser,
-  IconCheck
+  IconCheck,
+  IconX
 } from "@tabler/icons-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
+import { useApiClient } from "@/lib/api-client"
 
 interface Template {
   id: string
   name: string
-  description: string
-  content: string
+  description?: string
   category: string
-  created_at: string
-  updated_at: string
-  is_active: boolean
+  status: string
+  created_at?: string
+  updated_at?: string
+  template_file_name?: string
+  template_file_mime?: string
 }
 
-export default function TemplatesPage({ params }: { params: Promise<{ tenantId: string }> }) {
-  const resolvedParams = use(params)
-  const { backendUser } = useBackendUser()
+interface DriveStatus {
+  connected: boolean
+  google_email?: string
+  expires_at?: string
+}
+
+const formatTimestamp = (value?: string) => {
+  if (!value) return "Unknown"
+  return new Date(value).toLocaleDateString()
+}
+
+export default function TemplatesPage() {
+  const params = useParams<{ tenantId: string }>()
+  const tenantId = params?.tenantId ?? ""
+  const router = useRouter()
   const { toast } = useToast()
+  const apiClient = useApiClient()
+
   const [isLoading, setIsLoading] = useState(true)
   const [templates, setTemplates] = useState<Template[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [editingSessions, setEditingSessions] = useState<Set<string>>(new Set())
+  const [driveStatus, setDriveStatus] = useState<DriveStatus | null>(null)
+  const [driveLoading, setDriveLoading] = useState(true)
 
-  // Mock templates for demo - in production these would come from API
-  const mockTemplates: Template[] = [
-    {
-      id: "123e4567-e89b-12d3-a456-426614174000",
-      name: "Employee Contract Template",
-      description: "Standard employment contract with customizable fields for salary, position, and benefits.",
-      content: "<h1>Employment Contract</h1><p>This contract is between <strong>[COMPANY_NAME]</strong> and <strong>[EMPLOYEE_NAME]</strong>.</p><p>Position: <strong>[POSITION]</strong></p><ul><li>Salary: [SALARY]</li><li>Start Date: [START_DATE]</li><li>Benefits: [BENEFITS]</li></ul>",
-      category: "HR",
-      created_at: "2024-01-15",
-      updated_at: "2024-01-15",
-      is_active: true
-    },
-    {
-      id: "456e7890-e89b-12d3-a456-426614174001",
-      name: "Service Agreement Template",
-      description: "Professional services agreement template with scope, timeline, and payment terms.",
-      content: "<h1>Service Agreement</h1><p>Agreement between <strong>[CLIENT_NAME]</strong> and <strong>[PROVIDER_NAME]</strong></p><h2>Scope of Work</h2><p>[SCOPE_DESCRIPTION]</p><h2>Timeline</h2><p>Start: [START_DATE]<br>End: [END_DATE]</p><h2>Payment Terms</h2><p>Total: [TOTAL_AMOUNT]<br>Payment Schedule: [PAYMENT_TERMS]</p>",
-      category: "Legal",
-      created_at: "2024-01-10",
-      updated_at: "2024-01-12",
-      is_active: true
-    },
-    {
-      id: "789e0123-e89b-12d3-a456-426614174002",
-      name: "Invoice Template",
-      description: "Professional invoice template with itemized billing and payment information.",
-      content: "<h1>Invoice</h1><p><strong>From:</strong> [COMPANY_NAME]<br><strong>To:</strong> [CLIENT_NAME]</p><p><strong>Invoice Number:</strong> [INVOICE_NUMBER]<br><strong>Date:</strong> [INVOICE_DATE]<br><strong>Due Date:</strong> [DUE_DATE]</p><h2>Items</h2><table><tr><th>Description</th><th>Quantity</th><th>Price</th><th>Total</th></tr><tr><td>[ITEM_1]</td><td>[QTY_1]</td><td>[PRICE_1]</td><td>[TOTAL_1]</td></tr></table><p><strong>Total Amount:</strong> [TOTAL_AMOUNT]</p>",
-      category: "Finance",
-      created_at: "2024-01-08",
-      updated_at: "2024-01-14",
-      is_active: true
-    }
-  ]
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true)
+    setError(null)
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500))
-      setTemplates(mockTemplates)
-    } catch (error) {
-      console.error('Error loading templates:', error)
+      const response = await apiClient.get<Template[]>('/engine-templates?status=active')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const items = Array.isArray(response.data) ? response.data : []
+      const normalized: Template[] = items.map((item: Template) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        status: item.status,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+        template_file_name: item.template_file_name,
+        template_file_mime: item.template_file_mime,
+      }))
+
+      setTemplates(normalized)
+    } catch (err) {
+      console.error('[templates] load error', err)
+      const message = 'Unable to load templates right now. Please try again later.'
+      setError(message)
       toast({
-        title: "Error",
-        description: "Failed to load templates",
-        variant: "destructive"
+        title: 'Error loading templates',
+        description: message,
+        variant: 'destructive',
       })
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [apiClient, toast])
 
-  const startEditing = async (template: Template) => {
-    setEditingSessions(prev => new Set([...prev, template.id]))
-    
+  const fetchDriveStatus = useCallback(async () => {
+    setDriveLoading(true)
     try {
-      const requestBody = {
-        template_id: template.id,
-        template_name: template.name,
-        template_content: template.content,
-        user_id: backendUser?.id || backendUser?.clerk_user_id || "anonymous",
-        user_email: backendUser?.email || "user@example.com",
-        tenant_id: resolvedParams.tenantId
+      const response = await apiClient.get<DriveStatus>('/google-drive/status')
+      if (response.error) {
+        throw new Error(response.error)
       }
-      
-      // Debug logging
-      console.log('👤 Frontend - Backend user object:', backendUser)
-      console.log('🔑 Frontend - Sending user_id:', requestBody.user_id)
-      console.log('📧 Frontend - Sending user_email:', requestBody.user_email)
-      console.log('🏢 Frontend - Sending tenant_id:', requestBody.tenant_id)
-      
-      const response = await fetch(`/api/template-editor/sessions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody)
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to create edit session')
-      }
-
-      const session = await response.json()
-      
-      toast({
-        title: "Edit Session Created",
-        description: "Opening Google Docs for editing...",
-      })
-
-      // Open Google Docs in new tab
-      window.open(session.google_doc_edit_url, '_blank')
-      
-      // Show instructions
-      setTimeout(() => {
-        toast({
-          title: "Editing Instructions",
-          description: `Edit the document in Google Docs. Session expires at ${new Date(session.expires_at).toLocaleTimeString()}`,
-        })
-      }, 1000)
-
-    } catch (error) {
-      console.error('Error starting edit session:', error)
-      toast({
-        title: "Error",
-        description: "Failed to start editing session",
-        variant: "destructive"
-      })
+      setDriveStatus(response.data || { connected: false })
+    } catch (err) {
+      console.error('[templates] drive status error', err)
+      setDriveStatus({ connected: false })
     } finally {
-      setEditingSessions(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(template.id)
-        return newSet
+      setDriveLoading(false)
+    }
+  }, [apiClient])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    fetchDriveStatus()
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'google-drive-connected' || event.data?.type === 'google-drive-error') {
+        fetchDriveStatus()
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [fetchDriveStatus])
+
+  const handleConnectGoogleDrive = async () => {
+    try {
+      const response = await apiClient.get<{ authorization_url?: string }>('/google-drive/oauth-url')
+      if (response.error || !response.data?.authorization_url) {
+        throw new Error(response.error || 'Failed to initiate Google Drive connection')
+      }
+      window.location.href = response.data.authorization_url
+    } catch (err) {
+      console.error('[templates] connect drive error', err)
+      toast({
+        title: 'Cannot connect Google Drive',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
       })
     }
   }
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  const startEditing = async (template: Template) => {
+    if (driveLoading) {
+      toast({
+        title: 'Checking Google Drive',
+        description: 'Please wait while we verify your Drive connection',
+      })
+      return
+    }
+
+    if (!driveStatus?.connected) {
+      toast({
+        title: 'Connect Google Drive first',
+        description: 'You must connect your Google account to edit templates.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setEditingSessions(prev => new Set([...prev, template.id]))
+
+    try {
+      const response = await apiClient.post(`/engine-templates/${template.id}/edit-sessions`, {
+        reason: 'Template edit requested from library',
+      })
+
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to create editing session')
+      }
+
+      toast({
+        title: 'Edit session created',
+        description: `Opening Google Docs for ${template.name}`,
+      })
+
+      window.open(
+        response.data.google_doc_edit_url,
+        'googledocs',
+        'width=1200,height=800,scrollbars=yes,resizable=yes'
+      )
+    } catch (err) {
+      console.error('[templates] start edit error', err)
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to start editing session',
+        variant: 'destructive',
+      })
+    } finally {
+      setEditingSessions(prev => {
+        const next = new Set(prev)
+        next.delete(template.id)
+        return next
+      })
+    }
+  }
 
   if (isLoading) {
     return (
@@ -169,87 +207,126 @@ export default function TemplatesPage({ params }: { params: Promise<{ tenantId: 
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Document Templates</h1>
           <p className="text-muted-foreground">
-            Manage and edit document templates with Google Docs integration
+            Manage and edit document templates stored in the Nexus backend
           </p>
         </div>
-        <Button>
-          <IconPlus className="w-4 h-4 mr-2" />
-          New Template
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href={`/${tenantId}/templates/sessions`}>
+              <IconClock className="mr-2 h-4 w-4" />
+              Edit Sessions
+            </Link>
+          </Button>
+          <Button onClick={() => router.push(`/${tenantId}/documents?upload=template`)}>
+            Upload Template
+          </Button>
+        </div>
       </div>
 
-      {/* Templates Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {templates.map((template) => (
-          <Card key={template.id} className="h-full">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2">
-                  <IconFileText className="w-5 h-5 text-primary" />
-                  <CardTitle className="text-lg">{template.name}</CardTitle>
-                </div>
-                <Badge variant="outline">{template.category}</Badge>
-              </div>
-              <CardDescription className="line-clamp-2">
-                {template.description}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Template Preview */}
-              <div className="bg-muted rounded-md p-3 text-sm max-h-32 overflow-hidden">
-                <div 
-                  className="line-clamp-4 text-muted-foreground"
-                  dangerouslySetInnerHTML={{ 
-                    __html: template.content.replace(/<[^>]*>/g, '').substring(0, 150) + '...'
-                  }}
-                />
-              </div>
+      {!driveLoading && !driveStatus?.connected && (
+        <Card className="border-dashed border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-5">
+            <div>
+              <h2 className="text-base font-semibold">Connect Google Drive</h2>
+              <p className="text-sm text-muted-foreground">
+                You need to grant access so we can create temporary Google Docs for editing.
+              </p>
+            </div>
+            <Button onClick={handleConnectGoogleDrive}>Connect Google Drive</Button>
+          </CardContent>
+        </Card>
+      )}
 
-              {/* Template Info */}
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <div className="flex items-center space-x-1">
-                  <IconClock className="w-3 h-3" />
-                  <span>Updated {new Date(template.updated_at).toLocaleDateString()}</span>
-                </div>
-                {template.is_active && (
-                  <div className="flex items-center space-x-1 text-green-600">
-                    <IconCheck className="w-3 h-3" />
-                    <span>Active</span>
+      {error && (
+        <Card>
+          <CardContent className="flex items-center gap-3 py-4 text-destructive">
+            <IconX className="h-4 w-4" />
+            <span>{error}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {templates.length === 0 && !error ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground space-y-2">
+            <p className="font-medium">Aún no hay plantillas para este tenant.</p>
+            <p className="text-sm">
+              Sube una nueva plantilla ODT usando el botón "Upload Template" o conviértela desde{' '}
+              <Link className="underline text-primary" href={`/${tenantId}/documents`}>
+                la biblioteca de documentos
+              </Link>.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {templates.map((template) => (
+            <Card key={template.id} className="h-full">
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center space-x-2">
+                    <IconFileText className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-lg">{template.name}</CardTitle>
                   </div>
-                )}
-              </div>
+                  <Badge variant="outline">{template.category}</Badge>
+                </div>
+                <CardDescription className="line-clamp-2">
+                  {template.description || 'No description provided'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground line-clamp-4">
+                  {template.description || 'No description provided'}
+                </p>
 
-              {/* Actions */}
-              <div className="flex space-x-2">
-                <Button
-                  onClick={() => startEditing(template)}
-                  disabled={editingSessions.has(template.id)}
-                  className="flex-1"
-                >
-                  {editingSessions.has(template.id) ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Creating Session...
-                    </>
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <div className="flex items-center space-x-1">
+                    <IconClock className="w-3 h-3" />
+                    <span>Updated {formatTimestamp(template.updated_at || template.created_at)}</span>
+                  </div>
+                  {template.status === 'active' ? (
+                    <div className="flex items-center space-x-1 text-green-600">
+                      <IconCheck className="w-3 h-3" />
+                      <span>Active</span>
+                    </div>
                   ) : (
-                    <>
-                      <IconEdit className="w-4 h-4 mr-2" />
-                      Edit Template
-                    </>
+                    <Badge variant="outline">{template.status}</Badge>
                   )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                </div>
 
-      {/* Help Section */}
+                <div className="text-xs text-muted-foreground">
+                  Source file: {template.template_file_name || 'No ODT uploaded yet'}
+                </div>
+
+                <div className="flex space-x-2">
+                  <Button
+                    onClick={() => startEditing(template)}
+                    disabled={editingSessions.has(template.id)}
+                    className="flex-1"
+                  >
+                    {editingSessions.has(template.id) ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Preparing...
+                      </>
+                    ) : (
+                      <>
+                        <IconEdit className="w-4 h-4 mr-2" />
+                        Edit Template
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <Card className="mt-8">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -258,11 +335,10 @@ export default function TemplatesPage({ params }: { params: Promise<{ tenantId: 
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>1. Click "Edit Template" to create a temporary Google Docs session</p>
-          <p>2. Edit the document in Google Docs with full formatting support</p>
-          <p>3. Your changes are automatically saved to Google Docs</p>
-          <p>4. When finished, return here and finalize your session to sync changes</p>
-          <p>5. Temporary documents are automatically cleaned up after 4 hours</p>
+          <p>1. Click "Edit Template" to request a Google Docs session from the backend.</p>
+          <p>2. Edit the temporary document in Google Docs with full formatting support.</p>
+          <p>3. When you finish, finalize the session so the ODT is stored again.</p>
+          <p>4. Temporary documents automatically expire after a few hours.</p>
         </CardContent>
       </Card>
     </div>

@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useState } from 'react'
-import { AlertTriangle, Trash2, Shield, FileText, Eye } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { AlertTriangle, Trash2, Shield, Eye, Building2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,7 +20,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
-import { useUser } from '@clerk/nextjs'
+import { Switch } from "@/components/ui/switch"
+import { useAuth, useUser } from '@clerk/nextjs'
+import { useBackendUser } from '@/contexts/user-context'
+import { useApiClient } from '@/lib/api-client'
 
 interface UserDataSummary {
   user_id: string
@@ -65,20 +68,27 @@ interface DeletionResult {
   summary: {
     deleted_records: Record<string, number>
     anonymized_records: number
-    storage_deletions: Record<string, any>
-    external_deletions: Record<string, any>
+    storage_deletions: Record<string, Record<string, unknown>>
+    external_deletions: Record<string, Record<string, unknown>>
     errors: string[]
+    tenant_deleted?: boolean
+    tenant_name?: string
+    tenant_id?: string
+    user_deletions?: Array<Record<string, unknown>>
   }
   lgpd_compliance: {
     article: string
     method: string
     anonymization_applied: boolean
-    external_services_notified: Record<string, any>
+    external_services_notified: Record<string, unknown>
   }
 }
 
 export function UserDeletionDialog() {
   const { user } = useUser()
+  const { getToken } = useAuth()
+  const apiClient = useApiClient()
+  const { backendUser } = useBackendUser()
   const [isOpen, setIsOpen] = useState(false)
   const [step, setStep] = useState<'info' | 'summary' | 'confirm' | 'processing' | 'completed'>('info')
   const [dataSummary, setDataSummary] = useState<UserDataSummary | null>(null)
@@ -86,20 +96,29 @@ export function UserDeletionDialog() {
   const [confirmationEmail, setConfirmationEmail] = useState('')
   const [confirmationText, setConfirmationText] = useState('')
   const [reason, setReason] = useState('')
+  const [deleteTenant, setDeleteTenant] = useState(false)
+  const [tenantName, setTenantName] = useState<string | null>(null)
+  const [tenantConfirmation, setTenantConfirmation] = useState('')
+  const [isTenantLoading, setIsTenantLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const REQUIRED_CONFIRMATION = "DELETE MY ACCOUNT PERMANENTLY"
+  const REQUIRED_CONFIRMATION = "DELETE"
+  const canDeleteTenant = Boolean(backendUser && (backendUser.is_superuser || backendUser.is_team_member === false))
 
   const fetchDataSummary = async () => {
     try {
       setIsLoading(true)
       setError(null)
+      const token = await getToken()
+      if (!token) {
+        throw new Error('No pudimos validar tus credenciales. Vuelve a iniciar sesión.')
+      }
       
       const response = await fetch('/api/v1/lgpd/data-summary', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${await user?.getToken()}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       })
@@ -123,17 +142,23 @@ export function UserDeletionDialog() {
       setIsLoading(true)
       setError(null)
       setStep('processing')
+      const token = await getToken()
+      if (!token) {
+        throw new Error('No pudimos validar tus credenciales. Vuelve a iniciar sesión.')
+      }
       
       const response = await fetch('/api/v1/lgpd/request-deletion', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${await user?.getToken()}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           confirmation_email: confirmationEmail,
           confirmation_text: confirmationText,
-          reason: reason.trim() || null
+          reason: reason.trim() || null,
+          delete_tenant: deleteTenant,
+          tenant_confirmation: deleteTenant ? tenantConfirmation : null
         })
       })
       
@@ -166,13 +191,56 @@ export function UserDeletionDialog() {
     setConfirmationEmail('')
     setConfirmationText('')
     setReason('')
+    setDeleteTenant(false)
+    setTenantConfirmation('')
+    setTenantName(null)
     setError(null)
     setIsLoading(false)
   }
 
-  const canProceedToConfirmation = dataSummary && 
+  const canProceedToConfirmation = Boolean(
+    dataSummary &&
     confirmationEmail === user?.emailAddresses?.[0]?.emailAddress &&
-    confirmationText === REQUIRED_CONFIRMATION
+    confirmationText === REQUIRED_CONFIRMATION &&
+    (!deleteTenant || (tenantName && tenantConfirmation === tenantName))
+  )
+
+  useEffect(() => {
+    if (!deleteTenant || tenantName || !canDeleteTenant) {
+      return
+    }
+    let isMounted = true
+    const loadTenant = async () => {
+      try {
+        setIsTenantLoading(true)
+        const token = await getToken()
+        if (!token) {
+          throw new Error('No pudimos validar tus credenciales. Vuelve a iniciar sesión.')
+        }
+        const response = await apiClient.get('/tenants/current')
+        if (response.error || !response.data) {
+          throw new Error(response.error || 'No pudimos obtener la información del tenant')
+        }
+        if (isMounted) {
+          const data = response.data as { name?: string; display_name?: string }
+          setTenantName(data.display_name || data.name || null)
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load tenant information')
+          setDeleteTenant(false)
+        }
+      } finally {
+        if (isMounted) {
+          setIsTenantLoading(false)
+        }
+      }
+    }
+    loadTenant()
+    return () => {
+      isMounted = false
+    }
+  }, [deleteTenant, tenantName, canDeleteTenant, user, getToken, apiClient])
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
@@ -182,17 +250,17 @@ export function UserDeletionDialog() {
       <DialogTrigger asChild>
         <Button variant="destructive" size="sm" className="gap-2">
           <Trash2 className="h-4 w-4" />
-          Excluir Conta (LGPD)
+          Eliminar cuenta (LGPD)
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-red-600">
             <AlertTriangle className="h-5 w-5" />
-            Exclusão de Dados - LGPD
+            Eliminación de datos - LGPD
           </DialogTitle>
           <DialogDescription>
-            Exercício do direito de exclusão de dados pessoais conforme Lei Geral de Proteção de Dados (LGPD)
+            Ejercicio del derecho a suprimir datos personales según la Ley General de Protección de Datos
           </DialogDescription>
         </DialogHeader>
 
@@ -209,31 +277,30 @@ export function UserDeletionDialog() {
           <div className="space-y-6">
             <Alert>
               <Shield className="h-4 w-4" />
-              <AlertTitle>Seus Direitos Sob a LGPD</AlertTitle>
+              <AlertTitle>Tus derechos bajo la LGPD</AlertTitle>
               <AlertDescription>
-                De acordo com o Artigo 18 da LGPD, você tem o direito de solicitar a exclusão completa 
-                de seus dados pessoais. Esta ação é <strong>irreversível</strong> e removerá permanentemente 
-                todos os seus dados do sistema.
+                El Artículo 18 te permite solicitar la eliminación total de tus datos personales.
+                Esta acción es <strong>definitiva</strong> y borrará toda tu información del sistema.
               </AlertDescription>
             </Alert>
 
             <div className="space-y-4">
-              <h4 className="font-medium">O que será excluído:</h4>
-              <ul className="space-y-2 text-sm text-muted-foreground ml-4">
-                <li>• Perfil de usuário e informações pessoais</li>
-                <li>• Todos os documentos criados por você</li>
-                <li>• Histórico de visualizações e atividades</li>
-                <li>• Dados armazenados em serviços externos (Clerk, Stripe)</li>
-                <li>• Arquivos em armazenamento na nuvem</li>
-                <li>• Índices de busca e dados vetoriais</li>
+              <h4 className="font-medium">Qué se eliminará:</h4>
+              <ul className="ml-4 space-y-2 text-sm text-muted-foreground">
+                <li>• Perfil y datos personales del usuario</li>
+                <li>• Todos los documentos creados por ti</li>
+                <li>• Historial de visualizaciones y actividades</li>
+                <li>• Datos sincronizados con servicios externos (Clerk, Stripe)</li>
+                <li>• Archivos en almacenamiento en la nube</li>
+                <li>• Índices de búsqueda y datos vectoriales</li>
               </ul>
             </div>
 
             <div className="space-y-4">
-              <h4 className="font-medium">O que será mantido (anonimizado):</h4>
-              <ul className="space-y-2 text-sm text-muted-foreground ml-4">
-                <li>• Registros de auditoria (para conformidade legal)</li>
-                <li>• Logs de sistema sem identificação pessoal</li>
+              <h4 className="font-medium">Qué se conserva (anonimizado):</h4>
+              <ul className="ml-4 space-y-2 text-sm text-muted-foreground">
+                <li>• Registros de auditoría requeridos por ley</li>
+                <li>• Logs técnicos sin información personal</li>
               </ul>
             </div>
 
@@ -244,7 +311,7 @@ export function UserDeletionDialog() {
                 className="gap-2"
               >
                 <Eye className="h-4 w-4" />
-                {isLoading ? 'Carregando...' : 'Ver Resumo dos Dados'}
+                {isLoading ? 'Cargando…' : 'Ver resumen de datos'}
               </Button>
               <Button variant="outline" onClick={() => setIsOpen(false)}>
                 Cancelar
@@ -257,20 +324,20 @@ export function UserDeletionDialog() {
         {step === 'summary' && dataSummary && (
           <div className="space-y-6">
             <div>
-              <h4 className="font-medium mb-4">Resumo dos Seus Dados</h4>
+              <h4 className="font-medium mb-4">Resumen de tus datos</h4>
               
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="font-medium">Email:</span> {dataSummary.email}
                 </div>
                 <div>
-                  <span className="font-medium">Nome:</span> {dataSummary.full_name || 'Não informado'}
+                  <span className="font-medium">Nombre:</span> {dataSummary.full_name || 'No disponible'}
                 </div>
                 <div>
-                  <span className="font-medium">Organização:</span> {dataSummary.tenant}
+                  <span className="font-medium">Organización:</span> {dataSummary.tenant}
                 </div>
                 <div>
-                  <span className="font-medium">Conta criada:</span> {new Date(dataSummary.created_at).toLocaleDateString('pt-BR')}
+                  <span className="font-medium">Cuenta creada:</span> {new Date(dataSummary.created_at).toLocaleDateString('es-ES')}
                 </div>
               </div>
             </div>
@@ -278,25 +345,60 @@ export function UserDeletionDialog() {
             <Separator />
 
             <div>
-              <h5 className="font-medium mb-2">Dados que serão excluídos:</h5>
+              <h5 className="font-medium mb-2">Datos que se eliminarán:</h5>
               <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
-                <div>Documentos criados: <strong>{dataSummary.data_summary.document_data.documents_created}</strong></div>
-                <div>Visualizações: <strong>{dataSummary.data_summary.document_data.document_views}</strong></div>
-                <div>Funções atribuídas: <strong>{dataSummary.data_summary.access_data.role_assignments}</strong></div>
-                <div>Imagem do perfil: <strong>{dataSummary.data_summary.profile_data.user_image ? 'Sim' : 'Não'}</strong></div>
-                <div>Conta Clerk: <strong>{dataSummary.data_summary.profile_data.external_accounts.clerk ? 'Sim' : 'Não'}</strong></div>
-                <div>Conta Stripe: <strong>{dataSummary.data_summary.profile_data.external_accounts.stripe ? 'Sim' : 'Não'}</strong></div>
+                <div>Documentos creados: <strong>{dataSummary.data_summary.document_data.documents_created}</strong></div>
+                <div>Visualizaciones: <strong>{dataSummary.data_summary.document_data.document_views}</strong></div>
+                <div>Roles asignados: <strong>{dataSummary.data_summary.access_data.role_assignments}</strong></div>
+                <div>Imagen de perfil: <strong>{dataSummary.data_summary.profile_data.user_image ? 'Sí' : 'No'}</strong></div>
+                <div>Cuenta en Clerk: <strong>{dataSummary.data_summary.profile_data.external_accounts.clerk ? 'Sí' : 'No'}</strong></div>
+                <div>Cuenta en Stripe: <strong>{dataSummary.data_summary.profile_data.external_accounts.stripe ? 'Sí' : 'No'}</strong></div>
               </div>
             </div>
 
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Ação Irreversível</AlertTitle>
+              <AlertTitle>Acción irreversible</AlertTitle>
               <AlertDescription>
-                Uma vez confirmada, esta ação não pode ser desfeita. Todos os seus dados serão 
-                permanentemente removidos do sistema dentro de 30 dias.
+                Una vez confirmada no se puede deshacer. Todos los datos se eliminarán de manera permanente en un plazo máximo de 30 días.
               </AlertDescription>
             </Alert>
+
+            {canDeleteTenant && (
+              <div className="rounded-lg border border-dashed border-red-200 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="flex items-center gap-2 font-medium">
+                      <Building2 className="h-4 w-4 text-red-500" />
+                      También eliminar datos de la organización
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Borra usuarios, documentos y configuraciones del tenant actual. Solo los administradores pueden activarlo.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={deleteTenant}
+                    disabled={isTenantLoading}
+                    onCheckedChange={(checked) => {
+                      setDeleteTenant(checked)
+                      if (!checked) {
+                        setTenantConfirmation('')
+                      }
+                    }}
+                  />
+                </div>
+                {deleteTenant && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      Esta opción eliminará definitivamente la organización{" "}
+                      <strong>{tenantName || 'cargando...'}</strong> y todos los datos asociados.
+                      Confirma el nombre de la organización en el siguiente paso.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-4">
               <Button 
@@ -305,10 +407,10 @@ export function UserDeletionDialog() {
                 className="gap-2"
               >
                 <Trash2 className="h-4 w-4" />
-                Prosseguir com Exclusão
+                Continuar con la eliminación
               </Button>
               <Button variant="outline" onClick={() => setStep('info')}>
-                Voltar
+                Volver
               </Button>
             </div>
           </div>
@@ -319,16 +421,21 @@ export function UserDeletionDialog() {
           <div className="space-y-6">
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Confirmação Final</AlertTitle>
+              <AlertTitle>Confirmación final</AlertTitle>
               <AlertDescription>
-                Para confirmar a exclusão permanente de sua conta, você deve:
+                Para confirmar la eliminación permanente de tu cuenta debes completar los siguientes campos.
+                {deleteTenant && (
+                  <span className="block mt-2 text-red-500 font-semibold">
+                    Esta acción también eliminará toda la organización y todos los usuarios asociados.
+                  </span>
+                )}
               </AlertDescription>
             </Alert>
 
             <div className="space-y-4">
               <div>
                 <Label htmlFor="confirmation-email">
-                  Confirme seu email: <span className="text-red-500">*</span>
+                  Confirma tu email: <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="confirmation-email"
@@ -341,7 +448,7 @@ export function UserDeletionDialog() {
 
               <div>
                 <Label htmlFor="confirmation-text">
-                  Digite exatamente: <code className="bg-muted px-1 rounded">{REQUIRED_CONFIRMATION}</code> <span className="text-red-500">*</span>
+                  Escribe exactamente: <code className="bg-muted px-1 rounded">{REQUIRED_CONFIRMATION}</code> <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="confirmation-text"
@@ -357,10 +464,28 @@ export function UserDeletionDialog() {
                   id="reason"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Informe o motivo para a exclusão da conta (opcional)"
+                  placeholder="Cuéntanos por qué deseas eliminar la cuenta (opcional)"
                   rows={3}
                 />
               </div>
+
+              {deleteTenant && (
+                <div className="space-y-2 rounded-lg border border-dashed border-red-200 p-3">
+                  <Label htmlFor="tenant-confirmation" className="flex items-center gap-2">
+                    Confirma el nombre de la organización <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="tenant-confirmation"
+                    value={tenantConfirmation}
+                    onChange={(e) => setTenantConfirmation(e.target.value)}
+                    placeholder={tenantName || 'Nombre de la organización'}
+                    disabled={isTenantLoading || !tenantName}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Escribe exactamente <strong>{tenantName || 'el nombre del tenant'}</strong> para confirmar la eliminación total.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-4">
@@ -371,10 +496,10 @@ export function UserDeletionDialog() {
                 className="gap-2"
               >
                 <Trash2 className="h-4 w-4" />
-                {isLoading ? 'Processando...' : 'Confirmar Exclusão Definitiva'}
+                {isLoading ? 'Procesando…' : 'Confirmar eliminación definitiva'}
               </Button>
               <Button variant="outline" onClick={() => setStep('summary')}>
-                Voltar
+                Volver
               </Button>
             </div>
           </div>
@@ -387,10 +512,9 @@ export function UserDeletionDialog() {
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
             </div>
             <div>
-              <h4 className="font-medium">Processando Exclusão de Dados</h4>
-              <p className="text-sm text-muted-foreground mt-2">
-                Seus dados estão sendo removidos permanentemente do sistema. 
-                Este processo pode levar alguns minutos.
+              <h4 className="font-medium">Procesando la eliminación</h4>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Estamos borrando tu información de todos los sistemas. El proceso puede tardar algunos minutos.
               </p>
             </div>
           </div>
@@ -401,33 +525,43 @@ export function UserDeletionDialog() {
           <div className="space-y-6">
             <Alert>
               <Shield className="h-4 w-4" />
-              <AlertTitle>Exclusão Concluída</AlertTitle>
+              <AlertTitle>Eliminación completada</AlertTitle>
               <AlertDescription>
-                Seus dados foram excluídos com sucesso conforme a LGPD. 
-                Você será redirecionado automaticamente em alguns segundos.
+                Tus datos se eliminaron correctamente de acuerdo con la LGPD.
+                Serás redirigido automáticamente en unos segundos.
               </AlertDescription>
             </Alert>
 
+            {deletionResult.summary.tenant_deleted && (
+              <Alert variant="destructive">
+                <Building2 className="h-4 w-4" />
+                <AlertTitle>Organización eliminada</AlertTitle>
+                <AlertDescription>
+                  El tenant <strong>{deletionResult.summary.tenant_name || ''}</strong> fue eliminado definitivamente, incluidos todos los usuarios y documentos asociados.
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="space-y-4">
               <div>
-                <h5 className="font-medium">Resumo da Exclusão:</h5>
-                <div className="text-sm text-muted-foreground mt-2">
-                  <div>ID da Exclusão: <code>{deletionResult.deletion_id}</code></div>
-                  <div>Data: {new Date(deletionResult.deleted_at).toLocaleString('pt-BR')}</div>
-                  <div>Registros excluídos: {Object.values(deletionResult.summary.deleted_records).reduce((a, b) => a + b, 0)}</div>
+                <h5 className="font-medium">Resumen de la eliminación:</h5>
+                <div className="mt-2 text-sm text-muted-foreground">
+                  <div>ID de referencia: <code>{deletionResult.deletion_id}</code></div>
+                  <div>Fecha: {new Date(deletionResult.deleted_at).toLocaleString('es-ES')}</div>
+                  <div>Registros eliminados: {Object.values(deletionResult.summary.deleted_records).reduce((a, b) => a + b, 0)}</div>
                   <div>Registros anonimizados: {deletionResult.summary.anonymized_records}</div>
                 </div>
               </div>
 
               <div className="text-xs text-muted-foreground">
-                <p><strong>Conformidade LGPD:</strong> {deletionResult.lgpd_compliance.article}</p>
-                <p><strong>Método:</strong> {deletionResult.lgpd_compliance.method}</p>
+                <p><strong>Base legal:</strong> {deletionResult.lgpd_compliance.article}</p>
+                <p><strong>Método aplicado:</strong> {deletionResult.lgpd_compliance.method}</p>
               </div>
             </div>
 
             <div className="text-center">
               <Button onClick={() => window.location.href = '/'}>
-                Ir para Página Inicial
+                Volver al inicio
               </Button>
             </div>
           </div>

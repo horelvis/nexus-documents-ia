@@ -17,7 +17,7 @@ from app.core.config import settings
 
 # Importaciones necesarias en la parte superior del archivo
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
@@ -172,6 +172,59 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=500,
             detail="Error interno del servidor"
+        )
+
+
+@router.post("/start-free-trial")
+async def start_free_trial(
+    current_user: User = Depends(get_current_active_user_async),
+    db: AsyncSession = Depends(get_async_db)
+) -> Dict[str, Any]:
+    """
+    Permite a un usuario iniciar el trial gratuito sin pasar por Stripe.
+    Asigna plan 'trial' por 14 días (o el valor configurado) y marca el estado como trialing.
+    """
+    try:
+        trial_days = getattr(settings, "FREE_TRIAL_DAYS", 14) or 14
+        now = datetime.now(timezone.utc)
+
+        # Si ya tiene una suscripción activa o trial vigente, no hacer nada
+        if current_user.subscription_status in ['active', 'trialing']:
+            logger.info(f"[Stripe] User {current_user.id} already has active/trialing subscription")
+            return {
+                "status": "already_active",
+                "subscription_plan": current_user.subscription_plan,
+                "subscription_status": current_user.subscription_status,
+                "trial_ends_at": current_user.trial_ends_at.isoformat() if current_user.trial_ends_at else None
+            }
+
+        current_user.subscription_plan = 'trial'
+        current_user.subscription_status = 'trialing'
+        current_user.trial_ends_at = now + timedelta(days=int(trial_days))
+
+        await db.commit()
+        await db.refresh(current_user)
+
+        try:
+            from app.services.subscription_service_v2 import SubscriptionServiceV2
+            SubscriptionServiceV2.clear_cache(str(current_user.id))
+        except Exception as cache_error:
+            logger.warning(f"[Stripe] Unable to clear subscription cache: {cache_error}")
+
+        logger.info(f"[Stripe] Started free trial for user {current_user.id} until {current_user.trial_ends_at}")
+
+        return {
+            "status": "trial_started",
+            "subscription_plan": current_user.subscription_plan,
+            "subscription_status": current_user.subscription_status,
+            "trial_ends_at": current_user.trial_ends_at.isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"[Stripe] Error starting free trial: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo iniciar el trial gratuito"
         )
 
 

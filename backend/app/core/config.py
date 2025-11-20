@@ -66,7 +66,13 @@ class Settings(BaseSettings):
         "http://192.168.1.58:3000",
         "http://192.168.1.58:3001",
         "http://192.168.1.58:3002",
-        "http://192.168.1.58:8000"
+        "http://192.168.1.58:8000",
+        "http://nexus-docs360.es",
+        "http://nexus-docs360.es:3000",
+        "http://nexus-docs360.es:3001",
+        "https://nexus-docs360.es",
+        "https://nexus-docs360.es:3000",
+        "https://nexus-docs360.es:3001",
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -142,13 +148,16 @@ class Settings(BaseSettings):
     ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
     
     # CAG Microservice (Contextual Augmented Generation)
-    CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://cag-service:8008")
+    CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://weaviate-service:8000")
     
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     
     # Temporalio Service
     TEMPORALIO_SERVICE_URL: str = os.getenv("TEMPORALIO_SERVICE_URL", "http://temporalio-service:8000")
+    TEMPLATE_EDITOR_SERVICE_URL: str = os.getenv(
+        "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
+    )
 
     # Ollama
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
@@ -161,7 +170,7 @@ class Settings(BaseSettings):
     # Procesamiento de Documentos
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
     # Store as string to avoid JSON parsing issues
-    _ALLOWED_EXTENSIONS: str = "pdf,docx,txt,md,csv,xlsx,png,jpg,jpeg,gif,bmp,tiff,webp,json"
+    _ALLOWED_EXTENSIONS: str = "pdf,docx,txt,md,csv,xlsx,png,jpg,jpeg,gif,bmp,tiff,webp,json,odt"
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
     
@@ -183,6 +192,7 @@ class Settings(BaseSettings):
     MICROSERVICES_API_KEY: str
     
     # Clerk Configuration
+    CLERK_API_URL: str = os.getenv("CLERK_API_URL", "https://api.clerk.com/v1")
     CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")
     CLERK_PUBLISHABLE_KEY: Optional[str] = os.getenv("CLERK_PUBLISHABLE_KEY")
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
@@ -195,6 +205,31 @@ class Settings(BaseSettings):
     MAIL_PASSWORD: str = os.getenv("MAIL_PASSWORD", "")
     MAIL_FROM: str = os.getenv("MAIL_FROM", "noreply@nexusdocument.com")
     MAIL_FROM_NAME: str = os.getenv("MAIL_FROM_NAME", "Nexus Document Management")
+    
+    # Google OAuth for Drive/Docs
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+    GOOGLE_OAUTH_REDIRECT_URI: str = os.getenv(
+        "GOOGLE_OAUTH_REDIRECT_URI",
+        "http://localhost:8000/api/v1/google-drive/oauth/callback"
+    )
+    GOOGLE_OAUTH_SCOPES: str = os.getenv(
+        "GOOGLE_OAUTH_SCOPES",
+        "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents"
+    )
+    GOOGLE_OAUTH_SUCCESS_REDIRECT_URL: str = os.getenv(
+        "GOOGLE_OAUTH_SUCCESS_REDIRECT_URL",
+        "http://localhost:3000/integrations/google-drive/success"
+    )
+    GOOGLE_OAUTH_ERROR_REDIRECT_URL: str = os.getenv(
+        "GOOGLE_OAUTH_ERROR_REDIRECT_URL",
+        "http://localhost:3000/integrations/google-drive/error"
+    )
+    GOOGLE_DRIVE_ENCRYPTION_KEY: Optional[str] = os.getenv("GOOGLE_DRIVE_ENCRYPTION_KEY")
+    
+    @property
+    def google_oauth_scopes_list(self) -> list[str]:
+        return [scope.strip() for scope in self.GOOGLE_OAUTH_SCOPES.split() if scope.strip()]
     MAIL_PORT: int = int(os.getenv("MAIL_PORT", "587"))
     MAIL_SERVER: str = os.getenv("MAIL_SERVER", "smtp.gmail.com")
     MAIL_STARTTLS: bool = os.getenv("MAIL_STARTTLS", "True").lower() == "true"

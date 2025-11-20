@@ -1,5 +1,10 @@
+const baseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  ""
+
 export const API_CONFIG = {
-  BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL,
+  BASE_URL: baseUrl,
   API_V1: '/api/v1',
   TIMEOUT: 30000, // 30 seconds
   

@@ -27,6 +27,21 @@ class ElasticsearchService:
         logger.info(f"ElasticsearchService initialized for tenant: {tenant_id}")
         logger.info(f"Using index: {self.index_name}")
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+
+    async def close(self):
+        """Ensure HTTP connections are closed to avoid asyncio warnings."""
+        try:
+            if self.async_client:
+                await self.async_client.close()
+        finally:
+            if self.client:
+                self.client.close()
+
     def create_index_if_not_exists(self) -> bool:
         """
         Create index with optimized mapping for hybrid search

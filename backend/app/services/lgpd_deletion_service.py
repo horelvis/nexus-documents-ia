@@ -13,9 +13,13 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from uuid import UUID
+
+import httpx
+import stripe
+from clerk_backend_api import Clerk
+from sqlalchemy import delete, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import delete, update, func
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
@@ -23,7 +27,8 @@ from app.db.models import (
     RoleAssignmentAudit, DocumentTagAudit, LGPDDeletionAudit,
     role_permissions, user_roles, document_tags,
     Role, Tag, DocumentShare, DocumentShareAccessLog, DocumentShareRecipient,
-    SignatureRequest, SignatureRequestSigner, SignatureEvent, SignatureContact
+    SignatureRequest, SignatureRequestSigner, SignatureEvent, SignatureContact,
+    GoogleDriveToken
 )
 from app.db.agent_models import AgentExecution, AgentExecutionLog, AgentDefinition
 from app.services.async_storage_service import AsyncStorageService
@@ -41,6 +46,9 @@ class LGPDDeletionService:
     
     def __init__(self):
         self.deletion_log = []
+        self.clerk_client: Optional[Clerk] = None
+        if settings.STRIPE_SECRET_KEY:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
         
     async def request_user_deletion(
         self,
@@ -48,7 +56,8 @@ class LGPDDeletionService:
         user_id: str,
         requested_by_user_id: str,
         confirmation_token: str,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        delete_tenant: bool = False
     ) -> Dict[str, Any]:
         """
         Process complete user data deletion request for LGPD compliance
@@ -81,7 +90,10 @@ class LGPDDeletionService:
             )
             
             # 4. Execute complete data deletion
-            deletion_summary = await self._execute_complete_deletion(db, user)
+            if delete_tenant:
+                deletion_summary = await self._execute_tenant_deletion(db, user)
+            else:
+                deletion_summary = await self._execute_complete_deletion(db, user)
             
             # 5. Update deletion audit with results
             await self._finalize_deletion_audit(db, deletion_record.id, deletion_summary)
@@ -241,6 +253,109 @@ class LGPDDeletionService:
                 summary["errors"].append(f"Failed to delete document {doc.id}: {e}")
         
         return deleted_count
+
+    async def _execute_tenant_deletion(self, db: AsyncSession, user: User) -> Dict[str, Any]:
+        """
+        Delete the entire tenant and all associated users/data.
+        Only triggered when a tenant owner/admin explicitly requests it.
+        """
+        tenant_stmt = select(Tenant).options(selectinload(Tenant.users)).where(Tenant.id == user.tenant_id)
+        tenant_result = await db.execute(tenant_stmt)
+        tenant = tenant_result.scalar_one_or_none()
+        if not tenant:
+            raise ValueError("Tenant not found for deletion")
+        
+        tenant_users = list(tenant.users or [])
+        if not tenant_users:
+            tenant_users = [user]
+
+        tenant_user_ids = [str(tu.id) for tu in tenant_users]
+        
+        aggregate_summary: Dict[str, Any] = {
+            "tenant_id": str(tenant.id),
+            "tenant_name": tenant.name,
+            "tenant_deleted": False,
+            "user_deletions": [],
+            "deleted_records": {},
+            "anonymized_records": 0,
+            "storage_deletions": {},
+            "external_deletions": {},
+            "errors": []
+        }
+        
+        for tenant_user_id in tenant_user_ids:
+            member_user = await self._get_user_with_tenant(db, tenant_user_id)
+            if not member_user:
+                aggregate_summary["errors"].append(f"User {tenant_user_id} not found during tenant deletion")
+                continue
+
+            member_summary = await self._execute_complete_deletion(db, member_user)
+            aggregate_summary["user_deletions"].append(member_summary)
+            self._merge_deleted_counts(aggregate_summary["deleted_records"], member_summary.get("deleted_records", {}))
+            aggregate_summary["anonymized_records"] += member_summary.get("anonymized_records", 0)
+            if member_summary.get("storage_deletions"):
+                aggregate_summary["storage_deletions"][member_summary["user_id"]] = member_summary.get("storage_deletions", {})
+            if member_summary.get("external_deletions"):
+                aggregate_summary["external_deletions"][member_summary["user_id"]] = member_summary.get("external_deletions", {})
+            if member_summary.get("errors"):
+                aggregate_summary["errors"].extend(member_summary["errors"])
+
+        # Tenant-wide shared links cleanup
+        share_cleanup = await self._delete_tenant_shares(db, tenant.id)
+        for key, value in share_cleanup.items():
+            try:
+                numeric_value = int(value) if value is not None else 0
+            except (TypeError, ValueError):
+                numeric_value = 0
+            if numeric_value <= 0:
+                continue
+            aggregate_key = f"tenant_{key}"
+            aggregate_summary["deleted_records"][aggregate_key] = (
+                aggregate_summary["deleted_records"].get(aggregate_key, 0) + numeric_value
+            )
+        
+        await db.delete(tenant)
+        await db.commit()
+        aggregate_summary["tenant_deleted"] = True
+        aggregate_summary["deleted_records"]["tenants"] = aggregate_summary["deleted_records"].get("tenants", 0) + 1
+        return aggregate_summary
+
+    async def _delete_tenant_shares(self, db: AsyncSession, tenant_id: UUID) -> Dict[str, int]:
+        """Delete all document shares (and related entries) for a tenant"""
+        share_ids_subq = select(DocumentShare.id).where(DocumentShare.tenant_id == tenant_id).subquery()
+        cleanup_counts = {
+            "document_share_access_logs": 0,
+            "document_share_recipients": 0,
+            "document_shares": 0
+        }
+
+        # Count before deletion for audit visibility
+        access_count_result = await db.execute(
+            select(func.count(DocumentShareAccessLog.id)).where(DocumentShareAccessLog.share_id.in_(share_ids_subq))
+        )
+        cleanup_counts["document_share_access_logs"] = access_count_result.scalar() or 0
+
+        recipients_count_result = await db.execute(
+            select(func.count(DocumentShareRecipient.id)).where(DocumentShareRecipient.share_id.in_(share_ids_subq))
+        )
+        cleanup_counts["document_share_recipients"] = recipients_count_result.scalar() or 0
+
+        shares_count_result = await db.execute(
+            select(func.count(DocumentShare.id)).where(DocumentShare.tenant_id == tenant_id)
+        )
+        cleanup_counts["document_shares"] = shares_count_result.scalar() or 0
+
+        await db.execute(
+            delete(DocumentShareAccessLog).where(DocumentShareAccessLog.share_id.in_(share_ids_subq))
+        )
+        await db.execute(
+            delete(DocumentShareRecipient).where(DocumentShareRecipient.share_id.in_(share_ids_subq))
+        )
+        await db.execute(
+            delete(DocumentShare).where(DocumentShare.tenant_id == tenant_id)
+        )
+
+        return cleanup_counts
     
     async def _delete_user_profile_data(self, db: AsyncSession, user: User) -> int:
         """Delete user profile data"""
@@ -259,12 +374,12 @@ class LGPDDeletionService:
         
         # Delete document shares and related records
         await db.execute(
-            delete(DocumentShareAccessLog).where(DocumentShareAccessLog.document_share_id.in_(
+            delete(DocumentShareAccessLog).where(DocumentShareAccessLog.share_id.in_(
                 select(DocumentShare.id).where(DocumentShare.created_by == user.id)
             ))
         )
         await db.execute(
-            delete(DocumentShareRecipient).where(DocumentShareRecipient.document_share_id.in_(
+            delete(DocumentShareRecipient).where(DocumentShareRecipient.share_id.in_(
                 select(DocumentShare.id).where(DocumentShare.created_by == user.id)
             ))
         )
@@ -274,12 +389,12 @@ class LGPDDeletionService:
         
         # Delete signature-related records
         await db.execute(
-            delete(SignatureEvent).where(SignatureEvent.signature_request_id.in_(
+            delete(SignatureEvent).where(SignatureEvent.request_id.in_(
                 select(SignatureRequest.id).where(SignatureRequest.created_by == user.id)
             ))
         )
         await db.execute(
-            delete(SignatureRequestSigner).where(SignatureRequestSigner.signature_request_id.in_(
+            delete(SignatureRequestSigner).where(SignatureRequestSigner.request_id.in_(
                 select(SignatureRequest.id).where(SignatureRequest.created_by == user.id)
             ))
         )
@@ -289,17 +404,24 @@ class LGPDDeletionService:
         await db.execute(
             delete(SignatureContact).where(SignatureContact.created_by == user.id)
         )
+
+        # Delete Google Drive tokens bound to the user
+        tokens_result = await db.execute(
+            delete(GoogleDriveToken).where(GoogleDriveToken.user_id == user.id)
+        )
+        deleted_count += tokens_result.rowcount or 0
+        await db.flush()
         
         # Delete agent executions and logs
         await db.execute(
             delete(AgentExecutionLog).where(
                 AgentExecutionLog.execution_id.in_(
-                    select(AgentExecution.id).where(AgentExecution.created_by == user.id)
+                    select(AgentExecution.id).where(AgentExecution.user_id == user.id)
                 )
             )
         )
         await db.execute(
-            delete(AgentExecution).where(AgentExecution.created_by == user.id)
+            delete(AgentExecution).where(AgentExecution.user_id == user.id)
         )
         
         return deleted_count
@@ -395,25 +517,106 @@ class LGPDDeletionService:
         
         return deletion_results
     
+    async def _ensure_clerk_client(self) -> Optional[Clerk]:
+        """Lazily instantiate Clerk client"""
+        if self.clerk_client is None and settings.CLERK_SECRET_KEY:
+            try:
+                self.clerk_client = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Clerk client: {e}")
+                self.clerk_client = None
+        return self.clerk_client
+
+    async def _delete_clerk_account(self, clerk_user_id: str) -> Dict[str, Any]:
+        """Delete user account from Clerk"""
+        if not settings.CLERK_SECRET_KEY:
+            return {
+                "status": "skipped",
+                "user_id": clerk_user_id,
+                "note": "CLERK_SECRET_KEY not configured; delete manually via Clerk dashboard"
+            }
+
+        # Primary path: call Clerk REST API directly to ensure consistent deletion
+        base_url = (getattr(settings, "CLERK_API_URL", None) or "https://api.clerk.com/v1").rstrip("/")
+        delete_url = f"{base_url}/users/{clerk_user_id}"
+        headers = {
+            "Authorization": f"Bearer {settings.CLERK_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+        http_error: Optional[str] = None
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.delete(delete_url, headers=headers)
+
+            if response.status_code in (200, 201, 202, 204):
+                logger.info(f"✅ Deleted Clerk user {clerk_user_id} via REST API")
+                return {"status": "deleted", "user_id": clerk_user_id}
+
+            if response.status_code == 404:
+                logger.info(f"ℹ️ Clerk user {clerk_user_id} already deleted (404)")
+                return {"status": "already_deleted", "user_id": clerk_user_id}
+
+            http_error = f"{response.status_code} - {response.text}"
+            logger.error(f"❌ Clerk REST deletion failed for {clerk_user_id}: {http_error}")
+        except httpx.RequestError as exc:
+            http_error = f"HTTP error contacting Clerk: {exc}"
+            logger.warning(f"⚠️ {http_error}")
+
+        # Fallback to Clerk SDK if REST call failed (e.g., network issues)
+        try:
+            clerk_client = await self._ensure_clerk_client()
+            if not clerk_client:
+                raise RuntimeError("Clerk client not initialized")
+
+            await asyncio.to_thread(clerk_client.users.delete, user_id=clerk_user_id)
+            logger.info(f"✅ Deleted Clerk user {clerk_user_id} via SDK fallback")
+            return {"status": "deleted", "user_id": clerk_user_id, "method": "sdk_fallback"}
+        except Exception as e:
+            logger.exception(f"❌ Failed to delete Clerk user {clerk_user_id}: {e}")
+            return {
+                "status": "failed",
+                "user_id": clerk_user_id,
+                "error": str(e),
+                "previous_http_error": http_error
+            }
+
+    async def _delete_stripe_customer(self, customer_id: str) -> Dict[str, Any]:
+        """Delete Stripe customer and revoke subscriptions"""
+        if not settings.STRIPE_SECRET_KEY:
+            return {
+                "status": "skipped",
+                "customer_id": customer_id,
+                "note": "STRIPE_SECRET_KEY not configured; delete manually in Stripe"
+            }
+        
+        try:
+            deletion = await asyncio.to_thread(stripe.Customer.delete, customer_id)
+            logger.info(f"✅ Deleted Stripe customer {customer_id}")
+            return {
+                "status": "deleted",
+                "customer_id": customer_id,
+                "stripe_response": deletion
+            }
+        except Exception as e:
+            logger.warning(f"⚠️ Stripe customer {customer_id} could not be deleted ({e}); skipping")
+            return {
+                "status": "skipped",
+                "customer_id": customer_id,
+                "note": f"Skipped Stripe deletion: {e}"
+            }
+
     async def _delete_from_external_services(self, user: User) -> Dict[str, Any]:
         """Delete user from external services"""
         external_results = {}
         
         # Clerk deletion
         if user.clerk_user_id:
-            external_results["clerk"] = {
-                "status": "manual_deletion_required",
-                "user_id": user.clerk_user_id,
-                "note": "Must be deleted via Clerk Admin API"
-            }
+            external_results["clerk"] = await self._delete_clerk_account(user.clerk_user_id)
         
         # Stripe customer deletion  
         if user.stripe_customer_id:
-            external_results["stripe"] = {
-                "status": "manual_deletion_required", 
-                "customer_id": user.stripe_customer_id,
-                "note": "Must be deleted via Stripe Admin API"
-            }
+            external_results["stripe"] = await self._delete_stripe_customer(user.stripe_customer_id)
         
         return external_results
     
@@ -421,6 +624,20 @@ class LGPDDeletionService:
         """Delete the actual user record (final step)"""
         await db.delete(user)
         logger.info(f"User record deleted: {user.id}")
+    
+    def _merge_deleted_counts(self, target: Dict[str, int], source: Dict[str, int]):
+        """Utility to merge deletion counters"""
+        if not source:
+            return
+        for key, value in source.items():
+            try:
+                numeric_value = int(value) if value is not None else 0
+            except (TypeError, ValueError):
+                logger.debug(f"Skipping non-numeric deleted_records entry {key}={value}")
+                continue
+            if numeric_value <= 0:
+                continue
+            target[key] = target.get(key, 0) + numeric_value
     
     async def _finalize_deletion_audit(self, db: AsyncSession, deletion_id: UUID, summary: Dict):
         """Update deletion audit record with results"""
@@ -431,7 +648,10 @@ class LGPDDeletionService:
         audit_record.status = "completed" if not summary["errors"] else "completed_with_errors"
         audit_record.completed_at = datetime.utcnow()
         audit_record.deletion_summary = summary
-        audit_record.total_records_deleted = sum(summary["deleted_records"].values())
+        audit_record.total_records_deleted = sum(
+            v for v in summary["deleted_records"].values()
+            if isinstance(v, (int, float))
+        )
         audit_record.anonymized_records = summary["anonymized_records"]
         
         await db.commit()
@@ -495,7 +715,7 @@ class LGPDDeletionService:
                     "article_18": "Right to data deletion",
                     "deletion_scope": "Complete personal data removal",
                     "audit_retention": "Anonymized audit trail maintained for compliance",
-                    "external_services": "Manual deletion required in Clerk and Stripe"
+                    "external_services": "Clerk and Stripe accounts are deleted automatically when credentials are configured; otherwise manual action is required"
                 }
             }
             

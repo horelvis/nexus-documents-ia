@@ -39,6 +39,7 @@ def serialize_user(user: User) -> dict:
         "subscription_status": getattr(user, 'subscription_status', 'active'),
         "clerk_user_id": user.clerk_user_id,
         "is_team_member": getattr(user, 'is_team_member', False),
+        "is_admin": bool(getattr(user, "is_admin", False)),
         "trial_ends_at": user.trial_ends_at.isoformat() if hasattr(user, 'trial_ends_at') and user.trial_ends_at else None,
         # Omit image and roles to avoid lazy loading issues
         "image": None,
@@ -85,7 +86,7 @@ async def sync_user(
         full_name=user_data.full_name,
         stripe_customer_id=user_data.stripe_customer_id,
         metadata={
-            'selected_plan': user_data.dict().get('selected_plan', 'free')
+            'selected_plan': user_data.selected_plan
         }
     )
     
@@ -151,14 +152,23 @@ async def complete_onboarding(
             if onboarding_data.first_name and onboarding_data.last_name:
                 current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
             
-            # Solo loguear datos adicionales para referencia, no guardarlos
-            # Los datos de perfil se obtienen de Clerk
-            # Los datos de plan se obtienen de Stripe
+            if onboarding_data.selected_plan:
+                current_user.subscription_plan = onboarding_data.selected_plan
+
+                if onboarding_data.selected_plan == 'pro': # Assuming 'pro' plan triggers a trial
+                    current_user.subscription_status = 'trialing'
+                    current_user.trial_ends_at = datetime.utcnow() + timedelta(days=14)
+                    logger.info(f"🎉 User {current_user.id} started Pro Trial, ends at: {current_user.trial_ends_at}")
+                elif onboarding_data.selected_plan == 'free':
+                    current_user.subscription_status = 'active'
+                    logger.info(f"🆓 User {current_user.id} selected Free Plan.")
+                # For other plans (e.g., enterprise), the status might be 'pending' or handled by webhooks
+
             logger.info(f"📝 Onboarding completed for user {current_user.id}")
             logger.info(f"  - Plan seleccionado: {onboarding_data.selected_plan}")
             logger.info(f"  - Empresa: {onboarding_data.company_name}")
             logger.info(f"  - Industria: {onboarding_data.industry}")
-            logger.info(f"  - Datos disponibles en Clerk y Stripe")
+            logger.info(f"  - Datos de perfil se obtienen de Clerk y Stripe (si aplica)")
         
         await db.commit()
         await db.refresh(current_user)

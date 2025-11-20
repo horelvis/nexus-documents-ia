@@ -10,7 +10,7 @@ echo "📁 This mode mounts your source code as volumes for live reloading"
 echo ""
 
 # Check if .env file exists in backend root
-if [ ! -f "../.env" ]; then
+if [ ! -f ".env" ]; then
     echo "❌ Error: .env file not found in backend root directory"
     echo "Please create a .env file in backend/ directory with your configuration"
     echo "You can copy from .env.example: cp ../.env.example ../.env"
@@ -38,7 +38,7 @@ fi
 
 # Start services
 echo "🎯 Starting services in development mode..."
-docker compose up -d
+docker compose up -d 
 
 # Start the unified worker (using both compose files together)
 echo "👷 Starting unified background worker..."

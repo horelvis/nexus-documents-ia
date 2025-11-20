@@ -29,7 +29,9 @@ import {
   IconChevronsRight,
   IconShare2,
   IconSignature,
-  IconRefresh
+  IconRefresh,
+  IconFileTypeDoc,
+  IconLoader2
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -69,6 +71,9 @@ interface DocumentsDataTableProps {
   onFullPagePreview: (document: ApiDocument) => void
   onShareDocument: (document: ApiDocument) => void
   onRequestSignature?: (document: ApiDocument) => void
+  onConvertToTemplate?: (document: ApiDocument) => void
+  canConvertToTemplate?: boolean
+  convertLoadingId?: string | null
 }
 
 export function DocumentsDataTable({
@@ -81,6 +86,9 @@ export function DocumentsDataTable({
   onFullPagePreview,
   onShareDocument,
   onRequestSignature,
+  onConvertToTemplate,
+  canConvertToTemplate,
+  convertLoadingId,
 }: DocumentsDataTableProps) {
   // Get tenant ID from URL for localStorage keys
   const tenantId = React.useMemo(() => {
@@ -321,6 +329,19 @@ export function DocumentsDataTable({
                   <IconEdit className="mr-2 h-4 w-4" />
                   Edit
                 </DropdownMenuItem>
+                {canConvertToTemplate && onConvertToTemplate && (
+                  <DropdownMenuItem
+                    onClick={() => onConvertToTemplate(document)}
+                    disabled={convertLoadingId === document.id}
+                  >
+                    {convertLoadingId === document.id ? (
+                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <IconFileTypeDoc className="mr-2 h-4 w-4" />
+                    )}
+                    Convert to Template
+                  </DropdownMenuItem>
+                )}
                 
                 
                 <DropdownMenuSeparator />

@@ -35,7 +35,7 @@ const Banner = () => {
                         </span>
                     </p>
                     <Button size="lg" className="mt-6" asChild>
-                        <Link href="/auth/sign-up">
+                        <Link href="/pricing">
                             Agenda una demo
                         </Link>
                     </Button>

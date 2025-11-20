@@ -25,10 +25,7 @@ class Settings:
     
     # File limits
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "104857600"))  # 100MB
-    ALLOWED_EXTENSIONS: set = {
-        "pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls",
-        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "json"
-    }
+    _DEFAULT_ALLOWED_EXTENSIONS = "pdf,doc,docx,txt,md,csv,xlsx,xls,png,jpg,jpeg,gif,bmp,tiff,webp,json,odt"
     
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
@@ -40,6 +37,18 @@ class Settings:
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+
+    def __init__(self):
+        allowed_extensions_raw = (
+            os.getenv("STORAGE_ALLOWED_EXTENSIONS")
+            or os.getenv("ALLOWED_EXTENSIONS")
+            or self._DEFAULT_ALLOWED_EXTENSIONS
+        )
+        self.ALLOWED_EXTENSIONS = {
+            ext.strip().lower()
+            for ext in allowed_extensions_raw.split(",")
+            if ext.strip()
+        }
 
 # Crear instancia y log de configuración
 settings = Settings()
@@ -58,11 +67,12 @@ logger.info(f"DEBUG: {settings.DEBUG}")
 logger.info(f"TESTING: {settings.TESTING}")
 logger.info(f"REDIS_HOST: {settings.REDIS_HOST}")
 logger.info(f"REDIS_PORT: {settings.REDIS_PORT}")
+logger.info(f"ALLOWED_EXTENSIONS: {', '.join(sorted(settings.ALLOWED_EXTENSIONS))}")
 logger.info("=== END CONFIGURATION ===")
 
 # Log de variables de entorno raw
 logger.info("=== RAW ENVIRONMENT VARIABLES ===")
-for key in ["MICROSERVICES_API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING", "REDIS_HOST", "REDIS_PORT"]:
+for key in ["MICROSERVICES_API_KEY", "GCS_PROJECT_ID", "GCS_CREDENTIALS", "GCS_BUCKET_NAME", "DEBUG", "TESTING", "REDIS_HOST", "REDIS_PORT", "STORAGE_ALLOWED_EXTENSIONS"]:
     value = os.getenv(key, "NOT_SET")
     if key == "MICROSERVICES_API_KEY" and value not in ("NOT_SET", ""):
         value = f"{value[:10]}... (masked)"

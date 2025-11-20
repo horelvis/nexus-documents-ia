@@ -424,7 +424,7 @@ curl http://localhost:8000/temporalio/workflow/{id}/status
 
 ## 🧩 Plantillas de Workflow (Consolidación)
 
-- El microservicio ahora intenta consumir plantillas desde el Core (`/api/v1/workflow-templates`) usando clave de microservicios.
+- El microservicio ahora intenta consumir plantillas desde el Core (`/api/v1/engine-templates`) usando clave de microservicios.
 - Si el Core no está disponible o deniega acceso, hace fallback a plantillas AI locales estáticas.
 - Recomendación: exponer en Core un endpoint service-to-service para plantillas (aceptando `X-API-Key`) o que el microservicio lea directamente de la DB compartida.
 

@@ -2,10 +2,9 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useUserContext } from '@/contexts/user-context'
-import { useRouter, useSearchParams, useParams } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { NewUserOnboarding } from '@/components/auth/onboarding'
 import { useUser } from '@clerk/nextjs'
-import { syncUserWithBackend } from '@/lib/sync-user'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -14,41 +13,11 @@ function OnboardingContent() {
   const { user: clerkUser } = useUser()
   const router = useRouter()
   const params = useParams()
-  const searchParams = useSearchParams()
-  const plan = searchParams.get('plan')
   const tenantId = params.tenantId as string
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
 
   // Sync user with backend if needed
-  useEffect(() => {
-    const syncIfNeeded = async () => {
-      if (!clerkUser || !isSignedIn || backendUser || isSyncing) return
-      
-      // If we have a Clerk user but no backend user, sync it
-      if (plan === 'free') {
-        setIsSyncing(true)
-        try {
-          await syncUserWithBackend(
-            clerkUser.id,
-            clerkUser.emailAddresses[0]?.emailAddress || '',
-            clerkUser.fullName || clerkUser.firstName + ' ' + (clerkUser.lastName || ''),
-            'free'
-          )
-          // Reload the page to refresh user context
-          window.location.reload()
-        } catch (error) {
-          console.error('Failed to sync user:', error)
-          setSyncError('Failed to create your account. Please try again.')
-        } finally {
-          setIsSyncing(false)
-        }
-      }
-    }
-    
-    syncIfNeeded()
-  }, [clerkUser, isSignedIn, backendUser, isSyncing, plan])
-
   // Redirect if not authenticated
   if (isClerkLoaded && !isSignedIn) {
     router.push('/auth/sign-in')

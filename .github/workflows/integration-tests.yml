@@ -260,38 +260,38 @@ jobs:
         # Tests de performance básicos
         echo "🚀 Running performance tests..."
         python3 - <<'PY'
-import time
-import requests
+        import time
+        import requests
 
 
-def test_endpoint_load(url, num_requests=10):
-    response_times = []
-    for _ in range(num_requests):
-        start = time.time()
-        try:
-            response = requests.get(url, timeout=5)
-            end = time.time()
-            if response.status_code == 200:
-                response_times.append(end - start)
-        except Exception:
-            pass
+        def test_endpoint_load(url, num_requests=10):
+            response_times = []
+            for _ in range(num_requests):
+                start = time.time()
+                try:
+                    response = requests.get(url, timeout=5)
+                    end = time.time()
+                    if response.status_code == 200:
+                        response_times.append(end - start)
+                except Exception:
+                    pass
 
-    if response_times:
-        avg_time = sum(response_times) / len(response_times)
-        min_time = min(response_times)
-        max_time = max(response_times)
-        print(f'📊 {url}:')
-        print(f'   Requests: {len(response_times)}/{num_requests}')
-        print(f'   Avg: {avg_time:.3f}s')
-        print(f'   Min: {min_time:.3f}s')
-        print(f'   Max: {max_time:.3f}s')
-        return avg_time < 1.0  # Debe ser < 1 segundo
-    return False
+            if response_times:
+                avg_time = sum(response_times) / len(response_times)
+                min_time = min(response_times)
+                max_time = max(response_times)
+                print(f'📊 {url}:')
+                print(f'   Requests: {len(response_times)}/{num_requests}')
+                print(f'   Avg: {avg_time:.3f}s')
+                print(f'   Min: {min_time:.3f}s')
+                print(f'   Max: {max_time:.3f}s')
+                return avg_time < 1.0  # Debe ser < 1 segundo
+            return False
 
 
-success = test_endpoint_load('http://localhost:8000/api/v1/health', 5)
-print(f'✅ Health check performance: {"PASS" if success else "FAIL"}')
-PY
+        success = test_endpoint_load('http://localhost:8000/api/v1/health', 5)
+        print(f'✅ Health check performance: {"PASS" if success else "FAIL"}')
+        PY
 
   security-test:
     name: Security Tests

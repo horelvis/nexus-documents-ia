@@ -13,7 +13,7 @@ const navigation = [
   { name: 'Recursos', href: '#about' },
 ];
 
-const CapsNavbar = () => {
+const NexusNavbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const scrollToSection = (href: string) => {
@@ -52,7 +52,7 @@ const CapsNavbar = () => {
               </Link>
             </Button>
             <Button size="sm" asChild>
-              <Link href="/auth/sign-up">
+              <Link href="/pricing">
                 Solicitar demo
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Link>
@@ -118,7 +118,7 @@ const CapsNavbar = () => {
                     </Link>
                   </Button>
                   <Button asChild className="w-full">
-                    <Link href="/auth/sign-up">
+                    <Link href="/pricing">
                       Solicitar demo
                       <ArrowRight className="w-4 h-4 ml-2" />
                     </Link>
@@ -133,4 +133,4 @@ const CapsNavbar = () => {
   );
 };
 
-export default CapsNavbar;
+export default NexusNavbar;

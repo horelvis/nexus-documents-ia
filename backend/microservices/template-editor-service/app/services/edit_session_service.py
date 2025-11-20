@@ -1,19 +1,16 @@
 """
-Edit Session Service - Manages temporary Google Docs editing sessions
+Edit Session Service - Manages temporary Google Docs editing sessions via the core API.
 """
 import asyncio
 import base64
 import binascii
 import logging
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import update, delete
+from datetime import datetime
+from typing import Optional, Dict, Any
 
-from app.models.edit_session import EditSession
 from app.services.google_docs_service import google_docs_service, ODT_MIME_TYPE
-from app.core.config import settings
+from app.services.core_google_token_client import google_token_client, GoogleTokenNotConnectedError
+from app.services.core_session_client import core_session_client, SessionNotFoundError
 
 logger = logging.getLogger(__name__)
 DEFAULT_TEMPLATE_MIME = ODT_MIME_TYPE
@@ -21,15 +18,15 @@ DEFAULT_TEMPLATE_MIME = ODT_MIME_TYPE
 
 class EditSessionService:
     """
-    Service for managing edit sessions following Alfresco ECM pattern
+    Service for managing edit sessions following Alfresco ECM pattern.
+    Persists state using the core API instead of a local database.
     """
-    
+
     def __init__(self):
         self._cleanup_task = None
-    
+
     async def create_edit_session(
         self,
-        db: AsyncSession,
         template_id: str,
         template_name: str,
         template_file_base64: Optional[str],
@@ -38,459 +35,243 @@ class EditSessionService:
         template_file_mime: Optional[str],
         user_id: str,
         user_email: str,
-        tenant_id: str
-    ) -> EditSession:
-        """
-        Create new editing session with temporary Google Doc
-        """
+        tenant_id: str,
+    ) -> Dict[str, Any]:
+        logger.info("🔄 Creating edit session for template %s", template_id)
+
         try:
-            logger.info(f"🔄 Creating edit session for template {template_id} by user {user_id}")
-            
-            # 1. Check if user already has active session for this template
-            existing_session = await self._get_active_session_for_user(
-                db, template_id, user_id
+            user_token = await google_token_client.get_access_token(user_id)
+        except GoogleTokenNotConnectedError as exc:
+            raise ValueError("User must connect Google Drive before editing templates") from exc
+
+        existing_session = await core_session_client.get_active_session(
+            template_id, user_id
+        )
+        if existing_session:
+            logger.info("⚠️ Existing session found for template %s", template_id)
+            doc_exists = await google_docs_service.check_document_exists(
+                existing_session["google_doc_id"], user_token=user_token
             )
-            
-            if existing_session:
-                logger.warning(f"⚠️ User {user_id} already has active session for template {template_id}")
-                
-                # Check if the Google Doc still exists
-                doc_exists = await google_docs_service.check_document_exists(existing_session.google_doc_id)
-                
-                if doc_exists:
-                    # Document exists, extend existing session
-                    existing_session.extend_session(hours=1)
-                    await db.commit()
-                    logger.info(f"✅ Extended existing session for valid document: {existing_session.google_doc_id}")
-                    return existing_session
-                else:
-                    # Document doesn't exist, clean up old session and create new one
-                    logger.warning(f"🗑️ Document {existing_session.google_doc_id} no longer exists, cleaning up old session")
-                    await db.delete(existing_session)
-                    await db.commit()
-            
-            # Determine whether we are using an ODT payload or HTML content
-            template_file_bytes: Optional[bytes] = None
-            html_content: Optional[str] = None
-            if template_file_base64:
-                template_file_bytes = self._decode_template_payload(template_file_base64)
-            else:
-                html_content = template_content or "<p></p>"
-            
-            file_name = template_file_name
-            file_mime = template_file_mime
-            if template_file_bytes:
-                file_name = file_name or f"{template_name}.odt"
-                file_mime = file_mime or DEFAULT_TEMPLATE_MIME
-            else:
-                file_name = file_name or f"{template_name}.html"
-                file_mime = file_mime or "text/html"
-            
-            # 2. Create temporary Google Doc from provided payload
-            doc_info = await google_docs_service.create_temporary_document(
-                title=template_name,
-                content=html_content,
-                user_email=user_email,
-                template_id=template_id,
-                file_bytes=template_file_bytes,
-                file_mime_type=file_mime,
-                original_filename=file_name
+            if doc_exists:
+                await core_session_client.extend_session(existing_session["id"], user_id)
+                return existing_session
+            await core_session_client.cancel_session(
+                existing_session["id"], user_id, reason="Google Doc no longer exists"
             )
-            doc_original_name = doc_info.get('original_file_name') or file_name
-            doc_mime = doc_info.get('file_mime_type') or file_mime
-            payload_size = template_file_bytes or (html_content.encode('utf-8') if html_content else b"")
-            doc_size = doc_info.get('file_size') or len(payload_size)
-            
-            # 3. Create edit session record
-            edit_session = EditSession(
-                template_id=template_id,
-                template_name=template_name,
-                template_file_name=doc_original_name,
-                template_file_mime=doc_mime,
-                user_id=user_id,
-                user_email=user_email,
-                tenant_id=tenant_id,
-                google_doc_id=doc_info['document_id'],
-                google_doc_url=doc_info['view_url'],
-                google_doc_edit_url=doc_info['edit_url'],
-                original_content_hash=doc_info['content_hash'],
-                content_size_bytes=doc_size,
-                status="active"
-            )
-            
-            db.add(edit_session)
-            await db.commit()
-            await db.refresh(edit_session)
-            
-            logger.info(f"✅ Edit session created: {edit_session.id}")
-            
-            return edit_session
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to create edit session: {e}")
-            await db.rollback()
-            raise
-    
-    async def _get_active_session_for_user(
-        self,
-        db: AsyncSession,
-        template_id: str,
-        user_id: str
-    ) -> Optional[EditSession]:
-        """Get active session for user and template"""
+
+        template_file_bytes: Optional[bytes] = None
+        html_content: Optional[str] = None
+        if template_file_base64:
+            template_file_bytes = self._decode_template_payload(template_file_base64)
+        elif template_content:
+            html_content = template_content
+
+        file_name = template_file_name
+        file_mime = template_file_mime
+        if template_file_bytes:
+            file_name = file_name or f"{template_name}.odt"
+            file_mime = file_mime or DEFAULT_TEMPLATE_MIME
+        elif html_content:
+            file_name = file_name or f"{template_name}.html"
+            file_mime = file_mime or "text/html"
+        else:
+            file_name = file_name or f"{template_name}.odt"
+            file_mime = file_mime or DEFAULT_TEMPLATE_MIME
+
         try:
-            stmt = select(EditSession).where(
-                EditSession.template_id == template_id,
-                EditSession.user_id == user_id,
-                EditSession.status == "active"
-            )
-            result = await db.execute(stmt)
-            session = result.scalar_one_or_none()
-            
-            if session and session.is_expired:
-                # Session exists but expired, mark it as expired
-                await self._mark_session_expired(db, session)
-                return None
-            
-            return session
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to get active session: {e}")
-            return None
-    
-    async def get_edit_session(
-        self,
-        db: AsyncSession,
-        session_id: str,
-        user_id: str = None
-    ) -> Optional[EditSession]:
-        """Get edit session by ID"""
+            user_token = await google_token_client.get_access_token(user_id)
+        except GoogleTokenNotConnectedError as exc:
+            raise ValueError("User needs to connect Google Drive before editing templates") from exc
+
+        doc_info = await google_docs_service.create_temporary_document(
+            title=template_name,
+            content=html_content,
+            user_email=user_email,
+            template_id=template_id,
+            file_bytes=template_file_bytes,
+            file_mime_type=file_mime,
+            original_filename=file_name,
+            user_token=user_token,
+        )
+
+        payload_size = template_file_bytes or (html_content.encode("utf-8") if html_content else b"")
+        create_payload = {
+            "template_id": template_id,
+            "template_name": template_name,
+            "template_file_name": doc_info.get("original_file_name") or file_name,
+            "template_file_mime": doc_info.get("file_mime_type") or file_mime,
+            "user_id": user_id,
+            "user_email": user_email,
+            "tenant_id": tenant_id,
+            "google_doc_id": doc_info["document_id"],
+            "google_doc_url": doc_info["view_url"],
+            "google_doc_edit_url": doc_info["edit_url"],
+            "original_content_hash": doc_info["content_hash"],
+            "content_size_bytes": doc_info.get("file_size") or len(payload_size),
+        }
+        session = await core_session_client.create_session(create_payload)
+        logger.info("✅ Edit session created %s", session["id"])
+        return session
+
+    async def get_edit_session(self, session_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         try:
-            stmt = select(EditSession).where(EditSession.id == session_id)
-            
-            if user_id:
-                stmt = stmt.where(EditSession.user_id == user_id)
-            
-            result = await db.execute(stmt)
-            return result.scalar_one_or_none()
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to get edit session {session_id}: {e}")
-            return None
-    
+            return await core_session_client.get_session(session_id, user_id=user_id)
+        except SessionNotFoundError as exc:
+            raise ValueError("Edit session not found") from exc
+
     async def finish_edit_session(
         self,
-        db: AsyncSession,
         session_id: str,
         user_id: str,
-        force_sync: bool = False
+        force_sync: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Finish editing session - sync changes and cleanup
-        Following Alfresco pattern: sync back, delete temp doc
-        """
-        try:
-            logger.info(f"🔄 Finishing edit session {session_id}")
-            
-            # 1. Get session
-            session = await self.get_edit_session(db, session_id, user_id)
-            if not session:
-                raise ValueError("Edit session not found")
-            
-            if session.status != "active":
-                raise ValueError(f"Session is not active (status: {session.status})")
-            
-            # 2. Get updated ODT payload from Google Doc
-            updated_file_bytes, new_content_hash = await google_docs_service.export_document(
-                session.google_doc_id
-            )
-            
-            # 3. Check if changes were made
-            changes_detected = new_content_hash != session.original_content_hash
-            should_sync = changes_detected or force_sync
-            
-            # 4. Update template in main system (if changes detected)
-            sync_result = None
-            if should_sync:
-                sync_result = await self._sync_changes_to_template(
-                    session.template_id,
-                    updated_file_bytes,
-                    session.tenant_id,
-                    user_id
-                )
-            
-            # 5. Delete temporary Google Doc
-            deletion_success = await google_docs_service.delete_document(session.google_doc_id)
-            
-            # 6. Mark session as completed
-            session.mark_completed(
-                content_hash=new_content_hash,
-                changes_detected=changes_detected
-            )
-            session.cleanup_completed = deletion_success
-            
-            await db.commit()
+        session = await self.get_edit_session(session_id, user_id=user_id)
+        doc_id = session["google_doc_id"]
+        logger.info("🔚 Finishing edit session %s", session_id)
 
-            updated_file_payload = None
-            if should_sync and updated_file_bytes:
-                file_name = session.template_file_name or f"{session.template_name}.odt"
-                mime_type = session.template_file_mime or DEFAULT_TEMPLATE_MIME
-                updated_file_payload = {
-                    "base64": base64.b64encode(updated_file_bytes).decode("utf-8"),
-                    "mime_type": mime_type,
-                    "file_name": file_name,
-                    "content_hash": new_content_hash,
-                    "size": len(updated_file_bytes)
-                }
-            
-            result = {
-                "session_id": str(session.id),
-                "status": "completed",
-                "changes_detected": changes_detected,
-                "sync_result": sync_result,
-                "cleanup_success": deletion_success,
-                "completed_at": session.completed_at.isoformat(),
-                "updated_file": updated_file_payload
-            }
-            
-            logger.info(f"✅ Edit session completed: {session_id}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to finish edit session {session_id}: {e}")
-            await db.rollback()
-            raise
-    
-    async def _sync_changes_to_template(
-        self,
-        template_id: str,
-        updated_file_bytes: bytes,
-        tenant_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
-        """Sync changes back to main template system"""
         try:
-            logger.info(f"🔄 Syncing changes to template {template_id}")
-            
-            # Here you would call the main API to update the template
-            # For now, return mock result
-            sync_result = {
-                "template_id": template_id,
-                "updated_at": datetime.utcnow().isoformat(),
-                "updated_by": user_id,
-                "content_size": len(updated_file_bytes),
-                "success": True
+            user_token = await google_token_client.get_access_token(user_id)
+        except GoogleTokenNotConnectedError as exc:
+            raise ValueError("Cannot finish edit session without Google Drive connection") from exc
+
+        updated_file_bytes, new_hash = await google_docs_service.export_document(
+            doc_id, user_token=user_token
+        )
+        changes_detected = new_hash != session.get("original_content_hash") or force_sync
+        cleanup_success = await google_docs_service.delete_document(doc_id, user_token=user_token)
+
+        await core_session_client.complete_session(
+            session_id,
+            user_id,
+            changes_detected=changes_detected,
+            final_content_hash=new_hash,
+            content_size_bytes=len(updated_file_bytes),
+            cleanup_completed=cleanup_success,
+        )
+
+        updated_file_payload = None
+        if updated_file_bytes:
+            mime_type = session.get("template_file_mime") or DEFAULT_TEMPLATE_MIME
+            file_name = session.get("template_file_name") or f"{session['template_name']}.odt"
+            updated_file_payload = {
+                "base64": base64.b64encode(updated_file_bytes).decode("utf-8"),
+                "mime_type": mime_type,
+                "file_name": file_name,
+                "content_hash": new_hash,
+                "size": len(updated_file_bytes),
             }
-            
-            logger.info(f"✅ Template synchronized: {template_id}")
-            return sync_result
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to sync template {template_id}: {e}")
-            return {
-                "template_id": template_id,
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def extend_session(
-        self,
-        db: AsyncSession,
-        session_id: str,
-        user_id: str,
-        hours: int = 1
-    ) -> EditSession:
-        """Extend session expiration time"""
+
+        return {
+            "session_id": session_id,
+            "status": "completed" if cleanup_success else "cleanup_pending",
+            "changes_detected": changes_detected,
+            "cleanup_success": cleanup_success,
+            "completed_at": datetime.utcnow().isoformat(),
+            "updated_file": updated_file_payload,
+        }
+
+    async def extend_session(self, session_id: str, user_id: str, hours: int = 1) -> Dict[str, Any]:
         try:
-            session = await self.get_edit_session(db, session_id, user_id)
+            return await core_session_client.extend_session(session_id, user_id, hours)
+        except SessionNotFoundError as exc:
+            raise ValueError("Edit session not found") from exc
+
+    async def cancel_edit_session(self, session_id: str, user_id: str) -> Dict[str, Any]:
+        try:
+            session = await core_session_client.get_session(session_id, user_id=user_id)
             if not session:
                 raise ValueError("Edit session not found")
-            
-            if session.status != "active":
-                raise ValueError("Cannot extend inactive session")
-            
-            session.extend_session(hours=hours)
-            await db.commit()
-            
-            logger.info(f"⏰ Extended session {session_id} by {hours} hours")
-            return session
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to extend session {session_id}: {e}")
-            await db.rollback()
-            raise
-    
-    async def cancel_edit_session(
-        self,
-        db: AsyncSession,
-        session_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
-        """Cancel editing session and cleanup"""
-        try:
-            logger.info(f"❌ Cancelling edit session {session_id}")
-            
-            session = await self.get_edit_session(db, session_id, user_id)
-            if not session:
-                raise ValueError("Edit session not found")
-            
-            # Delete Google Doc
-            deletion_success = await google_docs_service.delete_document(session.google_doc_id)
-            
-            # Update session status
-            session.status = "cancelled"
-            session.completed_at = datetime.utcnow()
-            session.cleanup_completed = deletion_success
-            
-            await db.commit()
-            
-            logger.info(f"✅ Edit session cancelled: {session_id}")
-            
-            return {
-                "session_id": str(session.id),
-                "status": "cancelled",
-                "cleanup_success": deletion_success
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to cancel session {session_id}: {e}")
-            await db.rollback()
-            raise
-    
-    async def cleanup_expired_sessions(self, db: AsyncSession) -> Dict[str, Any]:
-        """
-        Cleanup expired sessions and their Google Docs
-        Runs periodically as background task
-        """
-        try:
-            logger.info("🧹 Starting cleanup of expired edit sessions")
-            
-            # Find expired sessions
-            current_time = datetime.utcnow()
-            stmt = select(EditSession).where(
-                EditSession.status == "active",
-                EditSession.expires_at <= current_time
+
+            try:
+                user_token = await google_token_client.get_access_token(user_id)
+            except GoogleTokenNotConnectedError:
+                user_token = None
+
+            if session.get("google_doc_id"):
+                await google_docs_service.delete_document(session["google_doc_id"], user_token=user_token)
+
+            return await core_session_client.cancel_session(
+                session_id, user_id, reason="Cancelled by user"
             )
-            result = await db.execute(stmt)
-            expired_sessions = result.scalars().all()
-            
-            cleanup_stats = {
-                "expired_sessions_found": len(expired_sessions),
-                "successfully_cleaned": 0,
-                "cleanup_errors": 0,
-                "google_docs_deleted": 0
-            }
-            
-            for session in expired_sessions:
+        except SessionNotFoundError as exc:
+            raise ValueError("Edit session not found") from exc
+
+    async def get_user_sessions(
+        self,
+        user_id: str,
+        tenant_id: str,
+        include_completed: bool = False,
+    ) -> Dict[str, Any]:
+        return await core_session_client.list_sessions(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            include_completed=include_completed,
+        )
+
+    def start_cleanup_task(self):
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+
+    def stop_cleanup_task(self):
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
+
+    async def _cleanup_loop(self):
+        while True:
+            try:
+                await asyncio.sleep(60 * 30)
+                await self._cleanup_expired_sessions()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error("❌ Cleanup loop error: %s", exc)
+
+    async def _cleanup_expired_sessions(self):
+        sessions = await core_session_client.list_sessions(
+            include_completed=False,
+            include_expired=True,
+        )
+        now = datetime.utcnow()
+        total = 0
+        cleaned = 0
+        errors = 0
+        for session in sessions.get("sessions", []):
+            expires_at = datetime.fromisoformat(session["expires_at"])
+            if expires_at <= now and session["status"] == "active":
+                total += 1
+                logger.info("🧹 Cleaning expired session %s", session["id"])
                 try:
-                    logger.info(f"🧹 Cleaning up expired session: {session.id}")
-                    
-                    # Delete Google Doc
-                    deletion_success = await google_docs_service.delete_document(
-                        session.google_doc_id
+                    user_token = None
+                    try:
+                        user_token = await google_token_client.get_access_token(session["user_id"])
+                    except GoogleTokenNotConnectedError:
+                        pass
+
+                    await google_docs_service.delete_document(
+                        session["google_doc_id"],
+                        user_token=user_token
                     )
-                    
-                    if deletion_success:
-                        cleanup_stats["google_docs_deleted"] += 1
-                    
-                    # Mark session as expired
-                    await self._mark_session_expired(db, session)
-                    session.cleanup_completed = deletion_success
-                    
-                    cleanup_stats["successfully_cleaned"] += 1
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to cleanup session {session.id}: {e}")
-                    cleanup_stats["cleanup_errors"] += 1
-                    
-                    # Mark cleanup error
-                    session.cleanup_error = str(e)
-                    session.status = "cleanup_error"
-            
-            await db.commit()
-            
-            logger.info(f"✅ Cleanup completed: {cleanup_stats}")
-            return cleanup_stats
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to cleanup expired sessions: {e}")
-            await db.rollback()
-            raise
-    
-    async def _mark_session_expired(self, db: AsyncSession, session: EditSession):
-        """Mark session as expired"""
-        session.mark_expired()
-        # Note: db.commit() should be called by the caller
-    
-    def _decode_template_payload(self, payload: str) -> bytes:
-        """Decode Base64 ODT payload coming from core API."""
+                    await core_session_client.cancel_session(
+                        session["id"],
+                        session["user_id"],
+                        reason="Expired cleanup",
+                    )
+                    cleaned += 1
+                except Exception as exc:  # pylint: disable=broad-except
+                    errors += 1
+                    logger.error("❌ Failed to cleanup session %s: %s", session["id"], exc)
+        return {"total": total, "success": cleaned, "errors": errors, "expired": total}
+
+    @staticmethod
+    def _decode_template_payload(payload: str) -> bytes:
         try:
             data = base64.b64decode(payload, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError("Invalid template file payload") from exc
-        
         if not data:
             raise ValueError("Template file payload is empty")
         return data
-    
-    async def get_user_sessions(
-        self,
-        db: AsyncSession,
-        user_id: str,
-        tenant_id: str,
-        include_completed: bool = False
-    ) -> List[EditSession]:
-        """Get all sessions for a user"""
-        try:
-            stmt = select(EditSession).where(
-                EditSession.user_id == user_id,
-                EditSession.tenant_id == tenant_id
-            )
-            
-            if not include_completed:
-                stmt = stmt.where(EditSession.status == "active")
-            
-            stmt = stmt.order_by(EditSession.created_at.desc())
-            
-            result = await db.execute(stmt)
-            return result.scalars().all()
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to get user sessions for {user_id}: {e}")
-            return []
-    
-    def start_cleanup_task(self):
-        """Start background cleanup task"""
-        if self._cleanup_task is None:
-            logger.info("🚀 Starting cleanup background task")
-            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-    
-    def stop_cleanup_task(self):
-        """Stop background cleanup task"""
-        if self._cleanup_task:
-            logger.info("🛑 Stopping cleanup background task")
-            self._cleanup_task.cancel()
-            self._cleanup_task = None
-    
-    async def _cleanup_loop(self):
-        """Background cleanup loop"""
-        try:
-            while True:
-                await asyncio.sleep(settings.cleanup_interval_minutes * 60)  # Convert to seconds
-                
-                try:
-                    # This would need proper database session management in real implementation
-                    # For now, it's just a placeholder
-                    logger.info("⏰ Running scheduled cleanup...")
-                    
-                except Exception as e:
-                    logger.error(f"❌ Cleanup loop error: {e}")
-                    
-        except asyncio.CancelledError:
-            logger.info("🛑 Cleanup loop cancelled")
-        except Exception as e:
-            logger.error(f"❌ Cleanup loop failed: {e}")
 
 
-# Global service instance
 edit_session_service = EditSessionService()

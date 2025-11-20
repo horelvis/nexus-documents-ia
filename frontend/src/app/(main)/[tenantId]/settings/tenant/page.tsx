@@ -1,15 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
+import { useState, useEffect, useCallback } from "react"
 import { 
   IconDatabase, 
   IconRefresh, 
   IconTrash, 
   IconAlertTriangle,
   IconLoader2,
-  IconCheck,
-  IconX,
   IconInfoCircle,
   IconDownload,
   IconTool
@@ -19,7 +16,6 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -31,36 +27,37 @@ import {
 import { Input } from "@/components/ui/input"
 import { useBackendUser } from "@/contexts/user-context"
 import { useNotifications } from "@/contexts/app-state-context"
-import { useTenantService } from "@/lib/services/tenant.service"
+import { useTenantService, TenantInfo, TenantStats, ReindexStatus } from "@/lib/services/tenant.service"
 import { formatBytes } from "@/lib/utils"
+import { UserDeletionDialog } from "@/components/lgpd/user-deletion-dialog"
 
 export default function TenantSettingsPage() {
-  const params = useParams()
-  const tenantId = params.tenantId as string
   const { backendUser: user } = useBackendUser()
   const { addNotification } = useNotifications()
   const tenantService = useTenantService()
 
   // States
   const [isLoading, setIsLoading] = useState(true)
-  const [tenantInfo, setTenantInfo] = useState<any>(null)
-  const [tenantStats, setTenantStats] = useState<any>(null)
-  const [reindexStatus, setReindexStatus] = useState<any>(null)
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null)
+  const [tenantStats, setTenantStats] = useState<TenantStats | null>(null)
+  const [reindexStatus, setReindexStatus] = useState<ReindexStatus | null>(null)
   const [isReindexing, setIsReindexing] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [isDeleting, setIsDeleting] = useState(false)
-  const [activeTab, setActiveTab] = useState("general")
 
-  // Check if user is admin
-  const isAdmin = user?.is_superuser || false
+  // Check if user is admin (tenant owner, admin role, or superuser)
+  const isAdmin = Boolean(
+    user &&
+      (
+        user.is_superuser ||
+        user.is_admin ||
+        user.is_team_member === false
+      )
+  )
 
   // Load initial data
-  useEffect(() => {
-    loadTenantData()
-  }, [])
-
-  const loadTenantData = async () => {
+  const loadTenantData = useCallback(async () => {
     setIsLoading(true)
     try {
       const [infoResponse, statsResponse, indexResponse] = await Promise.all([
@@ -73,15 +70,29 @@ export default function TenantSettingsPage() {
       if (!statsResponse.error) setTenantStats(statsResponse.data)
       if (!indexResponse.error) setReindexStatus(indexResponse.data)
     } catch (error) {
+      console.error(error)
       addNotification({
         type: 'error',
-        title: 'Error loading tenant data',
-        message: 'Failed to load tenant information'
+        title: 'Error al cargar los datos',
+        message: 'No pudimos obtener la información de la organización'
       })
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [addNotification, tenantService])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    if (!isAdmin) {
+      setIsLoading(false)
+      return
+    }
+
+    loadTenantData()
+  }, [isAdmin, loadTenantData, user])
 
   // Reindex operations
   const handleReindexMissing = async () => {
@@ -95,8 +106,8 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Reindexing completed',
-        message: `Successfully reindexed ${response.data?.successful || 0} documents`
+        title: 'Reindexado completado',
+        message: `Se reindexaron ${response.data?.successful || 0} documentos`
       })
 
       // Reload status
@@ -105,8 +116,8 @@ export default function TenantSettingsPage() {
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Reindexing failed',
-        message: error.message || 'Failed to reindex documents'
+        title: 'Error al reindexar',
+        message: (error as Error).message || 'No pudimos reindexar los documentos'
       })
     } finally {
       setIsReindexing(false)
@@ -114,7 +125,7 @@ export default function TenantSettingsPage() {
   }
 
   const handleForceReindex = async () => {
-    if (!confirm('This will reindex ALL documents and may take a long time. Continue?')) {
+    if (!confirm('Esto reindexará TODOS los documentos y puede tardar varios minutos. ¿Deseas continuar?')) {
       return
     }
 
@@ -128,14 +139,14 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Reindexing started',
-        message: 'Full reindexing has been started in the background'
+        title: 'Reindexado iniciado',
+        message: 'La reconstrucción completa se está ejecutando en segundo plano'
       })
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Failed to start reindexing',
-        message: error.message || 'Failed to start reindexing process'
+        title: 'No se pudo iniciar el reindexado',
+        message: (error as Error).message || 'Intenta nuevamente en unos segundos'
       })
     } finally {
       setIsReindexing(false)
@@ -156,8 +167,8 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Documents deleted',
-        message: `Deleted ${response.data?.deleted_count || 0} documents`
+        title: 'Documentos eliminados',
+        message: `Se eliminaron ${response.data?.deleted_count || 0} documentos`
       })
 
       setDeleteDialogOpen(false)
@@ -168,8 +179,8 @@ export default function TenantSettingsPage() {
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Deletion failed',
-        message: error.message || 'Failed to delete documents'
+        title: 'No se pudieron eliminar',
+        message: (error as Error).message || 'Revisa tu conexión y vuelve a intentar'
       })
     } finally {
       setIsDeleting(false)
@@ -177,7 +188,7 @@ export default function TenantSettingsPage() {
   }
 
   const handleClearVectorDB = async () => {
-    if (!confirm('This will clear all vector embeddings. Documents will need to be reindexed. Continue?')) {
+    if (!confirm('Esto borrará todos los embeddings de búsqueda. Después tendrás que reindexar los documentos. ¿Continuar?')) {
       return
     }
 
@@ -191,8 +202,8 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Vector database cleared',
-        message: 'All vector embeddings have been removed'
+        title: 'Índice vectorial vaciado',
+        message: 'Se eliminaron todos los embeddings del tenant'
       })
 
       // Reload status
@@ -200,8 +211,8 @@ export default function TenantSettingsPage() {
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Clear failed',
-        message: error.message || 'Failed to clear vector database'
+        title: 'No se pudo limpiar',
+        message: (error as Error).message || 'Intenta nuevamente en unos minutos'
       })
     } finally {
       setIsDeleting(false)
@@ -220,14 +231,14 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Maintenance completed',
-        message: `Performed ${response.data?.operations_performed?.length || 0} operations in ${response.data?.duration_seconds || 0}s`
+        title: 'Mantenimiento completado',
+        message: `Se ejecutaron ${response.data?.operations_performed?.length || 0} tareas en ${response.data?.duration_seconds || 0}s`
       })
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Maintenance failed',
-        message: error.message || 'Failed to run maintenance'
+        title: 'Falló el mantenimiento',
+        message: (error as Error).message || 'No pudimos ejecutar las tareas de optimización'
       })
     } finally {
       setIsLoading(false)
@@ -244,12 +255,12 @@ export default function TenantSettingsPage() {
 
   if (!isAdmin) {
     return (
-      <div className="p-6">
+      <div className="space-y-4 p-4 md:p-6">
         <Alert>
           <IconAlertTriangle className="h-4 w-4" />
-          <AlertTitle>Access Denied</AlertTitle>
+          <AlertTitle>Acceso restringido</AlertTitle>
           <AlertDescription>
-            Only administrators can access tenant settings.
+            Solo los administradores de la organización pueden acceder a esta página de configuración.
           </AlertDescription>
         </Alert>
       </div>
@@ -257,268 +268,262 @@ export default function TenantSettingsPage() {
   }
 
   return (
-    <div className="container max-w-6xl py-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Tenant Settings</h1>
+    <div className="max-w-6xl space-y-8 p-4 md:p-6">
+      <div>
+        <h1 className="mb-2 text-3xl font-bold">Configuración de la organización</h1>
         <p className="text-muted-foreground">
-          Manage your organization's data and system settings
+          Administra los datos, la seguridad y el mantenimiento de tu tenant
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="indexing">Search Index</TabsTrigger>
-          <TabsTrigger value="data">Data Management</TabsTrigger>
-          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
-        </TabsList>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Información de la organización</CardTitle>
+            <CardDescription>Datos básicos del tenant y su actividad</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Nombre</p>
+                <p className="text-lg">{tenantInfo?.display_name || tenantInfo?.name}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Creado el</p>
+                <p className="text-lg">
+                  {tenantInfo?.created_at ? new Date(tenantInfo.created_at).toLocaleDateString('es-ES') : 'N/A'}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Usuarios totales</p>
+                <p className="text-lg">{tenantStats?.total_users || 0}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Documentos totales</p>
+                <p className="text-lg">{tenantStats?.total_documents || 0}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <TabsContent value="general">
-          <div className="grid gap-6">
-            {/* Tenant Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Organization Information</CardTitle>
-                <CardDescription>Basic information about your organization</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Organization Name</p>
-                    <p className="text-lg">{tenantInfo?.display_name || tenantInfo?.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Created</p>
-                    <p className="text-lg">
-                      {tenantInfo?.created_at ? new Date(tenantInfo.created_at).toLocaleDateString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Users</p>
-                    <p className="text-lg">{tenantStats?.total_users || 0}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Documents</p>
-                    <p className="text-lg">{tenantStats?.total_documents || 0}</p>
-                  </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Uso de almacenamiento</CardTitle>
+            <CardDescription>Supervisa el espacio contratado y disponible</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-medium">
+                    {formatBytes(tenantStats?.storage_used_bytes || 0)} de {formatBytes(tenantStats?.storage_limit_bytes || 0)}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    {tenantStats?.storage_limit_bytes > 0 
+                      ? Math.round((tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100) 
+                      : 0}%
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
+                <Progress 
+                  value={tenantStats?.storage_limit_bytes > 0 
+                    ? (tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100 
+                    : 0} 
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-            {/* Storage Usage */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Storage Usage</CardTitle>
-                <CardDescription>Monitor your storage consumption</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm font-medium">
-                        {formatBytes(tenantStats?.storage_used_bytes || 0)} of {formatBytes(tenantStats?.storage_limit_bytes || 0)}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {tenantStats?.storage_limit_bytes > 0 
-                          ? Math.round((tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100) 
-                          : 0}%
-                      </span>
-                    </div>
-                    <Progress 
-                      value={tenantStats?.storage_limit_bytes > 0 
-                        ? (tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100 
-                        : 0} 
-                    />
-                  </div>
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Estado del índice de búsqueda</CardTitle>
+            <CardDescription>Supervisa y reconstruye el índice semántico cuando sea necesario</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-lg border p-4 text-center">
+                  <p className="text-2xl font-bold">{reindexStatus?.total_documents || 0}</p>
+                  <p className="text-sm text-muted-foreground">Documentos totales</p>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="indexing">
-          <div className="grid gap-6">
-            {/* Index Status */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Search Index Status</CardTitle>
-                <CardDescription>Monitor and manage your search index</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center p-4 border rounded-lg">
-                      <p className="text-2xl font-bold">{reindexStatus?.total_documents || 0}</p>
-                      <p className="text-sm text-muted-foreground">Total Documents</p>
-                    </div>
-                    <div className="text-center p-4 border rounded-lg">
-                      <p className="text-2xl font-bold text-green-600">
-                        {reindexStatus?.indexed_documents || 0}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Indexed</p>
-                    </div>
-                    <div className="text-center p-4 border rounded-lg">
-                      <p className="text-2xl font-bold text-orange-600">
-                        {reindexStatus?.missing_documents || 0}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Missing</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">
-                        Index Status: 
-                        <Badge variant={reindexStatus?.status === 'ready' ? 'success' : 'warning'} className="ml-2">
-                          {reindexStatus?.status || 'Unknown'}
-                        </Badge>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <Button
-                      onClick={handleReindexMissing}
-                      disabled={isReindexing || reindexStatus?.missing_documents === 0}
-                    >
-                      {isReindexing ? (
-                        <>
-                          <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Reindexing...
-                        </>
-                      ) : (
-                        <>
-                          <IconRefresh className="mr-2 h-4 w-4" />
-                          Reindex Missing Documents
-                        </>
-                      )}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      onClick={handleForceReindex}
-                      disabled={isReindexing}
-                    >
-                      <IconDatabase className="mr-2 h-4 w-4" />
-                      Force Full Reindex
-                    </Button>
-                  </div>
+                <div className="rounded-lg border p-4 text-center">
+                  <p className="text-2xl font-bold text-green-600">
+                    {reindexStatus?.indexed_documents || 0}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Indexados</p>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
+                <div className="rounded-lg border p-4 text-center">
+                  <p className="text-2xl font-bold text-orange-600">
+                    {reindexStatus?.missing_documents || 0}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Pendientes</p>
+                </div>
+              </div>
 
-        <TabsContent value="data">
-          <div className="grid gap-6">
-            <Alert>
-              <IconAlertTriangle className="h-4 w-4" />
-              <AlertTitle>Danger Zone</AlertTitle>
-              <AlertDescription>
-                These actions are irreversible. Please proceed with caution.
-              </AlertDescription>
-            </Alert>
+              <div className="flex items-center justify-between rounded-lg bg-muted p-4">
+                <div className="flex items-center gap-2">
+                  <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">
+                    Estado actual: 
+                    <Badge variant={reindexStatus?.status === 'ready' ? 'success' : 'warning'} className="ml-2">
+                      {reindexStatus?.status || 'desconocido'}
+                    </Badge>
+                  </span>
+                </div>
+              </div>
 
-            {/* Delete All Documents */}
-            <Card className="border-destructive/50">
-              <CardHeader>
-                <CardTitle className="text-destructive">Delete All Documents</CardTitle>
-                <CardDescription>
-                  Permanently remove all documents from your organization
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+              <div className="flex flex-col gap-2 md:flex-row">
                 <Button
-                  variant="destructive"
-                  onClick={() => setDeleteDialogOpen(true)}
+                  onClick={handleReindexMissing}
+                  disabled={isReindexing || reindexStatus?.missing_documents === 0}
+                  className="flex-1"
                 >
-                  <IconTrash className="mr-2 h-4 w-4" />
-                  Delete All Documents
+                  {isReindexing ? (
+                    <>
+                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Reindexando…
+                    </>
+                  ) : (
+                    <>
+                      <IconRefresh className="mr-2 h-4 w-4" />
+                      Reindexar pendientes
+                    </>
+                  )}
                 </Button>
-              </CardContent>
-            </Card>
 
-            {/* Clear Vector Database */}
-            <Card className="border-destructive/50">
-              <CardHeader>
-                <CardTitle className="text-destructive">Clear Search Index</CardTitle>
-                <CardDescription>
-                  Remove all search embeddings. Documents will need to be reindexed.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
                 <Button
-                  variant="destructive"
-                  onClick={handleClearVectorDB}
-                  disabled={isDeleting}
+                  variant="outline"
+                  onClick={handleForceReindex}
+                  disabled={isReindexing}
+                  className="flex-1"
                 >
                   <IconDatabase className="mr-2 h-4 w-4" />
-                  Clear Vector Database
+                  Reindexado completo
                 </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
 
-        <TabsContent value="maintenance">
-          <div className="grid gap-6">
-            {/* Maintenance Operations */}
-            <Card>
-              <CardHeader>
-                <CardTitle>System Maintenance</CardTitle>
-                <CardDescription>
-                  Run maintenance operations to optimize system performance
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 bg-muted rounded-lg">
-                  <h4 className="font-medium mb-2">Maintenance tasks include:</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Optimize database tables and indexes</li>
-                    <li>• Clean up orphaned files in storage</li>
-                    <li>• Remove expired temporary data</li>
-                    <li>• Compact vector database</li>
-                  </ul>
+      <section className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Mantenimiento del sistema</CardTitle>
+            <CardDescription>
+              Ejecuta tareas de optimización para mantener el rendimiento del tenant
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg bg-muted p-4">
+              <h4 className="mb-2 font-medium">Incluye las siguientes tareas:</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li>• Optimizar tablas e índices de la base de datos</li>
+                <li>• Limpiar archivos huérfanos en el almacenamiento</li>
+                <li>• Eliminar datos temporales vencidos</li>
+                <li>• Compactar la base vectorial</li>
+              </ul>
+            </div>
+
+            <Button
+              onClick={handleRunMaintenance}
+              disabled={isLoading}
+            >
+              <IconTool className="mr-2 h-4 w-4" />
+              Ejecutar mantenimiento
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Copias de seguridad</CardTitle>
+            <CardDescription>
+              Próximamente podrás descargar respaldos completos de la organización
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" disabled className="w-full">
+              <IconDownload className="mr-2 h-4 w-4" />
+              Crear backup (muy pronto)
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="text-destructive">Zona de peligro</CardTitle>
+            <CardDescription>
+              Estas operaciones son irreversibles. Úsalas solo si estás completamente seguro.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-medium text-destructive">Eliminar todos los documentos</p>
+                <p className="text-sm text-muted-foreground">
+                  Borra permanentemente cada archivo almacenado en el tenant.
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                onClick={() => setDeleteDialogOpen(true)}
+              >
+                <IconTrash className="mr-2 h-4 w-4" />
+                Eliminar documentos
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-medium text-destructive">Limpiar índice semántico</p>
+                <p className="text-sm text-muted-foreground">
+                  Elimina todos los embeddings de búsqueda. Luego deberás reindexar los documentos.
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                onClick={handleClearVectorDB}
+                disabled={isDeleting}
+              >
+                <IconDatabase className="mr-2 h-4 w-4" />
+                Vaciar base vectorial
+              </Button>
+            </div>
+
+            <div className="rounded-lg border border-dashed border-destructive/40 p-4">
+              <div className="mb-4 flex items-center gap-3">
+                <IconAlertTriangle className="h-5 w-5 text-destructive" />
+                <div>
+                  <p className="font-medium text-destructive">Derecho de supresión (LGPD)</p>
+                  <p className="text-sm text-muted-foreground">
+                    Ejecuta la eliminación total del tenant, usuarios y documentos según la Ley de Protección de Datos.
+                  </p>
                 </div>
-
-                <Button
-                  onClick={handleRunMaintenance}
-                  disabled={isLoading}
-                >
-                  <IconTool className="mr-2 h-4 w-4" />
-                  Run Maintenance
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Backup */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Data Backup</CardTitle>
-                <CardDescription>
-                  Create a backup of your organization data
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" disabled>
-                  <IconDownload className="mr-2 h-4 w-4" />
-                  Create Backup (Coming Soon)
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
+              </div>
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Esta acción abre el asistente LGPD donde podrás confirmar si solo eliminas tu cuenta o toda la organización.
+                </p>
+                <UserDeletionDialog />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Are you absolutely sure?</DialogTitle>
+            <DialogTitle>¿Seguro que deseas continuar?</DialogTitle>
             <DialogDescription>
-              This action will permanently delete all documents in your organization.
-              This action cannot be undone.
+              Esta acción eliminará de forma permanente todos los documentos del tenant.
+              No se puede deshacer.
             </DialogDescription>
           </DialogHeader>
           
@@ -526,12 +531,12 @@ export default function TenantSettingsPage() {
             <Alert className="border-destructive/50">
               <IconAlertTriangle className="h-4 w-4 text-destructive" />
               <AlertDescription>
-                Type <strong>DELETE ALL DOCUMENTS</strong> to confirm
+                Escribe <strong>DELETE ALL DOCUMENTS</strong> para confirmar.
               </AlertDescription>
             </Alert>
             
             <Input
-              placeholder="Type confirmation text"
+              placeholder="Introduce el texto de confirmación"
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
             />
@@ -545,7 +550,7 @@ export default function TenantSettingsPage() {
                 setDeleteConfirmText("")
               }}
             >
-              Cancel
+              Cancelar
             </Button>
             <Button
               variant="destructive"
@@ -555,10 +560,10 @@ export default function TenantSettingsPage() {
               {isDeleting ? (
                 <>
                   <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting...
+                  Eliminando…
                 </>
               ) : (
-                'Delete All Documents'
+                'Eliminar todos los documentos'
               )}
             </Button>
           </DialogFooter>

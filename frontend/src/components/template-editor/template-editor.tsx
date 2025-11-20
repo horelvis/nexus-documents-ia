@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Edit3, Save, X, Clock, ExternalLink, AlertCircle } from 'lucide-react'
+import { Loader2, Edit3, Save, X, Clock, ExternalLink, AlertCircle, Link2, Link2Off } from 'lucide-react'
 import { toast } from 'sonner'
 import { useUser } from '@clerk/nextjs'
+import { useApiClient } from '@/lib/api-client'
 
 interface EditSession {
   id: string
@@ -39,16 +40,24 @@ interface Template {
 interface TemplateEditorProps {
   template: Template
   onTemplateUpdated?: (template: Template) => void
-  tenantId: string
 }
 
-export function TemplateEditor({ template, onTemplateUpdated, tenantId }: TemplateEditorProps) {
+interface DriveStatus {
+  connected: boolean
+  google_email?: string
+  expires_at?: string
+}
+
+export function TemplateEditor({ template, onTemplateUpdated }: TemplateEditorProps) {
   const { user } = useUser()
+  const apiClient = useApiClient()
   const [editSession, setEditSession] = useState<EditSession | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [driveStatus, setDriveStatus] = useState<DriveStatus | null>(null)
+  const [driveLoading, setDriveLoading] = useState<boolean>(true)
 
   // Poll for session status updates
   useEffect(() => {
@@ -57,6 +66,63 @@ export function TemplateEditor({ template, onTemplateUpdated, tenantId }: Templa
       return () => clearInterval(interval)
     }
   }, [editSession])
+
+  const fetchDriveStatus = useCallback(async () => {
+    setDriveLoading(true)
+    try {
+      const response = await apiClient.get<DriveStatus>('/google-drive/status')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      setDriveStatus(response.data || { connected: false })
+    } catch (err) {
+      console.error(err)
+      setDriveStatus({ connected: false })
+    } finally {
+      setDriveLoading(false)
+    }
+  }, [apiClient])
+
+  useEffect(() => {
+    fetchDriveStatus()
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'google-drive-connected' || event.data?.type === 'google-drive-error') {
+        fetchDriveStatus()
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [fetchDriveStatus])
+
+  const handleConnectGoogleDrive = async () => {
+    try {
+      const response = await apiClient.get<{ authorization_url?: string }>('/google-drive/oauth-url')
+      if (response.error || !response.data?.authorization_url) {
+        throw new Error(response.error || 'Failed to initiate Google Drive connection')
+      }
+      window.location.href = response.data.authorization_url
+      } else {
+        throw new Error('Invalid authorization URL')
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Unable to start Google Drive connection')
+    }
+  }
+
+  const handleDisconnectGoogleDrive = async () => {
+    try {
+      const response = await apiClient.post('/google-drive/disconnect', {})
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      toast.success('Google Drive disconnected')
+      fetchDriveStatus()
+    } catch (err) {
+      console.error(err)
+      toast.error('Unable to disconnect Google Drive')
+    }
+  }
 
   const checkSessionStatus = useCallback(async () => {
     if (!editSession) return
@@ -78,32 +144,29 @@ export function TemplateEditor({ template, onTemplateUpdated, tenantId }: Templa
       return
     }
 
+    if (driveLoading) {
+      toast.info('Checking Google Drive connection, please wait...')
+      return
+    }
+
+    if (!driveStatus?.connected) {
+      toast.error('Connect Google Drive before editing templates')
+      return
+    }
+
     setIsCreatingSession(true)
     setError(null)
 
     try {
-      const response = await fetch('/api/template-editor/sessions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          template_id: template.id,
-          template_name: template.name,
-          template_content: template.content,
-          user_id: user.id,
-          user_email: user.emailAddresses[0]?.emailAddress || '',
-          tenant_id: tenantId
-        })
+      const response = await apiClient.post(`/engine-templates/${template.id}/edit-sessions`, {
+        reason: 'Manual edit requested from Template Editor UI'
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to create editing session')
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to create editing session')
       }
 
-      const session = await response.json()
-      setEditSession(session)
+      setEditSession(response.data as EditSession)
       setShowInstructions(true)
       
       toast.success('Google Docs editing session created! Click "Open Editor" to start editing.')
@@ -141,22 +204,15 @@ export function TemplateEditor({ template, onTemplateUpdated, tenantId }: Templa
     setError(null)
 
     try {
-      const response = await fetch(`/api/template-editor/sessions/${editSession.id}/finish`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_id: user?.id
-        })
+      const response = await apiClient.post(`/engine-templates/${template.id}/edit-sessions/${editSession.id}/finish`, {
+        force_sync: false
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to finish editing session')
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to finish editing session')
       }
 
-      const result = await response.json()
+      const result = response.data as any
       
       // Update local state
       setEditSession(null)
@@ -276,6 +332,58 @@ export function TemplateEditor({ template, onTemplateUpdated, tenantId }: Templa
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+
+        <div className="border rounded-lg p-4 bg-muted/40 flex flex-col gap-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <p className="font-medium flex items-center gap-2">
+                {driveStatus?.connected ? (
+                  <>
+                    <Link2 className="h-4 w-4 text-green-500" />
+                    Google Drive Connected
+                  </>
+                ) : (
+                  <>
+                    <Link2Off className="h-4 w-4 text-destructive" />
+                    Google Drive Not Connected
+                  </>
+                )}
+              </p>
+              {driveStatus?.google_email && (
+                <p className="text-sm text-muted-foreground">{driveStatus.google_email}</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {driveStatus?.connected ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDisconnectGoogleDrive}
+                  disabled={driveLoading}
+                >
+                  {driveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleConnectGoogleDrive}
+                  disabled={driveLoading}
+                >
+                  {driveLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'Connect Google Drive'
+                  )}
+                </Button>
+              )}
+            </div>
+          </div>
+          {!driveStatus?.connected && (
+            <p className="text-sm text-muted-foreground">
+              Connect your Google Drive account to edit templates directly and save changes automatically.
+            </p>
+          )}
+        </div>
 
         {!editSession ? (
           // Not editing mode

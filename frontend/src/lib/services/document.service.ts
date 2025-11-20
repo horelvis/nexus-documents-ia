@@ -145,6 +145,20 @@ export class DocumentService {
     return this.apiClient.put<Document>(endpoint, updates)
   }
 
+  async convertDocumentToTemplate(
+    documentId: string,
+    options?: { name?: string; description?: string; category?: string; tags?: string[] }
+  ) {
+    const payload = {
+      document_id: documentId,
+      name: options?.name,
+      description: options?.description,
+      category: options?.category,
+      tags: options?.tags,
+    }
+    return this.apiClient.post('/engine-templates/from-document', payload)
+  }
+
   async getDocumentContent(id: string) {
     const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_CONTENT(id)
     return this.apiClient.get<{ content: string }>(endpoint)

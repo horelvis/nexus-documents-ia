@@ -23,7 +23,7 @@ export { default as Marquee } from './ui/marquee';
 export * from './constants';
 
 // Navigation
-export { default as CapsNavbar } from './navbar';
+export { default as NexusNavbar } from './navbar';
 
 // Main component
 export { default as HomeSection } from './home-section';

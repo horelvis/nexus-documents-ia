@@ -28,9 +28,17 @@ export default function AuthRedirectPage() {
       try {
         // If we don't have backend user data yet, try to fetch it
         if (!backendUser) {
+          console.log('[auth/redirect] No backendUser yet, checking status…')
           await checkOnboardingStatus()
           return // Wait for the next effect run
         }
+        console.log('[auth/redirect] backendUser snapshot', {
+          tenantId: backendUser.tenant_id,
+          onboardingCompleted: backendUser.onboarding_completed,
+          subscriptionPlan: backendUser.subscription_plan,
+          subscriptionStatus: backendUser.subscription_status,
+          trialEndsAt: backendUser.trial_ends_at
+        })
 
         // Check for invalid tenant ID
         const isInvalidTenantId = !backendUser.tenant_id ||
@@ -56,6 +64,7 @@ export default function AuthRedirectPage() {
         const needsOnboarding = !hasCompletedOnboarding && hasValidPlan
 
         if (needsOnboarding) {
+          console.log('[auth/redirect] Needs onboarding, redirecting', { tenantId: backendUser.tenant_id })
           // Redirect to onboarding
           router.push(`/${backendUser.tenant_id}/onboarding`)
           return
@@ -66,11 +75,13 @@ export default function AuthRedirectPage() {
           ['active', 'trialing'].includes(backendUser.subscription_status)
 
         if (!hasValidTrial && !hasPaidSubscription && !hasActiveStatus) {
+          console.log('[auth/redirect] No valid subscription or trial, sending to plans')
           // No valid subscription, redirect to plans
           router.push(`/${backendUser.tenant_id}/plans`)
           return
         }
 
+        console.log('[auth/redirect] All good, going to dashboard')
         // Everything is good, redirect to dashboard
         router.push(`/${backendUser.tenant_id}/dashboard`)
 

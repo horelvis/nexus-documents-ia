@@ -1,4 +1,4 @@
-import { HomeSection } from "@/components/landing/caps-copy"
+import { HomeSection } from "@/components/landing/nexus-theme"
 
 export default function LandingV2Page() {
   return (

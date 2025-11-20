@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  allowedDevOrigins: ['192.168.1.58'],
+  allowedDevOrigins: ['http://nexus-docs360.es:3001', '192.168.1.58'],
   eslint: {
     // Warning: This allows production builds to successfully complete even if
     // your project has ESLint errors.

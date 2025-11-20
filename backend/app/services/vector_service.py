@@ -172,13 +172,21 @@ class VectorService:
             Lista de documentos similares
         """
         try:
+            if not doc_ids:
+                logger.warning(
+                    "⚠️ search_by_document_ids called without doc_ids | collection=%s query_chars=%d",
+                    self.collection_name,
+                    len(query),
+                )
+                return []
+
             search_request = {
                 "query": query,
                 "limit": limit,
                 "tenant_id": self.tenant_id,
                 "search_type": "hybrid",
                 "filters": {
-                    "doc_ids": doc_ids
+                    "document_id": doc_ids
                 }
             }
             

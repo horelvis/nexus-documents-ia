@@ -1,10 +1,13 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
-import { useUser } from '@clerk/nextjs'
+import { useUser, useClerk, useAuth } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
-import { useApiClient } from '@/lib/api-client'
+import useSWR, { useSWRConfig } from 'swr'
+import { useApiClient, apiClient as globalApiClient } from '@/lib/api-client'
+import { fetcher } from '@/lib/fetcher'
 import { ConnectionError } from '@/components/errors/connection-error'
+import { Button } from '@/components/ui/button'
 
 import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
 
@@ -12,28 +15,107 @@ const UserContext = createContext<UserContextType | undefined>(undefined)
 
 export function UserProvider({ children }: UserProviderProps) {
   const { user: clerkUser, isLoaded: isClerkLoaded, isSignedIn } = useUser()
+  const { getToken } = useAuth()
+  const { signOut } = useClerk()
   const router = useRouter()
   const pathname = usePathname()
-  const apiClient = useApiClient()
+  const apiClient = useApiClient() // This is the local instance
+  const { mutate } = useSWRConfig()
+  const [isTokenReady, setIsTokenReady] = useState(false)
   
-  // Backend user state
-  const [backendUser, setBackendUser] = useState<BackendUser | null>(null)
-  const [userLoading, setUserLoading] = useState(true)
-  const [userError] = useState<string | null>(null)
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
-  const [connectionError, setConnectionError] = useState<Error | null>(null)
+  // Configure global API client with token getter for SWR fetcher
+  useEffect(() => {
+    if (isClerkLoaded) {
+      globalApiClient.setAuthTokenGetter(async () => {
+        try {
+          const token = await getToken()
+          return token
+        } catch (error) {
+          console.error('Failed to get token for global api client:', error)
+          return null
+        }
+      })
+      // Mark token as ready after configuring the getter
+      setIsTokenReady(true)
+    }
+  }, [isClerkLoaded, getToken])
   
-  // Onboarding state
-  const [onboarding, setOnboarding] = useState<OnboardingStatus>({
-    needsOnboarding: false,
-    isNewUser: false,
-    hasCompletedSync: false,
-    loading: true,
-    error: null
-  })
+  // Internal state for sync errors that SWR doesn't catch (like failed sync after 404)
+  const [syncError, setSyncError] = useState<string | null>(null)
+  
+  // SWR for fetching backend user
+  const { data: backendUser, error: swrError, isLoading: swrLoading, mutate: reloadUser } = useSWR<BackendUser>(
+    isClerkLoaded && isSignedIn && isTokenReady ? '/auth/me' : null,
+    fetcher,
+    {
+      shouldRetryOnError: false,
+      revalidateOnFocus: true,
+      onError: (err) => {
+        // We'll handle 403/404 specifically in a useEffect
+        console.log('SWR Error:', err)
+      }
+    }
+  )
+
+  // Derived state
+  const userLoading = !isClerkLoaded || (isSignedIn && swrLoading && !backendUser && !swrError)
+  
+  // Consolidated error state
+  const userError = useMemo(() => {
+    if (syncError) return syncError
+    if (swrError) {
+      const status = (swrError as any).status
+      // Don't show error for 403/404 as we'll try to sync
+      if (status === 403 || status === 404) return null
+      return swrError.message || 'Unknown error'
+    }
+    return null
+  }, [swrError, syncError])
+
+  // Onboarding status derivation
+  const onboarding = useMemo<OnboardingStatus>(() => {
+    if (userLoading) {
+      return {
+        needsOnboarding: false,
+        isNewUser: false,
+        hasCompletedSync: false,
+        loading: true,
+        error: null
+      }
+    }
+    
+    if (userError) {
+       return {
+        needsOnboarding: false,
+        isNewUser: false,
+        hasCompletedSync: false,
+        loading: false,
+        error: userError
+      }
+    }
+
+    if (backendUser) {
+      return {
+        needsOnboarding: !backendUser.onboarding_completed,
+        isNewUser: false,
+        hasCompletedSync: true, // If we have backendUser, sync is done
+        loading: false,
+        error: null
+      }
+    }
+
+    // If no backend user and no error (yet), we might be syncing
+    return {
+      needsOnboarding: false,
+      isNewUser: true,
+      hasCompletedSync: false,
+      loading: false,
+      error: null
+    }
+  }, [userLoading, userError, backendUser])
 
   // Helper function to get tenant-aware onboarding path
-  const getOnboardingPath = (userData?: BackendUser) => {
+  const getOnboardingPath = useCallback((userData?: BackendUser) => {
     if (userData?.tenant_id) {
       return `/${userData.tenant_id}/onboarding`
     }
@@ -43,180 +125,67 @@ export function UserProvider({ children }: UserProviderProps) {
       return `/${tenantMatch[1]}/onboarding`
     }
     return '/onboarding' // Fallback
-  }
+  }, [pathname])
 
   // Helper function to check if current path is onboarding
-  const isOnboardingPath = () => {
-    return pathname.includes('/onboarding')
-  }
+  const isOnboardingPath = useCallback(() => {
+    return pathname.includes('/onboarding') || pathname.includes('/onboarding-simple')
+  }, [pathname])
 
-  // Note: syncUserWithBackend removed - users are created automatically by backend
-  // when they sign up through Clerk after completing checkout
+  // ... (rest of syncUserWithBackend and other functions)
 
-  // Mark onboarding as completed
+  // Redirect Logic
+  useEffect(() => {
+    // Skip redirect if we are in the auth flow or on the pricing page
+    if (pathname.startsWith('/auth/') || pathname === '/pricing') return
+
+    if (backendUser && !backendUser.onboarding_completed && !isOnboardingPath()) {
+       // Check for invalid/default tenant ID
+       const isInvalidTenantId = !backendUser.tenant_id || 
+       backendUser.tenant_id === 'default' || 
+       backendUser.tenant_id === '00000000-0000-0000-0000-000000000000' ||
+       backendUser.tenant_id === 'undefined' ||
+       backendUser.tenant_id === 'null'
+     
+      if (isInvalidTenantId) {
+         setSyncError('INVALID_TENANT')
+      } else {
+         console.log('[UserContext] Redirecting to onboarding')
+         router.push(getOnboardingPath(backendUser))
+      }
+    }
+  }, [backendUser, isOnboardingPath, getOnboardingPath, router])
+
+
+  // Actions
   const markOnboardingComplete = useCallback(async (onboardingData?: any): Promise<boolean> => {
     try {
-      // Send the onboarding data directly as the request body
       const response = await apiClient.post('/auth/complete-onboarding', onboardingData)
-      
-      if (response.error) {
-        throw new Error(response.error)
-      }
+      if (response.error) throw new Error(response.error)
 
-      // Update local state with the returned user data
-      const updatedUser: BackendUser = response.data
-      setBackendUser(updatedUser)
-      setOnboarding(prev => ({
-        ...prev,
-        needsOnboarding: false
-      }))
-      
+      // Update SWR cache
+      mutate('/auth/me', response.data, false) 
       return true
     } catch (error) {
       console.error('Error completing onboarding:', error)
       return false
     }
-  }, [apiClient])
+  }, [apiClient, mutate])
 
-  // Reset onboarding (for development/testing)
   const resetOnboarding = useCallback(async (): Promise<boolean> => {
     try {
       const response = await apiClient.post('/auth/reset-onboarding')
+      if (response.error) throw new Error(response.error)
       
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
-      // Update local state
-      const updatedUser: BackendUser = response.data
-      setBackendUser(updatedUser)
-      setOnboarding(prev => ({
-        ...prev,
-        needsOnboarding: true
-      }))
-      
+      mutate('/auth/me', response.data, false)
       return true
     } catch (error) {
       console.error('Error resetting onboarding:', error)
       return false
     }
-  }, [apiClient])
+  }, [apiClient, mutate])
 
-  // Check user status in backend
-  const checkOnboardingStatus = useCallback(async (): Promise<void> => {
-    if (!clerkUser) return
-
-    try {
-      setOnboarding(prev => ({ ...prev, loading: true, error: null }))
-      setUserLoading(true)
-
-      // Check if user exists in our backend
-      const response = await apiClient.get('/auth/me')
-      
-      if (response.error) {
-        // User doesn't exist in backend yet - this is normal for new users
-        // They will be created when they complete checkout
-        setBackendUser(null)
-        setOnboarding({
-          needsOnboarding: false,
-          isNewUser: true,
-          hasCompletedSync: false,
-          loading: false,
-          error: null
-        })
-        return
-      }
-
-      // User exists, update state
-      const userData: BackendUser = response.data
-      
-      // Check for invalid/default tenant ID
-      const isInvalidTenantId = !userData.tenant_id || 
-        userData.tenant_id === 'default' || 
-        userData.tenant_id === '00000000-0000-0000-0000-000000000000' ||
-        userData.tenant_id === 'undefined' ||
-        userData.tenant_id === 'null'
-      
-      if (isInvalidTenantId) {
-        console.error('Invalid tenant ID detected:', userData.tenant_id)
-        setOnboarding({
-          needsOnboarding: false,
-          isNewUser: false,
-          hasCompletedSync: false,
-          loading: false,
-          error: 'INVALID_TENANT'
-        })
-        setUserLoading(false)
-        return
-      }
-      
-      setBackendUser(userData)
-      
-      // Check if user needs onboarding (only after first payment or trial start)
-      const hasCompletedOnboarding = userData?.onboarding_completed || false
-      const needsOnboarding = !hasCompletedOnboarding && 
-        (userData?.subscription_plan !== 'free' || userData?.subscription_status === 'trialing')
-      
-      setOnboarding({
-        needsOnboarding,
-        isNewUser: false,
-        hasCompletedSync: true,
-        loading: false,
-        error: null
-      })
-
-      // Subscription redirects are now handled by middleware.ts
-      // Only handle onboarding redirects here
-      
-      // Check if user has valid subscription or trial for onboarding purposes
-      const hasValidTrial = userData?.trial_ends_at && new Date(userData.trial_ends_at) > new Date()
-      const hasPaidSubscription = userData?.subscription_plan && 
-        ['basic', 'pro', 'professional', 'enterprise'].includes(userData.subscription_plan)
-      
-      // If user has paid plan (including valid trial) but hasn't completed onboarding
-      const hasValidPlan = hasPaidSubscription || hasValidTrial
-      
-      if (!hasCompletedOnboarding && hasValidPlan && !isOnboardingPath()) {
-        router.push(getOnboardingPath(userData))
-      }
-
-    } catch (error: any) {
-      console.error('Error checking user status:', error)
-      
-      // Check if it's a connection error
-      const isConnectionError = 
-        error?.name === 'ConnectionError' ||
-        error?.message?.includes('Unable to connect') ||
-        error?.message?.includes('Failed to fetch')
-      
-      // For connection errors, show ConnectionError overlay
-      if (isConnectionError) {
-        setConnectionError(error)
-        setBackendUser(null)
-        setOnboarding({
-          needsOnboarding: false,
-          isNewUser: false,
-          hasCompletedSync: false,
-          loading: false,
-          error: null
-        })
-      } else {
-        // For other errors, set the error state
-        setBackendUser(null)
-        setOnboarding({
-          needsOnboarding: false,
-          isNewUser: false,
-          hasCompletedSync: false,
-          loading: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        })
-      }
-    } finally {
-      setUserLoading(false)
-    }
-  }, [clerkUser, apiClient, pathname, router])
-
-  // Helper functions for subscription status
+  // Subscription helpers
   const hasValidTrial = useCallback((): boolean => {
     if (!backendUser?.trial_ends_at) return false
     return new Date(backendUser.trial_ends_at) > new Date()
@@ -231,78 +200,53 @@ export function UserProvider({ children }: UserProviderProps) {
     return !hasValidTrial() && !hasPaidSubscription()
   }, [hasValidTrial, hasPaidSubscription])
 
-  // Refetch user data
-  const refetchUser = useCallback(async (): Promise<void> => {
-    if (!clerkUser) return
-    await checkOnboardingStatus()
-  }, [clerkUser, checkOnboardingStatus])
-
-  // Initialize user data when Clerk user is loaded
-  useEffect(() => {
-    if (!isClerkLoaded) {
-      setUserLoading(true)
-      setOnboarding(prev => ({ ...prev, loading: true }))
-      return
-    }
-
-    if (!clerkUser) {
-      setUserLoading(false)
-      setBackendUser(null)
-      setOnboarding(prev => ({ ...prev, loading: false }))
-      return
-    }
-
-    // User is loaded, check backend status
-    checkOnboardingStatus()
-  }, [isClerkLoaded, clerkUser])
 
   const contextValue: UserContextType = useMemo(() => ({
-    // Clerk data
     clerkUser,
     isClerkLoaded,
     isSignedIn: isSignedIn || false,
-    
-    // Backend data
-    backendUser,
+    backendUser: backendUser || null,
     userLoading,
     userError,
-    
-    // Onboarding
     onboarding,
-    
-    // Actions
     markOnboardingComplete,
     resetOnboarding,
-    checkOnboardingStatus,
-    refetchUser,
-    
-    // Subscription helpers
+    checkOnboardingStatus: async () => { await reloadUser() }, // Adapter for existing calls
+    refetchUser: async () => { await reloadUser() },
     hasValidTrial,
     hasPaidSubscription,
     needsPayment
   }), [
-    clerkUser,
-    isClerkLoaded,
-    isSignedIn,
-    backendUser,
-    userLoading,
-    userError,
-    onboarding,
-    markOnboardingComplete,
-    resetOnboarding,
-    checkOnboardingStatus,
-    refetchUser,
-    hasValidTrial,
-    hasPaidSubscription,
-    needsPayment
+    clerkUser, isClerkLoaded, isSignedIn, backendUser, userLoading, userError, onboarding,
+    markOnboardingComplete, resetOnboarding, reloadUser, hasValidTrial, hasPaidSubscription, needsPayment
   ])
 
-  if (connectionError) {
-    const handleRetry = async () => {
-      setConnectionError(null)
-      await checkOnboardingStatus()
+  // Handle connection errors specifically for the UI
+  const connectionError = useMemo(() => {
+    if (swrError && (swrError.message === 'Failed to fetch' || swrError.name === 'ConnectionError')) {
+       return swrError
     }
-    return <ConnectionError error={connectionError} onRetry={handleRetry} />
+    return null
+  }, [swrError])
+
+
+  if (connectionError) {
+    return <ConnectionError error={connectionError} onRetry={() => reloadUser()} />
+  }
+
+  if (userError && isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+        <div className="max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-semibold">Account Error</h2>
+          <p className="text-muted-foreground">{userError}</p>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => { setSyncError(null); reloadUser() }}>Try Again</Button>
+            <Button variant="outline" onClick={() => signOut()}>Sign Out</Button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

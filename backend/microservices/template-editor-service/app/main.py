@@ -29,8 +29,9 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     logger.info("🚀 Starting Template Editor Service...")
     logger.info(f"🔧 Service Port: {settings.service_port}")
-    logger.info(f"🗄️ Database URL: {settings.database_url}")
-    logger.info(f"📄 Google Credentials: {settings.google_credentials_path}")
+    if settings.debug:
+        logger.debug("Database URL set (value hidden)")
+        logger.debug("Google credentials path configured")
     
     # Start background cleanup task
     try:

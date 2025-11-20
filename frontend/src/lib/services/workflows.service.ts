@@ -178,7 +178,7 @@ export function useWorkflowsService() {
 
   // Workflow Templates API
   const getWorkflowTemplates = async (): Promise<ProcessTemplate[]> => {
-    const response = await apiClient.get<any[]>('/workflow-templates')
+    const response = await apiClient.get<any[]>('/engine-templates')
     return response.map(template => ({
       id: template.id,
       name: template.name,
@@ -197,7 +197,7 @@ export function useWorkflowsService() {
   const getWorkflowStats = async (): Promise<WorkflowStats> => {
     try {
       const [templates, executions] = await Promise.all([
-        apiClient.get<any[]>('/workflow-templates'),
+        apiClient.get<any[]>('/engine-templates'),
         apiClient.get<any[]>('/workflow-executions')
       ])
       

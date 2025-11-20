@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useMemo } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import { API_CONFIG } from './config'
 
@@ -13,6 +14,29 @@ export interface ApiError {
   message: string
   status: number
   details?: any
+}
+
+type ApiClientError = Error & {
+  response?: {
+    status: number
+    data: any
+  }
+}
+
+const createError = (message: string, name = 'Error'): ApiClientError => {
+  if (typeof Error === 'function') {
+    const err = new Error(message) as ApiClientError
+    err.name = name
+    return err
+  }
+  return { name, message } as ApiClientError
+}
+
+type ApiClientError = Error & {
+  response?: {
+    status: number
+    data: any
+  }
 }
 
 class ApiClient {
@@ -120,16 +144,18 @@ class ApiClient {
           // Try the request again with retry count incremented
           return this.request<T>(endpoint, options, retryCount + 1)
         }
-        
-        // Create an error object that includes the full response data
-        const errorObj = {
-          response: {
-            status: response.status,
-            data: data
-          },
-          message: data?.detail?.message || data?.detail || data?.message || `HTTP ${response.status}`
+
+        const message =
+          data?.detail?.message ||
+          data?.detail ||
+          data?.message ||
+          `HTTP ${response.status}`
+
+        return {
+          error: typeof message === 'string' ? message : `HTTP ${response.status}`,
+          status: response.status,
+          data
         }
-        throw errorObj
       }
 
       return {
@@ -142,27 +168,26 @@ class ApiClient {
       // Check if it's a network/connection error
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
         // This is a connection error
-        const connectionError = new Error('Unable to connect to the server. Please check if the backend is running.')
-        connectionError.name = 'ConnectionError'
+        const connectionError = createError(
+          'Unable to connect to the server. Please check if the backend is running.',
+          'ConnectionError'
+        )
         throw connectionError
       }
       
       // Check for other network errors
       if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.code === 'ERR_INTERNET_DISCONNECTED') {
-        const connectionError = new Error('Connection refused. The server may be down or unreachable.')
-        connectionError.name = 'ConnectionError'
+        const connectionError = createError(
+          'Connection refused. The server may be down or unreachable.',
+          'ConnectionError'
+        )
         throw connectionError
-      }
-      
-      // If the error has response data (from our throw above), preserve it
-      if (error?.response) {
-        throw error
       }
       
       // Otherwise, wrap it in a standard format
       return {
         error: error instanceof Error ? error.message : 'Unknown error',
-        status: error?.response?.status || 500,
+        status: (error as ApiClientError)?.response?.status || 500,
       }
     }
   }
@@ -317,32 +342,28 @@ class ApiClient {
 export function useApiClient() {
   const { getToken } = useAuth()
   
-  const client = new ApiClient()
+  const client = useMemo(() => new ApiClient(), [])
   
-  // Configurar el cliente para usar el token de Clerk
-  client.setAuthTokenGetter(async () => {
-    try {
-      // First try to get token normally
-      let token = await getToken()
-      
-      // If no token or if we're retrying, try to force refresh
-      if (!token) {
-        console.log('No token available, attempting to get fresh token...')
-        // Try with template option which sometimes helps
-        token = await getToken({ template: 'nexus' })
+  useEffect(() => {
+    client.setAuthTokenGetter(async () => {
+      try {
+        let token = await getToken()
+        if (!token) {
+          console.log('No token available, attempting to get fresh token...')
+          token = await getToken({ template: 'nexus' })
+        }
+        if (token) {
+          console.log('✅ Got Clerk token, length:', token.length)
+        } else {
+          console.log('❌ No Clerk token available')
+        }
+        return token
+      } catch (error) {
+        console.error('Failed to get auth token:', error)
+        return null
       }
-      
-      if (token) {
-        console.log('✅ Got Clerk token, length:', token.length)
-      } else {
-        console.log('❌ No Clerk token available')
-      }
-      return token
-    } catch (error) {
-      console.error('Failed to get auth token:', error)
-      return null
-    }
-  })
+    })
+  }, [client, getToken])
   
   return client
 }

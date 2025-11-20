@@ -11,23 +11,16 @@ export default function PricingPage() {
   const plans = getAllPlans()
 
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
-    if (plan.id === 'free') {
-      // Redirect directly to signup for free plan
-      const currentHost = window.location.origin;
-      window.location.href = `${currentHost}/auth/sign-up?plan=free`
-      return
-    }
-
     if (plan.id === 'enterprise') {
       // Open contact form or redirect to sales
       window.location.href = 'mailto:sales@nexusdocs360.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información&body=Hola,%0A%0AEstoy%20interesado%20en%20el%20plan%20Enterprise%20de%20NexusDocs360.%0A%0ANombre%20de%20la%20empresa:%20%0ANúmero%20de%20usuarios:%20%0ARequerimientos%20específicos:%20%0A%0AGracias.'
       return
     }
 
-    // For paid plans, redirect to signup with plan info
-    // The checkout session will be created after authentication
-    const interval = isYearly ? 'year' : 'month'
-    window.location.href = `/auth/sign-up?plan=${plan.id}&interval=${interval}`
+    // For all other plans (free and paid), redirect to signup with plan params.
+    const currentHost = window.location.origin;
+    const interval = isYearly ? 'yearly' : 'monthly';
+    window.location.href = `${currentHost}/auth/sign-up?plan=${plan.id}&interval=${interval}`
   }
 
   const getPlanIcon = (planId: string) => {
@@ -143,11 +136,7 @@ export default function PricingPage() {
                         className="w-full"
                         variant="outline"
                         size="lg"
-                        onClick={() => {
-                          // Use relative path to ensure it works with any base URL
-                          const currentHost = window.location.origin;
-                          window.location.href = `${currentHost}/auth/sign-up?plan=free`;
-                        }}
+                        onClick={() => handlePlanSelection(plans.find(p => p.id === 'free') || plan)}
                       >
                         <Star className="w-4 h-4 mr-2" />
                         Probar gratis

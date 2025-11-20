@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { Check, Star, Zap, Crown, CheckCircle } from 'lucide-react'
+import { Check, Star, Zap, Crown, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -16,10 +16,13 @@ export default function TenantPlansPage() {
   const router = useRouter()
   const params = useParams()
   const apiClient = useApiClient()
-  const { backendUser } = useUserContext()
+  const { backendUser, refetchUser } = useUserContext()
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
   const [currentSubscription, setCurrentSubscription] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [trialLoading, setTrialLoading] = useState(false)
+  const tenantId = params.tenantId as string
 
   // Check current subscription status - Single call optimization
   useEffect(() => {
@@ -54,20 +57,20 @@ export default function TenantPlansPage() {
   useEffect(() => {
     if (!isLoading && currentSubscription && currentSubscription.plan_id !== 'free' && currentSubscription.status === 'active') {
       // User has active subscription, redirect to dashboard immediately
-      router.replace(`/${params.tenantId}/dashboard`)
+      router.replace(`/${tenantId}/dashboard`)
     }
-  }, [isLoading, currentSubscription, params.tenantId, router])
+  }, [isLoading, currentSubscription, tenantId, router])
+
+  const isInitialSelection =
+    !currentSubscription ||
+    currentSubscription.plan_id === 'free' ||
+    currentSubscription.status !== 'active'
 
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
     setLoadingPlan(plan.id)
+    setErrorMessage(null)
     
     try {
-      if (plan.id === 'free') {
-        // Free plan - no checkout needed
-        router.push('/dashboard')
-        return
-      }
-
       if (plan.id === 'enterprise') {
         // Open contact form or redirect to sales
         window.location.href = 'mailto:sales@nexusdocs360.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información'
@@ -76,11 +79,13 @@ export default function TenantPlansPage() {
 
       // For paid plans, create checkout session
       const interval = isYearly ? 'year' : 'month'
+      const origin = window.location.origin
+      const currentPath = `${origin}${window.location.pathname}`
       const response = await apiClient.post('/stripe/create-checkout-session', {
         planId: plan.id,
         interval,
-        success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: window.location.pathname
+        success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: currentPath
       })
 
       if (response.error) {
@@ -93,8 +98,27 @@ export default function TenantPlansPage() {
       }
     } catch (error) {
       console.error('Error creating checkout session:', error)
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo procesar tu selección. Inténtalo de nuevo.')
     } finally {
       setLoadingPlan(null)
+    }
+  }
+
+  const handleStartTrial = async () => {
+    setErrorMessage(null)
+    setTrialLoading(true)
+    try {
+      const response = await apiClient.post('/stripe/start-free-trial')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      await refetchUser()
+      router.push(`/${tenantId}/onboarding`)
+    } catch (error) {
+      console.error('Error starting trial:', error)
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo iniciar tu trial. Inténtalo nuevamente.')
+    } finally {
+      setTrialLoading(false)
     }
   }
 
@@ -142,12 +166,20 @@ export default function TenantPlansPage() {
             Planes y Precios
           </Badge>
           <h1 className="text-4xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-purple-500 to-purple-700 bg-clip-text text-transparent">
-            Actualiza tu Plan
+            {isInitialSelection ? 'Selecciona tu plan' : 'Actualiza tu Plan'}
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
-            Elige el plan perfecto para tu equipo. Sin contratos, cancela cuando quieras.
+            {isInitialSelection
+              ? 'Elige el plan con el que comenzarás a trabajar en NexusDocs360. Siempre podrás cambiarlo más adelante.'
+              : 'Elige el plan perfecto para tu equipo. Sin contratos, cancela cuando quieras.'}
           </p>
         </div>
+
+        {errorMessage && (
+          <div className="max-w-3xl mx-auto mb-10 text-center text-sm text-red-500 dark:text-red-400">
+            {errorMessage}
+          </div>
+        )}
 
         {/* Pricing Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-7xl mx-auto">
@@ -235,6 +267,32 @@ export default function TenantPlansPage() {
                   >
                     Elegir Plan Anual (Ahorra {calculateYearlyDiscount(plan.price * 12, plan.yearlyPrice)}%)
                   </Button>
+                )}
+                {plan.id === 'pro' && isInitialSelection && (
+                  <>
+                    <Button
+                      className="w-full"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleStartTrial}
+                      disabled={trialLoading}
+                    >
+                      {trialLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Activando trial...
+                        </>
+                      ) : (
+                        <>
+                          Comenzar prueba gratuita (14 días)
+                          <ArrowRight className="w-4 h-4 ml-2" />
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-center text-gray-500 dark:text-gray-400">
+                      Incluye todas las capacidades Pro sin tarjeta de crédito.
+                    </p>
+                  </>
                 )}
               </CardFooter>
             </Card>

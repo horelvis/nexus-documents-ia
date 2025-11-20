@@ -23,6 +23,46 @@ class WeaviateService:
     def __init__(self):
         self.client = None
         self.embedding_model = None
+
+    def _build_property_filter(self, key: str, value: Any):
+        """Create filter for property supporting list/dict inputs"""
+        if value is None:
+            return None
+
+        # Support dict format with operator/value keys
+        if isinstance(value, dict):
+            operator = value.get("operator") or value.get("op")
+            values = value.get("values")
+            single_value = value.get("value")
+
+            if operator in {"in", "contains_any"} or isinstance(values, (list, tuple, set)):
+                candidate_values_raw = values or single_value or []
+                if isinstance(candidate_values_raw, (list, tuple, set)):
+                    candidate_values = list(candidate_values_raw)
+                elif candidate_values_raw:
+                    candidate_values = [candidate_values_raw]
+                else:
+                    candidate_values = []
+                return self._build_property_filter(key, candidate_values)
+
+            if single_value is not None:
+                value = single_value
+            else:
+                return None
+
+        # Lists/tuples/sets become OR filters
+        if isinstance(value, (list, tuple, set)):
+            items = [item for item in value if item is not None]
+            if not items:
+                return None
+
+            combined = None
+            for item in items:
+                condition = weaviate.classes.query.Filter.by_property(key).equal(item)
+                combined = condition if combined is None else combined | condition
+            return combined
+
+        return weaviate.classes.query.Filter.by_property(key).equal(value)
         
     async def initialize(self):
         """Initialize Weaviate client and embeddings"""
@@ -316,8 +356,9 @@ class WeaviateService:
             combined_filters = tenant_filter
             if search_request.filters:
                 for key, value in search_request.filters.items():
-                    additional_filter = weaviate.classes.query.Filter.by_property(key).equal(str(value))
-                    combined_filters = combined_filters & additional_filter
+                    additional_filter = self._build_property_filter(key, value)
+                    if additional_filter is not None:
+                        combined_filters = combined_filters & additional_filter
             
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":
@@ -577,8 +618,9 @@ class WeaviateService:
             
             if query.filters:
                 for key, value in query.filters.items():
-                    additional_filter = weaviate.classes.query.Filter.by_property(key).equal(str(value))
-                    where_filter = where_filter & additional_filter
+                    additional_filter = self._build_property_filter(key, value)
+                    if additional_filter is not None:
+                        where_filter = where_filter & additional_filter
             
             # Execute vector search using v4 API
             return_metadata = [weaviate.classes.query.MetadataQuery.certainty()]

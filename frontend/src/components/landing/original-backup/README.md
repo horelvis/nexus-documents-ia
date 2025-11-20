@@ -1,24 +1,22 @@
 # Original Landing Page Backup
 
-Este directorio contiene una copia de respaldo de la landing page original de NexusDocs360 antes de la migración a caps-copy.
+Este directorio contiene una copia de respaldo de la landing page original de NexusDocs360 antes de la migración a nexus-theme.
 
-## Archivos incluidos:
+La estructura original de la landing page (landing-header, landing-footer, hero-section, etc.) se ha movido aquí para mantener el código seguro mientras se implementa la nueva versión.
 
-- `original-page.tsx` - La página principal original (app/page.tsx)
-- `cta-section.tsx` - Sección de llamada a la acción
-- `features-section.tsx` - Sección de características
-- `hero-section.tsx` - Sección hero principal
-- `landing-footer.tsx` - Footer de la landing
-- `landing-header.tsx` - Header de la landing
-- `pricing-section.tsx` - Sección de precios
-- `stats-section.tsx` - Sección de estadísticas
-- `index.ts` - Archivo de exportaciones
+## Contenido
+- `landing-header.tsx`: Header original
+- `landing-footer.tsx`: Footer original
+- `hero-section.tsx`: Hero section original
+- `features-section.tsx`: Features section original
+- `stats-section.tsx`: Stats section original
+- `pricing-section.tsx`: Pricing section original
+- `cta-section.tsx`: CTA section original
+- `original-page.tsx`: Copia del page.tsx original que usaba estos componentes
 
-## Fecha de backup:
-$(date)
-
-## Propósito:
-Respaldo creado antes de migrar a caps-copy como landing page principal.
+## Uso
+Estos componentes no deberían usarse en la versión activa de la aplicación a menos que se decida revertir los cambios.
+Respaldo creado antes de migrar a nexus-theme como landing page principal.
 
 ## Restauración:
 Para restaurar la landing original, copiar estos archivos de vuelta a sus ubicaciones originales:

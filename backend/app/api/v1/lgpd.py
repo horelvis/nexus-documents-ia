@@ -4,12 +4,13 @@ Complete user data deletion for LGPD compliance
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Dict, Any, Optional
 import logging
 
 from app.api.async_dependencies import get_current_user_async, get_async_db
 from app.services.lgpd_deletion_service import lgpd_deletion_service
-from app.db.models import User, LGPDDeletionAudit
+from app.db.models import User, LGPDDeletionAudit, Tenant
 from app.schemas.user import UserResponse
 from pydantic import BaseModel, Field, EmailStr
 
@@ -21,15 +22,22 @@ router = APIRouter(tags=["LGPD Compliance"])
 class LGPDDeletionRequest(BaseModel):
     """Request model for LGPD user deletion"""
     confirmation_email: EmailStr = Field(..., description="User email for confirmation")
-    confirmation_text: str = Field(..., min_length=10, description="User must type confirmation text")
+    confirmation_text: str = Field(..., min_length=5, description="User must type confirmation text")
     reason: Optional[str] = Field(None, max_length=500, description="Optional reason for deletion")
+    delete_tenant: bool = Field(False, description="Also delete tenant data when user is an owner/admin")
+    tenant_confirmation: Optional[str] = Field(
+        None,
+        description="Tenant name confirmation (required when delete_tenant=true)"
+    )
     
     class Config:
         schema_extra = {
             "example": {
                 "confirmation_email": "user@example.com",
-                "confirmation_text": "DELETE MY ACCOUNT PERMANENTLY",
-                "reason": "No longer using the service"
+                "confirmation_text": "DELETE",
+                "reason": "No longer using the service",
+                "delete_tenant": False,
+                "tenant_confirmation": None
             }
         }
 
@@ -152,40 +160,61 @@ async def request_user_deletion(
     - User must type explicit confirmation text
     - Process is logged for compliance audit
     """
+    current_user_id = str(current_user.id)
+    current_user_email = current_user.email
     try:
-        logger.warning(f"🔥 LGPD DELETION REQUEST by user {current_user.id}")
+        logger.warning(f"🔥 LGPD DELETION REQUEST by user {current_user_id}")
         
         # Security validations
-        if deletion_request.confirmation_email != current_user.email:
+        if deletion_request.confirmation_email != current_user_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Confirmation email does not match your account email"
             )
         
-        expected_confirmation = "DELETE MY ACCOUNT PERMANENTLY"
+        expected_confirmation = "DELETE"
         if deletion_request.confirmation_text != expected_confirmation:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Confirmation text must be exactly: '{expected_confirmation}'"
             )
         
+        if deletion_request.delete_tenant:
+            if not current_user.is_admin:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only tenant administrators can delete the entire organization"
+                )
+            tenant_stmt = select(Tenant).where(Tenant.id == current_user.tenant_id)
+            tenant_result = await db.execute(tenant_stmt)
+            tenant_info = tenant_result.scalar_one_or_none()
+            if not tenant_info:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+            if not deletion_request.tenant_confirmation or \
+                deletion_request.tenant_confirmation.strip() != tenant_info.name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tenant confirmation name does not match"
+                )
+        
         # Execute LGPD deletion
         result = await lgpd_deletion_service.request_user_deletion(
             db=db,
-            user_id=str(current_user.id),
-            requested_by_user_id=str(current_user.id),
+            user_id=current_user_id,
+            requested_by_user_id=current_user_id,
             confirmation_token=deletion_request.confirmation_text,
-            reason=deletion_request.reason
+            reason=deletion_request.reason,
+            delete_tenant=deletion_request.delete_tenant
         )
         
-        logger.warning(f"🔥 LGPD DELETION COMPLETED for user {current_user.id}")
+        logger.warning(f"🔥 LGPD DELETION COMPLETED for user {current_user_id}")
         
         return LGPDDeletionResponse(**result)
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ LGPD deletion failed for user {current_user.id}: {e}")
+        logger.error(f"❌ LGPD deletion failed for user {current_user_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process deletion request"
@@ -331,7 +360,7 @@ async def get_lgpd_compliance_info():
                 "step_3": "System performs complete data removal within 30 days",
                 "step_4": "Audit record is created for compliance (anonymized)",
                 "irreversible": True,
-                "external_services": "Manual deletion required from Clerk and Stripe"
+                "external_services": "Clerk and Stripe accounts are deleted automatically when API keys are configured; otherwise manual action is required"
             },
             "data_retention": {
                 "audit_records": "Anonymized and retained for 5 years for legal compliance",

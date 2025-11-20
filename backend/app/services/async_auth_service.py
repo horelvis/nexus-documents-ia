@@ -371,20 +371,14 @@ class AsyncAuthService:
             user_tenant_id = user_tenant.id
             is_team_member = False
         
-        # Check if user selected a plan (from metadata)
-        selected_plan = metadata.get('selected_plan') if metadata else None
+        # Capture preferred plan from metadata but defer activation until explicit selection
+        preferred_plan = metadata.get('selected_plan') if metadata else None
         
-        # Set trial data for free plan
         trial_ends_at = None
         subscription_plan = None
         subscription_status = None
-        
-        if selected_plan == 'free':
-            # User selected free trial plan
-            trial_ends_at = datetime.utcnow() + timedelta(days=14)
-            subscription_plan = 'trial'
-            subscription_status = 'trialing'
-            logger.info(f"🎁 Setting up 14-day trial for user")
+        if preferred_plan:
+            logger.info(f"🗂️ User indicated preferred plan '{preferred_plan}' during signup; waiting for explicit activation")
         
         # Crear usuario con password temporal (no se usará con Clerk)
         new_user = User(

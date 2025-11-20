@@ -58,7 +58,7 @@ const Hero = () => {
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
                             <Button size="lg" asChild>
-                                <Link href="/auth/sign-up">
+                                <Link href="/pricing">
                                     Solicitar demo
                                 </Link>
                             </Button>
@@ -73,7 +73,7 @@ const Hero = () => {
                     <AnimationContainer delay={0.3}>
                         <div className="flex items-center justify-center mt-6 lg:hidden gap-x-4">
                             <Button asChild>
-                                <Link href="/auth/sign-up">
+                                <Link href="/pricing">
                                     Empezar piloto
                                 </Link>
                             </Button>

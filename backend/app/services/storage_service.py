@@ -45,8 +45,9 @@ class StorageService:
             True si se subió correctamente, False en caso contrario
         """
         try:
-            # Extraer filename del object_name
-            filename = object_name.split("/")[-1]
+            # Preservar rutas internas (templates/, documents/, etc.)
+            object_name = object_name.lstrip("/")
+            filename = object_name
             
             result = self.client.upload_file(
                 file=file,
@@ -72,6 +73,7 @@ class StorageService:
             Contenido del archivo como bytes o None si no existe
         """
         try:
+            object_name = object_name.lstrip("/")
             # Si el object_name incluye el prefijo del tenant, removerlo
             # Formato esperado: tenant-{id}/user-{id}/filename o tenant-{id}/system/filename
             file_path = object_name
@@ -122,6 +124,7 @@ class StorageService:
             True si se eliminó correctamente, False en caso contrario
         """
         try:
+            object_name = object_name.lstrip("/")
             # Si el object_name incluye el prefijo del tenant, removerlo
             file_path = object_name
             
@@ -209,8 +212,8 @@ class StorageService:
             Tuple con la URL firmada y la fecha de expiración
         """
         try:
-            # Extraer filename del object_name
-            filename = object_name.split("/")[-1]
+            object_name = object_name.lstrip("/")
+            filename = object_name
             
             url, expires_at = self.client.generate_upload_signed_url(
                 filename=filename,
@@ -241,6 +244,7 @@ class StorageService:
             Tuple con la URL firmada y la fecha de expiración
         """
         try:
+            object_name = object_name.lstrip("/")
             # Si el object_name incluye el prefijo del tenant, removerlo
             file_path = object_name
             

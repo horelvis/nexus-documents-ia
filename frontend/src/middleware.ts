@@ -8,7 +8,8 @@ const isPublicRoute = createRouteMatcher([
   '/auth/sign-up(.*)',
   '/auth/sign-out(.*)',
   '/auth/redirect',
-  '/shared/(.*)'  // Public share links
+  '/shared/(.*)',  // Public share links
+  '/integrations/(.*)'
 ])
 
 const isSubscriptionRoute = createRouteMatcher([

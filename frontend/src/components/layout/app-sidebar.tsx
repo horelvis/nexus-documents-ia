@@ -67,10 +67,6 @@ const data = {
           url: "/documents",
         },
         {
-          title: "Recent Documents",
-          url: "/documents/recent",
-        },
-        {
           title: "Shared Documents",
           url: "/shared",
         },
@@ -107,26 +103,6 @@ const data = {
         {
           title: "Analytics",
           url: "/workflows/analytics",
-        },
-      ],
-    },
-    {
-      title: "Document Templates",
-      url: "/templates",
-      icon: IconFileText,
-      color: "orange",
-      items: [
-        {
-          title: "Template Library",
-          url: "/templates",
-        },
-        {
-          title: "Create Template",
-          url: "/templates/create",
-        },
-        {
-          title: "Edit Sessions",
-          url: "/templates/sessions",
         },
       ],
     },
@@ -256,13 +232,33 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
     console.log('Sidebar - QuickActions URLs:', getNavData().quickActions.map(a => a.url))
   }, [backendUser, isTenantAdmin, tenantId])
   
+  const buildNavMain = React.useCallback(() => {
+    const baseNav = [...data.navMain]
+    if (isTenantAdmin) {
+      const templateItem = {
+        title: "Document Templates",
+        url: "/templates",
+        icon: IconFileText,
+        color: "orange",
+      }
+      const insertIndex = baseNav.findIndex(item => item.title === "Digital Signatures")
+      if (insertIndex >= 0) {
+        baseNav.splice(insertIndex, 0, templateItem)
+      } else {
+        baseNav.push(templateItem)
+      }
+    }
+    return baseNav
+  }, [isTenantAdmin])
+  
   // Generate tenant-aware navigation data
   const getNavData = () => {
     const basePath = tenantId ? `/${tenantId}` : '';
+    const navMainSource = buildNavMain()
     
     return {
       ...data,
-      navMain: data.navMain.map(item => ({
+      navMain: navMainSource.map(item => ({
         ...item,
         url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`,
         color: item.color,

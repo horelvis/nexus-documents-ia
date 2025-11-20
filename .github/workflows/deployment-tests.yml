@@ -78,15 +78,15 @@ jobs:
         # Test basic imports
         cd backend
         python3 - <<'PY'
-import sys
-sys.path.append('.')
-try:
-    from app.main import app
-    print('✅ FastAPI app imports OK')
-except Exception as e:
-    print(f'❌ FastAPI import failed: {e}')
-    exit(1)
-PY
+        import sys
+        sys.path.append('.')
+        try:
+            from app.main import app
+            print('✅ FastAPI app imports OK')
+        except Exception as e:
+            print(f'❌ FastAPI import failed: {e}')
+            exit(1)
+        PY
 
   docker-build-test:
     name: Docker Build Test
