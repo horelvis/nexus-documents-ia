@@ -533,10 +533,19 @@ export default function DocumentsPage() {
       addNotification({
         type: 'success',
         title: 'Plantilla creada',
-        message: `Abriremos Google Docs para "${template.name || document.title || document.filename}".`
+        message: `La plantilla "${template.name}" se ha creado correctamente.`
       })
 
-      await openTemplateInGoogleDocs(template.id, template.name || document.title || document.filename)
+      try {
+        await openTemplateInGoogleDocs(template.id, template.name || document.title || document.filename)
+      } catch (docError) {
+        console.warn('Failed to open Google Docs:', docError)
+        addNotification({
+          type: 'warning',
+          title: 'Edición no disponible',
+          message: 'La plantilla se creó, pero no pudimos abrir Google Docs. Asegúrate de conectar tu cuenta de Google Drive en Configuración.'
+        })
+      }
     } catch (error) {
       addNotification({
         type: 'error',
