@@ -107,28 +107,6 @@ async def get_current_user_info(
     # Log user status for debugging
     logger.info(f"📋 [AUTH_ENDPOINT] User onboarding completed: {current_user.onboarding_completed}")
     
-    # TODO: Fix SubscriptionServiceV2 to be fully async
-    # For now, use the values from the database
-    try:
-        # Ensure user has default subscription values
-        if not current_user.subscription_plan:
-            current_user.subscription_plan = 'trial'
-        if not current_user.subscription_status:
-            current_user.subscription_status = 'active'
-        
-        # If user has trial_ends_at, check if it's still valid
-        if hasattr(current_user, 'trial_ends_at') and current_user.trial_ends_at:
-            from datetime import datetime
-            if current_user.trial_ends_at < datetime.utcnow():
-                # Trial expired
-                current_user.subscription_status = 'expired'
-        
-        await db.commit()
-        
-    except Exception as e:
-        logger.error(f"Error updating subscription status: {e}")
-        await db.rollback()
-    
     # Return user data without lazy-loaded relationships
     return serialize_user(current_user)
 
@@ -152,20 +130,7 @@ async def complete_onboarding(
             if onboarding_data.first_name and onboarding_data.last_name:
                 current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
             
-            if onboarding_data.selected_plan:
-                current_user.subscription_plan = onboarding_data.selected_plan
-
-                if onboarding_data.selected_plan == 'pro': # Assuming 'pro' plan triggers a trial
-                    current_user.subscription_status = 'trialing'
-                    current_user.trial_ends_at = datetime.utcnow() + timedelta(days=14)
-                    logger.info(f"🎉 User {current_user.id} started Pro Trial, ends at: {current_user.trial_ends_at}")
-                elif onboarding_data.selected_plan == 'free':
-                    current_user.subscription_status = 'active'
-                    logger.info(f"🆓 User {current_user.id} selected Free Plan.")
-                # For other plans (e.g., enterprise), the status might be 'pending' or handled by webhooks
-
             logger.info(f"📝 Onboarding completed for user {current_user.id}")
-            logger.info(f"  - Plan seleccionado: {onboarding_data.selected_plan}")
             logger.info(f"  - Empresa: {onboarding_data.company_name}")
             logger.info(f"  - Industria: {onboarding_data.industry}")
             logger.info(f"  - Datos de perfil se obtienen de Clerk y Stripe (si aplica)")
