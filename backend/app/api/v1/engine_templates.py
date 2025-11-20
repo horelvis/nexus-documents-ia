@@ -893,7 +893,7 @@ def _build_template_response(template: WorkflowTemplate) -> WorkflowTemplateResp
     """Helper to keep API responses consistent."""
     return WorkflowTemplateResponse(
         id=str(template.id),
-        tenant_id=template.tenant_id,
+        tenant_id=str(template.tenant_id),
         name=template.name,
         description=template.description,
         category=template.category,
@@ -906,7 +906,7 @@ def _build_template_response(template: WorkflowTemplate) -> WorkflowTemplateResp
         success_rate=template.success_rate,
         is_public=template.is_public,
         allowed_roles=template.allowed_roles,
-        created_by=template.created_by,
+        created_by=str(template.created_by),
         created_at=template.created_at,
         updated_at=template.updated_at,
         workflow_definition=template.workflow_definition,
