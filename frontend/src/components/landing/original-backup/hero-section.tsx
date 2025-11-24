@@ -48,7 +48,7 @@ export function HeroSection() {
             <span className="text-indigo-600">inteligencia artificial</span>
           </h1>
           <p className="mt-6 text-lg leading-8 text-gray-600 sm:text-xl">
-            Nexus es la plataforma de gestión documental que utiliza IA para organizar, buscar y analizar 
+            Nexus Documents 360 es la plataforma de gestión documental que utiliza IA para organizar, buscar y analizar 
             tus documentos de manera inteligente. Sube, busca semánticamente y obtén insights automáticos.
           </p>
         </div>

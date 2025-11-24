@@ -60,7 +60,7 @@ export function LandingFooter() {
           <div className="space-y-8">
             <div className="flex items-center">
               <IconFileText className="h-8 w-8 text-indigo-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">Nexus</span>
+              <span className="ml-2 text-xl font-bold text-gray-900">Nexus Documents 360</span>
             </div>
             <p className="text-sm leading-6 text-gray-600">
               La plataforma de gestión documental más avanzada, potenciada por inteligencia artificial 
@@ -144,7 +144,7 @@ export function LandingFooter() {
         </div>
         <div className="mt-16 border-t border-gray-900/10 pt-8 sm:mt-20 lg:mt-24">
           <p className="text-xs leading-5 text-gray-500">
-            &copy; 2024 Nexus Document Management. Todos los derechos reservados.
+            &copy; 2024 Nexus Documents 360. Todos los derechos reservados.
           </p>
         </div>
       </div>

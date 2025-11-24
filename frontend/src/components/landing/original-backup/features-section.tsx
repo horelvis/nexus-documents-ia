@@ -62,7 +62,7 @@ export function FeaturesSection() {
             Todo lo que necesitas para gestionar documentos
           </p>
           <p className="mt-6 text-lg leading-8 text-gray-600">
-            Desde la subida hasta el análisis avanzado, Nexus te proporciona todas las herramientas 
+            Desde la subida hasta el análisis avanzado, Nexus Documents 360 te proporciona todas las herramientas 
             para maximizar el valor de tus documentos.
           </p>
         </div>

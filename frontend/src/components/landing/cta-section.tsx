@@ -32,7 +32,7 @@ export function CTASection() {
             ¿Listo para revolucionar tu gestión documental?
           </h2>
           <p className="mx-auto mt-6 max-w-xl text-lg leading-8 text-indigo-200">
-            Únete a miles de empresas que ya utilizan Nexus para optimizar su flujo de trabajo documental.
+            Únete a miles de empresas que ya utilizan Nexus Documents 360 para optimizar su flujo de trabajo documental.
           </p>
           
           <div className="mt-8 flex flex-col items-center space-y-4">

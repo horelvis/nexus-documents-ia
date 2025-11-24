@@ -17,7 +17,7 @@ export function StatsSection() {
               Resultados que hablan por sí mismos
             </h2>
             <p className="mt-4 text-lg leading-8 text-gray-300">
-              Miles de empresas ya utilizan Nexus para transformar su gestión documental
+              Miles de empresas ya utilizan Nexus Documents 360 para transformar su gestión documental
             </p>
           </div>
           <dl className="mt-16 grid grid-cols-1 gap-0.5 overflow-hidden rounded-2xl text-center sm:grid-cols-2 lg:grid-cols-4">

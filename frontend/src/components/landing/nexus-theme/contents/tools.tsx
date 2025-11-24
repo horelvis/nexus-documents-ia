@@ -30,7 +30,7 @@ const Tools = () => {
                         Conecta tu correo, almacenamiento y firma electrónica
                     </h2>
                     <p className="max-w-lg mt-6 text-center text-neutral-500">
-                        Importa documentos desde email, Drive o OneDrive, sincroniza con tu gestor de nóminas y lanza flujos de firma certificados sin salir de NexusDocs360.
+                        Importa documentos desde email, Drive o OneDrive, sincroniza con tu gestor de nóminas y lanza flujos de firma certificados sin salir de Nexus Documents 360.
                     </p>
                 </div>
             </AnimationContainer>

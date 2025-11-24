@@ -31,7 +31,7 @@ export function LandingHeader() {
         <div className="flex lg:flex-1">
           <a href="#" className="-m-1.5 p-1.5 flex items-center">
             <IconFileText className="h-8 w-8 text-indigo-600" />
-            <span className="ml-2 text-xl font-bold text-gray-900">Nexus</span>
+            <span className="ml-2 text-xl font-bold text-gray-900">Nexus Documents 360</span>
           </a>
         </div>
         <div className="flex lg:hidden">
@@ -84,7 +84,7 @@ export function LandingHeader() {
             <div className="flex items-center justify-between">
               <a href="#" className="-m-1.5 p-1.5 flex items-center">
                 <IconFileText className="h-8 w-8 text-indigo-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900">Nexus</span>
+                <span className="ml-2 text-xl font-bold text-gray-900">Nexus Documents 360</span>
               </a>
               <button
                 type="button"

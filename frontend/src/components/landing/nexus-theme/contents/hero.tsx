@@ -54,7 +54,7 @@ const Hero = () => {
                     </AnimationContainer>
                     <AnimationContainer delay={0.2}>
                         <p className="max-w-xl mt-2 text-base text-center text-accent-foreground/60">
-                            Centraliza nóminas, contratos y modelos oficiales, detecta riesgos y responde a tus clientes en minutos. <span className="hidden lg:inline">NexusDocs360 clasifica documentos laborales, genera alertas antes de las inspecciones y ofrece búsqueda semántica sobre todos los expedientes.</span>
+                            Centraliza nóminas, contratos y modelos oficiales, detecta riesgos y responde a tus clientes en minutos. <span className="hidden lg:inline">Nexus Documents 360 clasifica documentos laborales, genera alertas antes de las inspecciones y ofrece búsqueda semántica sobre todos los expedientes.</span>
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
                             <Button size="lg" asChild>

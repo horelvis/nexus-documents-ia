@@ -5,7 +5,7 @@ const Icons = {
     logo: ({ className }: { className?: string }) => (
         <Image
             src="/logo/logo-full.svg"
-            alt="NexusDocs360"
+            alt="Nexus Documents 360"
             width={180}
             height={42}
             className={className}
