@@ -6,6 +6,9 @@ on:
       - pre
     tags:
       - 'v*.*.*-pre.*'
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend-pre.yml'
   workflow_dispatch:
   workflow_call:
     inputs:
