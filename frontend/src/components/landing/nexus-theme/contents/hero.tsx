@@ -31,7 +31,7 @@ const Hero = () => {
                 <div className="flex flex-col items-center justify-center gap-y-4">
                     <AnimationContainer className="relative hidden lg:block overflow-hidden">
                         <Badge variant="outline" className="px-3 cursor-pointer">
-                            <span className="px-2 py-[0.5px] h-[18px] tracking-wide flex items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-orange-600 text-[9px] font-medium mr-2 text-white">
+                            <span className="px-2 py-[0.5px] h-[18px] tracking-wide flex items-center justify-center rounded-full bg-gradient-to-r from-[#8b6af6] to-[#a48bff] text-[9px] font-medium mr-2 text-white">
                                 NEW
                             </span>
                             <span>
@@ -129,8 +129,8 @@ const Hero = () => {
                             animate="visible"
                             className="absolute right-1/4 flex items-center justify-center opacity-50 group top-1/4"
                         >
-                            <div className="relative p-2 bg-orange-500/20 rounded-lg backdrop-blur-sm">
-                                <Presentation className="w-6 h-6 text-orange-400" />
+                            <div className="relative p-2 bg-[#8b6af6]/20 rounded-lg backdrop-blur-sm">
+                                <Presentation className="w-6 h-6 text-[#8b6af6]" />
                             </div>
                         </motion.div>
                         <motion.div
