@@ -1,46 +1,76 @@
 "use client"
 
-import { IconFileText, IconBrandTwitter, IconBrandLinkedin, IconBrandGithub } from "@tabler/icons-react"
+import {
+  IconFileText,
+  IconBrandTwitter,
+  IconBrandLinkedin,
+  IconBrandGithub,
+  IconMail,
+  IconPhone,
+  IconMapPin,
+} from "@tabler/icons-react"
 
-const navigation = {
-  product: [
-    { name: 'Características', href: '#features' },
-    { name: 'Precios', href: '#pricing' },
-    { name: 'Integraciones', href: '#integrations' },
-  ],
-  company: [
-    { name: 'Sobre Nosotros', href: '#about' },
-    { name: 'Blog', href: '#blog' },
-    { name: 'Carreras', href: '#careers' },
-  ],
-  support: [
-    { name: 'Centro de Ayuda', href: '#help' },
-    { name: 'Documentación', href: '#docs' },
-    { name: 'Contacto', href: '#contact' },
-  ],
-  legal: [
-    { name: 'Privacidad', href: '#privacy' },
-    { name: 'Términos', href: '#terms' },
-    { name: 'Cookies', href: '#cookies' },
-  ],
-  social: [
-    {
-      name: 'Twitter',
-      href: '#',
-      icon: IconBrandTwitter,
-    },
-    {
-      name: 'LinkedIn',
-      href: '#',
-      icon: IconBrandLinkedin,
-    },
-    {
-      name: 'GitHub',
-      href: '#',
-      icon: IconBrandGithub,
-    },
-  ],
-}
+const linkGroups = [
+  {
+    title: "Producto",
+    links: [
+      { name: "Características", href: "#features" },
+      { name: "Precios", href: "#pricing" },
+      { name: "Integraciones", href: "#integrations" },
+    ],
+  },
+  {
+    title: "Empresa",
+    links: [
+      { name: "Sobre Nosotros", href: "#about" },
+      { name: "Casos de Éxito", href: "#cases" },
+      { name: "Partners", href: "#partners" },
+    ],
+  },
+  {
+    title: "Recursos",
+    links: [
+      { name: "Blog", href: "#blog" },
+      { name: "Documentación", href: "#docs" },
+      { name: "Centro de Ayuda", href: "#help" },
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      { name: "Privacidad", href: "#privacy" },
+      { name: "Términos", href: "#terms" },
+      { name: "Cookies", href: "#cookies" },
+    ],
+  },
+]
+
+const contactInfo = [
+  {
+    label: "Escríbenos",
+    value: "contacto@nexusdocs360.com",
+    href: "mailto:contacto@nexusdocs360.com",
+    icon: IconMail,
+  },
+  {
+    label: "Asesor comercial",
+    value: "+34 910 123 456",
+    href: "tel:+34910123456",
+    icon: IconPhone,
+  },
+  {
+    label: "Oficinas",
+    value: "Av. Diagonal 640, Barcelona",
+    href: "https://maps.google.com/?q=Av.+Diagonal+640,+Barcelona",
+    icon: IconMapPin,
+  },
+]
+
+const social = [
+  { name: "Twitter", href: "https://twitter.com/nexusdocs360", icon: IconBrandTwitter },
+  { name: "LinkedIn", href: "https://linkedin.com/company/nexusdocs360", icon: IconBrandLinkedin },
+  { name: "GitHub", href: "https://github.com/nexusdocs360", icon: IconBrandGithub },
+]
 
 export function LandingFooter() {
   const scrollToSection = (href: string) => {
@@ -51,101 +81,111 @@ export function LandingFooter() {
   }
 
   return (
-    <footer className="bg-white" aria-labelledby="footer-heading">
-      <h2 id="footer-heading" className="sr-only">
-        Footer
-      </h2>
-      <div className="mx-auto max-w-7xl px-6 pb-8 pt-16 sm:pt-24 lg:px-8 lg:pt-32">
-        <div className="xl:grid xl:grid-cols-3 xl:gap-8">
+    <footer className="relative mt-24 bg-gray-950 text-gray-300" aria-labelledby="footer-heading">
+      <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/95 to-transparent" />
+      <div className="relative mx-auto max-w-7xl px-6 pb-10 pt-20 sm:px-8">
+        <div className="grid gap-8 rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-8">
             <div className="flex items-center">
-              <IconFileText className="h-8 w-8 text-indigo-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">Nexus Documents 360</span>
+              <IconFileText className="h-9 w-9 text-[#8b6af6]" />
+              <div className="ml-3">
+                <p className="text-lg font-semibold text-white">Nexus Documents 360</p>
+                <p className="text-sm text-gray-400">Inteligencia documental para asesorías modernas</p>
+              </div>
             </div>
-            <p className="text-sm leading-6 text-gray-600">
-              La plataforma de gestión documental más avanzada, potenciada por inteligencia artificial 
-              para maximizar la productividad de tu equipo.
+
+            <p className="text-sm leading-6 text-gray-400">
+              Centraliza y protege tus documentos estratégicos con flujos de IA, firmas electrónicas y analítica
+              operativa en tiempo real. Diseñado para equipos legales, laborales y financieros que necesitan
+              velocidad sin renunciar a la seguridad.
             </p>
-            <div className="flex space-x-6">
-              {navigation.social.map((item) => (
-                <a key={item.name} href={item.href} className="text-gray-400 hover:text-gray-500">
+
+            <div className="flex flex-wrap items-center gap-3">
+              {["ISO 27001 Ready", "Soporte 24/7", "Infraestructura UE"].map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full border border-white/15 px-4 py-1 text-xs font-semibold uppercase tracking-wider text-gray-300"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-4">
+              {social.map((item) => (
+                <a
+                  key={item.name}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-gray-200 transition hover:border-[#8b6af6]/40 hover:text-white"
+                >
                   <span className="sr-only">{item.name}</span>
-                  <item.icon className="h-6 w-6" aria-hidden="true" />
+                  <item.icon className="h-5 w-5" aria-hidden="true" />
                 </a>
               ))}
             </div>
           </div>
-          <div className="mt-16 grid grid-cols-2 gap-8 xl:col-span-2 xl:mt-0">
-            <div className="md:grid md:grid-cols-2 md:gap-8">
-              <div>
-                <h3 className="text-sm font-semibold leading-6 text-gray-900">Producto</h3>
-                <ul role="list" className="mt-6 space-y-4">
-                  {navigation.product.map((item) => (
-                    <li key={item.name}>
-                      <button
-                        onClick={() => scrollToSection(item.href)}
-                        className="text-sm leading-6 text-gray-600 hover:text-gray-900"
-                      >
-                        {item.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="mt-10 md:mt-0">
-                <h3 className="text-sm font-semibold leading-6 text-gray-900">Empresa</h3>
-                <ul role="list" className="mt-6 space-y-4">
-                  {navigation.company.map((item) => (
-                    <li key={item.name}>
-                      <button
-                        onClick={() => scrollToSection(item.href)}
-                        className="text-sm leading-6 text-gray-600 hover:text-gray-900"
-                      >
-                        {item.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-            <div className="md:grid md:grid-cols-2 md:gap-8">
-              <div>
-                <h3 className="text-sm font-semibold leading-6 text-gray-900">Soporte</h3>
-                <ul role="list" className="mt-6 space-y-4">
-                  {navigation.support.map((item) => (
-                    <li key={item.name}>
-                      <button
-                        onClick={() => scrollToSection(item.href)}
-                        className="text-sm leading-6 text-gray-600 hover:text-gray-900"
-                      >
-                        {item.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="mt-10 md:mt-0">
-                <h3 className="text-sm font-semibold leading-6 text-gray-900">Legal</h3>
-                <ul role="list" className="mt-6 space-y-4">
-                  {navigation.legal.map((item) => (
-                    <li key={item.name}>
-                      <button
-                        onClick={() => scrollToSection(item.href)}
-                        className="text-sm leading-6 text-gray-600 hover:text-gray-900"
-                      >
-                        {item.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+
+          <div className="space-y-5 rounded-2xl border border-white/10 bg-gray-900/40 p-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-gray-400">Contacto directo</p>
+            <div className="space-y-5">
+              {contactInfo.map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className="flex items-start rounded-xl border border-white/5 bg-white/5 p-4 transition hover:border-[#8b6af6]/40 hover:bg-white/10"
+                >
+                  <item.icon className="mt-1 h-5 w-5 text-[#8b6af6]" aria-hidden="true" />
+                  <div className="ml-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-400">{item.label}</p>
+                    <p className="text-sm font-medium text-white">{item.value}</p>
+                  </div>
+                </a>
+              ))}
             </div>
           </div>
         </div>
-        <div className="mt-16 border-t border-gray-900/10 pt-8 sm:mt-20 lg:mt-24">
-          <p className="text-xs leading-5 text-gray-500">
-            &copy; 2024 Nexus Documents 360. Todos los derechos reservados.
-          </p>
+
+        <div className="mt-16 grid gap-8 md:grid-cols-2 lg:grid-cols-4">
+          {linkGroups.map((group) => (
+            <div key={group.title}>
+              <p className="text-sm font-semibold uppercase tracking-wide text-gray-400">{group.title}</p>
+              <ul className="mt-5 space-y-3">
+                {group.links.map((link) => (
+                  <li key={link.name}>
+                    <button
+                      type="button"
+                      onClick={() => scrollToSection(link.href)}
+                      className="text-sm text-gray-400 transition hover:text-white"
+                    >
+                      {link.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-12 border-t border-white/10 pt-6 text-xs text-gray-500 sm:flex sm:items-center sm:justify-between">
+          <p>&copy; {new Date().getFullYear()} Nexus Documents 360. Todos los derechos reservados.</p>
+          <div className="mt-4 flex gap-4 sm:mt-0">
+            <button
+              type="button"
+              onClick={() => scrollToSection('#privacy')}
+              className="transition hover:text-white"
+            >
+              Política de privacidad
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToSection('#terms')}
+              className="transition hover:text-white"
+            >
+              Términos de servicio
+            </button>
+          </div>
         </div>
       </div>
     </footer>
