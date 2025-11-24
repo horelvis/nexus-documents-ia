@@ -42,7 +42,11 @@ Para los despliegues del entorno PRE seguimos SemVer con sufijo `-pre.N` y utili
 1. Asegura que `develp-new` contenga los cambios aprobados para PRE y posiciona el HEAD en ese commit.
 2. Crea el tag anotado con la versión correspondiente:
    ```bash
+   # Manual
    git tag -a v1.4.0-pre.3 -m "PRE env release 1.4.0 pre.3"
+
+   # O con el script helper
+   scripts/create_pre_tag.sh 1.4.0 --push
    ```
 3. Publica el tag para iniciar los despliegues:
    ```bash
