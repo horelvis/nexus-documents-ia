@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - pre
-    paths:
-      - 'backend/**'
-      - 'backend/microservices/**'
-      - '.github/workflows/deploy-backend-pre.yml'
+    tags:
+      - 'v*.*.*-pre.*'
   workflow_dispatch:
   workflow_call:
 

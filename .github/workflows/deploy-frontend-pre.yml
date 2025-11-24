@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - pre
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy-frontend-pre.yml'
+    tags:
+      - 'v*.*.*-pre.*'
   workflow_dispatch:
   workflow_call:
     inputs:

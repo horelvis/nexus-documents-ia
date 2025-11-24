@@ -35,6 +35,21 @@ Con la configuración anterior, el sistema generará automáticamente:
 
 ## 🚀 Despliegue Rápido
 
+### Flujo de tags para PRE
+
+Para los despliegues del entorno PRE seguimos SemVer con sufijo `-pre.N` y utilizamos tags anotados. Así queda trazabilidad del build y los workflows `deploy-backend-pre` y `deploy-frontend-pre` se disparan automáticamente tanto con pushes a la rama `pre` como cuando llega un tag `v*.*.*-pre.*`.
+
+1. Asegura que `develp-new` contenga los cambios aprobados para PRE y posiciona el HEAD en ese commit.
+2. Crea el tag anotado con la versión correspondiente:
+   ```bash
+   git tag -a v1.4.0-pre.3 -m "PRE env release 1.4.0 pre.3"
+   ```
+3. Publica el tag para iniciar los despliegues:
+   ```bash
+   git push origin v1.4.0-pre.3
+   ```
+4. Supervisa las ejecuciones `Deploy Backend to PRE Environment` y `Deploy Frontend to PRE Environment` en GitHub Actions. Una vez que la versión esté validada en PRE, reutiliza la misma numeración sin el sufijo (`v1.4.0`) para Producción.
+
 ### Opción A: Script Automático (Recomendado)
 ```bash
 # Desde la raíz del proyecto
