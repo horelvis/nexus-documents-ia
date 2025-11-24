@@ -6,7 +6,6 @@ export { default as AnimationContainer } from './utils/animation-container';
 export { default as Hero } from './contents/hero';
 export { default as HeroImage } from './contents/hero-image';
 export { default as Companies } from './contents/companies';
-export { default as Services } from './contents/services';
 export { default as Features } from './contents/features';
 export { default as Offerings } from './contents/offerings';
 export { default as Pricing } from './contents/pricing';
