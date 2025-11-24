@@ -197,144 +197,147 @@ jobs:
         REDIS_URL: redis://localhost:6379
       run: |
         echo "⚡ Running performance tests..."
-        python3 -c "
-import time
-import requests
-import statistics
+        python3 - <<'PY'
+        import statistics
+        import time
 
-def performance_test(url, num_requests=50):
-    print(f'🔬 Testing {url} with {num_requests} requests...')
-    response_times = []
+        import requests
 
-    for i in range(num_requests):
-        start = time.time()
-        try:
-            response = requests.get(url, timeout=10)
-            end = time.time()
-            if response.status_code == 200:
-                response_times.append(end - start)
-        except Exception as e:
-            print(f'❌ Request {i+1} failed: {e}')
 
-    if response_times:
-        avg_time = statistics.mean(response_times)
-        median_time = statistics.median(response_times)
-        min_time = min(response_times)
-        max_time = max(response_times)
-        p95 = statistics.quantiles(response_times, n=20)[18]  # 95th percentile
+        def performance_test(url, num_requests=50):
+            print(f'🔬 Testing {url} with {num_requests} requests...')
+            response_times = []
 
-        print(f'📊 Results for {url}:')
-        print(f'   Total requests: {len(response_times)}/{num_requests}')
-        print(f'   Average: {avg_time:.3f}s')
-        print(f'   Median: {median_time:.3f}s')
-        print(f'   Min: {min_time:.3f}s')
-        print(f'   Max: {max_time:.3f}s')
-        print(f'   95th percentile: {p95:.3f}s')
+            for i in range(num_requests):
+                start = time.time()
+                try:
+                    response = requests.get(url, timeout=10)
+                    end = time.time()
+                    if response.status_code == 200:
+                        response_times.append(end - start)
+                except Exception as exc:
+                    print(f'❌ Request {i + 1} failed: {exc}')
 
-        # Performance criteria
-        if avg_time < 0.5 and p95 < 1.0:
-            print('✅ Performance criteria met')
-            return True
-        else:
-            print('❌ Performance criteria not met')
+            if response_times:
+                avg_time = statistics.mean(response_times)
+                median_time = statistics.median(response_times)
+                min_time = min(response_times)
+                max_time = max(response_times)
+                p95 = statistics.quantiles(response_times, n=20)[18]
+
+                print(f'📊 Results for {url}:')
+                print(f'   Total requests: {len(response_times)}/{num_requests}')
+                print(f'   Average: {avg_time:.3f}s')
+                print(f'   Median: {median_time:.3f}s')
+                print(f'   Min: {min_time:.3f}s')
+                print(f'   Max: {max_time:.3f}s')
+                print(f'   95th percentile: {p95:.3f}s')
+
+                if avg_time < 0.5 and p95 < 1.0:
+                    print('✅ Performance criteria met')
+                    return True
+                print('❌ Performance criteria not met')
+                return False
+
+            print('❌ No successful requests')
             return False
-    else:
-        print('❌ No successful requests')
-        return False
 
-# Test health endpoint
-health_ok = performance_test('http://localhost:8000/api/v1/health', 30)
-print(f'🏥 Health endpoint performance: {\"PASS\" if health_ok else \"FAIL\"}')
-        "
+
+        if __name__ == '__main__':
+            health_ok = performance_test('http://localhost:8000/api/v1/health', 30)
+            status = 'PASS' if health_ok else 'FAIL'
+            print(f'🏥 Health endpoint performance: {status}')
+        PY
 
     - name: Load testing
       if: env.INCLUDE_LOAD_TEST == 'true'
       working-directory: ./backend
       run: |
         echo "🔥 Running load tests..."
-        python3 -c "
-import threading
-import time
-import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
+        python3 - <<'PY'
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def make_request(url, request_id):
-    start = time.time()
-    try:
-        response = requests.get(url, timeout=5)
-        end = time.time()
-        return {
-            'request_id': request_id,
-            'status_code': response.status_code,
-            'response_time': end - start,
-            'success': response.status_code == 200
-        }
-    except Exception as e:
-        end = time.time()
-        return {
-            'request_id': request_id,
-            'status_code': None,
-            'response_time': end - start,
-            'success': False,
-            'error': str(e)
-        }
+        import requests
 
-def load_test(url, num_users=10, duration=30):
-    print(f'🚀 Starting load test: {num_users} users for {duration}s')
-    print(f'🎯 Target: {url}')
 
-    results = []
-    start_time = time.time()
-    end_time = start_time + duration
+        def make_request(url, request_id):
+            start = time.time()
+            try:
+                response = requests.get(url, timeout=5)
+                end = time.time()
+                return {
+                    'request_id': request_id,
+                    'status_code': response.status_code,
+                    'response_time': end - start,
+                    'success': response.status_code == 200,
+                }
+            except Exception as exc:
+                end = time.time()
+                return {
+                    'request_id': request_id,
+                    'status_code': None,
+                    'response_time': end - start,
+                    'success': False,
+                    'error': str(exc),
+                }
 
-    with ThreadPoolExecutor(max_workers=num_users) as executor:
-        request_id = 0
-        futures = []
 
-        while time.time() < end_time:
-            # Submit new requests
-            for _ in range(min(5, num_users)):  # Max 5 concurrent per user
-                if time.time() < end_time:
-                    future = executor.submit(make_request, url, request_id)
-                    futures.append(future)
-                    request_id += 1
-                    time.sleep(0.1)  # Small delay between requests
+        def load_test(url, num_users=10, duration=30):
+            print(f'🚀 Starting load test: {num_users} users for {duration}s')
+            print(f'🎯 Target: {url}')
 
-        # Wait for all requests to complete
-        for future in as_completed(futures):
-            result = future.result()
-            results.append(result)
+            results = []
+            start_time = time.time()
+            end_time = start_time + duration
 
-    # Analyze results
-    successful_requests = [r for r in results if r['success']]
-    failed_requests = [r for r in results if not r['success']]
+            with ThreadPoolExecutor(max_workers=num_users) as executor:
+                request_id = 0
+                futures = []
 
-    if results:
-        response_times = [r['response_time'] for r in successful_requests]
-        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+                while time.time() < end_time:
+                    for _ in range(min(5, num_users)):
+                        if time.time() >= end_time:
+                            break
+                        futures.append(executor.submit(make_request, url, request_id))
+                        request_id += 1
+                        time.sleep(0.1)
 
-        print(f'📊 Load Test Results:')
-        print(f'   Total requests: {len(results)}')
-        print(f'   Successful: {len(successful_requests)}')
-        print(f'   Failed: {len(failed_requests)}')
-        print(f'   Success rate: {(len(successful_requests)/len(results)*100):.1f}%')
-        print(f'   Average response time: {avg_response_time:.3f}s')
+                for future in as_completed(futures):
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        results.append({'request_id': 'unknown', 'success': False, 'error': str(exc)})
 
-        # Load test criteria
-        if len(successful_requests)/len(results) > 0.95 and avg_response_time < 2.0:
-            print('✅ Load test criteria met')
-            return True
-        else:
-            print('❌ Load test criteria not met')
+            successful_requests = [r for r in results if r['success']]
+            failed_requests = [r for r in results if not r['success']]
+
+            if results:
+                response_times = [r['response_time'] for r in successful_requests]
+                avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+
+                print('📊 Load Test Results:')
+                print(f'   Total requests: {len(results)}')
+                print(f'   Successful: {len(successful_requests)}')
+                print(f'   Failed: {len(failed_requests)}')
+                print(f'   Success rate: {(len(successful_requests) / len(results) * 100):.1f}%')
+                print(f'   Average response time: {avg_response_time:.3f}s')
+
+                if len(successful_requests) / len(results) > 0.95 and avg_response_time < 2.0:
+                    print('✅ Load test criteria met')
+                    return True
+                print('❌ Load test criteria not met')
+                return False
+
+            print('❌ No requests completed')
             return False
-    else:
-        print('❌ No requests completed')
-        return False
 
-# Run load test
-load_test_passed = load_test('http://localhost:8000/api/v1/health', num_users=5, duration=20)
-print(f'🔥 Load test result: {\"PASS\" if load_test_passed else \"FAIL\"}')
-        "
+
+        if __name__ == '__main__':
+            load_test_passed = load_test('http://localhost:8000/api/v1/health', num_users=5, duration=20)
+            result = 'PASS' if load_test_passed else 'FAIL'
+            print(f'🔥 Load test result: {result}')
+        PY
 
     - name: Generate nightly report
       run: |
