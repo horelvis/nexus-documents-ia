@@ -463,7 +463,7 @@ jobs:
         name: Frontend Coverage
 
     - name: Upload test artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-${{ github.run_number }}
@@ -530,7 +530,7 @@ jobs:
       run: audit-ci --config audit-ci.json || true
 
     - name: Upload security reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: security-reports-${{ github.run_number }}

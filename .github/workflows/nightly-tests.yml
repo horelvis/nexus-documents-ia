@@ -366,13 +366,13 @@ print(f'🔥 Load test result: {\"PASS\" if load_test_passed else \"FAIL\"}')
         echo "Coverage reports are available in the workflow artifacts." >> nightly-report.md
 
     - name: Upload nightly report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: nightly-report-${{ github.run_number }}
         path: nightly-report.md
 
     - name: Upload coverage and performance data
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: nightly-coverage-${{ github.run_number }}
         path: |
