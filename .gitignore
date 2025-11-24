@@ -51,6 +51,8 @@ Thumbs.db
 # Credenciales - NUNCA commitear!
 credentials/
 *.json
+!frontend/package.json
+!frontend/package-lock.json
 *.key
 *.pem
 *.p12
