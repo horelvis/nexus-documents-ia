@@ -125,16 +125,7 @@ jobs:
         echo "🐳 Testing Docker images..."
 
         # Test backend image
-        docker run --rm nexus-backend:test-${{ github.run_number }} python3 -c "
-import sys
-sys.path.append('/app')
-try:
-    from app.main import app
-    print('✅ Backend Docker image OK')
-except Exception as e:
-    print(f'❌ Backend Docker image failed: {e}')
-    exit(1)
-        "
+        docker run --rm nexus-backend:test-${{ github.run_number }} python3 -c "import sys; sys.path.append('/app'); from app.main import app; print('✅ Backend Docker image OK')"
 
         # Test frontend image (basic check)
         docker run --rm nexus-frontend:test-${{ github.run_number }} ls -la /app/.next || echo "⚠️ Frontend build not found in image"
