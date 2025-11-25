@@ -3,7 +3,7 @@ name: Deploy Backend to PRE Environment
 on:
   push:
     branches:
-      - pre
+      - develp-new
     tags:
       - 'backend-v*.*.*-pre.*'
     paths:

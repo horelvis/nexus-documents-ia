@@ -3,7 +3,7 @@ name: Deploy Frontend to PRE Environment
 on:
   push:
     branches:
-      - pre
+      - develp-new
     tags:
       - 'frontend-v*.*.*-pre.*'
     paths:
