@@ -1,86 +1,41 @@
-<<<<<<< HEAD
 # Production Dockerfile for Backend API
 FROM python:3.11-slim
 
-WORKDIR /app
+# Environment configuration
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=production \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Instalar dependencias del sistema
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Configurar entorno de producción
-ENV PYTHONPATH=/app \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    ENVIRONMENT=production
+WORKDIR /app
 
-# Copiar archivo de requisitos
-COPY requirements.txt .
-
-# Instalar dependencias de Python
+# Install Python dependencies
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Verificar que uvicorn está instalado
-RUN pip show uvicorn || pip install uvicorn
-
-# Copiar código fuente
+# Copy source code
 COPY . .
 
-# Crear usuario no privilegiado
+# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
-# Exponer puerto
 EXPOSE 8000
 
-# Health check - aumentar tiempo de inicio
+# Health check with longer startup allowance for Cloud Run
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Comando para iniciar la aplicación en producción con más tiempo de timeout
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "120"]
-=======
-# Backend Dockerfile for production deployment
-FROM python:3.9-slim
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create and set working directory
-WORKDIR /app
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the application code
-COPY . .
-
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser
-RUN chown -R appuser:appuser /app
-USER appuser
-
-# Expose port
-EXPOSE 8000
-
-# Run the application - Cloud Run sets PORT automatically
-CMD ["sh", "-c", "uvicorn app.main_intermediate:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level info"]
->>>>>>> feature/architecture-improvements
+# Run the application (Cloud Run injects PORT if present)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level info --timeout-keep-alive 120"]
