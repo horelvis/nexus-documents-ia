@@ -92,7 +92,7 @@ jobs:
           --port 8000 \
           --allow-unauthenticated \
           --env-vars-file backend-env-vars.yaml \
-          --set-secrets "POSTGRES_PASSWORD=postgres-password:latest,REDIS_URL=redis-url-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest" \
+          --set-secrets "POSTGRES_PASSWORD=postgres-password:latest,REDIS_URL=redis-url-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest,SIGNATURE_ENCRYPTION_KEY=signature-encryption-key-pre:latest" \
           --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 0 \
           --max-instances 3 \

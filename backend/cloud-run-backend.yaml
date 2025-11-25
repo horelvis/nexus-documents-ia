@@ -46,6 +46,11 @@ spec:
             secretKeyRef:
               name: clerk-secret
               key: secret-key
+        - name: SIGNATURE_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: signature-encryption-key-pre
+              key: latest
         
         # Payments
         - name: STRIPE_SECRET_KEY

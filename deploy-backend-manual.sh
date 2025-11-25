@@ -43,7 +43,7 @@ gcloud run deploy $SERVICE_NAME \
   --vpc-egress private-ranges-only \
   --service-account nexus-cloud-run-pre@$PROJECT_ID.iam.gserviceaccount.com \
   --set-env-vars "ENVIRONMENT=pre" \
-  --set-secrets "DATABASE_URL=database-url-pre:latest,ASYNC_DATABASE_URL=async-database-url-pre:latest,REDIS_URL=redis-url-pre:latest,SECRET_KEY=secret-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
+  --set-secrets "DATABASE_URL=database-url-pre:latest,ASYNC_DATABASE_URL=async-database-url-pre:latest,REDIS_URL=redis-url-pre:latest,SECRET_KEY=secret-key-pre:latest,CLERK_SECRET_KEY=clerk-secret-pre:latest,STRIPE_SECRET_KEY=stripe-secret-pre:latest,SIGNATURE_ENCRYPTION_KEY=signature-encryption-key-pre:latest,MICROSERVICES_API_KEY=microservices-api-key-pre:latest" \
   --min-instances 1 \
   --max-instances 3 \
   --memory 1Gi \
