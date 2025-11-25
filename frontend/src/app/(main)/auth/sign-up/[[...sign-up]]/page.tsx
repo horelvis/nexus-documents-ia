@@ -1,314 +1,197 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { SignUp, useAuth, useUser } from '@clerk/nextjs'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { STRIPE_PLANS, type PlanId } from '@/lib/stripe-plans'
+import { CheckCircle, Loader2 } from 'lucide-react'
 
 function SignUpContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { isSignedIn, isLoaded } = useAuth()
   const { user } = useUser()
-  const [processingCheckout, setProcessingCheckout] = useState(false)
-  const [checkoutError, setCheckoutError] = useState<string | null>(null)
-  
+
   const rawPlan = (searchParams.get('plan') || '').toLowerCase()
   const planId = (rawPlan in STRIPE_PLANS ? rawPlan : 'free') as PlanId
   const rawInterval = (searchParams.get('interval') || 'month').toLowerCase()
-  const interval = rawInterval === 'yearly'
-    ? 'year'
-    : rawInterval === 'monthly'
-      ? 'month'
-      : rawInterval
+  const interval =
+    rawInterval === 'yearly'
+      ? 'year'
+      : rawInterval === 'monthly'
+        ? 'month'
+        : rawInterval
   const invitation = searchParams.get('invitation')
   const tenantId = searchParams.get('tenant')
 
   const selectedPlan = STRIPE_PLANS[planId]
 
-    useEffect(() => {
-      // Si el usuario ya está autenticado y la sesión está cargada, redirigir al dashboard
-      if (isLoaded && isSignedIn && user) {
-        router.push('/dashboard')
-        return
-      }
-
-      // Validar que exista un plan o una invitación
-      const planParam = searchParams.get('plan')
-      if (!planParam && !invitation) {
-        router.replace('/pricing')
-      }
-    }, [isLoaded, isSignedIn, user, router, searchParams, invitation])
-
-    const getPlanBadgeColor = (planId: string) => {
-
-      switch (planId) {
-
-        case 'pro':
-
-          return 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200'
-
-        case 'enterprise':
-
-          return 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-200'
-
-        default:
-
-          return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
-
-      }
-
+  useEffect(() => {
+    if (isLoaded && isSignedIn && user) {
+      router.push('/dashboard')
+      return
     }
 
-  
-
-    return (
-
-      <div className="min-h-screen bg-background py-8">
-
-        <div className="max-w-6xl mx-auto px-4">
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-
-            {/* Left side - Plan information */}
-
-            <div className="space-y-6">
-
-              <div className="text-center lg:text-left">
-
-                <h1 className="text-3xl font-bold text-foreground mb-2">
-
-                  {invitation ? 'Únete a tu equipo' : 'Crea tu cuenta'}
-
-                </h1>
-
-                <p className="text-muted-foreground">
-
-                  {invitation 
-
-                    ? 'Crea tu cuenta para unirte al equipo y comenzar a colaborar.'
-
-                    : 'Regístrate para comenzar a usar Nexus Documents.'}
-
-                </p>
-
-              </div>
-
-  
-
-              {/* Selected Plan Info - Now just showing the default/chosen plan */}
-
-              <Card className="bg-card text-card-foreground border shadow-sm">
-
-                <CardHeader>
-
-                  <div className="flex items-center justify-between">
-
-                    <CardTitle className="text-lg">Plan seleccionado</CardTitle>
-
-                    <Badge className={getPlanBadgeColor(selectedPlan.id)}>
-
-                      {selectedPlan.name}
-
-                    </Badge>
-
-                  </div>
-
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-
-                  <div className="space-y-2">
-
-                    {selectedPlan.features.map((feature, index) => (
-
-                      <div key={index} className="flex items-center space-x-2">
-
-                        <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-
-                        <span className="text-sm">{feature}</span>
-
-                      </div>
-
-                    ))}
-
-                  </div>
-
-                  {selectedPlan.price > 0 && (
-
-                    <div className="pt-4 border-t">
-
-                      <div className="flex items-center justify-between">
-
-                        <span className="text-muted-foreground">Precio:</span>
-
-                        <span className="font-semibold">
-
-                          ${selectedPlan.price}/{interval === 'year' ? 'año' : 'mes'}
-
-                        </span>
-
-                      </div>
-
-                    </div>
-
-                  )}
-
-                </CardContent>
-
-              </Card>
-
-  
-
-              {/* What's next */}
-
-              <Card className="bg-card text-card-foreground border shadow-sm">
-
-                <CardHeader>
-
-                  <CardTitle className="text-lg">Proceso de registro</CardTitle>
-
-                </CardHeader>
-
-                <CardContent>
-
-                  <ol className="space-y-3 text-sm">
-
-                    <li className="flex items-start">
-
-                      <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">1</span>
-
-                      <div>
-
-                        <span className="font-medium">Crea tu cuenta</span>
-
-                        <p className="text-muted-foreground">Regístrate con email o redes sociales</p>
-
-                      </div>
-
-                    </li>
-
-                    <li className="flex items-start">
-
-                      <span className="bg-gray-400 dark:bg-gray-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">2</span>
-
-                      <div>
-
-                        <span className="font-medium">Completa el onboarding</span>
-
-                        <p className="text-muted-foreground">Configura tu empresa y preferencias</p>
-
-                      </div>
-
-                    </li>
-
-                    <li className="flex items-start">
-
-                      <span className="bg-gray-400 dark:bg-gray-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-3 mt-0.5 flex-shrink-0">3</span>
-
-                      <div>
-
-                        <span className="font-medium">¡Comienza a usar Nexus!</span>
-
-                        <p className="text-muted-foreground">Accede a tu dashboard</p>
-
-                      </div>
-
-                    </li>
-
-                  </ol>
-
-                </CardContent>
-
-              </Card>
-
-  
-
-              {/* Change plan option */}
-
-              <div className="text-center lg:text-left">
-
-                <Button
-
-                  variant="outline"
-
-                  onClick={() => router.push('/pricing')}
-
-                  className="w-full lg:w-auto"
-
-                >
-
-                  Cambiar plan
-
-                </Button>
-
-              </div>
-
-            </div>
-
-  
-
-            {/* Right side - Clerk SignUp */}
-
-            <div className="flex justify-center">
-
-              <div className="w-full max-w-md">
-
-                                <SignUp 
-
-                                  appearance={{
-
-                                    elements: {
-
-                                      rootBox: "w-full",
-
-                                      card: "shadow-none p-0",
-
-                                    }
-
-                                  }}
-
-                                  afterSignUpUrl={'/dashboard'}
-
-                                                    unsafeMetadata={{
-
-                                                      invitation_code: invitation || undefined,
-
-                                                      tenant_id: tenantId || undefined,
-
-                                                      selected_plan: planId,
-
-                                                      selected_interval: interval
-
-                                                    }}
-
-                                />
-
-              </div>
-
-            </div>
-
-          </div>
-
-        </div>
-
+    const planParam = searchParams.get('plan')
+    if (!planParam && !invitation) {
+      router.replace('/pricing')
+    }
+  }, [isLoaded, isSignedIn, user, router, searchParams, invitation])
+
+  const getPlanBadgeColor = (currentPlanId: string) => {
+    switch (currentPlanId) {
+      case 'pro':
+        return 'bg-cyan-500/20 text-cyan-100 border border-cyan-500/30'
+      case 'enterprise':
+        return 'bg-purple-500/20 text-purple-100 border border-purple-500/30'
+      default:
+        return 'bg-white/5 text-white border border-white/10'
+    }
+  }
+
+  const shortFeatures = selectedPlan.features.slice(0, 4)
+  const displayPrice =
+    selectedPlan.price && selectedPlan.price > 0
+      ? `$${selectedPlan.price}/${interval === 'year' ? 'año' : 'mes'}`
+      : selectedPlan.customPricing
+        ? 'Hablemos'
+        : 'Incluido'
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[#05070d] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-cyan-500/10 via-transparent to-transparent blur-3xl" />
+        <div className="absolute left-12 top-1/3 h-48 w-48 rounded-full bg-purple-500/10 blur-3xl" />
+        <div className="absolute right-10 bottom-10 h-40 w-40 rounded-full bg-cyan-500/10 blur-2xl" />
       </div>
 
-    )
+      <div className="relative mx-auto flex max-w-6xl flex-col gap-10 px-4 py-12 lg:flex-row lg:items-start">
+        <div className="space-y-6 lg:w-1/2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-sm text-cyan-100 ring-1 ring-white/10">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            {invitation ? 'Acceso por invitación' : 'Plan seleccionado'}
+          </div>
 
-  }
+          <div className="space-y-3">
+            <h1 className="text-3xl font-semibold leading-tight md:text-4xl">
+              {invitation ? 'Únete al equipo y colabora en segundos' : 'Crea tu cuenta en Nexus'}
+            </h1>
+            <p className="text-lg text-slate-300">
+              {invitation
+                ? 'Confirma tu información y tendrás todo listo para trabajar con tu equipo.'
+                : 'Regístrate y empieza a centralizar tus documentos con IA desde el primer día.'}
+            </p>
+          </div>
+
+          <Card className="border-white/10 bg-white/5 shadow-2xl shadow-black/40 backdrop-blur">
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-slate-400">Plan</p>
+                <div className="mt-1 flex items-center gap-3">
+                  <Badge className={getPlanBadgeColor(selectedPlan.id)}>{selectedPlan.name}</Badge>
+                  <span className="text-sm text-slate-300">{selectedPlan.description}</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase text-slate-400">Precio</p>
+                <p className="text-xl font-semibold">{displayPrice}</p>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {shortFeatures.map((feature, index) => (
+                  <div
+                    key={index}
+                    className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2"
+                  >
+                    <CheckCircle className="mt-0.5 h-4 w-4 text-emerald-400" />
+                    <span className="text-sm text-slate-200">{feature}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between rounded-xl bg-black/40 px-4 py-3 text-sm text-slate-300 ring-1 ring-white/10">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+                  <span>Configuraremos tu espacio tras el registro.</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="h-8 px-3 text-sm text-cyan-200 hover:text-white"
+                  onClick={() => router.push('/pricing')}
+                >
+                  Cambiar plan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="lg:w-1/2">
+          <div className="rounded-2xl border border-white/10 bg-[#0c1222]/90 p-6 shadow-2xl shadow-black/40 backdrop-blur">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-300">Paso 1 de 2</p>
+                <p className="text-lg font-semibold">Crea tu cuenta</p>
+              </div>
+              <div className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-200">
+                Sin tarjeta requerida
+              </div>
+            </div>
+            <div className="flex justify-center">
+              <SignUp
+                appearance={{
+                  variables: {
+                    colorPrimary: '#22d3ee',
+                    colorText: '#e5e7eb',
+                    colorBackground: '#0c1222',
+                    colorInputBackground: '#0b1220',
+                    colorInputText: '#e5e7eb',
+                    colorDanger: '#f87171',
+                    borderRadius: '12px',
+                    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                  },
+                  elements: {
+                    rootBox: 'w-full flex justify-center',
+                    card: 'bg-transparent shadow-none border-0 p-0 max-w-md',
+                    headerTitle: 'text-white text-2xl font-semibold',
+                    headerSubtitle: 'text-slate-300',
+                    socialButtonsBlockButton: 'bg-white/5 border-white/10 text-white hover:bg-white/10',
+                    formButtonPrimary: 'bg-cyan-400 hover:bg-cyan-300 text-slate-900 font-semibold',
+                    formButtonPrimary__disabled: 'bg-cyan-400/60',
+                    formFieldInput: 'bg-[#0b1220] border border-white/10 text-white focus:border-cyan-400 focus:ring-0',
+                    formFieldLabel: 'text-slate-200',
+                    footerActionText: 'text-slate-300',
+                    footerActionLink: 'text-cyan-200 hover:text-white',
+                  },
+                }}
+                afterSignUpUrl="/dashboard"
+                unsafeMetadata={{
+                  invitation_code: invitation || undefined,
+                  tenant_id: tenantId || undefined,
+                  selected_plan: planId,
+                  selected_interval: interval,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function SignUpPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
       <SignUpContent />
     </Suspense>
   )
