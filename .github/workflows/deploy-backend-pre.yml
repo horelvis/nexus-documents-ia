@@ -72,22 +72,22 @@ jobs:
     # Deploy Backend API to Cloud Run (MINIMAL CONFIG FOR DEBUGGING)
     - name: Deploy Backend API to Cloud Run
       run: |
-        cat <<'ENVVARS' > backend-env-vars.txt
-        DEBUG=true
-        ENVIRONMENT=pre
-        POSTGRES_USER=postgres
-        POSTGRES_DB=nexusdocuments360db
-        POSTGRES_SERVER=/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db
-        PYTHONUNBUFFERED=1
-        API_V1_STR=/api/v1
-        SERVER_NAME=Nexus Document Management API
-        TESTING=false
-        LOG_LEVEL=INFO
-        MULTI_TENANT=true
-        DEFAULT_TENANT=default
-        GCS_PROJECT_ID=nexusdocs360-pre
-        GCS_BUCKET_NAME=nexus-docs-eu
-        GCS_REGION=europe-west1
+        cat <<'ENVVARS' > backend-env-vars.yaml
+        DEBUG: "true"
+        ENVIRONMENT: "pre"
+        POSTGRES_USER: "postgres"
+        POSTGRES_DB: "nexusdocuments360db"
+        POSTGRES_SERVER: "/cloudsql/nexusdocs360-pre:europe-west1:nexusdocuments360db"
+        PYTHONUNBUFFERED: "1"
+        API_V1_STR: "/api/v1"
+        SERVER_NAME: "Nexus Document Management API"
+        TESTING: "false"
+        LOG_LEVEL: "INFO"
+        MULTI_TENANT: "true"
+        DEFAULT_TENANT: "default"
+        GCS_PROJECT_ID: "nexusdocs360-pre"
+        GCS_BUCKET_NAME: "nexus-docs-eu"
+        GCS_REGION: "europe-west1"
         ENVVARS
 
         gcloud run deploy nexus-backend-pre \
@@ -96,7 +96,7 @@ jobs:
           --platform managed \
           --port 8000 \
           --allow-unauthenticated \
-          --env-vars-file backend-env-vars.txt \
+          --env-vars-file backend-env-vars.yaml \
           --set-secrets "POSTGRES_PASSWORD=postgres-password:latest" \
           --add-cloudsql-instances nexusdocs360-pre:europe-west1:nexusdocuments360db \
           --min-instances 0 \
