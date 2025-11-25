@@ -2,13 +2,8 @@ name: Deploy Backend to PRE Environment
 
 on:
   push:
-    branches:
-      - develp-new
     tags:
       - 'backend-v*.*.*-pre.*'
-    paths:
-      - 'backend/**'
-      - '.github/workflows/deploy-backend-pre.yml'
   workflow_dispatch:
   workflow_call:
 
