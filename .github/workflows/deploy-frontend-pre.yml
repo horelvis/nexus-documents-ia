@@ -5,7 +5,7 @@ on:
     branches:
       - pre
     tags:
-      - 'v*.*.*-pre.*'
+      - 'frontend-v*.*.*-pre.*'
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend-pre.yml'

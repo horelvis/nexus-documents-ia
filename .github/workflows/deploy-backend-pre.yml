@@ -5,7 +5,10 @@ on:
     branches:
       - pre
     tags:
-      - 'v*.*.*-pre.*'
+      - 'backend-v*.*.*-pre.*'
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend-pre.yml'
   workflow_dispatch:
   workflow_call:
 
