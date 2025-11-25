@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import AnimationContainer from "../utils/animation-container";
+import { useDemoRequest } from '../demo-request-provider';
 
 const Hero = () => {
 
@@ -18,6 +19,8 @@ const Hero = () => {
         hidden: { x: 100, opacity: 0 },
         visible: { x: 0, opacity: 1 },
     };
+
+    const { open } = useDemoRequest();
 
     return (
         <div className="relative flex flex-col items-center justify-center w-full py-20">
@@ -57,13 +60,11 @@ const Hero = () => {
                             Centraliza nóminas, contratos y modelos oficiales, detecta riesgos y responde a tus clientes en minutos. <span className="hidden lg:inline">Nexus Documents 360 clasifica documentos laborales, genera alertas antes de las inspecciones y ofrece búsqueda semántica sobre todos los expedientes.</span>
                         </p>
                         <div className="items-center justify-center hidden mt-6 lg:flex gap-x-4">
-                            <Button size="lg" asChild>
-                                <Link href="/pricing">
-                                    Solicitar demo
-                                </Link>
+                            <Button size="lg" onClick={open}>
+                                Solicitar demo
                             </Button>
                             <Button size="lg" variant="secondary" asChild>
-                                <Link href="/pricing" className="flex items-center">
+                                <Link href="#pricing" className="flex items-center">
                                     Ver precios
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
@@ -72,14 +73,12 @@ const Hero = () => {
                     </AnimationContainer>
                     <AnimationContainer delay={0.3}>
                         <div className="flex items-center justify-center mt-6 lg:hidden gap-x-4">
-                            <Button asChild>
-                                <Link href="/pricing">
-                                    Empezar piloto
-                                </Link>
+                            <Button onClick={open}>
+                                Solicitar demo
                             </Button>
                             <Button variant="secondary" asChild>
-                                <Link href="/pricing" className="flex items-center">
-                                    Ver demo
+                                <Link href="#pricing" className="flex items-center">
+                                    Ver precios
                                     <Play className="w-4 h-4 ml-2" />
                                 </Link>
                             </Button>

@@ -6,6 +6,7 @@ import { useEffect } from 'react'
 import { useUserContext } from '@/contexts/user-context'
 import { InitialLoader } from '@/components/ui/unified-loader'
 import { NexusNavbar, SectionContainer, HomeSection } from "@/components/landing/nexus-theme"
+import { DemoRequestProvider } from "@/components/landing/nexus-theme/demo-request-provider"
 
 export default function Home() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -29,13 +30,15 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <NexusNavbar />
-      <SectionContainer>
-        <div className="relative flex flex-col items-center justify-center px-4 pt-20">
-          <HomeSection />
-        </div>
-      </SectionContainer>
-    </div>
+    <DemoRequestProvider>
+      <div className="min-h-screen bg-background">
+        <NexusNavbar />
+        <SectionContainer>
+          <div className="relative flex flex-col items-center justify-center px-4 pt-20">
+            <HomeSection />
+          </div>
+        </SectionContainer>
+      </div>
+    </DemoRequestProvider>
   )
 }

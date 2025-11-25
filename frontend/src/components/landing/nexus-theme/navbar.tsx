@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Button } from '../../ui/button';
 import Icons from './ui/icons';
+import { useDemoRequest } from './demo-request-provider';
 
 const navigation = [
   { name: 'Solución', href: '#features' },
@@ -15,6 +16,7 @@ const navigation = [
 
 const NexusNavbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { open } = useDemoRequest();
 
   const scrollToSection = (href: string) => {
     if (href.startsWith('#')) {
@@ -51,11 +53,9 @@ const NexusNavbar = () => {
                 Iniciar sesión
               </Link>
             </Button>
-            <Button size="sm" asChild>
-              <Link href="/pricing">
-                Solicitar demo
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Link>
+            <Button size="sm" onClick={open}>
+              Solicitar demo
+              <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
         </div>
@@ -117,11 +117,9 @@ const NexusNavbar = () => {
                       Iniciar sesión
                     </Link>
                   </Button>
-                  <Button asChild className="w-full">
-                    <Link href="/pricing">
-                      Solicitar demo
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Link>
+                  <Button className="w-full" onClick={open}>
+                    Solicitar demo
+                    <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               </div>

@@ -1,9 +1,11 @@
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import Icons from '../ui/icons'
 import AnimationContainer from "../utils/animation-container"
+import { useDemoRequest } from '../demo-request-provider'
 
 const Banner = () => {
+    const { open } = useDemoRequest()
+
     return (
         <div className="flex flex-col relative items-center justify-center mx-auto max-w-5xl w-full py-20 lg:pb-40">
 
@@ -34,10 +36,8 @@ const Banner = () => {
                             Combina clasificación automática, firma electrónica y alertas inteligentes en un solo flujo.
                         </span>
                     </p>
-                    <Button size="lg" className="mt-6" asChild>
-                        <Link href="/pricing">
-                            Agenda una demo
-                        </Link>
+                    <Button size="lg" className="mt-6" onClick={open}>
+                        Agenda una demo
                     </Button>
                 </div>
             </AnimationContainer>
