@@ -1,7 +1,8 @@
 import logging
 import os
 import secrets
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from urllib.parse import urlparse
 
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings
@@ -107,14 +108,21 @@ class Settings(BaseSettings):
         return url
     
     # Redis
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    _REDIS_URL_ENV: ClassVar[Optional[str]] = os.getenv("REDIS_URL")
+    if _REDIS_URL_ENV:
+        _parsed_redis_url = urlparse(_REDIS_URL_ENV)
+        REDIS_HOST: str = _parsed_redis_url.hostname or os.getenv("REDIS_HOST", "redis")
+        REDIS_PORT: int = _parsed_redis_url.port or int(os.getenv("REDIS_PORT", "6379"))
+        REDIS_PASSWORD: Optional[str] = _parsed_redis_url.password or os.getenv("REDIS_PASSWORD")
+    else:
+        REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")  # "redis" for Docker, "localhost" for local
+        REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+        REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
     
     @property
     def REDIS_URL(self) -> str:
-        """Generate Redis URL from host and port"""
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
-    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", None)
+        """Generate Redis URL from host and port unless provided via env."""
+        return self._REDIS_URL_ENV or f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     
     # NEW: Elasticsearch for hybrid search and analytics
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "localhost")
