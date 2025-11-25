@@ -7,7 +7,7 @@ const Icons = {
             src="/logo/logo-full.svg"
             alt="Nexus Documents 360"
             width={180}
-            height={42}
+            height={164}
             className={className}
             priority
         />

@@ -27,11 +27,11 @@ const NexusNavbar = () => {
   return (
     <header className="fixed inset-x-0 top-0 z-[999] w-full h-16 backdrop-blur-md bg-background/50 bg-[rgba(4,1,2,0.2)] flex">
       {/* Desktop */}
-      <div className="hidden lg:flex items-center justify-between w-full px-4 mx-auto lg:px-8 max-w-7xl">
+      <div className="hidden lg:flex items-center justify-between w-full px-4 mx-auto lg:px-8 max-w-7xl h-full">
         <div className="flex items-center justify-between w-full flex-nowrap">
           <div className="flex items-center flex-1 lg:flex-none">
-            <Link href="/" className="text-lg font-semibold text-primary">
-              <Icons.logo className="w-auto h-6" />
+            <Link href="/" className="flex items-center h-full text-lg font-semibold text-primary">
+              <Icons.logo className="w-auto h-full" />
             </Link>
             <div className="items-center hidden ml-8 lg:flex gap-x-6">
               {navigation.map((item) => (
@@ -62,10 +62,10 @@ const NexusNavbar = () => {
       </div>
 
       {/* Mobile */}
-      <div className="flex items-center justify-between w-full px-4 mx-auto lg:hidden max-w-7xl">
+      <div className="flex items-center justify-between w-full px-4 mx-auto lg:hidden max-w-7xl h-full">
         <div className="flex items-center">
-          <Link href="/" className="text-lg font-semibold text-primary">
-            <Icons.logo className="w-auto h-6" />
+          <Link href="/" className="flex items-center h-full text-lg font-semibold text-primary">
+            <Icons.logo className="w-auto h-full" />
           </Link>
         </div>
         <div className="flex items-center">
@@ -86,8 +86,8 @@ const NexusNavbar = () => {
           <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm" />
           <div className="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-background px-6 py-6 sm:max-w-sm border-l border-border">
             <div className="flex items-center justify-between">
-              <Link href="/" className="text-lg font-semibold text-primary">
-                <Icons.logo className="w-auto h-6" />
+              <Link href="/" className="flex items-center h-full text-lg font-semibold text-primary">
+                <Icons.logo className="w-auto h-full" />
               </Link>
               <button
                 type="button"

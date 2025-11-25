@@ -3,7 +3,6 @@ import {
     Bot,
     Calendar,
     Cloud,
-    LucideIcon,
     Mail,
     PenTool,
     ShieldCheck,

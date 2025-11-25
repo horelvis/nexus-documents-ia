@@ -1,3 +1,4 @@
+import { LandingFooter } from "../landing-footer";
 import { Hero, HeroImage, Features, Offerings, Tools, Banner } from "./index";
 import { PricingSection } from "@/components/landing/pricing-section";
 
@@ -19,7 +20,8 @@ const HomeSection = () => {
 
                 <Tools />
 
-                <Banner />
+                <LandingFooter />
+
 
             </div>
 

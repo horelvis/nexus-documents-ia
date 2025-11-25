@@ -81,8 +81,8 @@ export function LandingFooter() {
   }
 
   return (
-    <footer className="relative mt-24 bg-gray-950 text-gray-300" aria-labelledby="footer-heading">
-      <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/95 to-transparent" />
+    <footer className="relative mt-24 text-gray-300" aria-labelledby="footer-heading">
+      <div className="hidden lg:block absolute -translate-x-1/2 rounded-full blur-[10rem] translate-y-1/4 -z-10 left-1/2 top-1/4 w-72 h-60 bg-purple-600/60"></div>
       <div className="relative mx-auto max-w-7xl px-6 pb-10 pt-20 sm:px-8">
         <div className="grid gap-8 rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-8">
