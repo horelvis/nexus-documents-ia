@@ -2,13 +2,8 @@ name: Deploy Frontend to PRE Environment
 
 on:
   push:
-    branches:
-      - develp-new
     tags:
       - 'frontend-v*.*.*-pre.*'
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy-frontend-pre.yml'
   workflow_dispatch:
   workflow_call:
     inputs:
