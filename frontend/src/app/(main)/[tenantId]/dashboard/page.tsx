@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useLanguage } from "@/contexts/language-context";
 import { useApiClient } from "@/lib/api-client"
 export default function DashboardPage() {
   const params = useParams()
@@ -19,6 +20,7 @@ export default function DashboardPage() {
   const [activeWorkflows, setActiveWorkflows] = useState<number>(0)
   const [loadingWorkflows, setLoadingWorkflows] = useState<boolean>(false)
   const apiClient = useApiClient()
+  const { t } = useLanguage()
 
   useEffect(() => {
     let isMounted = true
@@ -69,9 +71,9 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-6 py-4 md:py-6">
       {/* Welcome Section */}
       <div className="px-4 lg:px-6 dashboard-welcome">
-        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+        <h1 className="text-3xl font-bold mb-2">{t('dashboard.title')}</h1>
         <p className="text-muted-foreground">
-          Welcome back! Here's an overview of your document workspace.
+          {t('dashboard.welcomeMessage')}
         </p>
       </div>
 
@@ -80,15 +82,15 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
-              <CardTitle className="text-lg">Workflows con TemporalIO</CardTitle>
-              <CardDescription>Orquesta procesos durables con Emma AI</CardDescription>
+              <CardTitle className="text-lg">{t('dashboard.workflows.title')}</CardTitle>
+              <CardDescription>{t('dashboard.workflows.description')}</CardDescription>
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="text-xs">
-                {loadingWorkflows ? 'Cargando…' : `Activos: ${activeWorkflows}`}
+                {loadingWorkflows ? t('dashboard.workflows.loading') : t('dashboard.workflows.active', { count: activeWorkflows })}
               </Badge>
               <Link href={`/${tenantId}/workflows`}>
-                <Button>Ir a Workflows</Button>
+                <Button>{t('dashboard.workflows.button')}</Button>
               </Link>
             </div>
           </CardContent>

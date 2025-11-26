@@ -30,11 +30,13 @@ import { useNotifications } from "@/contexts/app-state-context"
 import { useTenantService, TenantInfo, TenantStats, ReindexStatus } from "@/lib/services/tenant.service"
 import { formatBytes } from "@/lib/utils"
 import { UserDeletionDialog } from "@/components/lgpd/user-deletion-dialog"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export default function TenantSettingsPage() {
   const { backendUser: user } = useBackendUser()
   const { addNotification } = useNotifications()
   const tenantService = useTenantService()
+  const { t, language } = useTranslation()
 
   // States
   const [isLoading, setIsLoading] = useState(true)
@@ -52,7 +54,6 @@ export default function TenantSettingsPage() {
   const [reindexProgress, setReindexProgress] = useState({ processed: 0, total: 0, percentage: 0 })
   const [reindexError, setReindexError] = useState<string | null>(null)
 
-  // Check if user is admin (tenant owner, admin role, or superuser)
   const isAdmin = Boolean(
     user &&
       (
@@ -62,13 +63,7 @@ export default function TenantSettingsPage() {
       )
   )
 
-  // Load initial data
   const loadTenantData = useCallback(async () => {
-    // ... existing loadTenantData logic ...
-    // We'll reuse the existing logic but wrap it here to keep the context clean if needed, 
-    // but for this replace block, we assume the existing function is fine.
-    // Just need to ensure we refresh status if reindexing is happening in background? 
-    // No, let's stick to the requested change.
     setIsLoading(true)
     try {
       const [infoResponse, statsResponse, indexResponse] = await Promise.all([
@@ -84,13 +79,13 @@ export default function TenantSettingsPage() {
       console.error(error)
       addNotification({
         type: 'error',
-        title: 'Error al cargar los datos',
-        message: 'No pudimos obtener la información de la organización'
+        title: t('tenantSettings.notifications.loadError.title'),
+        message: t('tenantSettings.notifications.loadError.message')
       })
     } finally {
       setIsLoading(false)
     }
-  }, [addNotification, tenantService])
+  }, [addNotification, tenantService, t])
 
   useEffect(() => {
     if (!user) {
@@ -105,7 +100,6 @@ export default function TenantSettingsPage() {
     loadTenantData()
   }, [isAdmin, loadTenantData, user])
 
-  // Polling for reindex progress
   useEffect(() => {
     let intervalId: NodeJS.Timeout
 
@@ -115,12 +109,6 @@ export default function TenantSettingsPage() {
           const statusResponse = await tenantService.getReindexStatus()
           if (!statusResponse.error && statusResponse.data) {
             const status = statusResponse.data
-            // Calculate progress
-            // Note: During force reindex, total documents might be the target
-            // We can estimate progress based on indexed_documents vs total_documents
-            // But initially indexed might be high if we are re-indexing.
-            // Ideally backend would provide a job ID and specific progress, 
-            // but here we rely on the general stats.
             
             const total = status.total_documents || 1
             const indexed = status.indexed_documents || 0
@@ -134,10 +122,6 @@ export default function TenantSettingsPage() {
             
             setReindexStatus(status)
 
-            // Check completion conditions
-            // This heuristic might need adjustment based on exact backend behavior during reindex
-            // If we are in 'progress' and missing is 0 (or very low) and status is 'ready', we are done?
-            // Or we just let the user close it when they see 100%?
             if (reindexPhase === 'progress' && percentage === 100 && status.missing_documents === 0) {
                setReindexPhase('complete')
             }
@@ -147,9 +131,7 @@ export default function TenantSettingsPage() {
         }
       }
 
-      // Poll every 2 seconds
       intervalId = setInterval(pollStatus, 2000)
-      // Initial poll
       pollStatus()
     }
 
@@ -158,8 +140,6 @@ export default function TenantSettingsPage() {
     }
   }, [reindexDialogOpen, reindexPhase, tenantService])
 
-
-  // Reindex operations
   const handleReindexMissing = async () => {
     setIsReindexing(true)
     try {
@@ -171,18 +151,17 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Reindexado completado',
-        message: `Se reindexaron ${response.data?.successful || 0} documentos`
+        title: t('tenantSettings.notifications.reindexComplete.title'),
+        message: t('tenantSettings.notifications.reindexComplete.message', { count: response.data?.successful || 0 })
       })
 
-      // Reload status
       const statusResponse = await tenantService.getReindexStatus()
       if (!statusResponse.error) setReindexStatus(statusResponse.data)
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Error al reindexar',
-        message: (error as Error).message || 'No pudimos reindexar los documentos'
+        title: t('tenantSettings.notifications.reindexError.title'),
+        message: (error as Error).message || t('tenantSettings.notifications.reindexError.message')
       })
     } finally {
       setIsReindexing(false)
@@ -207,27 +186,23 @@ export default function TenantSettingsPage() {
       }
 
       setReindexPhase('progress')
-      // Initial progress update based on response if available, 
-      // otherwise polling will pick it up
       
       addNotification({
         type: 'success',
-        title: 'Reindexado iniciado',
-        message: 'El proceso se está ejecutando en segundo plano.'
+        title: t('tenantSettings.notifications.reindexStarted.title'),
+        message: t('tenantSettings.notifications.reindexStarted.message')
       })
     } catch (error) {
       setReindexPhase('error')
-      setReindexError((error as Error).message || 'No se pudo iniciar el proceso.')
+      setReindexError((error as Error).message || 'Could not start the process.')
     }
   }
   
   const handleCloseReindexDialog = () => {
       setReindexDialogOpen(false)
-      // Refresh data one last time
       loadTenantData()
   }
 
-  // Delete operations
   const handleDeleteAllDocuments = async () => {
     if (deleteConfirmText !== "DELETE ALL DOCUMENTS") return
 
@@ -241,20 +216,19 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Documentos eliminados',
-        message: `Se eliminaron ${response.data?.deleted_count || 0} documentos`
+        title: t('tenantSettings.notifications.deleteSuccess.title'),
+        message: t('tenantSettings.notifications.deleteSuccess.message', { count: response.data?.deleted_count || 0 })
       })
 
       setDeleteDialogOpen(false)
       setDeleteConfirmText("")
       
-      // Reload stats
       loadTenantData()
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'No se pudieron eliminar',
-        message: (error as Error).message || 'Revisa tu conexión y vuelve a intentar'
+        title: t('tenantSettings.notifications.deleteError.title'),
+        message: (error as Error).message || t('tenantSettings.notifications.deleteError.message')
       })
     } finally {
       setIsDeleting(false)
@@ -262,7 +236,7 @@ export default function TenantSettingsPage() {
   }
 
   const handleClearVectorDB = async () => {
-    if (!confirm('Esto borrará todos los embeddings de búsqueda. Después tendrás que reindexar los documentos. ¿Continuar?')) {
+    if (!confirm(t('tenantSettings.notifications.clearIndexConfirm'))) {
       return
     }
 
@@ -276,24 +250,22 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Índice vectorial vaciado',
-        message: 'Se eliminaron todos los embeddings del tenant'
+        title: t('tenantSettings.notifications.clearIndexSuccess.title'),
+        message: t('tenantSettings.notifications.clearIndexSuccess.message')
       })
 
-      // Reload status
       loadTenantData()
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'No se pudo limpiar',
-        message: (error as Error).message || 'Intenta nuevamente en unos minutos'
+        title: t('tenantSettings.notifications.clearIndexError.title'),
+        message: (error as Error).message || t('tenantSettings.notifications.clearIndexError.message')
       })
     } finally {
       setIsDeleting(false)
     }
   }
 
-  // Maintenance operations
   const handleRunMaintenance = async () => {
     setIsLoading(true)
     try {
@@ -305,14 +277,14 @@ export default function TenantSettingsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Mantenimiento completado',
-        message: `Se ejecutaron ${response.data?.operations_performed?.length || 0} tareas en ${response.data?.duration_seconds || 0}s`
+        title: t('tenantSettings.notifications.maintenanceSuccess.title'),
+        message: t('tenantSettings.notifications.maintenanceSuccess.message', { count: response.data?.operations_performed?.length || 0, duration: response.data?.duration_seconds || 0 })
       })
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Falló el mantenimiento',
-        message: (error as Error).message || 'No pudimos ejecutar las tareas de optimización'
+        title: t('tenantSettings.notifications.maintenanceError.title'),
+        message: (error as Error).message || t('tenantSettings.notifications.maintenanceError.message')
       })
     } finally {
       setIsLoading(false)
@@ -332,48 +304,50 @@ export default function TenantSettingsPage() {
       <div className="space-y-4 p-4 md:p-6">
         <Alert>
           <IconAlertTriangle className="h-4 w-4" />
-          <AlertTitle>Acceso restringido</AlertTitle>
+          <AlertTitle>{t('tenantSettings.restrictedAccess.title')}</AlertTitle>
           <AlertDescription>
-            Solo los administradores de la organización pueden acceder a esta página de configuración.
+            {t('tenantSettings.restrictedAccess.description')}
           </AlertDescription>
         </Alert>
       </div>
     )
   }
+  
+  const locale = language === 'es' ? 'es-ES' : 'en-US';
 
   return (
     <div className="max-w-6xl space-y-8 p-4 md:p-6">
       <div>
-        <h1 className="mb-2 text-3xl font-bold">Configuración de la organización</h1>
+        <h1 className="mb-2 text-3xl font-bold">{t('tenantSettings.title')}</h1>
         <p className="text-muted-foreground">
-          Administra los datos, la seguridad y el mantenimiento de tu tenant
+          {t('tenantSettings.subtitle')}
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Información de la organización</CardTitle>
-            <CardDescription>Datos básicos del tenant y su actividad</CardDescription>
+            <CardTitle>{t('tenantSettings.info.title')}</CardTitle>
+            <CardDescription>{t('tenantSettings.info.description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Nombre</p>
+                <p className="text-sm font-medium text-muted-foreground">{t('tenantSettings.info.name')}</p>
                 <p className="text-lg">{tenantInfo?.display_name || tenantInfo?.name}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Creado el</p>
+                <p className="text-sm font-medium text-muted-foreground">{t('tenantSettings.info.createdAt')}</p>
                 <p className="text-lg">
-                  {tenantInfo?.created_at ? new Date(tenantInfo.created_at).toLocaleDateString('es-ES') : 'N/A'}
+                  {tenantInfo?.created_at ? new Date(tenantInfo.created_at).toLocaleDateString(locale) : t('tenantSettings.info.notAvailable')}
                 </p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Usuarios totales</p>
+                <p className="text-sm font-medium text-muted-foreground">{t('tenantSettings.info.totalUsers')}</p>
                 <p className="text-lg">{tenantStats?.total_users || 0}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Documentos totales</p>
+                <p className="text-sm font-medium text-muted-foreground">{t('tenantSettings.info.totalDocuments')}</p>
                 <p className="text-lg">{tenantStats?.total_documents || 0}</p>
               </div>
             </div>
@@ -382,15 +356,15 @@ export default function TenantSettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Uso de almacenamiento</CardTitle>
-            <CardDescription>Supervisa el espacio contratado y disponible</CardDescription>
+            <CardTitle>{t('tenantSettings.storage.title')}</CardTitle>
+            <CardDescription>{t('tenantSettings.storage.description')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium">
-                    {formatBytes(tenantStats?.storage_used_bytes || 0)} de {formatBytes(tenantStats?.storage_limit_bytes || 0)}
+                    {t('tenantSettings.storage.usage', { used: formatBytes(tenantStats?.storage_used_bytes || 0), limit: formatBytes(tenantStats?.storage_limit_bytes || 0)})}
                   </span>
                   <span className="text-sm text-muted-foreground">
                     {tenantStats?.storage_limit_bytes > 0 
@@ -412,27 +386,27 @@ export default function TenantSettingsPage() {
       <section>
         <Card>
           <CardHeader>
-            <CardTitle>Estado del índice de búsqueda</CardTitle>
-            <CardDescription>Supervisa y reconstruye el índice semántico cuando sea necesario</CardDescription>
+            <CardTitle>{t('tenantSettings.searchIndex.title')}</CardTitle>
+            <CardDescription>{t('tenantSettings.searchIndex.description')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{reindexStatus?.total_documents || 0}</p>
-                  <p className="text-sm text-muted-foreground">Documentos totales</p>
+                  <p className="text-sm text-muted-foreground">{t('tenantSettings.searchIndex.totalDocuments')}</p>
                 </div>
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold text-green-600">
                     {reindexStatus?.indexed_documents || 0}
                   </p>
-                  <p className="text-sm text-muted-foreground">Indexados</p>
+                  <p className="text-sm text-muted-foreground">{t('tenantSettings.searchIndex.indexed')}</p>
                 </div>
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold text-orange-600">
                     {reindexStatus?.missing_documents || 0}
                   </p>
-                  <p className="text-sm text-muted-foreground">Pendientes</p>
+                  <p className="text-sm text-muted-foreground">{t('tenantSettings.searchIndex.pending')}</p>
                 </div>
               </div>
 
@@ -440,9 +414,9 @@ export default function TenantSettingsPage() {
                 <div className="flex items-center gap-2">
                   <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">
-                    Estado actual: 
+                    {t('tenantSettings.searchIndex.status')}
                     <Badge variant={reindexStatus?.status === 'ready' ? 'success' : 'warning'} className="ml-2">
-                      {reindexStatus?.status || 'desconocido'}
+                      {reindexStatus?.status ? t(`tenantSettings.searchIndex.status${reindexStatus.status.charAt(0).toUpperCase() + reindexStatus.status.slice(1)}`) : t('tenantSettings.searchIndex.statusUnknown')}
                     </Badge>
                   </span>
                 </div>
@@ -457,12 +431,12 @@ export default function TenantSettingsPage() {
                   {isReindexing ? (
                     <>
                       <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Reindexando…
+                      {t('tenantSettings.searchIndex.reindexing')}
                     </>
                   ) : (
                     <>
                       <IconRefresh className="mr-2 h-4 w-4" />
-                      Reindexar pendientes
+                      {t('tenantSettings.searchIndex.reindexPending')}
                     </>
                   )}
                 </Button>
@@ -474,7 +448,7 @@ export default function TenantSettingsPage() {
                   className="flex-1"
                 >
                   <IconDatabase className="mr-2 h-4 w-4" />
-                  Reindexado completo
+                  {t('tenantSettings.searchIndex.fullReindex')}
                 </Button>
               </div>
             </div>
@@ -485,19 +459,18 @@ export default function TenantSettingsPage() {
       <section className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Mantenimiento del sistema</CardTitle>
+            <CardTitle>{t('tenantSettings.maintenance.title')}</CardTitle>
             <CardDescription>
-              Ejecuta tareas de optimización para mantener el rendimiento del tenant
+              {t('tenantSettings.maintenance.description')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-lg bg-muted p-4">
-              <h4 className="mb-2 font-medium">Incluye las siguientes tareas:</h4>
+              <h4 className="mb-2 font-medium">{t('tenantSettings.maintenance.tasksTitle')}</h4>
               <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>• Optimizar tablas e índices de la base de datos</li>
-                <li>• Limpiar archivos huérfanos en el almacenamiento</li>
-                <li>• Eliminar datos temporales vencidos</li>
-                <li>• Compactar la base vectorial</li>
+                {t('tenantSettings.maintenance.tasks', { returnObjects: true }).map((task: string, index: number) => (
+                  <li key={index}>• {task}</li>
+                ))}
               </ul>
             </div>
 
@@ -506,22 +479,22 @@ export default function TenantSettingsPage() {
               disabled={isLoading}
             >
               <IconTool className="mr-2 h-4 w-4" />
-              Ejecutar mantenimiento
+              {t('tenantSettings.maintenance.runButton')}
             </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Copias de seguridad</CardTitle>
+            <CardTitle>{t('tenantSettings.backups.title')}</CardTitle>
             <CardDescription>
-              Próximamente podrás descargar respaldos completos de la organización
+              {t('tenantSettings.backups.description')}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button variant="outline" disabled className="w-full">
               <IconDownload className="mr-2 h-4 w-4" />
-              Crear backup (muy pronto)
+              {t('tenantSettings.backups.createButton')}
             </Button>
           </CardContent>
         </Card>
@@ -530,17 +503,17 @@ export default function TenantSettingsPage() {
       <section>
         <Card className="border-destructive/40">
           <CardHeader>
-            <CardTitle className="text-destructive">Zona de peligro</CardTitle>
+            <CardTitle className="text-destructive">{t('tenantSettings.dangerZone.title')}</CardTitle>
             <CardDescription>
-              Estas operaciones son irreversibles. Úsalas solo si estás completamente seguro.
+              {t('tenantSettings.dangerZone.description')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="font-medium text-destructive">Eliminar todos los documentos</p>
+                <p className="font-medium text-destructive">{t('tenantSettings.dangerZone.deleteAll.title')}</p>
                 <p className="text-sm text-muted-foreground">
-                  Borra permanentemente cada archivo almacenado en el tenant.
+                  {t('tenantSettings.dangerZone.deleteAll.description')}
                 </p>
               </div>
               <Button
@@ -548,15 +521,15 @@ export default function TenantSettingsPage() {
                 onClick={() => setDeleteDialogOpen(true)}
               >
                 <IconTrash className="mr-2 h-4 w-4" />
-                Eliminar documentos
+                {t('tenantSettings.dangerZone.deleteAll.button')}
               </Button>
             </div>
 
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="font-medium text-destructive">Limpiar índice semántico</p>
+                <p className="font-medium text-destructive">{t('tenantSettings.dangerZone.clearIndex.title')}</p>
                 <p className="text-sm text-muted-foreground">
-                  Elimina todos los embeddings de búsqueda. Luego deberás reindexar los documentos.
+                  {t('tenantSettings.dangerZone.clearIndex.description')}
                 </p>
               </div>
               <Button
@@ -565,7 +538,7 @@ export default function TenantSettingsPage() {
                 disabled={isDeleting}
               >
                 <IconDatabase className="mr-2 h-4 w-4" />
-                Vaciar base vectorial
+                {t('tenantSettings.dangerZone.clearIndex.button')}
               </Button>
             </div>
 
@@ -573,15 +546,15 @@ export default function TenantSettingsPage() {
               <div className="mb-4 flex items-center gap-3">
                 <IconAlertTriangle className="h-5 w-5 text-destructive" />
                 <div>
-                  <p className="font-medium text-destructive">Derecho de supresión (LGPD)</p>
+                  <p className="font-medium text-destructive">{t('tenantSettings.dangerZone.suppressionRight.title')}</p>
                   <p className="text-sm text-muted-foreground">
-                    Ejecuta la eliminación total del tenant, usuarios y documentos según la Ley de Protección de Datos.
+                    {t('tenantSettings.dangerZone.suppressionRight.description')}
                   </p>
                 </div>
               </div>
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Esta acción abre el asistente LGPD donde podrás confirmar si solo eliminas tu cuenta o toda la organización.
+                  {t('tenantSettings.dangerZone.suppressionRight.details')}
                 </p>
                 <UserDeletionDialog />
               </div>
@@ -594,9 +567,9 @@ export default function TenantSettingsPage() {
       <Dialog open={reindexDialogOpen} onOpenChange={reindexPhase === 'progress' || reindexPhase === 'starting' ? undefined : setReindexDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Reindexado Completo</DialogTitle>
+            <DialogTitle>{t('tenantSettings.reindexDialog.title')}</DialogTitle>
             <DialogDescription>
-              Reconstrucción del índice de búsqueda y base vectorial
+              {t('tenantSettings.reindexDialog.description')}
             </DialogDescription>
           </DialogHeader>
 
@@ -605,16 +578,11 @@ export default function TenantSettingsPage() {
               <div className="space-y-4">
                  <Alert variant="default" className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/10">
                   <IconAlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
-                  <AlertTitle className="text-yellow-800 dark:text-yellow-500">Atención</AlertTitle>
-                  <AlertDescription className="text-yellow-700 dark:text-yellow-400">
-                    Esta operación procesará <strong>TODOS</strong> los documentos existentes ({reindexStatus?.total_documents || 0}) nuevamente.
-                    <br /><br />
-                    • El rendimiento del sistema puede verse afectado.<br />
-                    • Puede tardar varios minutos dependiendo del volumen.<br />
-                  </AlertDescription>
+                  <AlertTitle className="text-yellow-800 dark:text-yellow-500">{t('tenantSettings.reindexDialog.attention')}</AlertTitle>
+                  <AlertDescription className="text-yellow-700 dark:text-yellow-400" dangerouslySetInnerHTML={{ __html: t('tenantSettings.reindexDialog.attentionText', { count: reindexStatus?.total_documents || 0 }) }} />
                 </Alert>
                 <p className="text-sm text-muted-foreground">
-                  Utiliza esta opción si experimentas problemas con la búsqueda o si has cambiado la configuración de los modelos de IA.
+                  {t('tenantSettings.reindexDialog.explanation')}
                 </p>
               </div>
             )}
@@ -625,17 +593,17 @@ export default function TenantSettingsPage() {
                     <div className="relative">
                        <IconRefresh className="h-12 w-12 animate-spin text-primary" />
                     </div>
-                    <p className="text-lg font-medium">Procesando documentos...</p>
+                    <p className="text-lg font-medium">{t('tenantSettings.reindexDialog.processing')}</p>
                  </div>
                  
                  <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                       <span>Progreso</span>
+                       <span>{t('tenantSettings.reindexDialog.progress')}</span>
                        <span className="font-medium">{reindexProgress.percentage}%</span>
                     </div>
                     <Progress value={reindexProgress.percentage} className="h-2" />
                     <p className="text-center text-xs text-muted-foreground">
-                       {reindexProgress.processed} de {reindexProgress.total} documentos procesados
+                       {t('tenantSettings.reindexDialog.progressText', { processed: reindexProgress.processed, total: reindexProgress.total })}
                     </p>
                  </div>
               </div>
@@ -646,9 +614,9 @@ export default function TenantSettingsPage() {
                   <div className="rounded-full bg-green-100 p-3 dark:bg-green-900/20">
                      <div className="h-8 w-8 text-green-600 dark:text-green-400">✓</div>
                   </div>
-                  <h3 className="text-lg font-medium">¡Reindexado completado!</h3>
+                  <h3 className="text-lg font-medium">{t('tenantSettings.reindexDialog.completeTitle')}</h3>
                   <p className="text-center text-sm text-muted-foreground">
-                     El índice de búsqueda ha sido actualizado exitosamente. Todos los documentos están disponibles para búsqueda.
+                     {t('tenantSettings.reindexDialog.completeText')}
                   </p>
                </div>
             )}
@@ -657,7 +625,7 @@ export default function TenantSettingsPage() {
                <div className="space-y-4">
                   <Alert variant="destructive">
                      <IconAlertTriangle className="h-4 w-4" />
-                     <AlertTitle>Error</AlertTitle>
+                     <AlertTitle>{t('tenantSettings.reindexDialog.errorTitle')}</AlertTitle>
                      <AlertDescription>{reindexError}</AlertDescription>
                   </Alert>
                </div>
@@ -668,24 +636,24 @@ export default function TenantSettingsPage() {
             {reindexPhase === 'confirm' ? (
               <>
                 <Button variant="outline" onClick={() => setReindexDialogOpen(false)}>
-                  Cancelar
+                  {t('tenantSettings.reindexDialog.cancelButton')}
                 </Button>
                 <Button onClick={handleStartForceReindex}>
                   <IconRefresh className="mr-2 h-4 w-4" />
-                  Comenzar reindexado
+                  {t('tenantSettings.reindexDialog.startButton')}
                 </Button>
               </>
             ) : reindexPhase === 'complete' ? (
                <Button className="w-full" onClick={handleCloseReindexDialog}>
-                  Cerrar
+                  {t('tenantSettings.reindexDialog.closeButton')}
                </Button>
             ) : reindexPhase === 'error' ? (
                <Button variant="outline" className="w-full" onClick={() => setReindexPhase('confirm')}>
-                  Intentar de nuevo
+                  {t('tenantSettings.reindexDialog.retryButton')}
                </Button>
             ) : (
                <Button disabled variant="ghost" className="w-full cursor-not-allowed opacity-50">
-                  Por favor espere...
+                  {t('tenantSettings.reindexDialog.waitButton')}
                </Button>
             )}
           </DialogFooter>
@@ -696,23 +664,20 @@ export default function TenantSettingsPage() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>¿Seguro que deseas continuar?</DialogTitle>
+            <DialogTitle>{t('tenantSettings.deleteDialog.title')}</DialogTitle>
             <DialogDescription>
-              Esta acción eliminará de forma permanente todos los documentos del tenant.
-              No se puede deshacer.
+              {t('tenantSettings.deleteDialog.description')}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             <Alert className="border-destructive/50">
               <IconAlertTriangle className="h-4 w-4 text-destructive" />
-              <AlertDescription>
-                Escribe <strong>DELETE ALL DOCUMENTS</strong> para confirmar.
-              </AlertDescription>
+              <AlertDescription dangerouslySetInnerHTML={{ __html: t('tenantSettings.deleteDialog.confirmText') }} />
             </Alert>
             
             <Input
-              placeholder="Introduce el texto de confirmación"
+              placeholder={t('tenantSettings.deleteDialog.placeholder')}
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
             />
@@ -726,7 +691,7 @@ export default function TenantSettingsPage() {
                 setDeleteConfirmText("")
               }}
             >
-              Cancelar
+              {t('tenantSettings.deleteDialog.cancelButton')}
             </Button>
             <Button
               variant="destructive"
@@ -736,10 +701,10 @@ export default function TenantSettingsPage() {
               {isDeleting ? (
                 <>
                   <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Eliminando…
+                  {t('tenantSettings.deleteDialog.deletingButton')}
                 </>
               ) : (
-                'Eliminar todos los documentos'
+                t('tenantSettings.deleteDialog.deleteButton')
               )}
             </Button>
           </DialogFooter>

@@ -21,6 +21,7 @@ import {
   DollarSign
 } from 'lucide-react'
 import { useUserContext } from '@/contexts/user-context'
+import { useTranslation } from '@/lib/i18n/hooks'
 
 interface SubscriptionData {
   id: string
@@ -38,18 +39,17 @@ export default function BillingPage() {
   const router = useRouter()
   const { getToken } = useAuth()
   const { backendUser, userLoading } = useUserContext()
+  const { t, language } = useTranslation()
   
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingPortal, setIsLoadingPortal] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Check if user is admin of the tenant
   const isAdminUser = backendUser?.is_superuser || false
 
   useEffect(() => {
     if (!isAdminUser && !userLoading) {
-      // Only tenant admins can access billing
       router.push(`/${params.tenantId}/dashboard`)
       return
     }
@@ -76,10 +76,10 @@ export default function BillingPage() {
         const data = await response.json()
         setSubscription(data)
       } else {
-        throw new Error('Failed to fetch subscription')
+        throw new Error(t('billingPage.error'))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
+      setError(err instanceof Error ? err.message : t('billingPage.unknownError'))
     } finally {
       setIsLoading(false)
     }
@@ -103,10 +103,10 @@ export default function BillingPage() {
         const { portal_url } = await response.json()
         window.open(portal_url, '_blank')
       } else {
-        throw new Error('Failed to create portal session')
+        throw new Error(t('billingPage.createPortalError'))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open billing portal')
+      setError(err instanceof Error ? err.message : t('billingPage.openPortalError'))
     } finally {
       setIsLoadingPortal(false)
     }
@@ -124,12 +124,9 @@ export default function BillingPage() {
   }
 
   const getPlanDisplayName = (planId: string) => {
-    const plans: Record<string, string> = {
-      'free': 'Free Plan',
-      'pro': 'Pro Plan',
-      'enterprise': 'Enterprise Plan',
-    }
-    return plans[planId] || planId
+    const planKey = `billingPage.plans.${planId}`
+    const displayName = t(planKey)
+    return displayName === planKey ? planId : displayName
   }
 
   const getStatusBadgeVariant = (status: string) => {
@@ -146,7 +143,8 @@ export default function BillingPage() {
   }
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleDateString('en-US', {
+    const locale = language === 'es' ? 'es-ES' : 'en-US';
+    return new Date(timestamp * 1000).toLocaleDateString(locale, {
       year: 'numeric',
       month: 'long',
       day: 'numeric'
@@ -168,7 +166,7 @@ export default function BillingPage() {
           <Alert>
             <Shield className="h-4 w-4" />
             <AlertDescription>
-              Only tenant administrators can access billing information.
+              {t('billingPage.onlyAdmin')}
             </AlertDescription>
           </Alert>
         </div>
@@ -181,9 +179,9 @@ export default function BillingPage() {
       <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
         <div className="px-4 lg:px-6">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold mb-2">Billing & Subscription</h1>
+            <h1 className="text-3xl font-bold mb-2">{t('billingPage.title')}</h1>
             <p className="text-muted-foreground">
-              Manage your subscription, billing, and payment methods
+              {t('billingPage.subtitle')}
             </p>
           </div>
           
@@ -212,9 +210,9 @@ export default function BillingPage() {
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Billing & Subscription</h1>
+          <h1 className="text-3xl font-bold mb-2">{t('billingPage.title')}</h1>
           <p className="text-muted-foreground">
-            Manage your subscription, billing, and payment methods
+            {t('billingPage.subtitle')}
           </p>
         </div>
 
@@ -231,7 +229,7 @@ export default function BillingPage() {
                         {getPlanDisplayName(subscription.plan_id)}
                       </CardTitle>
                       <CardDescription>
-                        Your current subscription plan
+                        {t('billingPage.currentPlan.title')}
                       </CardDescription>
                     </div>
                   </div>
@@ -248,16 +246,16 @@ export default function BillingPage() {
                       <div className="flex items-center space-x-2">
                         <Calendar className="h-4 w-4 text-muted-foreground" />
                         <div>
-                          <p className="text-sm font-medium">Billing Cycle</p>
+                          <p className="text-sm font-medium">{t('billingPage.currentPlan.billingCycle')}</p>
                           <p className="text-sm text-muted-foreground capitalize">
-                            {subscription.interval}ly
+                            {subscription.interval === 'month' ? t('billingPage.currentPlan.monthly') : t('billingPage.currentPlan.yearly')}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
                         <DollarSign className="h-4 w-4 text-muted-foreground" />
                         <div>
-                          <p className="text-sm font-medium">Next Payment</p>
+                          <p className="text-sm font-medium">{t('billingPage.currentPlan.nextPayment')}</p>
                           <p className="text-sm text-muted-foreground">
                             {formatDate(subscription.current_period_end)}
                           </p>
@@ -269,8 +267,7 @@ export default function BillingPage() {
                       <Alert>
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription>
-                          Your subscription will be canceled on {formatDate(subscription.current_period_end)}.
-                          You'll retain access until then.
+                          {t('billingPage.currentPlan.cancellationWarning', {date: formatDate(subscription.current_period_end)})}
                         </AlertDescription>
                       </Alert>
                     )}
@@ -280,14 +277,14 @@ export default function BillingPage() {
                 {subscription.plan_id === 'free' && (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
-                      You're currently on the free plan. Upgrade to unlock premium features.
+                      {t('billingPage.freePlan.description')}
                     </p>
                     <Button 
                       onClick={() => router.push('/pricing')}
                       className="w-full sm:w-auto"
                     >
                       <Zap className="h-4 w-4 mr-2" />
-                      Upgrade Plan
+                      {t('billingPage.freePlan.upgradeButton')}
                     </Button>
                   </div>
                 )}
@@ -307,7 +304,7 @@ export default function BillingPage() {
                       ) : (
                         <CreditCard className="h-4 w-4 mr-2" />
                       )}
-                      Manage Billing
+                      {t('billingPage.manageBilling')}
                       <ExternalLink className="h-4 w-4 ml-2" />
                     </Button>
                   </CardFooter>
@@ -318,22 +315,20 @@ export default function BillingPage() {
             {/* Billing Portal Info */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Billing Portal</CardTitle>
+                <CardTitle className="text-lg">{t('billingPage.billingPortal.title')}</CardTitle>
                 <CardDescription>
-                  Secure access to your billing information
+                  {t('billingPage.billingPortal.description')}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    The billing portal allows you to:
+                    {t('billingPage.billingPortal.featureIntro')}
                   </p>
                   <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                    <li>• Update payment methods</li>
-                    <li>• Download invoices</li>
-                    <li>• Update billing address</li>
-                    <li>• Manage subscription</li>
-                    <li>• View payment history</li>
+                    {t('billingPage.billingPortal.features', { returnObjects: true }).map((feature: string, index: number) => (
+                      <li key={index}>• {feature}</li>
+                    ))}
                   </ul>
                 </div>
               </CardContent>

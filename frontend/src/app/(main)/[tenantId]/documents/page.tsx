@@ -59,15 +59,10 @@ import { ShareDocumentDialog } from "@/components/documents/share-document-dialo
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 import { useTranslation } from "@/lib/i18n/hooks"
 
-const DOCUMENT_FILTERS = [
-  { value: 'all', label: 'All Documents' },
-  { value: 'recent', label: 'Recent Documents' },
-] as const
-
-type DocumentFilterOption = typeof DOCUMENT_FILTERS[number]['value']
+type DocumentFilterOption = 'all' | 'recent';
 
 const isDocumentFilterOption = (value: unknown): value is DocumentFilterOption =>
-  DOCUMENT_FILTERS.some(filter => filter.value === value)
+  ['all', 'recent'].includes(value as string)
 
 const mapRecentDocumentToApiDocument = (doc: RecentDocument): ApiDocument => ({
   id: doc.id,
@@ -97,6 +92,11 @@ export default function DocumentsPage() {
   const { t } = useTranslation()
   const { backendUser } = useUserContext()
   const apiClient = useApiClient()
+
+  const DOCUMENT_FILTERS = useMemo(() => [
+    { value: 'all' as const, label: t('documentsPage.filters.all') },
+    { value: 'recent' as const, label: t('documentsPage.filters.recent') },
+  ], [t]);
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -156,8 +156,8 @@ export default function DocumentsPage() {
     getStoredPreference('viewMode', 'grid')
   )
   const selectedFilterLabel = useMemo(() => {
-    return DOCUMENT_FILTERS.find(option => option.value === selectedFilter)?.label ?? 'All Documents'
-  }, [selectedFilter])
+    return DOCUMENT_FILTERS.find(option => option.value === selectedFilter)?.label ?? t('documentsPage.filters.all')
+  }, [selectedFilter, DOCUMENT_FILTERS, t])
   // Siempre usar búsqueda semántica por contenido
   const useDeepSearch = true
 
@@ -355,7 +355,7 @@ export default function DocumentsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage])
+  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage, t])
 
   // Reload when dependencies change
   useEffect(() => {
@@ -378,56 +378,42 @@ export default function DocumentsPage() {
   }, [])
 
   const handleDocumentsUpdated = useCallback((payload?: DocumentsUpdatedPayload) => {
-    console.log('[DEBUG] DocumentsPage: handleDocumentsUpdated received payload:', payload)
-
     if (payload?.tenantId && payload.tenantId !== tenantId) {
-      console.log('[DEBUG] DocumentsPage: Tenant ID mismatch, ignoring event')
       return
     }
 
     if (payload?.source === 'upload') {
-      console.log('[DEBUG] DocumentsPage: Processing upload event')
       const uploadedFiles = payload.files || []
-      if (!uploadedFiles.length) {
-        console.log('[DEBUG] DocumentsPage: No files in payload, skipping')
-        return
-      }
-
       const successfulUploads = uploadedFiles.filter(file => file.status === 'success')
       if (!successfulUploads.length) {
-         console.log('[DEBUG] DocumentsPage: No successful uploads, skipping')
         return
       }
 
-      // closeUploadDialog is now handled in GlobalUploadDialog
+      const message = successfulUploads.length > 1 
+        ? t('documentsPage.notifications.uploadComplete.message_other', { count: successfulUploads.length })
+        : t('documentsPage.notifications.uploadComplete.message_one', { count: 1 });
 
       addNotification({
         type: 'upload',
-        title: 'Upload Complete',
-        message: `${successfulUploads.length} file${successfulUploads.length > 1 ? 's' : ''} uploaded successfully`,
+        title: t('documentsPage.notifications.uploadComplete.title'),
+        message: message,
         fileCount: successfulUploads.length,
         action: {
-          label: 'View Documents',
-          href: '/documents'
+          label: t('documentsPage.notifications.viewDocumentsAction'),
+          href: `/${tenantId}/documents`
         }
       })
 
-      console.log('[DEBUG] DocumentsPage: Resetting filters and search')
       setSearchQuery('')
       setSelectedFilter('all')
       storePreference('filter', 'all')
       setCurrentPage(1)
-
-      // Wait a bit for Elasticsearch to index the new documents (now removed, refreshing immediately)
-      console.log('[DEBUG] DocumentsPage: Executing immediate loadDocuments')
       loadDocuments()
-
       return
     }
     
-    console.log('[DEBUG] DocumentsPage: Generic update event, reloading documents immediately')
     loadDocuments()
-  }, [addNotification, closeUploadDialog, loadDocuments, setCurrentPage, setSearchQuery, setSelectedFilter, storePreference, tenantId])
+  }, [addNotification, loadDocuments, tenantId, t, storePreference])
 
   useDocumentEvent("documents:updated", handleDocumentsUpdated)
 
@@ -507,8 +493,8 @@ export default function DocumentsPage() {
     if (!isOdtDocument(document)) {
       addNotification({
         type: 'error',
-        title: 'Formato no soportado',
-        message: 'Solo se pueden convertir documentos ODT en plantillas.'
+        title: t('documentsPage.notifications.convertToTemplate.unsupported.title'),
+        message: t('documentsPage.notifications.convertToTemplate.unsupported.message')
       })
       return
     }
@@ -532,8 +518,8 @@ export default function DocumentsPage() {
       }
       addNotification({
         type: 'success',
-        title: 'Plantilla creada',
-        message: `La plantilla "${template.name}" se ha creado correctamente.`
+        title: t('documentsPage.notifications.convertToTemplate.success.title'),
+        message: t('documentsPage.notifications.convertToTemplate.success.message', { templateName: template.name })
       })
 
       try {
@@ -549,13 +535,13 @@ export default function DocumentsPage() {
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Conversión fallida',
-        message: error instanceof Error ? error.message : 'No se pudo convertir el documento.'
+        title: t('documentsPage.notifications.convertToTemplate.error.title'),
+        message: error instanceof Error ? error.message : t('documentsPage.notifications.convertToTemplate.error.message')
       })
     } finally {
       setConvertingDocumentId(null)
     }
-  }, [isTenantAdmin, documentService, addNotification, openTemplateInGoogleDocs, isOdtDocument])
+  }, [isTenantAdmin, documentService, addNotification, openTemplateInGoogleDocs, isOdtDocument, t])
 
   const handleRequestSignature = (document: ApiDocument) => {
     router.push(`/${tenantId}/documents/${document.id}/signature-request`)
@@ -569,8 +555,8 @@ export default function DocumentsPage() {
     try {
       addNotification({
         type: 'info',
-        title: 'Downloading',
-        message: `Downloading ${document.filename}...`
+        title: t('documentsPage.notifications.downloading.title'),
+        message: t('documentsPage.notifications.downloading.message', { filename: document.filename })
       })
       
       const result = await documentService.downloadDocument(document.id)
@@ -578,23 +564,21 @@ export default function DocumentsPage() {
       if ('error' in result) {
         addNotification({
           type: 'error',
-          title: 'Download Failed',
-          message: result.error
+          title: t('documentsPage.notifications.downloadFailed.title'),
+          message: t('documentsPage.notifications.downloadFailed.message', { error: result.error })
         })
         return
       }
 
-      // Verify we have a blob
       if (!result.blob || !(result.blob instanceof Blob)) {
         addNotification({
           type: 'error',
-          title: 'Download Failed',
-          message: 'Invalid file data received'
+          title: t('documentsPage.notifications.invalidFile.title'),
+          message: t('documentsPage.notifications.invalidFile.message')
         })
         return
       }
 
-      // Create download link
       const url = URL.createObjectURL(result.blob)
       const a = window.document.createElement('a')
       a.href = url
@@ -603,7 +587,6 @@ export default function DocumentsPage() {
       window.document.body.appendChild(a)
       a.click()
       
-      // Cleanup
       setTimeout(() => {
         window.document.body.removeChild(a)
         URL.revokeObjectURL(url)
@@ -611,15 +594,15 @@ export default function DocumentsPage() {
 
       addNotification({
         type: 'success',
-        title: 'Download Complete',
-        message: `${document.filename} downloaded successfully`
+        title: t('documentsPage.notifications.downloadComplete.title'),
+        message: t('documentsPage.notifications.downloadComplete.message', { filename: document.filename })
       })
     } catch (error) {
       console.error('Download exception:', error)
       addNotification({
         type: 'error',
-        title: 'Download Failed',
-        message: error instanceof Error ? error.message : 'Unknown error occurred'
+        title: t('documentsPage.notifications.downloadFailed.title'),
+        message: t('documentsPage.notifications.downloadFailed.message', { error: error instanceof Error ? error.message : 'Unknown error' })
       })
     }
   }
@@ -631,29 +614,28 @@ export default function DocumentsPage() {
       if (response.error) {
         addNotification({
           type: 'error',
-          title: 'Update Failed',
-          message: response.error
+          title: t('documentsPage.notifications.updateFailed.title'),
+          message: t('documentsPage.notifications.updateFailed.message', { error: response.error })
         })
         return
       }
 
-      // Update local state
       setDocuments(prev => prev.map(doc => 
         doc.id === id ? { ...doc, ...updates } : doc
       ))
 
       addNotification({
         type: 'success',
-        title: 'Document Updated',
-        message: 'Document information has been updated successfully'
+        title: t('documentsPage.notifications.updateSuccess.title'),
+        message: t('documentsPage.notifications.updateSuccess.message')
       })
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Update Failed',
-        message: error instanceof Error ? error.message : 'Unknown error occurred'
+        title: t('documentsPage.notifications.updateFailed.title'),
+        message: t('documentsPage.notifications.updateFailed.message', { error: error instanceof Error ? error.message : 'Unknown error' })
       })
-      throw error // Re-throw to prevent dialog from closing
+      throw error
     }
   }
 
@@ -664,19 +646,18 @@ export default function DocumentsPage() {
       if (response.error) {
         addNotification({
           type: 'error',
-          title: 'Delete Failed',
-          message: response.error
+          title: t('documentsPage.notifications.deleteFailed.title'),
+          message: t('documentsPage.notifications.deleteFailed.message', { error: response.error })
         })
         return
       }
 
-      // Remove from local state
       setDocuments(prev => prev.filter(doc => doc.id !== id))
 
       addNotification({
         type: 'success',
-        title: 'Document Deleted',
-        message: 'Document has been deleted successfully'
+        title: t('documentsPage.notifications.deleteSuccess.title'),
+        message: t('documentsPage.notifications.deleteSuccess.message')
       })
 
       emitDocumentEvent("documents:updated", {
@@ -686,10 +667,10 @@ export default function DocumentsPage() {
     } catch (error) {
       addNotification({
         type: 'error',
-        title: 'Delete Failed',
-        message: error instanceof Error ? error.message : 'Unknown error occurred'
+        title: t('documentsPage.notifications.deleteFailed.title'),
+        message: t('documentsPage.notifications.deleteFailed.message', { error: error instanceof Error ? error.message : 'Unknown error' })
       })
-      throw error // Re-throw to prevent dialog from closing
+      throw error
     }
   }
 
@@ -723,14 +704,14 @@ export default function DocumentsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Document Library</h1>
+            <h1 className="text-3xl font-bold mb-2">{t('documentsPage.title')}</h1>
             <p className="text-muted-foreground">
-              Manage and organize your uploaded documents
+              {t('documentsPage.subtitle')}
             </p>
           </div>
           <Button onClick={openUploadDialog}>
             <IconPlus className="mr-2 h-4 w-4" />
-            Upload Document
+            {t('documentsPage.uploadButton')}
           </Button>
         </div>
 
@@ -746,7 +727,7 @@ export default function DocumentsPage() {
                 <div className="flex-1 relative">
                   <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
                   <RichTextInput
-                    placeholder="Search documents... (usa @ para mencionar entidades)"
+                    placeholder={t('documentsPage.searchPlaceholder')}
                     value={localSearchQuery}
                     onChange={setLocalSearchQuery}
                     onKeyDown={handleKeyDown}
@@ -754,21 +735,20 @@ export default function DocumentsPage() {
                     documentId="general"
                     onEntitySelect={(entity) => {
                       console.log("Entity selected in document search:", entity)
-                      // Optionally trigger search when entity is selected
-                      handleSearchConfirm() // Trigger search on entity select
+                      handleSearchConfirm()
                     }}
                   />
                 </div>
                 
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button onClick={handleSearchConfirm} variant="outline" className="flex-shrink-0">
-                    Search
+                    {t('documentsPage.searchButton')}
                   </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline">
                       <IconFilter className="mr-2 h-4 w-4" />
-                      Filter: {selectedFilterLabel}
+                      {t('documentsPage.filterButton', { filter: selectedFilterLabel })}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
@@ -812,10 +792,9 @@ export default function DocumentsPage() {
                 </div>
               </div>
               
-              {/* Búsqueda semántica siempre habilitada */}
               <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                 <IconBrain className="h-4 w-4" />
-                <span>Búsqueda inteligente por contenido activada</span>
+                <span>{t('documentsPage.smartSearch')}</span>
               </div>
             </div>
           </CardContent>
@@ -825,7 +804,7 @@ export default function DocumentsPage() {
         {isLoading && (
           <div className="flex justify-center items-center py-12">
             <IconLoader2 className="h-8 w-8 animate-spin" />
-            <span className="ml-2">Loading documents...</span>
+            <span className="ml-2">{t('documentsPage.loading')}</span>
           </div>
         )}
 
@@ -835,7 +814,7 @@ export default function DocumentsPage() {
             <CardContent>
               <p className="text-red-600 mb-4">{error}</p>
               <Button onClick={loadDocuments} variant="outline">
-                Try Again
+                {t('documentsPage.tryAgainButton')}
               </Button>
             </CardContent>
           </Card>
@@ -852,12 +831,10 @@ export default function DocumentsPage() {
               >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
-                    {/* File Icon */}
                     <div className="flex-shrink-0">
                       {getFileIcon(document.file_type, document.mime_type, document.filename)}
                     </div>
                     
-                    {/* Document Info */}
                     <div className="flex-grow min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <div className="min-w-0 flex-1">
@@ -879,19 +856,16 @@ export default function DocumentsPage() {
                         </div>
                       </div>
                       
-                      {/* Metadata and Actions */}
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span>Size: {formatFileSize(document.file_size)}</span>
+                          <span>{t('documentsPage.grid.size', {size: formatFileSize(document.file_size)})}</span>
                           <span>•</span>
-                          <span>Uploaded: {new Date(document.created_at).toLocaleDateString()}</span>
+                          <span>{t('documentsPage.grid.uploaded', {date: new Date(document.created_at).toLocaleDateString()})}</span>
                           <span>•</span>
-                          <span>{document.category || 'Sin Categoría'}</span>
+                          <span>{document.category || t('documentsPage.grid.noCategory')}</span>
                         </div>
                         
-                        {/* Actions */}
                         <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {/* 3 Main Actions */}
                           <Button 
                             size="sm" 
                             variant="ghost"
@@ -899,7 +873,7 @@ export default function DocumentsPage() {
                               e.stopPropagation()
                               handleFullPagePreview(document)
                             }}
-                            title="Full Preview"
+                            title={t('documentsPage.grid.tooltips.preview')}
                             className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconEye className="h-3.5 w-3.5" />
@@ -911,7 +885,7 @@ export default function DocumentsPage() {
                               e.stopPropagation()
                               handleDownloadDocument(document)
                             }}
-                            title="Download"
+                            title={t('documentsPage.grid.tooltips.download')}
                             className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconDownload className="h-3.5 w-3.5" />
@@ -923,20 +897,19 @@ export default function DocumentsPage() {
                               e.stopPropagation()
                               handleShareDocument(document)
                             }}
-                            title="Share"
+                            title={t('documentsPage.grid.tooltips.share')}
                             className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                           >
                             <IconShare2 className="h-3.5 w-3.5" />
                           </Button>
                           
-                          {/* More Actions Dropdown */}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button 
                                 size="sm" 
                                 variant="ghost"
                                 onClick={(e) => e.stopPropagation()}
-                                title="More actions"
+                                title={t('documentsPage.grid.tooltips.more')}
                                 className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                               >
                                 <IconDotsVertical className="h-3.5 w-3.5" />
@@ -945,19 +918,19 @@ export default function DocumentsPage() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => handleViewDocument(document)}>
                                 <IconEye className="mr-2 h-4 w-4" />
-                                View Details
+                                {t('documentsPage.grid.actions.viewDetails')}
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleDownloadDocument(document)}>
                                 <IconDownload className="mr-2 h-4 w-4" />
-                                Download
+                                {t('documentsPage.grid.actions.download')}
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleRequestSignature(document)}>
                                 <IconSignature className="mr-2 h-4 w-4" />
-                                Request Signature
+                                {t('documentsPage.grid.actions.requestSignature')}
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEditDocument(document)}>
                                 <IconEdit className="mr-2 h-4 w-4" />
-                                Edit
+                                {t('documentsPage.grid.actions.edit')}
                               </DropdownMenuItem>
                               {isTenantAdmin && (
                                 <DropdownMenuItem
@@ -973,7 +946,7 @@ export default function DocumentsPage() {
                                   ) : (
                                     <IconFileTypeDoc className="mr-2 h-4 w-4" />
                                   )}
-                                  Convert to Template
+                                  {t('documentsPage.grid.actions.convertToTemplate')}
                                 </DropdownMenuItem>
                               )}
                               
@@ -985,14 +958,13 @@ export default function DocumentsPage() {
                                 className="text-red-600 focus:text-red-600"
                               >
                                 <IconTrash className="mr-2 h-4 w-4" />
-                                Delete
+                                {t('documentsPage.grid.actions.delete')}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
                       </div>
                       
-                      {/* Tags */}
                       {(document.tags || []).length > 0 && (
                         <div className="flex flex-wrap gap-0.5">
                           {(document.tags || []).map((tag: string) => (
@@ -1032,17 +1004,17 @@ export default function DocumentsPage() {
           <Card className="text-center py-12">
             <CardContent>
               <IconFile className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No documents found</h3>
+              <h3 className="text-lg font-semibold mb-2">{t('documentsPage.empty.title')}</h3>
               <p className="text-muted-foreground mb-4">
                 {searchQuery || selectedFilter !== 'all' 
-                  ? 'Try adjusting your search or filter criteria.'
-                  : 'Get started by uploading your first document.'
+                  ? t('documentsPage.empty.messageWithFilter')
+                  : t('documentsPage.empty.messageWithoutFilter')
                 }
               </p>
               {!searchQuery && selectedFilter === 'all' && (
                 <Button onClick={openUploadDialog}>
                   <IconPlus className="mr-2 h-4 w-4" />
-                  Upload Document
+                  {t('documentsPage.uploadButton')}
                 </Button>
               )}
             </CardContent>
@@ -1055,7 +1027,11 @@ export default function DocumentsPage() {
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-sm text-muted-foreground">
-                  Showing {((currentPage - 1) * perPage) + 1} to {Math.min(currentPage * perPage, totalDocuments)} of {totalDocuments} documents
+                  {t('documentsPage.pagination.showing', {
+                    start: ((currentPage - 1) * perPage) + 1,
+                    end: Math.min(currentPage * perPage, totalDocuments),
+                    total: totalDocuments
+                  })}
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -1066,11 +1042,10 @@ export default function DocumentsPage() {
                     disabled={currentPage === 1}
                   >
                     <IconChevronLeft className="h-4 w-4" />
-                    Previous
+                    {t('documentsPage.pagination.previous')}
                   </Button>
                   
                   <div className="flex items-center gap-1">
-                    {/* Show first page */}
                     <Button
                       size="sm"
                       variant={currentPage === 1 ? "default" : "outline"}
@@ -1080,12 +1055,10 @@ export default function DocumentsPage() {
                       1
                     </Button>
                     
-                    {/* Show dots if needed */}
                     {currentPage > 3 && (
                       <span className="px-2 text-muted-foreground">...</span>
                     )}
                     
-                    {/* Show pages around current page */}
                     {Array.from({ length: totalPages }, (_, i) => i + 1)
                       .filter(page => page > 1 && page < totalPages && Math.abs(page - currentPage) <= 1)
                       .map(page => (
@@ -1101,12 +1074,10 @@ export default function DocumentsPage() {
                       ))
                     }
                     
-                    {/* Show dots if needed */}
                     {currentPage < totalPages - 2 && (
                       <span className="px-2 text-muted-foreground">...</span>
                     )}
                     
-                    {/* Show last page */}
                     {totalPages > 1 && (
                       <Button
                         size="sm"
@@ -1125,7 +1096,7 @@ export default function DocumentsPage() {
                     onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                     disabled={currentPage === totalPages}
                   >
-                    Next
+                    {t('documentsPage.pagination.next')}
                     <IconChevronRight className="h-4 w-4" />
                   </Button>
                 </div>

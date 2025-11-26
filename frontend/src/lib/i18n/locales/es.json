@@ -176,6 +176,267 @@
       "description": "Algunos documentos no pudieron ser procesados correctamente",
       "action": "Ver detalles y reintentar",
       "count": "{count} documento(s) con errores"
-    }
-  }
-}
+          }
+        },
+        "billingPage": {
+          "title": "Facturación y Suscripción",
+          "subtitle": "Gestiona tu suscripción, facturación y métodos de pago",
+          "onlyAdmin": "Solo los administradores del tenant pueden acceder a la información de facturación.",
+          "loading": "Cargando...",
+          "error": "No se pudo obtener la suscripción",
+          "unknownError": "Error desconocido",
+          "createPortalError": "No se pudo crear la sesión del portal",
+          "openPortalError": "No se pudo abrir el portal de facturación",
+          "plans": {
+            "free": "Plan Gratuito",
+            "pro": "Plan Pro",
+            "enterprise": "Plan Enterprise"
+          },
+          "currentPlan": {
+            "title": "Tu plan de suscripción actual",
+            "billingCycle": "Ciclo de Facturación",
+            "nextPayment": "Próximo Pago",
+            "monthly": "Mensual",
+            "yearly": "Anual",
+            "cancellationWarning": "Tu suscripción se cancelará el {date}. Conservarás el acceso hasta entonces."
+          },
+          "freePlan": {
+            "description": "Actualmente estás en el plan gratuito. Actualiza para desbloquear funciones premium.",
+            "upgradeButton": "Actualizar Plan"
+          },
+          "manageBilling": "Gestionar Facturación",
+          "billingPortal": {
+            "title": "Portal de Facturación",
+            "description": "Acceso seguro a tu información de facturación",
+            "features": [
+              "Actualizar métodos de pago",
+              "Descargar facturas",
+              "Actualizar dirección de facturación",
+              "Gestionar suscripción",
+              "Ver historial de pagos"
+            ],
+            "featureIntro": "El portal de facturación te permite:"
+          }
+        },
+        "chatPage": {
+          "assistantName": "Emma Asistente",
+          "assistantSubtitle": "Inteligencia documental impulsada por IA",
+          "mode": {
+            "chat": "Chat",
+            "settings": "Configuración"
+          },
+          "status": {
+            "online": "En línea"
+          },
+          "landingScreen": {
+            "askEmma": "Pregúntale a Emma",
+            "askEmmaSubtitle": "¿En qué puedo ayudarte hoy?",
+            "tryAsking": "Intenta preguntar:",
+            "refreshPrompts": "Actualizar",
+            "orTypeQuestion": "O escribe tu propia pregunta abajo para comenzar a chatear"
+          },
+          "examplePrompts": [
+            "¿Qué documentos hay disponibles en mi biblioteca?",
+            "Busca información sobre contratos firmados",
+            "Resume los documentos más recientes",
+            "¿Hay algún documento sobre facturación?",
+            "Muéstrame los documentos compartidos conmigo",
+            "Encuentra documentos con firmas digitales",
+            "¿Qué documentos necesitan revisión?",
+            "Busca documentos por fecha de creación"
+          ],
+          "settingsPage": {
+            "title": "Configuración de Emma",
+            "modelSettings": {
+              "title": "Configuración del Modelo",
+              "temperature": "Temperatura",
+              "temperatureDescription": "Controla la creatividad de las respuestas",
+              "maxTokens": "Máximo de tokens",
+              "maxTokensDescription": "Límite de longitud de respuesta"
+            },
+            "searchSettings": {
+              "title": "Configuración de Búsqueda",
+              "documentLimit": "Límite de documentos",
+              "documentLimitDescription": "Número máximo de documentos a analizar",
+              "similarityThreshold": "Umbral de similitud",
+              "similarityThresholdDescription": "Mínimo de similitud para incluir documentos"
+            },
+            "userInfo": {
+              "title": "Información del Usuario",
+              "tenant": "Tenant:",
+              "user": "Usuario:",
+              "role": "Rol:",
+              "notAvailable": "No disponible",
+              "member": "Miembro del equipo",
+              "admin": "Administrador"
+            },
+            "capabilities": {
+              "title": "Capacidades",
+              "ragAgentic": "RAG Agentic",
+              "semanticSearch": "Búsqueda Semántica",
+              "documentAnalysis": "Análisis de Documentos",
+              "contextualResponses": "Respuestas Contextuales"
+            },
+            "backToChat": "Volver al Chat"
+          },
+          "initialMessage": "¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+        },
+        "searchPage": {
+          "title": "Búsqueda de Documentos",
+          "subtitle": "Encuentra documentos rápidamente usando búsqueda semántica con filtros dinámicos. Para consultas y análisis complejos, prueba el Asistente Emma.",
+          "quickSearch": "Búsqueda Rápida",
+          "filterActive": "{count} filtro activo",
+          "filtersActive": "{count} filtros activos",
+          "searchPlaceholder": "Buscar documentos...",
+          "searchButton": "Buscar",
+          "clearButton": "Limpiar",
+          "semantic": "Semántica",
+          "semanticDescription": "Búsqueda rápida con IA",
+          "hybrid": "Híbrida",
+          "hybridDescription": "IA + palabras clave",
+          "keyword": "Palabra Clave",
+          "keywordDescription": "Búsqueda tradicional",
+          "engineInfoSemantic": "Búsqueda semántica rápida usando embeddings de IA",
+          "engineInfoHybrid": "Búsqueda combinada por palabras clave y semántica con filtros",
+          "engineInfoKeyword": "Búsqueda tradicional basada en palabras clave con operadores booleanos",
+          "advancedFilters": "Filtros Avanzados",
+          "optionalFilters": "Filtros opcionales para resultados más específicos",
+          "tags": "Etiquetas",
+          "tagsPlaceholder": "etiqueta1, etiqueta2, etiqueta3",
+          "dateFrom": "Fecha Desde",
+          "dateTo": "Fecha Hasta",
+          "fileSize": "Tamaño (Bytes)",
+          "min": "Mínimo",
+          "max": "Máximo",
+          "error": "Por favor, introduce una consulta de búsqueda",
+          "minCharacters": "Por favor, introduce al menos 3 caracteres",
+          "searchError": "Ocurrió un error durante la búsqueda",
+          "noResults": "No se encontraron documentos que coincidan con tu búsqueda",
+          "resultsHeader": "Se encontraron {count} documentos",
+          "askEmmaAboutResults": "Pregúntale a Emma sobre estos resultados",
+          "noResultsToAnalyze": "No hay resultados para analizar",
+          "downloadUrlNotAvailable": "URL de descarga no disponible",
+          "shareComingSoon": "Funcionalidad para compartir próximamente",
+          "emptySearchTitle": "Búsqueda Rápida de Documentos",
+          "emptySearchDescription": "Busca documentos específicos usando palabras clave. Utiliza los filtros de la izquierda para acotar los resultados. Para análisis y conversaciones complejas, utiliza el Asistente Emma.",
+          "tryEmmaAssistant": "Probar Asistente Emma",
+          "activeFilters": "Filtros Activos",
+          "processingResultError": "El resultado de la búsqueda no tiene identificador. Saltando elemento."
+        },
+        "templatesPage": {
+          "title": "Plantillas de Documentos",
+          "subtitle": "Gestiona y edita las plantillas de documentos almacenadas en el backend de Nexus",
+          "editSessionsButton": "Sesiones de Edición",
+          "uploadTemplateButton": "Subir Plantilla",
+          "connectGoogleDrive": {
+            "title": "Conectar Google Drive",
+            "description": "Necesitas conceder acceso para que podamos crear Google Docs temporales para la edición.",
+            "button": "Conectar Google Drive"
+          },
+          "errorLoading": {
+            "title": "Error al cargar las plantillas",
+            "description": "No se pudieron cargar las plantillas en este momento. Por favor, inténtalo de nuevo más tarde."
+          },
+          "genericError": "Error desconocido",
+          "noTemplates": {
+            "title": "Aún no hay plantillas para este tenant.",
+            "description1": "Sube una nueva plantilla ODT usando el botón \"Subir Plantilla\" o conviértela desde",
+            "documentsLibrary": "la biblioteca de documentos"
+          },
+          "templateCard": {
+            "noDescription": "Sin descripción proporcionada",
+            "updated": "Actualizado",
+            "unknown": "Desconocido",
+            "active": "Activo",
+            "sourceFile": "Archivo de origen:",
+            "noOdtUploaded": "Aún no se ha subido ningún ODT",
+            "editTemplateButton": "Editar Plantilla",
+            "preparingButton": "Preparando..."
+          },
+          "howItWorks": {
+            "title": "¿Cómo funciona la edición de plantillas?",
+            "step1": "1. Haz clic en \"Editar Plantilla\" para solicitar una sesión de Google Docs al backend.",
+            "step2": "2. Edita el documento temporal en Google Docs con soporte completo de formato.",
+            "step3": "3. Cuando termines, finaliza la sesión para que el ODT se guarde de nuevo.",
+            "step4": "4. Los documentos temporales caducan automáticamente después de unas horas."
+          },
+          "toast": {
+            "connectDriveFailed": {
+              "title": "No se pudo conectar Google Drive",
+              "description": "No se pudo iniciar la conexión con Google Drive"
+            },
+            "checkingDrive": {
+              "title": "Comprobando Google Drive",
+              "description": "Por favor, espera mientras verificamos tu conexión con Drive"
+            },
+            "connectDriveFirst": {
+              "title": "Conecta Google Drive primero",
+              "description": "Debes conectar tu cuenta de Google para editar plantillas."
+            },
+            "editSessionCreated": {
+              "title": "Sesión de edición creada",
+              "description": "Abriendo Google Docs para {templateName}"
+            },
+            "editSessionFailed": {
+                        "title": "Error",
+                        "description": "No se pudo iniciar la sesión de edición"
+                      }
+                    }
+                  },
+                  "workflowsPage": {
+                    "title": "Workflows con TemporalIO",
+                    "subtitle": "Gestiona procesos automatizados durables con TemporalIO",
+                    "newWorkflowButton": "Nuevo Workflow",
+                    "errorDisplay": {
+                      "title": "Error",
+                      "description": "Ocurrió un error al cargar los workflows."
+                    },
+                    "stats": {
+                      "totalWorkflows": {
+                        "title": "Total Workflows",
+                        "description": "Workflows en el sistema"
+                      },
+                      "activeWorkflows": {
+                        "title": "Activos",
+                        "description": "En ejecución"
+                      },
+                      "completedToday": {
+                        "title": "Completados Hoy",
+                        "description": "Finalizados hoy"
+                      },
+                      "failedWorkflows": {
+                        "title": "Fallidos",
+                        "description": "Con errores"
+                      }
+                    },
+                    "tabs": {
+                      "dashboard": "Dashboard",
+                      "monitor": "Monitor",
+                      "templates": "Plantillas",
+                      "history": "Historial"
+                    },
+                    "historyCard": {
+                      "title": "Historial de Workflows",
+                      "description": "Workflows completados y cancelados",
+                      "emptyMessage": "Historial próximamente disponible"
+                    },
+                    "status": {
+                      "running": "En Ejecución",
+                      "completed": "Completado",
+                      "failed": "Fallido",
+                      "cancelled": "Cancelado",
+                      "unknown": "Desconocido"
+                    },
+                    "toast": {
+                      "startWorkflowError": "Error al iniciar workflow:",
+                      "cancelWorkflowError": "Error al cancelar workflow:",
+                      "workflowUpdated": "Workflow actualizado:"
+                    },
+                    "workflowForm": {
+                      "title": "Nuevo Workflow",
+                      "cancelButton": "Cancelar"
+                    }
+                  }
+            
+      }
+      

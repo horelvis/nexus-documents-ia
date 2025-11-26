@@ -17,8 +17,8 @@ export async function loadTranslations(language: Language) {
   }
 
   try {
-    const module = await translations[language]()
-    translationCache[language] = module.default || module
+    const translationModule = await translations[language]()
+    translationCache[language] = translationModule.default || translationModule
     return translationCache[language]
   } catch (error) {
     console.error(`Failed to load translations for ${language}:`, error)

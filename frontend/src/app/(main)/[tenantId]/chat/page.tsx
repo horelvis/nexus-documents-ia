@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useRef } from "react"
+import React, { useEffect, useState, useRef, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { 
   MessageSquare, 
@@ -18,9 +18,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
-// Usar nuestros componentes de Elysia existentes
 import { ElysiaChat, type ElysiaChatRef } from "@/components/elysia-chat"
 import { useBackendUser } from "@/contexts/user-context"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 interface ChatPageProps {
   params: Promise<{
@@ -28,25 +28,7 @@ interface ChatPageProps {
   }>
 }
 
-// Prompts de ejemplo para comenzar
-const examplePrompts = [
-  "¿Qué documentos hay disponibles en mi biblioteca?",
-  "Busca información sobre contratos firmados",
-  "Resume los documentos más recientes",
-  "¿Hay algún documento sobre facturación?",
-  "Muéstrame los documentos compartidos conmigo",
-  "Encuentra documentos con firmas digitales",
-  "¿Qué documentos necesitan revisión?",
-  "Busca documentos por fecha de creación"
-]
-
-function getRandomPrompts(count: number = 4): string[] {
-  const shuffled = [...examplePrompts].sort(() => 0.5 - Math.random())
-  return shuffled.slice(0, count)
-}
-
 export default function ChatPage({ params }: ChatPageProps) {
-  // Unwrap params Promise using React.use()
   const { tenantId } = React.use(params)
   
   const { backendUser } = useBackendUser()
@@ -56,8 +38,24 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [hasStartedChat, setHasStartedChat] = useState(false)
   const [initialQuery, setInitialQuery] = useState<string | null>(null)
   const elysiaChatRef = useRef<ElysiaChatRef>(null)
+  const { t } = useTranslation()
 
-  // Check for initial query parameter
+  const examplePrompts = useMemo(() => ([
+    t('chatPage.examplePrompts.0'),
+    t('chatPage.examplePrompts.1'),
+    t('chatPage.examplePrompts.2'),
+    t('chatPage.examplePrompts.3'),
+    t('chatPage.examplePrompts.4'),
+    t('chatPage.examplePrompts.5'),
+    t('chatPage.examplePrompts.6'),
+    t('chatPage.examplePrompts.7')
+  ]), [t]);
+
+  const getRandomPrompts = useCallback((count: number = 4): string[] => {
+    const shuffled = [...examplePrompts].sort(() => 0.5 - Math.random())
+    return shuffled.slice(0, count)
+  }, [examplePrompts]);
+
   useEffect(() => {
     const queryParam = searchParams.get('q')
     if (queryParam) {
@@ -66,10 +64,9 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   }, [searchParams])
 
-  // Generar prompts aleatorios al cargar
   useEffect(() => {
     setRandomPrompts(getRandomPrompts(4))
-  }, [])
+  }, [getRandomPrompts])
 
   const refreshPrompts = () => {
     setRandomPrompts(getRandomPrompts(4))
@@ -77,7 +74,6 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   const handlePromptClick = (prompt: string) => {
     setHasStartedChat(true)
-    // Enviar el prompt al componente de chat usando la referencia
     if (elysiaChatRef.current) {
       elysiaChatRef.current.sendQuery(prompt)
     }
@@ -90,9 +86,9 @@ export default function ChatPage({ params }: ChatPageProps) {
         <div className="flex items-center gap-4">
           <Brain className="h-6 w-6 text-primary" />
           <div>
-            <h1 className="text-xl font-semibold">Emma Assistant</h1>
+            <h1 className="text-xl font-semibold">{t('chatPage.assistantName')}</h1>
             <p className="text-sm text-muted-foreground">
-              AI-powered document intelligence
+              {t('chatPage.assistantSubtitle')}
             </p>
           </div>
         </div>
@@ -105,12 +101,12 @@ export default function ChatPage({ params }: ChatPageProps) {
                 {mode === "chat" ? (
                   <>
                     <MessageSquare className="h-4 w-4 mr-2" />
-                    Chat
+                    {t('chatPage.mode.chat')}
                   </>
                 ) : (
                   <>
                     <Settings className="h-4 w-4 mr-2" />
-                    Settings
+                    {t('chatPage.mode.settings')}
                   </>
                 )}
               </Button>
@@ -118,18 +114,18 @@ export default function ChatPage({ params }: ChatPageProps) {
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => setMode("chat")}>
                 <MessageSquare className="h-4 w-4 mr-2" />
-                Chat
+                {t('chatPage.mode.chat')}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setMode("settings")}>
                 <Settings className="h-4 w-4 mr-2" />
-                Settings
+                {t('chatPage.mode.settings')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           
           <Badge variant="secondary">
             <Zap className="h-3 w-3 mr-1" />
-            Online
+            {t('chatPage.status.online')}
           </Badge>
         </div>
       </div>
@@ -137,17 +133,16 @@ export default function ChatPage({ params }: ChatPageProps) {
       {mode === "chat" ? (
         <div className="flex flex-col w-full flex-1 min-h-0">
           {!hasStartedChat ? (
-            // Landing screen con prompts sugeridos
             <div className="flex flex-col items-center justify-center flex-1 p-6 overflow-y-auto">
               <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold mb-2">Ask Emma</h2>
+                <h2 className="text-3xl font-bold mb-2">{t('chatPage.landingScreen.askEmma')}</h2>
                 <p className="text-muted-foreground">
-                  Start a conversation about your documents
+                  {t('chatPage.landingScreen.askEmmaSubtitle')}
                 </p>
               </div>
 
               <div className="flex items-center gap-4 mb-6">
-                <h3 className="text-lg font-semibold">Try asking:</h3>
+                <h3 className="text-lg font-semibold">{t('chatPage.landingScreen.tryAsking')}</h3>
                 <Button
                   variant="outline"
                   size="sm"
@@ -155,7 +150,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                   className="gap-2"
                 >
                   <RefreshCw className="h-4 w-4" />
-                  Refresh
+                  {t('chatPage.landingScreen.refreshPrompts')}
                 </Button>
               </div>
 
@@ -176,7 +171,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
               <div className="mt-8 text-center">
                 <p className="text-sm text-muted-foreground">
-                  Or type your own question below to start chatting
+                  {t('chatPage.landingScreen.orTypeQuestion')}
                 </p>
               </div>
             </div>
@@ -188,7 +183,7 @@ export default function ChatPage({ params }: ChatPageProps) {
               ref={elysiaChatRef}
               tenantId={tenantId}
               className="h-full"
-              initialMessage="¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+              initialMessage={t('chatPage.initialMessage')}
               initialQuery={initialQuery || undefined}
               onFirstQuery={() => setHasStartedChat(true)}
               isAdmin={backendUser ? (
@@ -201,24 +196,24 @@ export default function ChatPage({ params }: ChatPageProps) {
         </div>
       ) : mode === "settings" ? (
         <div className="flex flex-col w-full max-w-4xl mx-auto p-6 flex-1 overflow-y-auto">
-          <h2 className="text-2xl font-bold mb-6">Configuración de Emma</h2>
+          <h2 className="text-2xl font-bold mb-6">{t('chatPage.settingsPage.title')}</h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Model Settings */}
             <div className="p-6 border rounded-lg">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <Brain className="h-5 w-5" />
-                Configuración del Modelo
+                {t('chatPage.settingsPage.modelSettings.title')}
               </h3>
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Temperatura</label>
-                  <p className="text-sm text-muted-foreground">Controla la creatividad de las respuestas</p>
+                  <label className="text-sm font-medium">{t('chatPage.settingsPage.modelSettings.temperature')}</label>
+                  <p className="text-sm text-muted-foreground">{t('chatPage.settingsPage.modelSettings.temperatureDescription')}</p>
                   <Badge variant="secondary">0.7 (por defecto)</Badge>
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Máximo tokens</label>
-                  <p className="text-sm text-muted-foreground">Límite de longitud de respuesta</p>
+                  <label className="text-sm font-medium">{t('chatPage.settingsPage.modelSettings.maxTokens')}</label>
+                  <p className="text-sm text-muted-foreground">{t('chatPage.settingsPage.modelSettings.maxTokensDescription')}</p>
                   <Badge variant="secondary">2048</Badge>
                 </div>
               </div>
@@ -228,17 +223,17 @@ export default function ChatPage({ params }: ChatPageProps) {
             <div className="p-6 border rounded-lg">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <MessageSquare className="h-5 w-5" />
-                Configuración de Búsqueda
+                {t('chatPage.settingsPage.searchSettings.title')}
               </h3>
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Límite de documentos</label>
-                  <p className="text-sm text-muted-foreground">Número máximo de documentos a analizar</p>
+                  <label className="text-sm font-medium">{t('chatPage.settingsPage.searchSettings.documentLimit')}</label>
+                  <p className="text-sm text-muted-foreground">{t('chatPage.settingsPage.searchSettings.documentLimitDescription')}</p>
                   <Badge variant="secondary">10</Badge>
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Umbral de similitud</label>
-                  <p className="text-sm text-muted-foreground">Mínimo de similitud para incluir documentos</p>
+                  <label className="text-sm font-medium">{t('chatPage.settingsPage.searchSettings.similarityThreshold')}</label>
+                  <p className="text-sm text-muted-foreground">{t('chatPage.settingsPage.searchSettings.similarityThresholdDescription')}</p>
                   <Badge variant="secondary">0.7</Badge>
                 </div>
               </div>
@@ -248,12 +243,12 @@ export default function ChatPage({ params }: ChatPageProps) {
             <div className="p-6 border rounded-lg">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <Settings className="h-5 w-5" />
-                Información del Usuario
+                {t('chatPage.settingsPage.userInfo.title')}
               </h3>
               <div className="space-y-2">
-                <p className="text-sm"><strong>Tenant:</strong> {tenantId}</p>
-                <p className="text-sm"><strong>Usuario:</strong> {backendUser?.email || 'No disponible'}</p>
-                <p className="text-sm"><strong>Rol:</strong> {backendUser?.is_team_member ? 'Miembro del equipo' : 'Administrador'}</p>
+                <p className="text-sm"><strong>{t('chatPage.settingsPage.userInfo.tenant')}</strong> {tenantId}</p>
+                <p className="text-sm"><strong>{t('chatPage.settingsPage.userInfo.user')}</strong> {backendUser?.email || t('chatPage.settingsPage.userInfo.notAvailable')}</p>
+                <p className="text-sm"><strong>{t('chatPage.settingsPage.userInfo.role')}</strong> {backendUser?.is_team_member ? t('chatPage.settingsPage.userInfo.member') : t('chatPage.settingsPage.userInfo.admin')}</p>
               </div>
             </div>
 
@@ -261,13 +256,13 @@ export default function ChatPage({ params }: ChatPageProps) {
             <div className="p-6 border rounded-lg">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <Zap className="h-5 w-5" />
-                Capacidades
+                {t('chatPage.settingsPage.capabilities.title')}
               </h3>
               <div className="space-y-2">
-                <Badge variant="outline">RAG Agentic</Badge>
-                <Badge variant="outline">Búsqueda Semántica</Badge>
-                <Badge variant="outline">Análisis de Documentos</Badge>
-                <Badge variant="outline">Respuestas Contextuales</Badge>
+                <Badge variant="outline">{t('chatPage.settingsPage.capabilities.ragAgentic')}</Badge>
+                <Badge variant="outline">{t('chatPage.settingsPage.capabilities.semanticSearch')}</Badge>
+                <Badge variant="outline">{t('chatPage.settingsPage.capabilities.documentAnalysis')}</Badge>
+                <Badge variant="outline">{t('chatPage.settingsPage.capabilities.contextualResponses')}</Badge>
               </div>
             </div>
           </div>
@@ -275,7 +270,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           <div className="mt-6">
             <Button onClick={() => setMode("chat")} className="gap-2">
               <MessageSquare className="h-4 w-4" />
-              Volver al Chat
+              {t('chatPage.settingsPage.backToChat')}
             </Button>
           </div>
         </div>

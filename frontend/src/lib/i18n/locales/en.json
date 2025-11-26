@@ -132,5 +132,265 @@
     "uploadError": "Failed to upload file",
     "fileTooLarge": "File is too large",
     "unsupportedFormat": "Unsupported file format"
-  }
-}
+      },
+      "billingPage": {
+        "title": "Billing & Subscription",
+        "subtitle": "Manage your subscription, billing, and payment methods",
+        "onlyAdmin": "Only tenant administrators can access billing information.",
+        "loading": "Loading...",
+        "error": "Failed to fetch subscription",
+        "unknownError": "Unknown error",
+        "createPortalError": "Failed to create portal session",
+        "openPortalError": "Failed to open billing portal",
+        "plans": {
+          "free": "Free Plan",
+          "pro": "Pro Plan",
+          "enterprise": "Enterprise Plan"
+        },
+        "currentPlan": {
+          "title": "Your current subscription plan",
+          "billingCycle": "Billing Cycle",
+          "nextPayment": "Next Payment",
+          "monthly": "Monthly",
+          "yearly": "Yearly",
+          "cancellationWarning": "Your subscription will be canceled on {date}. You'll retain access until then."
+        },
+        "freePlan": {
+          "description": "You're currently on the free plan. Upgrade to unlock premium features.",
+          "upgradeButton": "Upgrade Plan"
+        },
+        "manageBilling": "Manage Billing",
+        "billingPortal": {
+          "title": "Billing Portal",
+          "description": "Secure access to your billing information",
+          "features": [
+            "Update payment methods",
+            "Download invoices",
+            "Update billing address",
+            "Manage subscription",
+            "View payment history"
+          ],
+          "featureIntro": "The billing portal allows you to:"
+        }
+      },
+      "chatPage": {
+        "assistantName": "Emma Assistant",
+        "assistantSubtitle": "AI-powered document intelligence",
+        "mode": {
+          "chat": "Chat",
+          "settings": "Settings"
+        },
+        "status": {
+          "online": "Online"
+        },
+        "landingScreen": {
+          "askEmma": "Ask Emma",
+          "askEmmaSubtitle": "Start a conversation about your documents",
+          "tryAsking": "Try asking:",
+          "refreshPrompts": "Refresh",
+          "orTypeQuestion": "Or type your own question below to start chatting"
+        },
+        "examplePrompts": [
+          "What documents are available in my library?",
+          "Search for information about signed contracts",
+          "Summarize the most recent documents",
+          "Are there any documents about billing?",
+          "Show me the documents shared with me",
+          "Find documents with digital signatures",
+          "What documents need review?",
+          "Search documents by creation date"
+        ],
+        "settingsPage": {
+          "title": "Emma Settings",
+          "modelSettings": {
+            "title": "Model Settings",
+            "temperature": "Temperature",
+            "temperatureDescription": "Controls the creativity of responses",
+            "maxTokens": "Max Tokens",
+            "maxTokensDescription": "Response length limit"
+          },
+          "searchSettings": {
+            "title": "Search Settings",
+            "documentLimit": "Document Limit",
+            "documentLimitDescription": "Maximum number of documents to analyze",
+            "similarityThreshold": "Similarity Threshold",
+            "similarityThresholdDescription": "Minimum similarity to include documents"
+          },
+          "userInfo": {
+            "title": "User Information",
+            "tenant": "Tenant:",
+            "user": "User:",
+            "role": "Role:",
+            "notAvailable": "Not available",
+            "member": "Team Member",
+            "admin": "Administrator"
+          },
+          "capabilities": {
+            "title": "Capabilities",
+            "ragAgentic": "RAG Agentic",
+            "semanticSearch": "Semantic Search",
+            "documentAnalysis": "Document Analysis",
+            "contextualResponses": "Contextual Responses"
+          },
+          "backToChat": "Back to Chat"
+        },
+        "initialMessage": "Hi! I'm Emma, your smart assistant. How can I help you today?"
+      },
+      "searchPage": {
+        "title": "Document Search",
+        "subtitle": "Quickly find documents using semantic search with dynamic filters. For complex queries and analysis, try Emma Assistant.",
+        "quickSearch": "Quick Search",
+        "filterActive": "{count} filter active",
+        "filtersActive": "{count} filters active",
+        "searchPlaceholder": "Search documents...",
+        "searchButton": "Search",
+        "clearButton": "Clear",
+        "semantic": "Semantic",
+        "semanticDescription": "Fast AI search",
+        "hybrid": "Hybrid",
+        "hybridDescription": "AI + keywords",
+        "keyword": "Keyword",
+        "keywordDescription": "Traditional search",
+        "engineInfoSemantic": "Fast semantic search using AI embeddings",
+        "engineInfoHybrid": "Combined keyword and semantic search with filters",
+        "engineInfoKeyword": "Traditional keyword-based search with boolean operators",
+        "advancedFilters": "Advanced Filters",
+        "optionalFilters": "Optional filters for more specific results",
+        "tags": "Tags",
+        "tagsPlaceholder": "tag1, tag2, tag3",
+        "dateFrom": "Date From",
+        "dateTo": "Date To",
+        "fileSize": "Size (Bytes)",
+        "min": "Min",
+        "max": "Max",
+        "error": "Please enter a search query",
+        "minCharacters": "Please enter at least 3 characters",
+        "searchError": "An error occurred during search",
+        "noResults": "No documents found matching your search",
+        "resultsHeader": "Found {count} documents",
+        "askEmmaAboutResults": "Ask Emma about these results",
+        "noResultsToAnalyze": "No results to analyze",
+        "downloadUrlNotAvailable": "Download URL not available",
+        "shareComingSoon": "Share functionality coming soon",
+        "emptySearchTitle": "Quick Document Search",
+        "emptySearchDescription": "Search for specific documents using keywords. Use the filters on the left to narrow down results. For complex analysis and conversations, use Emma Assistant.",
+        "tryEmmaAssistant": "Try Emma Assistant",
+        "activeFilters": "Active Filters",
+        "processingResultError": "Search result missing identifier. Skipping item."
+      },
+      "templatesPage": {
+        "title": "Document Templates",
+        "subtitle": "Manage and edit document templates stored in the Nexus backend",
+        "editSessionsButton": "Edit Sessions",
+        "uploadTemplateButton": "Upload Template",
+        "connectGoogleDrive": {
+          "title": "Connect Google Drive",
+          "description": "You need to grant access so we can create temporary Google Docs for editing.",
+          "button": "Connect Google Drive"
+        },
+        "errorLoading": {
+          "title": "Error loading templates",
+          "description": "Unable to load templates right now. Please try again later."
+        },
+        "genericError": "Unknown error",
+        "noTemplates": {
+          "title": "No templates yet for this tenant.",
+          "description1": "Upload a new ODT template using the \"Upload Template\" button or convert it from",
+          "documentsLibrary": "the documents library"
+        },
+        "templateCard": {
+          "noDescription": "No description provided",
+          "updated": "Updated",
+          "unknown": "Unknown",
+          "active": "Active",
+          "sourceFile": "Source file:",
+          "noOdtUploaded": "No ODT uploaded yet",
+          "editTemplateButton": "Edit Template",
+          "preparingButton": "Preparing..."
+        },
+        "howItWorks": {
+          "title": "How Template Editing Works",
+          "step1": "1. Click \"Edit Template\" to request a Google Docs session from the backend.",
+          "step2": "2. Edit the temporary document in Google Docs with full formatting support.",
+          "step3": "3. When you finish, finalize the session so the ODT is stored again.",
+          "step4": "4. Temporary documents automatically expire after a few hours."
+        },
+        "toast": {
+          "connectDriveFailed": {
+            "title": "Cannot connect Google Drive",
+            "description": "Failed to initiate Google Drive connection"
+          },
+          "checkingDrive": {
+            "title": "Checking Google Drive",
+            "description": "Please wait while we verify your Drive connection"
+          },
+          "connectDriveFirst": {
+            "title": "Connect Google Drive first",
+            "description": "You must connect your Google account to edit templates."
+          },
+          "editSessionCreated": {
+            "title": "Edit session created",
+            "description": "Opening Google Docs for {templateName}"
+          },
+          "editSessionFailed": {
+            "title": "Error",
+            "description": "Failed to start editing session"
+          }
+        }
+      },
+      "workflowsPage": {
+        "title": "Workflows with TemporalIO",
+        "subtitle": "Manage automated durable processes with TemporalIO",
+        "newWorkflowButton": "New Workflow",
+        "errorDisplay": {
+          "title": "Error",
+          "description": "An error occurred while loading workflows."
+        },
+        "stats": {
+          "totalWorkflows": {
+            "title": "Total Workflows",
+            "description": "Workflows in the system"
+          },
+          "activeWorkflows": {
+            "title": "Active",
+            "description": "Running"
+          },
+          "completedToday": {
+            "title": "Completed Today",
+            "description": "Finished today"
+          },
+          "failedWorkflows": {
+            "title": "Failed",
+            "description": "With errors"
+          }
+        },
+        "tabs": {
+          "dashboard": "Dashboard",
+          "monitor": "Monitor",
+          "templates": "Templates",
+          "history": "History"
+        },
+        "historyCard": {
+          "title": "Workflow History",
+          "description": "Completed and canceled workflows",
+          "emptyMessage": "History coming soon"
+        },
+        "status": {
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "unknown": "Unknown"
+        },
+        "toast": {
+          "startWorkflowError": "Error starting workflow:",
+          "cancelWorkflowError": "Error cancelling workflow:",
+          "workflowUpdated": "Workflow updated:"
+        },
+        "workflowForm": {
+          "title": "New Workflow",
+          "cancelButton": "Cancel"
+        }
+      }
+    }
+    

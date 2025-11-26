@@ -12,12 +12,14 @@ import { WorkflowForm } from "@/components/workflows/WorkflowForm";
 import { WorkflowTemplates } from "@/components/workflows/WorkflowTemplates";
 import { WorkflowMonitor } from "@/components/workflows/WorkflowMonitor";
 import { useWorkflows } from "@/hooks/useWorkflows";
+import { useTranslation } from "@/lib/i18n/hooks";
 
 export default function WorkflowsPage() {
   const params = useParams();
   const tenantId = params.tenantId as string;
   const [activeTab, setActiveTab] = useState("dashboard");
   const [showNewWorkflow, setShowNewWorkflow] = useState(false);
+  const { t } = useTranslation();
 
   const {
     workflows,
@@ -31,7 +33,6 @@ export default function WorkflowsPage() {
     stats
   } = useWorkflows(tenantId);
 
-  // Auto-refresh workflows every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       refreshWorkflows();
@@ -40,7 +41,6 @@ export default function WorkflowsPage() {
     return () => clearInterval(interval);
   }, [refreshWorkflows]);
 
-  // Load initial data
   useEffect(() => {
     refreshWorkflows();
     getWorkflowStats();
@@ -52,7 +52,7 @@ export default function WorkflowsPage() {
       setShowNewWorkflow(false);
       refreshWorkflows();
     } catch (error) {
-      console.error("Error starting workflow:", error);
+      console.error(t('workflowsPage.toast.startWorkflowError'), error);
     }
   };
 
@@ -61,7 +61,7 @@ export default function WorkflowsPage() {
       await cancelWorkflow(workflowId);
       refreshWorkflows();
     } catch (error) {
-      console.error("Error cancelling workflow:", error);
+      console.error(t('workflowsPage.toast.cancelWorkflowError'), error);
     }
   };
 
@@ -91,7 +91,7 @@ export default function WorkflowsPage() {
     return (
       <Badge variant={variants[status?.toLowerCase()] || "outline"}>
         {getStatusIcon(status)}
-        <span className="ml-1 capitalize">{status || "Unknown"}</span>
+        <span className="ml-1 capitalize">{t(`workflowsPage.status.${status?.toLowerCase()}`)}</span>
       </Badge>
     );
   };
@@ -103,15 +103,15 @@ export default function WorkflowsPage() {
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <GitBranch className="h-8 w-8 text-blue-600" />
-            Workflows con TemporalIO
+            {t('workflowsPage.title')}
           </h1>
           <p className="text-muted-foreground">
-            Gestiona procesos automatizados durables con TemporalIO
+            {t('workflowsPage.subtitle')}
           </p>
         </div>
         <Button onClick={() => setShowNewWorkflow(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Nuevo Workflow
+          {t('workflowsPage.newWorkflowButton')}
         </Button>
       </div>
 
@@ -132,52 +132,52 @@ export default function WorkflowsPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Workflows</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('workflowsPage.stats.totalWorkflows.title')}</CardTitle>
               <GitBranch className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.total_workflows}</div>
               <p className="text-xs text-muted-foreground">
-                Workflows en el sistema
+                {t('workflowsPage.stats.totalWorkflows.description')}
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Activos</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('workflowsPage.stats.activeWorkflows.title')}</CardTitle>
               <Play className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-blue-600">{stats.active_workflows}</div>
               <p className="text-xs text-muted-foreground">
-                En ejecución
+                {t('workflowsPage.stats.activeWorkflows.description')}
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Completados Hoy</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('workflowsPage.stats.completedToday.title')}</CardTitle>
               <CheckCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600">{stats.completed_today}</div>
               <p className="text-xs text-muted-foreground">
-                Finalizados hoy
+                {t('workflowsPage.stats.completedToday.description')}
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Fallidos</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('workflowsPage.stats.failedWorkflows.title')}</CardTitle>
               <XCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{stats.failed_workflows}</div>
               <p className="text-xs text-muted-foreground">
-                Con errores
+                {t('workflowsPage.stats.failedWorkflows.description')}
               </p>
             </CardContent>
           </Card>
@@ -187,10 +187,10 @@ export default function WorkflowsPage() {
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="monitor">Monitor</TabsTrigger>
-          <TabsTrigger value="templates">Plantillas</TabsTrigger>
-          <TabsTrigger value="history">Historial</TabsTrigger>
+          <TabsTrigger value="dashboard">{t('workflowsPage.tabs.dashboard')}</TabsTrigger>
+          <TabsTrigger value="monitor">{t('workflowsPage.tabs.monitor')}</TabsTrigger>
+          <TabsTrigger value="templates">{t('workflowsPage.tabs.templates')}</TabsTrigger>
+          <TabsTrigger value="history">{t('workflowsPage.tabs.history')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-6">
@@ -207,8 +207,7 @@ export default function WorkflowsPage() {
           <WorkflowMonitor
             tenantId={tenantId}
             onWorkflowUpdate={(workflow) => {
-              // Handle real-time workflow updates
-              console.log("Workflow updated:", workflow);
+              console.log(t('workflowsPage.toast.workflowUpdated'), workflow);
               refreshWorkflows();
             }}
           />
@@ -224,14 +223,14 @@ export default function WorkflowsPage() {
         <TabsContent value="history" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Historial de Workflows</CardTitle>
+              <CardTitle>{t('workflowsPage.historyCard.title')}</CardTitle>
               <CardDescription>
-                Workflows completados y cancelados
+                {t('workflowsPage.historyCard.description')}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-center py-8 text-muted-foreground">
-                Historial próximamente disponible
+                {t('workflowsPage.historyCard.emptyMessage')}
               </div>
             </CardContent>
           </Card>

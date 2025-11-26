@@ -21,16 +21,13 @@ import { SearchResults } from "@/components/search/search-results"
 import { FacetPanel } from "@/components/search/facet-panel"
 import { useSearchFacets } from "@/lib/hooks/use-search-facets"
 import { toast } from "sonner"
+import { useTranslation } from "@/lib/i18n/hooks"
 
-// Helper function to normalize search results from CAG/backend
-const normalizeSearchResult = (rawResult: any) => {
-  console.log('Raw search result:', rawResult)
-
+const normalizeSearchResult = (rawResult: any, t: (key: string) => string) => {
   if (!rawResult) {
     return null
   }
 
-  // Support both legacy flat results and the new backend shape that wraps data inside "document"
   const document = rawResult.document ?? rawResult
   const metadata = rawResult.metadata ?? document.metadata ?? {}
 
@@ -40,7 +37,7 @@ const normalizeSearchResult = (rawResult: any) => {
     metadata._id
 
   if (!id) {
-    console.warn('Search result missing identifier. Skipping item.', rawResult)
+    console.warn(t('searchPage.processingResultError'), rawResult)
     return null
   }
 
@@ -49,7 +46,7 @@ const normalizeSearchResult = (rawResult: any) => {
     metadata.title ??
     document.filename ??
     metadata.filename ??
-    'Untitled document'
+    t('searchPage.untitledDocument')
 
   const filename =
     document.filename ??
@@ -111,12 +108,9 @@ const normalizeSearchResult = (rawResult: any) => {
     tenant_id: document.tenant_id ?? metadata.tenant_id ?? null,
     download_url: document.download_url ?? rawResult.download_url ?? null
   }
-
-  console.log('Normalized result:', normalized)
   return normalized
 }
 
-// Skip static generation for this page since it uses dynamic params
 export const dynamic = 'force-dynamic'
 
 export default function SimpleSearchPage() {
@@ -124,8 +118,8 @@ export default function SimpleSearchPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tenantId = params.tenantId as string
+  const { t } = useTranslation()
 
-  // Search state
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -138,7 +132,6 @@ export default function SimpleSearchPage() {
   const [fileSizeMin, setFileSizeMin] = useState('')
   const [fileSizeMax, setFileSizeMax] = useState('')
 
-  // Use the faceting hook
   const {
     facets,
     isLoadingFacets,
@@ -153,15 +146,12 @@ export default function SimpleSearchPage() {
   
   const searchService = useSearchService()
 
-  // Local state for input to decouple typing from searching
   const [localQuery, setLocalQuery] = useState(searchQuery)
 
-  // Sync local state with URL state (e.g. on back button or initial load)
   useEffect(() => {
     setLocalQuery(searchQuery)
   }, [searchQuery])
 
-  // Sync local filter state with URL filters
   useEffect(() => {
     if (currentFilters.date_from) setDateFrom(currentFilters.date_from)
     if (currentFilters.date_to) setDateTo(currentFilters.date_to)
@@ -170,24 +160,23 @@ export default function SimpleSearchPage() {
     if (currentFilters.file_size_max) setFileSizeMax(currentFilters.file_size_max)
   }, [currentFilters])
 
-  // Auto-search if returning from preview with search context
   useEffect(() => {
     const queryFromUrl = searchParams.get('q')
     if (queryFromUrl && queryFromUrl.trim()) {
       performSearch(queryFromUrl)
     }
-  }, []) // Only run once on mount
+  }, [])
 
   const performSearch = useCallback(async (queryOverride?: string) => {
     const queryToUse = queryOverride !== undefined ? queryOverride : searchQuery;
 
     if (!queryToUse.trim()) {
-      toast.error("Please enter a search query")
+      toast.error(t('searchPage.error'))
       return
     }
 
     if (queryToUse.trim().length < 3) {
-      toast.error("Please enter at least 3 characters")
+      toast.error(t('searchPage.minCharacters'))
       return
     }
 
@@ -204,13 +193,6 @@ export default function SimpleSearchPage() {
     }
 
     try {
-      console.log('Starting search with params:', {
-        query: queryToUse,
-        limit: 20,
-        search_type: searchType,
-        filters: activeFilters
-      })
-
       const response = await searchService.searchDocuments({
         query: queryToUse,
         limit: 20,
@@ -218,37 +200,20 @@ export default function SimpleSearchPage() {
         ...activeFilters
       })
 
-
-      console.log('Search response:', response)
-
       if (response.error) {
-        console.error('Search error from response:', response.error)
         setSearchError(response.error)
       } else {
-        console.log('Search results raw:', response.data)
-
-        if (response.data && response.data.length > 0) {
-          console.log('First result sample:', response.data[0])
-          console.log('Search results structure check:', response.data?.map((r: any) => ({
-            hasDocument: !!r?.document,
-            hasId: !!r?.document?.id || !!r?.id,
-            documentKeys: r?.document ? Object.keys(r.document) : [],
-            resultKeys: r ? Object.keys(r) : []
-          })))
-        }
-
         setSearchResults(response.data || [])
         if (!response.data || response.data.length === 0) {
-          toast.info("No documents found matching your search")
+          toast.info(t('searchPage.noResults'))
         }
       }
     } catch (error: any) {
-      console.error('Search exception:', error)
-      setSearchError(error.message || "An error occurred during search")
+      setSearchError(error.message || t('searchPage.searchError'))
     } finally {
       setIsSearching(false)
     }
-  }, [searchQuery, searchType, currentFilters, searchService])
+  }, [searchQuery, searchType, currentFilters, searchService, t, tags, dateFrom, dateTo, fileSizeMin, fileSizeMax])
 
   const handleSearchConfirm = () => {
     updateSearchQuery(localQuery)
@@ -263,11 +228,10 @@ export default function SimpleSearchPage() {
 
   const askEmmaAboutResults = () => {
     if (searchResults.length === 0) {
-      toast.error("No results to analyze")
+      toast.error(t('searchPage.noResultsToAnalyze'))
       return
     }
     
-    // Navigate to Emma with search context
     const emmaQuery = `Analyze these search results for: "${searchQuery}"`
     router.push(`/${tenantId}/chat?q=${encodeURIComponent(emmaQuery)}`)
   }
@@ -284,13 +248,12 @@ export default function SimpleSearchPage() {
     if (document.download_url) {
       window.open(document.download_url, '_blank')
     } else {
-      toast.error("Download URL not available")
+      toast.error(t('searchPage.downloadUrlNotAvailable'))
     }
   }
 
   const handleDocumentShare = (document: any) => {
-    // TODO: Implement share functionality
-    toast.info("Share functionality coming soon")
+    toast.info(t('searchPage.shareComingSoon'))
   }
 
   const handleDocumentSignature = (document: any) => {
@@ -301,9 +264,9 @@ export default function SimpleSearchPage() {
     <div className="flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">Document Search</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{t('searchPage.title')}</h1>
         <p className="text-muted-foreground">
-          Quickly find documents using semantic search with dynamic filters. For complex queries and analysis, try Emma Assistant.
+          {t('searchPage.subtitle')}
         </p>
       </div>
 
@@ -325,10 +288,10 @@ export default function SimpleSearchPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <IconSearch className="h-5 w-5" />
-                Quick Search
+                {t('searchPage.quickSearch')}
                 {getActiveFilterCount() > 0 && (
                   <Badge variant="secondary" className="text-xs">
-                    {getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''} active
+                    {getActiveFilterCount()} {getActiveFilterCount() !== 1 ? t('searchPage.filtersActive', { count: getActiveFilterCount() }) : t('searchPage.filterActive', { count: getActiveFilterCount() })}
                   </Badge>
                 )}
               </CardTitle>
@@ -341,7 +304,7 @@ export default function SimpleSearchPage() {
               <div className="flex-1 relative">
                 <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                 <Input
-                  placeholder="Search documents..."
+                  placeholder={t('searchPage.searchPlaceholder')}
                   value={localQuery}
                   onChange={(e) => setLocalQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -355,20 +318,20 @@ export default function SimpleSearchPage() {
                 <SelectContent>
                   <SelectItem value="semantic">
                     <div className="flex flex-col">
-                      <span>Semantic</span>
-                      <span className="text-xs text-muted-foreground">Fast AI search</span>
+                      <span>{t('searchPage.semantic')}</span>
+                      <span className="text-xs text-muted-foreground">{t('searchPage.semanticDescription')}</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="hybrid">
                     <div className="flex flex-col">
-                      <span>Hybrid</span>
-                      <span className="text-xs text-muted-foreground">AI + keywords</span>
+                      <span>{t('searchPage.hybrid')}</span>
+                      <span className="text-xs text-muted-foreground">{t('searchPage.hybridDescription')}</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="keyword">
                     <div className="flex flex-col">
-                      <span>Keyword</span>
-                      <span className="text-xs text-muted-foreground">Traditional search</span>
+                      <span>{t('searchPage.keyword')}</span>
+                      <span className="text-xs text-muted-foreground">{t('searchPage.keywordDescription')}</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -379,11 +342,11 @@ export default function SimpleSearchPage() {
                 ) : (
                   <IconSearch className="h-4 w-4" />
                 )}
-                Search
+                {t('searchPage.searchButton')}
               </Button>
               {searchResults.length > 0 && (
                 <Button variant="outline" onClick={clearSearch}>
-                  Clear
+                  {t('searchPage.clearButton')}
                 </Button>
               )}
             </div>
@@ -396,9 +359,9 @@ export default function SimpleSearchPage() {
                 {searchType === 'keyword' && '📝 Elasticsearch Engine'}
               </Badge>
               <span>
-                {searchType === 'semantic' && 'Fast semantic search using AI embeddings'}
-                {searchType === 'hybrid' && 'Combined keyword and semantic search with filters'}
-                {searchType === 'keyword' && 'Traditional keyword-based search with boolean operators'}
+                {searchType === 'semantic' && t('searchPage.engineInfoSemantic')}
+                {searchType === 'hybrid' && t('searchPage.engineInfoHybrid')}
+                {searchType === 'keyword' && t('searchPage.engineInfoKeyword')}
               </span>
             </div>
           </div>
@@ -412,11 +375,11 @@ export default function SimpleSearchPage() {
               className="text-muted-foreground"
             >
               <IconFilter className="h-4 w-4 mr-2" />
-              Advanced Filters
+              {t('searchPage.advancedFilters')}
             </Button>
             {showFilters && (
               <Badge variant="secondary" className="text-xs">
-                Optional filters for more specific results
+                {t('searchPage.optionalFilters')}
               </Badge>
             )}
           </div>
@@ -427,10 +390,10 @@ export default function SimpleSearchPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <IconTag className="h-4 w-4" />
-                  Tags
+                  {t('searchPage.tags')}
                 </label>
                 <Input
-                  placeholder="tag1, tag2, tag3"
+                  placeholder={t('searchPage.tagsPlaceholder')}
                   value={tags}
                   onChange={(e) => setTags(e.target.value)}
                   className="text-sm"
@@ -439,7 +402,7 @@ export default function SimpleSearchPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <IconCalendar className="h-4 w-4" />
-                  Date From
+                  {t('searchPage.dateFrom')}
                 </label>
                 <Input
                   type="date"
@@ -451,7 +414,7 @@ export default function SimpleSearchPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <IconCalendar className="h-4 w-4" />
-                  Date To
+                  {t('searchPage.dateTo')}
                 </label>
                 <Input
                   type="date"
@@ -463,19 +426,19 @@ export default function SimpleSearchPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <IconFile className="h-4 w-4" />
-                  Size (Bytes)
+                  {t('searchPage.fileSize')}
                 </label>
                 <div className="flex gap-2">
                   <Input
                     type="number"
-                    placeholder="Min"
+                    placeholder={t('searchPage.min')}
                     value={fileSizeMin}
                     onChange={(e) => setFileSizeMin(e.target.value)}
                     className="text-sm"
                   />
                   <Input
                     type="number"
-                    placeholder="Max"
+                    placeholder={t('searchPage.max')}
                     value={fileSizeMax}
                     onChange={(e) => setFileSizeMax(e.target.value)}
                     className="text-sm"
@@ -504,11 +467,11 @@ export default function SimpleSearchPage() {
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                   <IconFile className="h-5 w-5" />
-                  Found {searchResults.length} documents
+                  {t('searchPage.resultsHeader', { count: searchResults.length })}
                 </CardTitle>
                 <Button onClick={askEmmaAboutResults} className="flex items-center gap-2">
                   <IconBrain className="h-4 w-4" />
-                  Ask Emma about these results
+                  {t('searchPage.askEmmaAboutResults')}
                 </Button>
               </div>
             </CardHeader>
@@ -517,11 +480,9 @@ export default function SimpleSearchPage() {
           {/* Search Results */}
           <SearchResults
             results={searchResults.map((result, index) => {
-              console.log(`Processing result ${index}:`, result)
-              return normalizeSearchResult(result)
+              return normalizeSearchResult(result, t)
             }).filter(doc => doc !== null)}
             onDocumentClick={(doc) => {
-              // Preserve search context in URL
               const searchParams = new URLSearchParams({
                 returnTo: 'search',
                 query: searchQuery,
@@ -534,7 +495,7 @@ export default function SimpleSearchPage() {
             onDownload={handleDocumentDownload}
             onShare={handleDocumentShare}
             onSignature={handleDocumentSignature}
-            emptyMessage="No documents found matching your search criteria"
+            emptyMessage={t('searchPage.noResults')}
           />
         </div>
       )}
@@ -543,7 +504,7 @@ export default function SimpleSearchPage() {
       {getActiveFilterCount() > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Active Filters</CardTitle>
+            <CardTitle className="text-sm">{t('searchPage.activeFilters')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -564,24 +525,21 @@ export default function SimpleSearchPage() {
             <div className="text-center space-y-4">
               <IconSearch className="h-12 w-12 text-muted-foreground mx-auto" />
               <div>
-                <h3 className="text-lg font-medium">Quick Document Search</h3>
+                <h3 className="text-lg font-medium">{t('searchPage.emptySearchTitle')}</h3>
                 <p className="text-muted-foreground mt-2">
-                  Search for specific documents using keywords. Use the filters on the left to narrow down results. For complex analysis and conversations, use Emma Assistant.
+                  {t('searchPage.emptySearchDescription')}
                 </p>
               </div>
               <div className="flex items-center justify-center gap-4">
                 <Button onClick={() => router.push(`/${tenantId}/chat`)} variant="outline" className="flex items-center gap-2">
                   <IconBrain className="h-4 w-4" />
-                  Try Emma Assistant
+                  {t('searchPage.tryEmmaAssistant')}
                 </Button>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
-    </div>
-  </div>
-
     </div>
   )
 }
