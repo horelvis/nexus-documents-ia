@@ -76,7 +76,7 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 | **Storage Service** | Signed URLs, lifecycle policies, and tenant-aware retention for GCS. | Pre-signed upload endpoints, “legal hold” snapshots. |
 | **Engine Template Service** | Collaborative template editor with variables, approvals, and audit trail. | Pre-configured advisory letter, hospital consent form with placeholders. |
 | **Elasticsearch Service** | Hybrid analytics + search (keyword, semantic boosts, aggregations). | “Show all oncology reports signed last week”, anomaly scores on expenses. |
-| **Signature Service** | Encrypts provider credentials, coordinates DocuSign/YouSign flows. | Multi-signer envelopes, webhook callbacks with compliance events. |
+| **Signature Service** | Encrypts provider credentials, manages provider catalog (YouSign GA, DocuSign/Signaturit beta). | Multi-signer envelopes, webhook callbacks with compliance events. |
 | **Gotenberg & Ollama Hosts** | Document-to-PDF transformation and low-latency LLM inference. | Print-ready binders, agent reasoning traces. |
 
 ### Workflow Spotlight: Advisory & Professional Services
@@ -109,7 +109,7 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 - **Current**: Pre-production environment serving beta tenants with end-to-end ingestion → agent review → signature workflows.
 - **Near Term (next 2 quarters)**  
   1. Ship investor-facing analytics dashboard (usage + ROI insights).  
-  2. Expand signature provider connectors (DocuSign, YouSign) from mock to production APIs.  
+  2. Bring DocuSign & Signaturit connectors to production parity (YouSign already live).  
   3. Harden auto-scaling policies for AI microservices (Ollama/Weaviate/Elasticsearch).  
   4. Launch compliance automation pack (LGPD/GDPR erasure workflows + attestations).
 

@@ -75,7 +75,7 @@ Microservicios (todos protegidos por `MICROSERVICES_API_KEY`)
 | **Storage Service** | URLs firmadas, políticas de ciclo de vida y retención por tenant en GCS. | Endpoints de subida, snapshots de “legal hold”. |
 | **Engine Template Service** | Editor colaborativo con variables, aprobaciones y auditoría. | Plantilla de carta asesoría, consentimiento hospitalario con campos dinámicos. |
 | **Elasticsearch Service** | Búsqueda híbrida + analytics (keyword, semántica, agregaciones). | “Ver reportes oncológicos firmados la última semana”, puntajes de anomalía. |
-| **Signature Service** | Cifra credenciales, gestiona catálogo de proveedores y enruta sobres (DocuSign, YouSign, Signaturit). | Workflows multi-firma, callbacks regulatorios, paneles SLA. |
+| **Signature Service** | Cifra credenciales, gestiona catálogo de proveedores (YouSign en producción, DocuSign/Signaturit en beta) y enruta sobres. | Workflows multi-firma, callbacks regulatorios, paneles SLA. |
 | **Gotenberg / Ollama Hosts** | Conversión a PDF y LLMs de baja latencia para reasoning. | Dossieres listos para impresión, trazas de razonamiento de agentes. |
 
 ### Workflow Clave: Firmas de Asesoría
@@ -108,7 +108,7 @@ Microservicios (todos protegidos por `MICROSERVICES_API_KEY`)
 - **Estado actual**: entorno pre-producción sirviendo tenants beta con flujo ingestión → revisión por agente → firma.
 - **Próximos dos trimestres**  
   1. Dashboard de analítica para inversores (uso + ROI).  
-  2. Conectores de firma (DocuSign, YouSign) listos para producción.  
+  2. Llevar los conectores de DocuSign y Signaturit a producción (YouSign ya está operativo).  
   3. Políticas de autoescalado endurecidas para Ollama/Weaviate/Elasticsearch.  
   4. Paquete de automatización de cumplimiento (borrado LGPD/GDPR + actas).
 
