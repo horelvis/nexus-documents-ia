@@ -23,9 +23,11 @@
 3. **Autonomous Agents & Workflows**
    - Specialized agents for legal review, LGPD compliance, digital signatures, onboarding, and financial extraction.
    - Temporal.io workflows plus alerting/monitoring for long-running jobs.
-4. **Collaboration & Governance**
-   - Role-based access control, audit trails, and per-tenant quotas.
-   - Integrated subscription management, usage tracking, and plan-based feature gates.
+4. **Collaboration, Sharing & Teams**
+   - Secure document sharing (expirable links, watermarking, legal holds) and federated guest access.
+   - Team/department workspaces with quota controls, approvals, and activity streams.
+   - Signature provider directory with routing rules, status dashboards, and compliance attestations.
+5. **Security & Compliance**
 5. **Security & Compliance**
    - Secrets validation on boot, encryption at rest/in transit, GDPR/LGPD deletion service, structured logging, and Prometheus metrics.
 
@@ -64,6 +66,39 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 - **Circuit breakers & fallbacks**: Elasticsearch client downgrades to direct cluster queries when the microservice is unavailable.
 - **Observability**: Prometheus metrics, structured logging, and health-check orchestration logging success/failure per dependency.
 
+### Microservice Capabilities (Deep Dive)
+| Service | Responsibilities | Example Outputs |
+|---------|------------------|-----------------|
+| **CAG Service** | Orchestrates contextual agents (legal, financial, compliance) with shared memory. | Risk matrix for a contract, task breakdown for onboarding packages. |
+| **LangExtract Service** | LLM-powered entity extraction with guardrails and explainability payloads. | Parties, monetary amounts, dates, clauses, ICD-10 codes. |
+| **TextExtract Service** | Deterministic parser + OCR fallback for scanned documents. | High-fidelity text blocks, table structures, redaction map. |
+| **Temporalio Service** | Durable workflows for signatures, policy renewals, and advisory tasks. | State machines with SLA timers, compensating actions, alert hooks. |
+| **Storage Service** | Signed URLs, lifecycle policies, and tenant-aware retention for GCS. | Pre-signed upload endpoints, “legal hold” snapshots. |
+| **Engine Template Service** | Collaborative template editor with variables, approvals, and audit trail. | Pre-configured advisory letter, hospital consent form with placeholders. |
+| **Elasticsearch Service** | Hybrid analytics + search (keyword, semantic boosts, aggregations). | “Show all oncology reports signed last week”, anomaly scores on expenses. |
+| **Signature Service** | Encrypts provider credentials, coordinates DocuSign/YouSign flows. | Multi-signer envelopes, webhook callbacks with compliance events. |
+| **Gotenberg & Ollama Hosts** | Document-to-PDF transformation and low-latency LLM inference. | Print-ready binders, agent reasoning traces. |
+
+### Workflow Spotlight: Advisory & Professional Services
+1. **Intake** – Client uploads financials, policies, or legal docs. Temporalio opens a workflow instance tagged to the engagement.
+2. **Triage** – LangExtract + TextExtract normalize content; CAG Service applies domain agents (tax, legal, compliance) to surface blockers.
+3. **Collaboration** – Engine Template Service proposes deliverables (e.g., board memo). Advisors edit in real time while Storage Service enforces retention.
+4. **Approval & Sign-off** – Signature Service routes the document to stakeholders, logging evidence for auditors.
+5. **Handoff & Monitoring** – Workflow emits KPIs (SLA met, risks closed) and pushes summaries to the client portal.
+
+### Industry Use Cases
+- **Consulting / Advisory Firms**
+  - Portfolio diligence: ingest datarooms, detect covenant breaches, prepare executive summaries.
+  - ESG compliance packs: agents verify disclosures, auto-populate reporting templates, orchestrate client approvals.
+- **Hospitals & Healthcare Networks**
+  - Clinical documentation: extract diagnoses, treatments, and consent statuses; feed EMR or billing systems.
+  - Compliance sweeps: monitor retention policies, automate GDPR/LGPD right-to-erasure workflows.
+  - Multidisciplinary boards: share annotated imaging reports, route for signatures, archive with audit trail.
+- **Law Firms / Corporate Legal**
+  - Contract lifecycle: clause extraction, redline recommendations, signature orchestration, and clause-level search.
+  - Litigation readiness: vectorize discovery sets, ask questions over exhibits, generate chronologies.
+  - Privacy programs: run LGPD deletion workflows, verify DSAR responses, log structured evidence for regulators.
+
 ## Competitive Advantages
 - **Unified AI stack**: Blend of deterministic extraction + LLM reasoning, exposed through reusable agents.
 - **Multi-tenant by design**: Tenant IDs thread through API, storage, and vector indexes; onboarding is instant per organization.
@@ -78,6 +113,13 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
   3. Harden auto-scaling policies for AI microservices (Ollama/Weaviate/Elasticsearch).  
   4. Launch compliance automation pack (LGPD/GDPR erasure workflows + attestations).
 
+### LGPD/Data Privacy Compliance
+- **Data minimization & tagging**: every document chunk carries tenant_id + sensitivity metadata; only scoped agents can access it.
+- **Consent & lifecycle control**: Storage Service enforces retention rules per dataset, while Temporalio workflows model consent capture/renewal with auditable checkpoints.
+- **Right-to-erasure automation**: LGPD Deletion Service orchestrates multi-system wipes (Postgres, GCS, Weaviate, Elasticsearch) and stores evidence payloads signed by `SIGNATURE_ENCRYPTION_KEY`.
+- **Access governance**: role-based policies, Clerk-backed identity, and Redis-backed session caches ensure least-privilege access.
+- **Monitoring & alerts**: structured logging + Prometheus detect anomalous reads; violations trigger advisory workflows and Slack/PagerDuty alerts.
+
 ## Call to Action
 We are raising to accelerate go-to-market (sales + onboarding), finalize enterprise compliance (SOC 2, ISO 27001), and scale AI infrastructure. Funds unlock:
 - Dedicated AI inference clusters for low-latency agent execution.
@@ -86,3 +128,17 @@ We are raising to accelerate go-to-market (sales + onboarding), finalize enterpr
 
 **Contact**: founders@nexusdocs360.app | Demo: https://pre.nexusdocs360.app
 
+---
+
+### Suggested Screenshots (place in `docs/screenshots/`)
+| Filename | Description |
+|----------|-------------|
+| `tenant-dashboard.png` | Main dashboard showing multi-tenant stats, activity feed, and AI insights. |
+| `document-workspace.png` | Document list with metadata, sharing controls, and version history panel. |
+| `agent-review.png` | AI agent review screen highlighting extracted risks/recommendations. |
+| `signature-providers.png` | Provider management view (DocuSign/YouSign catalog, SLA status). |
+| `workflow-temporal.png` | Temporal workflow timeline for advisory engagement (intake → approval). |
+| `lgpd-deletion.png` | LGPD deletion audit trail with multi-system status. |
+| `search-hybrid.png` | Hybrid search results combining semantic + keyword filters. |
+| **Signature Service** | Encrypts provider credentials, manages provider catalog, routes envelopes (DocuSign, YouSign, Signaturit). | Multi-signer workflows, webhook callbacks, provider SLA dashboards. |
+- **Signature Service** now highlighted as provider management hub (DocuSign/YouSign catalog, SLA dashboards).
