@@ -103,6 +103,7 @@ Microservicios (todos protegidos por `MICROSERVICES_API_KEY`)
 - **Multi-tenant desde el diseño**: tenant_id atraviesa API, storage e índices vectoriales; onboarding instantáneo por organización.
 - **Listo para despliegue**: pipelines de Cloud Build, plantillas de secretos y scripts Terraform reducen la puesta en marcha a <1 h.
 - **Microservicios extensibles**: cada capacidad (firmas, extracción, búsqueda) escalan de forma independiente pero comparten autenticación.
+- **Emma como hub inteligente**: asistente móvil respaldado por CAG + Temporal que concentra solicitudes de datos, aprobaciones, y firmas con biometría (voz/FaceID) para procesos de alta confianza.
 
 ## Tracción y Próximos Hitos
 - **Estado actual**: entorno pre-producción sirviendo tenants beta con flujo ingestión → revisión por agente → firma.
@@ -139,3 +140,4 @@ Buscamos capital para acelerar go-to-market, completar certificaciones (SOC 2,
 | `workflow-temporal.png` | Línea de tiempo de un workflow de asesoría en Temporalio. |
 | `lgpd-deletion.png` | Evidencia de borrado LGPD con estado multi-sistema. |
 | `search-hybrid.png` | Resultados de búsqueda híbrida con filtros semánticos y keyword. |
+| `emma-mobile.png` | Emma en app móvil mostrando solicitud de datos y aprobación biométrica (voz/FaceID). |

@@ -104,6 +104,7 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 - **Multi-tenant by design**: Tenant IDs thread through API, storage, and vector indexes; onboarding is instant per organization.
 - **Deployment-ready**: Cloud Build pipelines, secret templating, and Terraform-ready scripts cut infra setup to <1 hour.
 - **Extensible microservices**: Each capability (signatures, extraction, search) is shippable independently yet secured via a shared auth layer.
+- **Emma Intelligence Hub**: A mobile-ready assistant (backed by CAG Service + Temporal workflows) that becomes the single entry point for approvals, data requests, and signature flows—embedding biometric approvals (voice + FaceID) to satisfy high-trust processes.
 
 ## Momentum & Next Milestones
 - **Current**: Pre-production environment serving beta tenants with end-to-end ingestion → agent review → signature workflows.
@@ -140,3 +141,4 @@ We are raising to accelerate go-to-market (sales + onboarding), finalize enterpr
 | `workflow-temporal.png` | Temporal workflow timeline for advisory engagement (intake → approval). |
 | `lgpd-deletion.png` | LGPD deletion audit trail with multi-system status. |
 | `search-hybrid.png` | Hybrid search results combining semantic + keyword filters. |
+| `emma-mobile.png` | Emma assistant on mobile showing data request + biometric approval (voice/FaceID). |
