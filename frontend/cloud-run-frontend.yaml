@@ -28,7 +28,7 @@ spec:
               name: projects/PROJECT_ID/secrets/clerk-publishable-key-pre
               version: latest
         - name: NEXT_PUBLIC_API_BASE_URL
-          value: "https://nexus-backend-HASH-uc.a.run.app"
+          value: "https://nexus-backend-pre-73mocw2pqq-ew.a.run.app"
         - name: NEXT_PUBLIC_FRONTEND_URL
           value: "https://nexus-frontend-HASH-uc.a.run.app"
         - name: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
