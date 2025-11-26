@@ -21,43 +21,156 @@ spec:
         ports:
         - containerPort: 8000
         env:
+        # Core secrets
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/secret-key-pre
+              version: latest
+        - name: MICROSERVICES_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/microservices-api-key-pre
+              version: latest
+
         # Database
         - name: DATABASE_URL
-          value: "postgresql://user:password@/db?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME"
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/database-url-pre
+              version: latest
+        - name: ASYNC_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/async-database-url-pre
+              version: latest
+        - name: POSTGRES_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/postgres-server-pre
+              version: latest
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/postgres-user-pre
+              version: latest
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/postgres-password-pre
+              version: latest
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/postgres-db-pre
+              version: latest
         
         # Redis
         - name: REDIS_URL
           valueFrom:
             secretKeyRef:
-              name: redis-url-pre
-              key: latest
+              name: projects/PROJECT_ID/secrets/redis-url-pre
+              version: latest
         
         # Storage
         - name: STORAGE_SERVICE_URL
           value: "https://storage-service-HASH-uc.a.run.app"
+        - name: STORAGE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/storage-api-key-pre
+              version: latest
         - name: GCS_PROJECT_ID
-          value: "PROJECT_ID"
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/gcs-project-id-pre
+              version: latest
         - name: GCS_BUCKET_NAME
-          value: "your-gcs-bucket"
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/gcs-bucket-name-pre
+              version: latest
         
         # Authentication
         - name: CLERK_SECRET_KEY
           valueFrom:
             secretKeyRef:
-              name: clerk-secret
-              key: secret-key
+              name: projects/PROJECT_ID/secrets/clerk-secret-pre
+              version: latest
+        - name: CLERK_PUBLISHABLE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/clerk-publishable-key-pre
+              version: latest
+        - name: CLERK_JWT_VERIFICATION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/clerk-jwt-key-pre
+              version: latest
         - name: SIGNATURE_ENCRYPTION_KEY
           valueFrom:
             secretKeyRef:
-              name: signature-encryption-key-pre
-              key: latest
+              name: projects/PROJECT_ID/secrets/signature-encryption-key-pre
+              version: latest
+        - name: STRIPE_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/stripe-webhook-secret-pre
+              version: latest
         
         # Payments
         - name: STRIPE_SECRET_KEY
           valueFrom:
             secretKeyRef:
-              name: stripe-secret
-              key: secret-key
+              name: projects/PROJECT_ID/secrets/stripe-secret-pre
+              version: latest
+        - name: STRIPE_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/stripe-public-key-pre
+              version: latest
+
+        # Search & AI microservices
+        - name: WEAVIATE_SERVICE_URL
+          value: "https://weaviate-service-HASH-uc.a.run.app"
+        - name: ELASTICSEARCH_SERVICE_URL
+          value: "https://elasticsearch-service-HASH-uc.a.run.app"
+        - name: ELASTICSEARCH_URL
+          value: "https://elasticsearch-cluster-pre.example.com"
+        - name: CAG_SERVICE_URL
+          value: "https://cag-service-HASH-uc.a.run.app"
+        - name: LANGEXTRACT_SERVICE_URL
+          value: "https://langextract-service-HASH-uc.a.run.app"
+        - name: TEXT_EXTRACTION_SERVICE_URL
+          value: "https://textextract-service-HASH-uc.a.run.app"
+        - name: TEMPORALIO_SERVICE_URL
+          value: "https://temporalio-service-HASH-uc.a.run.app"
+        - name: ENGINE_TEMPLATE_SERVICE_URL
+          value: "https://engine-template-service-HASH-uc.a.run.app"
+        - name: OLLAMA_BASE_URL
+          value: "https://ollama-service-HASH-uc.a.run.app"
+        - name: GOTENBERG_BASE_URL
+          value: "https://gotenberg-service-HASH-uc.a.run.app"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/openai-api-key-pre
+              version: latest
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/anthropic-api-key-pre
+              version: latest
+        - name: HUGGINGFACE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/huggingface-token-pre
+              version: latest
+        - name: XAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/xai-api-key-pre
+              version: latest
         
         # URLs
         - name: FRONTEND_URL
@@ -70,6 +183,21 @@ spec:
           value: "false"
         - name: ALLOW_ALL_CORS
           value: "false"
+        - name: FEATURE_FLAGS
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/feature-flags-pre
+              version: latest
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/slack-webhook-pre
+              version: latest
+        - name: PAGERDUTY_KEY
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/pagerduty-key-pre
+              version: latest
         
         resources:
           limits:
@@ -102,7 +230,10 @@ spec:
       volumes:
       - name: gcs-key
         secret:
-          secretName: gcs-key
+          secretName: projects/PROJECT_ID/secrets/gcs-credentials-pre
+          items:
+            - key: latest
+              path: key.json
   
   traffic:
   - percent: 100
