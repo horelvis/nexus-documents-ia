@@ -67,18 +67,24 @@ jobs:
 
     # Build and push Frontend image
     - name: Build and Push Frontend
+      env:
+        BACKEND_URL: ${{ steps.backend.outputs.backend_url }}
       run: |
+        CLERK_PUBLISHABLE_KEY=$(gcloud secrets versions access latest --secret=clerk-publishable-key-pre --project=${{ env.PROJECT_ID }})
+        STRIPE_PUBLISHABLE_KEY=$(gcloud secrets versions access latest --secret=stripe-public-key-pre --project=${{ env.PROJECT_ID }})
+        
         cd frontend
         docker build -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
           -t ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest \
-          --build-arg NEXT_PUBLIC_API_BASE_URL=${{ steps.backend.outputs.backend_url }} \
+          --build-arg NEXT_PUBLIC_API_BASE_URL= \
+          --build-arg INTERNAL_API_URL=${BACKEND_URL} \
           --build-arg NEXT_PUBLIC_FRONTEND_URL=https://pre.nexusdocs360.app \
-          --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_ZGVlcC1yYWJiaXQtMjkuY2xlcmsuYWNjb3VudHMuZGV2JA \
+          --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="${CLERK_PUBLISHABLE_KEY}" \
           --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_URL=/auth/sign-in \
           --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/sign-up \
           --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard \
           --build-arg NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/onboarding \
-          --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_51RitIlR8hZSzPrz7s9giSrKIVQOQrHkxnlDkpRvxFwlJwAayDMsbqlkoweIq164iInWmYsYGaRZ0Tkn7oTKW3d7c00bl16u2XR \
+          --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${STRIPE_PUBLISHABLE_KEY}" \
           -f Dockerfile.prod \
           .
         docker push ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
