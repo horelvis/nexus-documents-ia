@@ -112,6 +112,9 @@ Microservicios (todos protegidos por `MICROSERVICES_API_KEY`)
   3. Políticas de autoescalado endurecidas para Ollama/Weaviate/Elasticsearch.  
   4. Paquete de automatización de cumplimiento (borrado LGPD/GDPR + actas).
 
+### Cumplimiento LGPD / Privacidad de Datos
+- **Minimización y etiquetado de datos**: cada chunk documenta tenant_id y nivel de sensibilidad; solo los agentes permitidos acceden a él.
+- **Control de consentimiento y ciclo de vida**: Storage Service aplica reglas de retención y los workflows de Temporalio registran capturas/renovaciones con checkpoints auditables.
 - **Derecho al olvido automatizado**: el Servicio de Eliminación LGPD coordina apagados en Postgres, GCS, Weaviate y Elasticsearch, firmando evidencias con `SIGNATURE_ENCRYPTION_KEY`.
 - **Gobernanza de acceso**: políticas basadas en roles, identidad con Clerk y caches Redis para garantizar mínimo privilegio.
 - **Monitoreo y alertas**: logging estructurado + Prometheus detectan lecturas anómalas; las violaciones disparan workflows de asesoría y alertas Slack/PagerDuty.

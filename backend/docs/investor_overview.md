@@ -140,5 +140,3 @@ We are raising to accelerate go-to-market (sales + onboarding), finalize enterpr
 | `workflow-temporal.png` | Temporal workflow timeline for advisory engagement (intake → approval). |
 | `lgpd-deletion.png` | LGPD deletion audit trail with multi-system status. |
 | `search-hybrid.png` | Hybrid search results combining semantic + keyword filters. |
-| **Signature Service** | Encrypts provider credentials, manages provider catalog, routes envelopes (DocuSign, YouSign, Signaturit). | Multi-signer workflows, webhook callbacks, provider SLA dashboards. |
-- **Signature Service** now highlighted as provider management hub (DocuSign/YouSign catalog, SLA dashboards).
