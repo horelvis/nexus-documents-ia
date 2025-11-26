@@ -453,6 +453,16 @@ class LGPDDeletionService:
             .values(tagged_by=anonymous_id)
         )
         anonymized_count += result.rowcount
+
+        # Anonymize LGPD deletion audits (Fix for circular dependency)
+        # When a user requests their own deletion, the audit log points to them via 'requested_by'
+        # We must anonymize this reference BEFORE deleting the user to avoid ForeignKeyViolationError
+        result = await db.execute(
+            update(LGPDDeletionAudit)
+            .where(LGPDDeletionAudit.requested_by == user_id)
+            .values(requested_by=anonymous_id)
+        )
+        anonymized_count += result.rowcount
         
         logger.info(f"Anonymized {anonymized_count} audit records for user {user_id}")
         return anonymized_count

@@ -58,6 +58,20 @@ export default function TemplatesPage() {
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
+    
+    // Check Google Drive status first
+    if (!driveStatus?.connected) {
+      const driveErrorMessage = 'Google Drive is not connected. Please connect your Google Drive to load templates.'
+      setError(driveErrorMessage)
+      toast({
+        title: 'Google Drive required',
+        description: driveErrorMessage,
+        variant: 'destructive',
+      })
+      setIsLoading(false)
+      return // Stop here if Drive is not connected
+    }
+
     try {
       const response = await apiClient.get<Template[]>('/engine-templates?status=active')
       if (response.error) {
@@ -90,7 +104,7 @@ export default function TemplatesPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [apiClient, toast])
+  }, [apiClient, toast, driveStatus])
 
   const fetchDriveStatus = useCallback(async () => {
     setDriveLoading(true)

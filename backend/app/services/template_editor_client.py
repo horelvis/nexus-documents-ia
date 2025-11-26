@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import httpx
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import HTTPException
 
@@ -18,9 +18,9 @@ class TemplateEditorClient:
     """Encapsulates interactions with the template-editor-service microservice."""
 
     def __init__(self):
-        base_url = getattr(settings, "TEMPLATE_EDITOR_SERVICE_URL", "").rstrip("/")
+        base_url = getattr(settings, "ENGINE_TEMPLATE_SERVICE_URL", "").rstrip("/")
         if not base_url:
-            raise RuntimeError("TEMPLATE_EDITOR_SERVICE_URL is not configured")
+            raise RuntimeError("ENGINE_TEMPLATE_SERVICE_URL is not configured")
         self.base_url = base_url
         self.headers = {
             "Authorization": f"Bearer {settings.MICROSERVICES_API_KEY}",
@@ -32,6 +32,18 @@ class TemplateEditorClient:
         """Create a new Google Docs editing session."""
         return await self._request("POST", "/edit-sessions/", json=payload)
 
+    async def get_user_sessions(
+        self, user_id: str, tenant_id: str, include_completed: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get all edit sessions for a user."""
+        params = {
+            "tenant_id": tenant_id,
+            "include_completed": str(include_completed).lower(),
+        }
+        return await self._request(
+            "GET", f"/edit-sessions/user/{user_id}", params=params
+        )
+
     async def finish_edit_session(
         self, session_id: str, user_id: str, force_sync: bool = False
     ) -> Dict[str, Any]:
@@ -39,6 +51,15 @@ class TemplateEditorClient:
         payload = {"user_id": user_id, "force_sync": force_sync}
         return await self._request(
             "POST", f"/edit-sessions/{session_id}/finish", json=payload
+        )
+
+    async def extend_session(
+        self, session_id: str, user_id: str, hours: int = 1
+    ) -> Dict[str, Any]:
+        """Extend an editing session."""
+        payload = {"user_id": user_id, "hours": hours}
+        return await self._request(
+            "POST", f"/edit-sessions/{session_id}/extend", json=payload
         )
 
     async def cancel_edit_session(

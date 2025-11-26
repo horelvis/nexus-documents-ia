@@ -290,28 +290,38 @@ sequenceDiagram
     participant F as 🖥️ Frontend
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant ES as 🔎 Elasticsearch
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
 
+    Note over U, G: 📤 Ingesta y Procesamiento
     U->>F: Upload Document
     F->>A: POST /api/v1/documents
     A->>D: Process Document
     D->>G: Store File
     D->>P: Save Metadata
-    D->>E: Generate Embeddings
-    E->>W: Store Vectors
+    
+    par Indexing & Embedding
+        D->>ES: Index Content (Full-Text + Metadata)
+        D->>W: Store Vectors (Semantic Embeddings)
+    end
+    
     D->>A: Document Processed
     A->>F: Success Response
 
+    Note over U, G: 🔍 Búsqueda Híbrida (Hybrid Search)
     U->>F: Search Query
     F->>A: GET /api/v1/search
-    A->>E: Semantic Search
-    E->>W: Vector Search
-    W->>E: Similar Documents
-    E->>A: Search Results
-    A->>F: Results + Metadata
+    A->>ES: Hybrid Search (Keyword + Semantic Boost)
+    ES-->>A: Results + Content Highlights
+    
+    opt Fallback / Semantic Only
+        A->>W: Vector Similarity Search
+        W-->>A: Semantic Results
+    end
+    
+    A->>F: Ranked Results (Cards with Highlights)
 ```
 
 ### 🛡️ **Características de Seguridad**

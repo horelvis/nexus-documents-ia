@@ -751,6 +751,58 @@ async def create_template_from_document(
         ) from exc
 
 
+class TemplateEditSessionExtendRequest(BaseModel):
+    hours: int = Field(1, ge=1, le=24)
+
+
+@router.get("/edit-sessions", response_model=List[TemplateEditSessionStartResponse])
+async def list_template_edit_sessions(
+    include_completed: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List active editing sessions for the current user."""
+    editor_client = TemplateEditorClient()
+    sessions = await editor_client.get_user_sessions(
+        user_id=str(current_user.id),
+        tenant_id=str(current_user.tenant_id),
+        include_completed=include_completed
+    )
+    return sessions
+
+
+@router.delete("/edit-sessions/{session_id}")
+async def cancel_template_edit_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Cancel an active editing session."""
+    editor_client = TemplateEditorClient()
+    result = await editor_client.cancel_edit_session(
+        session_id=session_id,
+        user_id=str(current_user.id)
+    )
+    return result
+
+
+@router.post("/edit-sessions/{session_id}/extend")
+async def extend_template_edit_session(
+    session_id: str,
+    request: TemplateEditSessionExtendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Extend an active editing session."""
+    editor_client = TemplateEditorClient()
+    result = await editor_client.extend_session(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        hours=request.hours
+    )
+    return result
+
+
 @router.post("/{template_id}/edit-sessions", response_model=TemplateEditSessionStartResponse)
 async def start_template_edit_session(
     template_id: str,

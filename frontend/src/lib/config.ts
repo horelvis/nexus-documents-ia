@@ -1,7 +1,9 @@
-const baseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  ""
+// Proxy Mode Configuration:
+// We set baseUrl to empty string "" to force the ApiClient to use relative paths (e.g. /api/v1/...).
+// This triggers the Next.js Rewrite proxy (defined in next.config.ts), which handles the 
+// actual connection to the backend, eliminating CORS issues.
+const baseUrl = ""; 
+// previously: process.env.NEXT_PUBLIC_API_BASE_URL ?? ...
 
 export const API_CONFIG = {
   BASE_URL: baseUrl,

@@ -10,22 +10,22 @@ persistence:
     default:
       sql:
         pluginName: "postgres12"
-        databaseName: "temporal"
+        databaseName: "temporalio-nexus"
         connectAddr: "db:5432"
         connectProtocol: "tcp"
-        user: "postgres"
-        password: "password"
+        user: "nexus_user"
+        password: "nexus_password"
         maxConns: 20
         maxIdleConns: 2
         maxConnLifetime: "1h"
     visibility:
       sql:
         pluginName: "postgres12"
-        databaseName: "temporal_visibility"
+        databaseName: "temporalio-nexus_visibility"
         connectAddr: "db:5432"
         connectProtocol: "tcp"
-        user: "postgres"
-        password: "password"
+        user: "nexus_user"
+        password: "nexus_password"
         maxConns: 20
         maxIdleConns: 2
         maxConnLifetime: "1h"

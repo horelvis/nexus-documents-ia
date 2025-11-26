@@ -3,7 +3,8 @@ Application middlewares configuration
 """
 import logging
 import time
-from typing import Callable
+from typing import Any, Callable
+from urllib.parse import urlparse
 
 from fastapi import Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,69 +26,41 @@ def configure_cors(app) -> None:
     """Configure CORS middleware with secure settings"""
     cors_origins = get_cors_origins()
 
-    if settings.DEBUG:
-        logger.info("🔧 DEBUG mode - allowing flexible development origins")
-        logger.info(f"🌐 Configured origins: {len(cors_origins)} total")
+    # Define critical origins that must always be allowed for this deployment
+    critical_origins = [
+        "http://nexus-docs360.es:3000",
+        "http://nexus-docs360.es:3001",
+        "http://192.168.1.58:3000",
+        "http://192.168.1.58:3001",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8000"
+    ]
 
-        # Log a sample of origins for debugging
-        if len(cors_origins) > 10:
-            logger.info(f"📋 Sample origins: {cors_origins[:5]} ... and {len(cors_origins)-5} more")
-        else:
-            logger.info(f"📋 All origins: {cors_origins}")
+    # Ensure critical origins are present
+    for origin in critical_origins:
+        if origin not in cors_origins:
+            cors_origins.append(origin)
 
-        # In development, also allow localhost with any port as fallback
-        if settings.ALLOW_ALL_CORS:
-            logger.warning("🚨 ALLOW_ALL_CORS is enabled - allowing all origins!")
-            cors_origins = ["*"]
-    else:
-        if not cors_origins:
-            logger.error("❌ CRITICAL: No CORS origins configured for production!")
-            logger.error("🔧 Set BACKEND_CORS_ORIGINS environment variable")
-            cors_origins = []  # Fail securely
-
-    logger.info(f"🌐 Final CORS configuration: {len(cors_origins)} origins")
+    # Log initial state
+    logger.info(f"🔧 CORS Configuration Starting...")
+    logger.info(f"🌐 DEBUG mode: {settings.DEBUG}")
+    logger.info(f"✅ Final Allowed Origins: {cors_origins}")
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_credentials=False if cors_origins == ["*"] else True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        allow_headers=[
-            "Accept",
-            "Accept-Language",
-            "Content-Language",
-            "Content-Type",
-            "Authorization",
-            "X-Requested-With",
-            "X-User-Id",
-            "X-Tenant-Id",
-            "X-Requested-With",
-            "X-CSRF-Token"
-        ],
+        allow_credentials=True,
+        allow_methods=["*"],  # Allow all methods
+        allow_headers=["*"],  # Allow all headers
+        expose_headers=["*"]
     )
-    logger.info("✅ CORS middleware configured with secure settings")
+    logger.info("✅ CORS middleware configured with explicit origins and credentials=True")
 
 
 async def log_requests_middleware(request: Request, call_next: Callable) -> Response:
     """Middleware for detailed request logging"""
     start_time = time.time()
-
-    # Handle OPTIONS requests early (CORS preflight)
-    if request.method == "OPTIONS":
-        logger.info(f"🔄 OPTIONS: {request.url.path}")
-        logger.info(f"🌐 Origin: {request.headers.get('origin')}")
-        logger.info(f"🔍 Request headers: {dict(request.headers)}")
-
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        logger.info(f"📨 Response headers: {dict(response.headers)}")
-        logger.info(f"✅ OPTIONS completed: {response.status_code} ({process_time:.3f}s)")
-
-        if response.status_code != 200:
-            logger.error(f"❌ OPTIONS failed with {response.status_code}")
-
-        return response
 
     # Get request information
     client_ip = request.client.host if request.client else "unknown"
@@ -182,18 +155,42 @@ def configure_trusted_hosts(app) -> None:
     """Configure trusted hosts middleware for production"""
     if not settings.DEBUG:
         # In production, only allow requests from trusted hosts
-        trusted_hosts = ["nexusdocs360.app", "www.nexusdocs360.app", "api.nexusdocs360.app"]
+        trusted_hosts = {
+            "nexusdocs360.app",
+            "www.nexusdocs360.app",
+            "api.nexusdocs360.app",
+        }
+
+        def _add_host(value: str | Any) -> None:
+            if not value:
+                return
+            value_str = str(value)
+            if not value_str:
+                return
+            parsed = urlparse(value_str if "://" in value_str else f"http://{value_str}")
+            host = parsed.hostname or value_str.split(":")[0]
+            if host:
+                trusted_hosts.add(host)
+
+        # Automatically trust hosts referenced by configuration/allowed origins
+        _add_host(settings.SERVER_HOST)
+        _add_host(settings.FRONTEND_URL)
+        _add_host(settings.API_BASE_URL)
+
+        for origin in settings.BACKEND_CORS_ORIGINS:
+            _add_host(str(origin))
+
+        # Common local/dev hosts
+        trusted_hosts.update({"localhost", "127.0.0.1"})
+
         app.add_middleware(
             TrustedHostMiddleware,
-            allowed_hosts=trusted_hosts
+            allowed_hosts=sorted(trusted_hosts)
         )
-        logger.info(f"🛡️ Trusted hosts configured: {trusted_hosts}")
+        logger.info(f"🛡️ Trusted hosts configured: {sorted(trusted_hosts)}")
 
 def configure_middlewares(app) -> None:
     """Configure all application middlewares"""
-    # Configure CORS
-    configure_cors(app)
-
     # Configure trusted hosts (production only)
     configure_trusted_hosts(app)
 
@@ -214,3 +211,7 @@ def configure_middlewares(app) -> None:
 
     # Add request logging middleware
     app.middleware("http")(log_requests_middleware)
+
+    # Configure CORS - Must be added LAST to be the outermost middleware
+    # This ensures it handles OPTIONS requests before any other middleware
+    configure_cors(app)

@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
+import { useApiClient } from "@/lib/api-client"
 
 interface TemplateEditSession {
   id: string
@@ -37,6 +38,7 @@ export default function TemplateSessionsPage({ params }: { params: Promise<{ ten
 
   const { toast } = useToast()
   const { backendUser } = useBackendUser()
+  const apiClient = useApiClient()
 
   const [sessions, setSessions] = useState<TemplateEditSession[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -51,17 +53,15 @@ export default function TemplateSessionsPage({ params }: { params: Promise<{ ten
     setError(null)
 
     try {
-      const response = await fetch(
-        `/api/template-editor/sessions?tenant_id=${tenantId}&include_completed=${includeCompleted}`
+      const response = await apiClient.get<TemplateEditSession[]>(
+        `/engine-templates/edit-sessions?include_completed=${includeCompleted}`
       )
 
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}))
-        throw new Error(detail?.error || "No se pudieron cargar las sesiones")
+      if (response.error) {
+        throw new Error(response.error)
       }
 
-      const data = await response.json()
-      setSessions(Array.isArray(data) ? data : [])
+      setSessions(Array.isArray(response.data) ? response.data : [])
     } catch (err) {
       console.error("[template-sessions] load error:", err)
       const message = err instanceof Error ? err.message : "Error desconocido al cargar las sesiones"
@@ -89,13 +89,12 @@ export default function TemplateSessionsPage({ params }: { params: Promise<{ ten
 
   const handleCancel = async (sessionId: string) => {
     try {
-      const response = await fetch(`/api/template-editor/sessions/${sessionId}`, {
-        method: "DELETE",
-      })
+      const response = await apiClient.delete(
+        `/engine-templates/edit-sessions/${sessionId}`
+      )
 
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}))
-        throw new Error(detail?.error || "No se pudo cancelar la sesión")
+      if (response.error) {
+        throw new Error(response.error)
       }
 
       toast({
@@ -115,26 +114,14 @@ export default function TemplateSessionsPage({ params }: { params: Promise<{ ten
   }
 
   const handleExtend = async (sessionId: string) => {
-    const clerkUserId = backendUser?.clerk_user_id || backendUser?.id
-    if (!clerkUserId) {
-      toast({
-        title: "Sesión no disponible",
-        description: "No pudimos identificar al usuario actual para extender la sesión.",
-        variant: "destructive",
-      })
-      return
-    }
-
     try {
-      const response = await fetch(`/api/template-editor/sessions/${sessionId}/extend`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: clerkUserId, hours: 1 }),
-      })
+      const response = await apiClient.post(
+        `/engine-templates/edit-sessions/${sessionId}/extend`,
+        { hours: 1 }
+      )
 
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}))
-        throw new Error(detail?.error || "No se pudo extender la sesión")
+      if (response.error) {
+        throw new Error(response.error)
       }
 
       toast({

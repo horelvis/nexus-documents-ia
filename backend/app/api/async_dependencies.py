@@ -84,12 +84,57 @@ async def get_current_user_async(
         user = result.scalar_one_or_none()
         
         if not user:
-            logger.warning(f"⚠️ [ASYNC_DEPENDENCIES] User not found for Clerk ID: {clerk_user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User is not registered in Nexus. Complete the signup flow first.",
-                headers={"WWW-Authenticate": "Bearer"},
+            logger.info(f"👤 [JIT] User not found locally, initiating JIT provisioning for: {clerk_user_id}")
+            
+            # 1. Fetch Profile from Clerk
+            try:
+                profile = await AsyncAuthService.fetch_clerk_user_profile(clerk_user_id)
+            except Exception as e:
+                logger.error(f"❌ [JIT] Failed to fetch Clerk profile: {e}")
+                # Fallback to 403 if we can't verify details
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User not registered and provisioning failed.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # 2. Extract Data
+            email_addresses = profile.get('email_addresses', [])
+            primary_email_id = profile.get('primary_email_address_id')
+            email = next((e['email_address'] for e in email_addresses if e['id'] == primary_email_id), None)
+            
+            if not email and email_addresses:
+                email = email_addresses[0]['email_address']
+            
+            if not email:
+                logger.error("❌ [JIT] No email found in Clerk profile")
+                raise HTTPException(status_code=400, detail="User has no email")
+
+            full_name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+            if not full_name:
+                full_name = email.split('@')[0]
+            
+            # 3. Create User (Sync)
+            # Note: We pass metadata (which contains selected_plan from unsafe_metadata)
+            # unsafe_metadata is usually top level in User object from Clerk API
+            unsafe_metadata = profile.get('unsafe_metadata', {})
+            
+            user = await AsyncAuthService.sync_user_from_clerk(
+                db=db,
+                clerk_user_id=clerk_user_id,
+                email=email,
+                full_name=full_name,
+                metadata=unsafe_metadata
             )
+            
+            # 4. Ensure Stripe Customer (Critical for SubscriptionService)
+            try:
+                from app.services.subscription_service_v2 import SubscriptionServiceV2
+                await SubscriptionServiceV2._find_or_create_stripe_customer(db, user)
+            except Exception as e:
+                logger.warning(f"⚠️ [JIT] Failed to setup Stripe customer (non-critical): {e}")
+            
+            logger.info(f"✅ [JIT] User successfully provisioned: {user.id}")
         
         logger.info(f"✅ [ASYNC_DEPENDENCIES] User authenticated: {user.email}")
         return user

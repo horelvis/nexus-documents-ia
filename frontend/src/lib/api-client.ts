@@ -39,13 +39,52 @@ type ApiClientError = Error & {
   }
 }
 
+const normalizeBasePath = (value: string) => value.replace(/\/+$/, '')
+
+const resolveApiBaseUrl = () => {
+  const configured = (API_CONFIG.BASE_URL || '').trim()
+
+  // No base configured -> rely on Next.js rewrite (/api/* → backend)
+  if (!configured) {
+    return ''
+  }
+
+  // Already a relative path (e.g. "/api")
+  if (configured.startsWith('/')) {
+    return normalizeBasePath(configured)
+  }
+
+  try {
+    const parsed = new URL(configured)
+    const pathname = parsed.pathname === '/' ? '' : normalizeBasePath(parsed.pathname)
+    const normalized = `${parsed.origin}${pathname}`
+
+    if (
+      typeof window !== 'undefined' &&
+      window.location.protocol === 'https:' &&
+      parsed.protocol === 'http:' &&
+      process.env.NEXT_PUBLIC_ALLOW_INSECURE_API !== 'true'
+    ) {
+      console.warn(
+        '[ApiClient] Insecure API base detected from an HTTPS page. ' +
+        'Falling back to the Next.js /api proxy to avoid mixed-content issues.'
+      )
+      return ''
+    }
+
+    return normalized
+  } catch {
+    // If URL parsing fails (e.g., custom schema), return as-is
+    return normalizeBasePath(configured)
+  }
+}
+
 class ApiClient {
   private baseURL: string
 
   constructor() {
-    // API_CONFIG.BASE_URL incluye la base del servidor 
-    // Agregamos el prefijo /api/v1 para todas las rutas
-    this.baseURL = `${API_CONFIG.BASE_URL}${API_CONFIG.API_V1}`
+    const resolvedBase = resolveApiBaseUrl()
+    this.baseURL = `${resolvedBase}${API_CONFIG.API_V1}`
   }
 
   private async getAuthToken(): Promise<string | null> {

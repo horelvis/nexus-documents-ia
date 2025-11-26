@@ -19,7 +19,7 @@ logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | "
            "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level=settings.log_level,
+    level="INFO",
 )
 
 
@@ -87,5 +87,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level=settings.log_level.lower(),
+        log_level=settings.log_level,
     )

@@ -1,58 +1,26 @@
-# 📋 Contexto Continuidad – Enfoque Asesorías Laborales
+# Session Context: 2025-11-20
 
-## 🗓️ Fecha
-15 noviembre 2025 – 18:30 CET
+## Status
+- **Resolved:**
+    - Fixed 500 Internal Server Error in `POST /api/v1/engine-templates/from-document` (UUID serialization issue).
+    - Improved UI error handling in `DocumentsPage` to separate template creation success from Google Docs opening failure.
+- **In Progress:**
+    - Investigating why Google Drive tokens are not being saved/found for user `cd8bb336-5653-43fa-b84e-ee1627540d5a`, even though the user reports connecting successfully.
+    - The script `check_google_token.py` failed to run locally due to environment issues; needs to be run inside the Docker container.
 
-## 🎯 Objetivo general
-Convertir NexusDocs360 en la plataforma IA de referencia para **asesorías laborales**, con una hoja de ruta clara de funcionalidades CORE que podamos reutilizar después en gestorías fiscales/contables.
+## Next Steps
+1. **Verify Google Drive Token:**
+   - Execute the database check *inside* the `api` container to confirm if the token exists for the user.
+   - **Suggested Command:**
+     ```bash
+     docker compose -f backend/docker/docker-compose.yml exec api python3 -c "from app.db.session import SessionLocal; from app.db.models import GoogleDriveToken; from uuid import UUID; db = SessionLocal(); token = db.query(GoogleDriveToken).filter(GoogleDriveToken.user_id == UUID('cd8bb336-5653-43fa-b84e-ee1627540d5a')).first(); print(f'Token found: {token is not None}')"
+     ```
 
----
+2. **Debug OAuth Flow:**
+   - If no token is found, trace the `oauth_callback` in `backend/app/api/v1/google_drive.py`.
+   - Check logs for "Failed to store Google Drive tokens" or other errors during the callback.
 
-## ✅ Estado actual (resumen)
-- **Landing** orientada a asesorías → mensajes, badges y testimonios adaptados.
-- **Catálogo de workflows AI** expuesto vía `/temporalio/ai-workflows`, con formularios dinámicos en frontend.
-- **Temporalio** estable: search attributes corregidos, catálogo curado lista legal/documental funcionando.
-- **Infra**: microservicios operativos (Temporalio, Weaviate, firma, storage). Faltan pipelines específicos para ingestión laboral.
-
----
-
-## 🔧 Backlog prioritario (asesorías laborales)
-
-| Módulo | Función | Estado | Notas/Dependencias |
-| --- | --- | --- | --- |
-| Ingesta documental | Drag & drop multiarchivo con metadatos (cliente, periodo, tipo) | ⚙️ existente pero genérico | Adaptar UI/validaciones para documentos laborales |
-| Ingesta por email | Conector IMAP/365 + reglas por cliente | ⏳ por implementar | Necesita microservicio de watcher + colas |
-| OCR + normalización | OCR ya disponible (Gotenberg/PDF). Falta pipeline laboral | 🔄 parcial | Crear plantillas específicas (nómina, contrato, certificado) |
-| Clasificación IA | Detectar modelo 111/190/303, nómina, contrato, certificado, comunicaciones ITSS | ✅ base (clasif genérica) | Entrenar prompts/etiquetas laborales + motor de reglas |
-| Búsqueda semántica | Implementada con Weaviate | ✅ | Añadir filtros “cliente”, “tipo modelo”, “fecha vencimiento” |
-| Alertas/vencimientos | Jobs para contratos y obligaciones | ⏳ | Requiere scheduler + metadatos en DB |
-| ACL / espacios clientes | ACL básica multi-tenant | ✅ base | Añadir roles “asesor”, “cliente empresa” y carpetas compartidas |
-| Firma electrónica | Microservicio listo | ✅ | Crear plantillas de firma (contrato, anexo, certificado) y flujos preconfigurados |
-| Portal cliente | UI ligera para empresas finales | ⏳ | Reutilizar componentes de sharing + auth delegada |
-| Panel analítico | Charts de obligaciones, carga por asesor, incidencias | ⏳ | Base de datos ya tiene eventos → crear endpoints + dashboards |
-| Chat IA laboral | Emma/LLM ya disponible | ⚙️ | Afinar prompt + retrieval sobre documentos laborales y convenios |
-
----
-
-## 📌 Recomendación de corto plazo (orden sugerido)
-1. **Ingesta omnicanal** (drag & drop + email) con pipeline de OCR y clasificación laboral.
-2. **Metadatos críticos**: cliente, periodo fiscal, tipo de modelo, status firma.
-3. **Alertas y calendario**: modelos 111/190/303, vencimientos de contratos/ITSS.
-4. **Portal cliente**: acceso seguro, subida de docs y seguimiento de firmas.
-5. **Analytics**: tablero interno (carga asesores, obligaciones pendientes).
-
----
-
-## 🧱 Bloqueos / Riesgos
-- **Datos de entrenamiento**: necesitamos ejemplos reales (anonimizados) de nóminas/modelos para mejorar clasificación.
-- **Firmas avanzadas**: validar requisitos legales según clientes (EU vs LATAM).
-- **Coste de almacenamiento**: incremento por ingestión masiva → revisar cuotas y archivado.
-
----
-
-## 🔁 Próximas sesiones
-- **Backend**: diseñar pipeline de ingesta + clasificación específica.
-- **Frontend**: UI de carga por cliente + calendario de obligaciones.
-- **Go-to-market**: preparar pitch deck y pricing para pilotos (3-5 asesorías).
-
-> Guardar este archivo antes de pausar y retomarlo la próxima sesión. Familiarizarnos con `backend/app/data/ai_workflow_catalog.py` y los microservicios de ingestión será clave para acelerar los siguientes pasos. 
+## Key Files
+- `backend/app/api/v1/engine_templates.py` (Backend fix)
+- `frontend/src/app/(main)/[tenantId]/documents/page.tsx` (Frontend fix)
+- `backend/app/api/v1/google_drive.py` (OAuth logic)

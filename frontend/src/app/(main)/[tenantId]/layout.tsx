@@ -2,6 +2,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { SiteHeader } from "@/components/layout/site-header"
 import { AuthGuard, ProfileVerificationGuard } from "@/components/auth"
 import { GlobalUploadDialog } from "@/components/dashboard/global-upload-dialog"
+import { GlobalCommandMenu } from "@/components/layout/global-command-menu"
 import { NavigationProgress } from "@/components/layout/navigation-progress"
 import { VirtualAssistant } from "@/components/virtual-assistant/virtual-assistant"
 import { TourGuide } from "@/components/tour/TourGuide"
@@ -49,6 +50,9 @@ export default async function TenantLayout({
                   
                   {/* Global Upload Dialog */}
                   <GlobalUploadDialog />
+
+                  {/* Global Command Menu */}
+                  <GlobalCommandMenu tenantId={tenantId} />
                   
                   {/* Virtual Assistant */}
                   <VirtualAssistant />
