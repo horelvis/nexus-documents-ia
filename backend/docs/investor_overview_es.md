@@ -89,6 +89,7 @@ Microservicios (todos protegidos por `MICROSERVICES_API_KEY`)
 - **Consultorías y Asesorías**
   - Due diligence: ingestión de datarooms, detección de incumplimientos, resúmenes ejecutivos.
   - ESG/Compliance: agentes validan disclosures, rellenan plantillas regulatorias, coordinan aprobaciones con el cliente.
+  - Solicitudes naturales con Emma: “Muéstrame los contratos que siguen pendientes de revisión” dispara búsqueda CAG + orquestación de firmas.
 - **Hospitales y Redes de Salud**
   - Documentación clínica: extracción de diagnósticos, tratamientos y consentimientos para EMR/billing.
   - Cumplimiento: monitoreo de políticas de retención, automatización de borrado GDPR/LGPD.

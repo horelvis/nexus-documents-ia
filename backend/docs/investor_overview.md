@@ -90,6 +90,7 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 - **Consulting / Advisory Firms**
   - Portfolio diligence: ingest datarooms, detect covenant breaches, prepare executive summaries.
   - ESG compliance packs: agents verify disclosures, auto-populate reporting templates, orchestrate client approvals.
+  - Natural-language requests via Emma: “Show me contracts that still need partner review” triggers CAG search + signature orchestration.
 - **Hospitals & Healthcare Networks**
   - Clinical documentation: extract diagnoses, treatments, and consent statuses; feed EMR or billing systems.
   - Compliance sweeps: monitor retention policies, automate GDPR/LGPD right-to-erasure workflows.
@@ -97,7 +98,7 @@ Microservices (all gated by `MICROSERVICES_API_KEY`)
 - **Law Firms / Corporate Legal**
   - Contract lifecycle: clause extraction, redline recommendations, signature orchestration, and clause-level search.
   - Litigation readiness: vectorize discovery sets, ask questions over exhibits, generate chronologies.
-  - Privacy programs: run LGPD deletion workflows, verify DSAR responses, log structured evidence for regulators.
+- Privacy programs: run LGPD deletion workflows, verify DSAR responses, log structured evidence for regulators.
 
 ## Competitive Advantages
 - **Unified AI stack**: Blend of deterministic extraction + LLM reasoning, exposed through reusable agents.
