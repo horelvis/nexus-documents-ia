@@ -23,7 +23,10 @@ spec:
         - name: NODE_ENV
           value: "production"
         - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-          value: "YOUR_CLERK_KEY"
+          valueFrom:
+            secretKeyRef:
+              name: projects/PROJECT_ID/secrets/clerk-publishable-key-pre
+              version: latest
         - name: NEXT_PUBLIC_API_BASE_URL
           value: "https://nexus-backend-HASH-uc.a.run.app"
         - name: NEXT_PUBLIC_FRONTEND_URL
