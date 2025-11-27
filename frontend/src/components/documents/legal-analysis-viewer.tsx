@@ -133,7 +133,7 @@ export default function LegalAnalysisViewer({
   // Error state
   if (error) {
     return (
-      <div className={cn("flex h-full items-center justify-center bg-gray-50 dark:bg-gray-900", className)}>
+      <div className={cn("flex h-full items-center justify-center bg-background", className)}>
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
@@ -143,11 +143,11 @@ export default function LegalAnalysisViewer({
   }
 
   return (
-    <div className={cn("flex h-full bg-gray-50 dark:bg-gray-900", className)}>
+    <div className={cn("flex h-full bg-background", className)}>
       {/* Main PDF Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="h-14 border-b bg-white dark:bg-gray-800 flex items-center justify-between px-4 shadow-sm z-10">
+        <div className="h-14 border-b bg-card flex items-center justify-between px-4 shadow-sm z-10">
           <div className="flex items-center space-x-2">
             <Button
               variant="ghost"
@@ -340,9 +340,9 @@ export default function LegalAnalysisViewer({
       </div>
 
       {/* Analysis Sidebar */}
-      <div className="w-96 border-l bg-white dark:bg-gray-800 flex flex-col shadow-xl z-20">
-        <div className="p-6 border-b bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900">
-          <h2 className="font-serif text-2xl font-bold text-gray-900 dark:text-gray-100">
+      <div className="w-96 border-l bg-card flex flex-col shadow-xl z-20">
+        <div className="p-6 border-b bg-muted/30">
+          <h2 className="font-serif text-2xl font-bold">
             Análisis del Agente Legal
           </h2>
         </div>
