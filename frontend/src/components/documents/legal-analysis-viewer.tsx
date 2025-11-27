@@ -20,7 +20,10 @@ import {
   AlertTriangle,
   Lightbulb,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Download,
+  Maximize2,
+  RotateCw
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -45,18 +48,21 @@ export interface AnalysisItem {
 
 interface LegalAnalysisViewerProps {
   url: string
+  fileName?: string
   analysisItems: AnalysisItem[]
   className?: string
 }
 
 export default function LegalAnalysisViewer({
   url,
+  fileName = 'document.pdf',
   analysisItems,
   className
 }: LegalAnalysisViewerProps) {
   const [numPages, setNumPages] = useState<number>(0)
   const [pageNumber, setPageNumber] = useState<number>(1)
   const [scale, setScale] = useState<number>(1.0)
+  const [rotation, setRotation] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -92,6 +98,27 @@ export default function LegalAnalysisViewer({
   const handleZoomOut = useCallback(() => {
     setScale(s => Math.max(0.5, s - 0.1))
   }, [])
+
+  const handleResetZoom = useCallback(() => {
+    setScale(1.0)
+  }, [])
+
+  const handleRotate = useCallback(() => {
+    setRotation(prev => (prev + 90) % 360)
+  }, [])
+
+  const handleDownload = useCallback(() => {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [url, fileName])
+
+  const handleFullscreen = useCallback(() => {
+    window.open(url, '_blank')
+  }, [url])
 
   // Get severity label
   const getSeverityLabel = (severity?: 'high' | 'medium' | 'low') => {
@@ -155,9 +182,14 @@ export default function LegalAnalysisViewer({
             >
               <ZoomOut className="h-4 w-4" />
             </Button>
-            <span className="text-sm w-12 text-center" aria-live="polite">
+            <Badge
+              variant="secondary"
+              className="cursor-pointer px-3 min-w-[60px] text-center"
+              onClick={handleResetZoom}
+              aria-label="Restablecer zoom"
+            >
               {Math.round(scale * 100)}%
-            </span>
+            </Badge>
             <Button
               variant="ghost"
               size="sm"
@@ -166,6 +198,35 @@ export default function LegalAnalysisViewer({
               aria-label="Aumentar zoom"
             >
               <ZoomIn className="h-4 w-4" />
+            </Button>
+
+            <div className="h-6 w-px bg-border mx-1" />
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRotate}
+              aria-label="Rotar documento"
+            >
+              <RotateCw className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleDownload}
+              aria-label="Descargar documento"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleFullscreen}
+              aria-label="Abrir en pantalla completa"
+            >
+              <Maximize2 className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -192,6 +253,7 @@ export default function LegalAnalysisViewer({
               <Page
                 pageNumber={pageNumber}
                 scale={scale}
+                rotate={rotation}
                 className="bg-white"
               />
 

@@ -161,9 +161,10 @@ export default function AnalysisPage() {
     }
 
     return (
-        <div className="h-screen w-full overflow-hidden">
+        <div className="h-screen w-full overflow-hidden bg-gray-900">
             <LegalAnalysisViewer
                 url={pdfUrl}
+                fileName={document?.filename || 'document.pdf'}
                 analysisItems={mockAnalysisItems}
             />
         </div>
