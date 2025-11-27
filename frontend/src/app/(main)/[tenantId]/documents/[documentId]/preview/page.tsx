@@ -264,8 +264,9 @@ export default function DocumentPreviewPage() {
   }, [preview, pdfUrl, isLoadingPdf, loadPdfUrl])
 
   useEffect(() => {
-    // Poll for preview if it's pending
-    if (preview?.conversion_method === 'pending') {
+    // Poll for preview if thumbnails are still being generated
+    // For PDFs, thumbnails might take a moment to generate even though the PDF is available
+    if (preview && !preview.pdf_available && preview.conversion_method === 'none') {
       const timer = setTimeout(() => {
         generatePreview(false)
       }, 2000)
@@ -416,14 +417,14 @@ export default function DocumentPreviewPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col min-h-[75vh]">
-                {(isLoadingPreview || preview?.conversion_method === 'pending') && (
+                {(isLoadingPreview || (preview && !preview.pdf_available && preview.conversion_method === 'none')) && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
                       <RefreshCw className="h-4 w-4 animate-spin" />
                       <span className="text-sm text-muted-foreground">
-                        {preview?.conversion_method === 'pending'
-                          ? 'Generating preview in background...'
-                          : 'Checking preview status...'}
+                        {isLoadingPreview
+                          ? 'Checking preview status...'
+                          : 'Generating preview in background...'}
                       </span>
                     </div>
                     <Skeleton className="h-32 w-full" />
@@ -431,7 +432,7 @@ export default function DocumentPreviewPage() {
                   </div>
                 )}
 
-                {preview && !isLoadingPreview && preview.conversion_method !== 'pending' && (
+                {preview && preview.pdf_available && (
                   <div className="space-y-6">
                     {/* PDF Viewer */}
                     {preview.pdf_available && (
