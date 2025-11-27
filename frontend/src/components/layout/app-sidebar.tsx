@@ -43,205 +43,200 @@ import {
 } from "@/components/ui/sidebar"
 import { useBackendUser } from "@/contexts/user-context"
 
-const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
-  navMain: [
-    {
-      title: "Dashboard",
-      url: "/dashboard",
-      icon: IconDashboard,
-      color: "blue",
-    },
-    {
-      title: "Documents",
-      url: "/documents",
-      icon: IconFiles,
-      color: "green",
-      items: [
-        {
-          title: "Document Library",
-          url: "/documents",
-        },
-        {
-          title: "Shared Documents",
-          url: "/shared",
-        },
-      ],
-    },
-    {
-      title: "Search & AI",
-      url: "/search",
-      icon: IconBrain,
-      color: "purple",
-    },
-    {
-      title: "WorkFlow AI",
-      url: "/workflows",
-      icon: IconGitBranch,
-      color: "cyan",
-      items: [
-        {
-          title: "AI Agents Workflows",
-          url: "/workflows/ai-agents",
-        },
-        {
-          title: "Process Builder",
-          url: "/workflows/builder",
-        },
-        {
-          title: "Contract Renewals",
-          url: "/workflows/contract-renewal",
-        },
-        {
-          title: "Process Library",
-          url: "/workflows/library",
-        },
-        {
-          title: "Analytics",
-          url: "/workflows/analytics",
-        },
-      ],
-    },
-    {
-      title: "Digital Signatures",
-      url: "/signatures/requests",
-      icon: IconSignature,
-      color: "pink",
-      items: [
-        {
-          title: "Signature Requests",
-          url: "/signatures/requests",
-        },
-        {
-          title: "Signature History",
-          url: "/signatures/history",
-        },
-      ],
-    },
-    {
-      title: "Analytics",
-      url: "/analytics",
-      icon: IconChartBar,
-      color: "orange",
-    },
-  ],
-  quickActions: [
-    {
-      name: "Upload Document", 
-      url: "#", // Will be handled by context
-      icon: IconCloudUpload,
-      color: "blue",
-    },
-    {
-      name: "Ask Emma",
-      url: "/chat",
-      icon: IconBrain,
-      color: "purple",
-    },
-    {
-      name: "Create Workflow",
-      url: "/workflows/builder",
-      icon: IconRobot,
-      color: "cyan",
-    },
-    {
-      name: "Firmar Documento",
-      url: "/signatures/requests",
-      icon: IconSignature,
-      color: "pink",
-    },
-  ],
-  adminActions: [
-    {
-      title: "Team Management",
-      url: "/admin/teams",
-      icon: IconUsers,
-      color: "indigo",
-    },
-    {
-      title: "Tenant Settings",
-      url: "/settings/tenant",
-      icon: IconSettings,
-      color: "gray",
-    },
-    {
-      title: "Signature Providers",
-      url: "/admin/signature-providers",
-      icon: IconSignature,
-      color: "pink",
-    },
-    {
-      title: "Billing",
-      url: "/billing",
-      icon: IconCreditCard,
-      color: "green",
-    },
-  ],
-  navSecondary: [
-    {
-      title: "Storage",
-      url: "/storage",
-      icon: IconDatabase,
-      color: "purple",
-    },
-    {
-      title: "Help",
-      url: "/help",
-      icon: IconHelp,
-      color: "orange",
-    },
-  ],
-  recentDocuments: [
-    {
-      name: "Recent uploads",
-      url: "/documents/recent",
-      icon: IconClock,
-    },
-    {
-      name: "Most viewed",
-      url: "/documents/popular",
-      icon: IconTrendingUp,
-    },
-    {
-      name: "Shared with me",
-      url: "/documents/shared",
-      icon: IconUserCheck,
-    },
-  ],
-}
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
   const { backendUser } = useBackendUser()
-  
+  const { t } = useTranslation()
+
   // Check if user is admin (superuser, has admin role, or is not a team member)
   const isTenantAdmin = backendUser && (
-    backendUser.is_superuser || 
+    backendUser.is_superuser ||
     backendUser.roles?.some((role: any) => role.name === 'admin') ||
     !backendUser.is_team_member
   )
-  
-  // Debug log
-  React.useEffect(() => {
-    console.log('Sidebar - Backend user:', backendUser)
-    console.log('Sidebar - Is tenant admin:', isTenantAdmin)
-    console.log('Sidebar - TenantId:', tenantId)
-    console.log('Sidebar - QuickActions URLs:', getNavData().quickActions.map(a => a.url))
-  }, [backendUser, isTenantAdmin, tenantId])
-  
+
+  const data = {
+    user: {
+      name: "shadcn",
+      email: "m@example.com",
+      avatar: "/avatars/shadcn.jpg",
+    },
+    navMain: [
+      {
+        title: t('sidebar.dashboard'),
+        url: "/dashboard",
+        icon: IconDashboard,
+        color: "blue",
+      },
+      {
+        title: t('sidebar.documents.title'),
+        url: "/documents",
+        icon: IconFiles,
+        color: "green",
+        items: [
+          {
+            title: t('sidebar.documents.library'),
+            url: "/documents",
+          },
+          {
+            title: t('sidebar.documents.shared'),
+            url: "/shared",
+          },
+        ],
+      },
+      {
+        title: t('sidebar.search'),
+        url: "/search",
+        icon: IconBrain,
+        color: "purple",
+      },
+      {
+        title: t('sidebar.workflows.title'),
+        url: "/workflows",
+        icon: IconGitBranch,
+        color: "cyan",
+        items: [
+          {
+            title: t('sidebar.workflows.agents'),
+            url: "/workflows/ai-agents",
+          },
+          {
+            title: t('sidebar.workflows.builder'),
+            url: "/workflows/builder",
+          },
+          {
+            title: t('sidebar.workflows.renewals'),
+            url: "/workflows/contract-renewal",
+          },
+          {
+            title: t('sidebar.workflows.library'),
+            url: "/workflows/library",
+          },
+          {
+            title: t('sidebar.workflows.analytics'),
+            url: "/workflows/analytics",
+          },
+        ],
+      },
+      {
+        title: t('sidebar.signatures.title'),
+        url: "/signatures/requests",
+        icon: IconSignature,
+        color: "pink",
+        items: [
+          {
+            title: t('sidebar.signatures.requests'),
+            url: "/signatures/requests",
+          },
+          {
+            title: t('sidebar.signatures.history'),
+            url: "/signatures/history",
+          },
+        ],
+      },
+      {
+        title: t('sidebar.analytics'),
+        url: "/analytics",
+        icon: IconChartBar,
+        color: "orange",
+      },
+    ],
+    quickActions: [
+      {
+        name: t('sidebar.quickActions.upload'),
+        url: "#", // Will be handled by context
+        icon: IconCloudUpload,
+        color: "blue",
+      },
+      {
+        name: t('sidebar.quickActions.askEmma'),
+        url: "/chat",
+        icon: IconBrain,
+        color: "purple",
+      },
+      {
+        name: t('sidebar.quickActions.createWorkflow'),
+        url: "/workflows/builder",
+        icon: IconRobot,
+        color: "cyan",
+      },
+      {
+        name: t('sidebar.quickActions.sign'),
+        url: "/signatures/requests",
+        icon: IconSignature,
+        color: "pink",
+      },
+    ],
+    adminActions: [
+      {
+        title: t('sidebar.admin.teams'),
+        url: "/admin/teams",
+        icon: IconUsers,
+        color: "indigo",
+      },
+      {
+        title: t('sidebar.admin.settings'),
+        url: "/settings/tenant",
+        icon: IconSettings,
+        color: "gray",
+      },
+      {
+        title: t('sidebar.admin.providers'),
+        url: "/admin/signature-providers",
+        icon: IconSignature,
+        color: "pink",
+      },
+      {
+        title: t('sidebar.admin.billing'),
+        url: "/billing",
+        icon: IconCreditCard,
+        color: "green",
+      },
+    ],
+    navSecondary: [
+      {
+        title: t('sidebar.storage'),
+        url: "/storage",
+        icon: IconDatabase,
+        color: "purple",
+      },
+      {
+        title: t('sidebar.help'),
+        url: "/help",
+        icon: IconHelp,
+        color: "orange",
+      },
+    ],
+    recentDocuments: [
+      {
+        name: t('sidebar.documents.recent'),
+        url: "/documents/recent",
+        icon: IconClock,
+      },
+      {
+        name: t('sidebar.documents.popular'),
+        url: "/documents/popular",
+        icon: IconTrendingUp,
+      },
+      {
+        name: t('sidebar.documents.sharedWithMe'),
+        url: "/documents/shared",
+        icon: IconUserCheck,
+      },
+    ],
+  }
+
   const buildNavMain = React.useCallback(() => {
     const baseNav = [...data.navMain]
     if (isTenantAdmin) {
       const templateItem = {
-        title: "Document Templates",
+        title: t('sidebar.admin.templates'),
         url: "/templates",
         icon: IconFileText,
         color: "orange",
       }
-      const insertIndex = baseNav.findIndex(item => item.title === "Digital Signatures")
+      const insertIndex = baseNav.findIndex(item => item.title === t('sidebar.signatures.title'))
       if (insertIndex >= 0) {
         baseNav.splice(insertIndex, 0, templateItem)
       } else {
@@ -249,13 +244,13 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
       }
     }
     return baseNav
-  }, [isTenantAdmin])
-  
+  }, [isTenantAdmin, t, data.navMain])
+
   // Generate tenant-aware navigation data
   const getNavData = () => {
     const basePath = tenantId ? `/${tenantId}` : '';
     const navMainSource = buildNavMain()
-    
+
     return {
       ...data,
       navMain: navMainSource.map(item => ({
@@ -294,11 +289,11 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
             <SidebarMenuButton
               asChild
               className="data-[slot=sidebar-menu-button]:!p-1.5"
-              tooltip="Nexus Document"
+              tooltip={t('sidebar.nexusDocument')}
             >
               <NavLink href={`/${tenantId}/dashboard`}>
                 <IconInnerShadowTop className="!size-5" />
-                <span className="text-base font-semibold">Nexus Document</span>
+                <span className="text-base font-semibold">{t('sidebar.nexusDocument')}</span>
               </NavLink>
             </SidebarMenuButton>
           </SidebarMenuItem>
