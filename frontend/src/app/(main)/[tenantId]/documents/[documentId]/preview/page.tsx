@@ -46,7 +46,7 @@ export default function DocumentPreviewPage() {
     if (path.startsWith('http')) {
       return path // Already a full URL
     }
-    
+
     // The path already includes /api/v1, so just use the base URL
     return `${API_CONFIG.BASE_URL}${path}`
   }
@@ -57,7 +57,7 @@ export default function DocumentPreviewPage() {
 
     try {
       const response = await documentService.getDocument(documentId)
-      
+
       if (response.error) {
         setError(response.error)
         toast.error('Failed to load document', {
@@ -83,7 +83,7 @@ export default function DocumentPreviewPage() {
 
     try {
       const response = await documentService.getDocumentPreview(documentId, forceRegenerate)
-      
+
       if (response.error) {
         setError(response.error)
         toast.error('Failed to generate preview', {
@@ -91,12 +91,7 @@ export default function DocumentPreviewPage() {
         })
       } else if (response.data) {
         setPreview(response.data)
-        
-        // For PDF files or converted documents, get signed URL for PDF viewer
-        if (response.data.pdf_available) {
-          await loadPdfUrl()
-        }
-        
+
         if (forceRegenerate) {
           toast.success('Preview regenerated successfully')
         }
@@ -114,16 +109,16 @@ export default function DocumentPreviewPage() {
 
   const loadPdfUrl = async () => {
     if (!document) return
-    
+
     try {
       console.log('[DocumentPreviewPage] Attempting to load PDF URL for document:', document.id, 'file_type:', document.file_type)
       let result
-      
+
       if (document.file_type === 'pdf' || document.mime_type === 'application/pdf') {
-         result = await documentService.downloadDocument(document.id)
+        result = await documentService.downloadDocument(document.id)
       } else {
-         // For non-PDFs (like ODT), fetch the converted PDF
-         result = await documentService.downloadConvertedDocument(document.id)
+        // For non-PDFs (like ODT), fetch the converted PDF
+        result = await documentService.downloadConvertedDocument(document.id)
       }
 
       if ('blob' in result && result.blob) {
@@ -143,7 +138,7 @@ export default function DocumentPreviewPage() {
 
   const loadImageUrl = async () => {
     if (!document) return
-    
+
     setIsLoadingImage(true)
     try {
       // Use authenticated download service for images
@@ -168,14 +163,14 @@ export default function DocumentPreviewPage() {
       toast.error('No document selected')
       return
     }
-    
+
     try {
       toast.info('Downloading document...')
       console.log('Downloading document:', document.id, document.filename)
-      
+
       const result = await documentService.downloadDocument(document.id)
       console.log('Download result:', result)
-      
+
       if ('error' in result) {
         console.error('Download error:', result.error)
         toast.error('Download failed', { description: result.error })
@@ -190,7 +185,7 @@ export default function DocumentPreviewPage() {
       }
 
       console.log('Creating download link for:', result.filename, 'size:', result.blob.size)
-      
+
       // Create download link
       const url = URL.createObjectURL(result.blob)
       const a = window.document.createElement('a')
@@ -199,13 +194,13 @@ export default function DocumentPreviewPage() {
       a.style.display = 'none'
       window.document.body.appendChild(a)
       a.click()
-      
+
       // Cleanup
       setTimeout(() => {
         window.document.body.removeChild(a)
         URL.revokeObjectURL(url)
       }, 100)
-      
+
       toast.success('Document downloaded successfully')
     } catch (error) {
       console.error('Download exception:', error)
@@ -255,6 +250,16 @@ export default function DocumentPreviewPage() {
       generatePreview()
     }
   }, [document])
+
+  // Optimize PDF loading: Start downloading immediately when document is available
+  // This parallels the behavior in analysis/page.tsx which is faster
+  useEffect(() => {
+    if (document && !pdfUrl && !isLoadingDocument) {
+      // Check if it's a PDF or a file that might have a converted PDF
+      // We attempt to load it immediately instead of waiting for preview generation
+      loadPdfUrl()
+    }
+  }, [document, pdfUrl, isLoadingDocument])
 
   useEffect(() => {
     // Poll for preview if it's pending
@@ -309,8 +314,8 @@ export default function DocumentPreviewPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => {
               const returnTo = searchParams.get('returnTo')
@@ -320,13 +325,13 @@ export default function DocumentPreviewPage() {
                 const tags = searchParams.get('tags') || ''
                 const dateFrom = searchParams.get('dateFrom') || ''
                 const dateTo = searchParams.get('dateTo') || ''
-                
+
                 const searchUrl = new URLSearchParams()
                 if (query) searchUrl.set('q', query)
                 if (tags) searchUrl.set('tags', tags)
                 if (dateFrom) searchUrl.set('dateFrom', dateFrom)
                 if (dateTo) searchUrl.set('dateTo', dateTo)
-                
+
                 router.push(`/${tenantId}/search?${searchUrl.toString()}`)
               } else {
                 router.push(`/${tenantId}/documents`)
@@ -336,7 +341,7 @@ export default function DocumentPreviewPage() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             {searchParams.get('returnTo') === 'search' ? 'Back to Search' : 'Back to Documents'}
           </Button>
-          
+
           {document && (
             <div>
               <h1 className="text-2xl font-bold">{document.title || document.filename}</h1>
@@ -352,17 +357,17 @@ export default function DocumentPreviewPage() {
             <Share2 className="h-4 w-4 mr-2" />
             Share
           </Button>
-          
+
           {document && (
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-2" />
               Download
             </Button>
           )}
-          
-          <Button 
-            variant="outline" 
-            size="sm" 
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => generatePreview(true)}
             disabled={isLoadingPreview || preview?.conversion_method === 'pending'}
           >
@@ -414,8 +419,8 @@ export default function DocumentPreviewPage() {
                     <div className="flex items-center gap-2">
                       <RefreshCw className="h-4 w-4 animate-spin" />
                       <span className="text-sm text-muted-foreground">
-                        {preview?.conversion_method === 'pending' 
-                          ? 'Generating preview in background...' 
+                        {preview?.conversion_method === 'pending'
+                          ? 'Generating preview in background...'
                           : 'Checking preview status...'}
                       </span>
                     </div>
@@ -459,7 +464,7 @@ export default function DocumentPreviewPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                           {preview.thumbnails.map((thumbnail, index) => {
                             const thumbnailUrl = getFullImageUrl(thumbnail)
-                            
+
                             return (
                               <div key={index} className="space-y-2">
                                 <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border-2 border-border hover:border-primary/50 transition-colors">
@@ -473,10 +478,10 @@ export default function DocumentPreviewPage() {
                                     }}
                                   />
                                 </div>
-                              <p className="text-sm text-center text-muted-foreground">
-                                Page {index + 1}
-                              </p>
-                            </div>
+                                <p className="text-sm text-center text-muted-foreground">
+                                  Page {index + 1}
+                                </p>
+                              </div>
                             )
                           })}
                         </div>
@@ -586,7 +591,7 @@ export default function DocumentPreviewPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Estado:</span>
-                      <DocumentStatusIndicator 
+                      <DocumentStatusIndicator
                         status={document.indexed}
                         showDescription={true}
                         size="md"
@@ -654,18 +659,18 @@ export default function DocumentPreviewPage() {
                 <div className="space-y-2">
                   <h4 className="font-medium">Actions</h4>
                   <div className="space-y-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="w-full justify-start" 
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start"
                       onClick={handleDownload}
                     >
                       <Download className="h-4 w-4 mr-2" />
                       Download Original
                     </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="w-full justify-start"
                       onClick={() => router.push(`/${tenantId}/documents/${documentId}`)}
                     >
