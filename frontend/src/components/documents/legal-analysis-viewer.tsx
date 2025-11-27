@@ -254,7 +254,7 @@ export default function LegalAnalysisViewer({
                 pageNumber={pageNumber}
                 scale={scale}
                 rotate={rotation}
-                className="bg-white"
+                className="shadow-sm"
               />
 
               {/* Overlays Layer */}
