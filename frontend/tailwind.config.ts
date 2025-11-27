@@ -14,6 +14,7 @@ const config: Config = {
     './app/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
   ],
+  darkMode: "class",
   theme: {
     container: {
       center: true,
@@ -166,14 +167,14 @@ const config: Config = {
             maskImage: `linear-gradient(to right, transparent, black ${value}, black ${100 - parseInt(value)}%, transparent)`,
           }),
         },
-        { 
-          values: { 
-            '10': '10%', 
-            '20': '20%', 
-            '30': '30%', 
-            '40': '40%', 
+        {
+          values: {
+            '10': '10%',
+            '20': '20%',
+            '30': '30%',
+            '40': '40%',
             '50': '50%'
-          } 
+          }
         }
       );
     },
