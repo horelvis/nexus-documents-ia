@@ -33,6 +33,7 @@ export default function DocumentPreviewPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [isLoadingPdf, setIsLoadingPdf] = useState(false)
   const [isLoadingImage, setIsLoadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -92,11 +93,6 @@ export default function DocumentPreviewPage() {
       } else if (response.data) {
         setPreview(response.data)
 
-        // For PDF files or converted documents, get signed URL for PDF viewer
-        if (response.data.pdf_available) {
-          await loadPdfUrl()
-        }
-
         if (forceRegenerate) {
           toast.success('Preview regenerated successfully')
         }
@@ -115,6 +111,7 @@ export default function DocumentPreviewPage() {
   const loadPdfUrl = async () => {
     if (!document) return
 
+    setIsLoadingPdf(true)
     try {
       console.log('[DocumentPreviewPage] Attempting to load PDF URL for document:', document.id, 'file_type:', document.file_type)
       let result
@@ -133,11 +130,13 @@ export default function DocumentPreviewPage() {
         console.log('[DocumentPreviewPage] Created object URL:', localUrl)
       } else {
         console.error('[DocumentPreviewPage] Failed to download PDF blob:', 'error' in result ? result.error : 'Unknown error')
-        setError('Failed to load PDF preview') // Set error state to be displayed in UI
+        setError('Failed to load PDF preview')
       }
     } catch (err) {
       console.error('[DocumentPreviewPage] Error in loadPdfUrl:', err)
-      setError('An unexpected error occurred while loading PDF') // Set error state for unexpected exceptions
+      setError('An unexpected error occurred while loading PDF')
+    } finally {
+      setIsLoadingPdf(false)
     }
   }
 
@@ -255,6 +254,14 @@ export default function DocumentPreviewPage() {
       generatePreview()
     }
   }, [document])
+
+  // Load PDF URL only after we confirm from preview that PDF is available
+  // This prevents worker initialization errors
+  useEffect(() => {
+    if (preview && preview.pdf_available && !pdfUrl && !isLoadingPdf) {
+      loadPdfUrl()
+    }
+  }, [preview, pdfUrl, isLoadingPdf, loadPdfUrl])
 
   useEffect(() => {
     // Poll for preview if it's pending
