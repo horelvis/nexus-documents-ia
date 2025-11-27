@@ -279,7 +279,12 @@ export default function LegalAnalysisViewer({
               </div>
 
               {/* Connectors Layer (SVG) */}
-              <svg className="absolute inset-0 overflow-visible pointer-events-none" style={{ width: '100%', height: '100%' }}>
+              <svg
+                className="absolute inset-0 overflow-visible pointer-events-none"
+                style={{ width: '100%', height: '100%' }}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
                 <defs>
                   {/* Arrow marker for risk */}
                   <marker
@@ -289,6 +294,7 @@ export default function LegalAnalysisViewer({
                     refX="9"
                     refY="3"
                     orient="auto"
+                    markerUnits="userSpaceOnUse"
                   >
                     <polygon points="0 0, 10 3, 0 6" fill="#f59e0b" />
                   </marker>
@@ -300,6 +306,7 @@ export default function LegalAnalysisViewer({
                     refX="9"
                     refY="3"
                     orient="auto"
+                    markerUnits="userSpaceOnUse"
                   >
                     <polygon points="0 0, 10 3, 0 6" fill="#3b82f6" />
                   </marker>
@@ -312,16 +319,17 @@ export default function LegalAnalysisViewer({
                   return (
                     <path
                       key={`connector-${item.id}`}
-                      d={`M ${item.highlight.x + item.highlight.width}% ${item.highlight.y + (item.highlight.height / 2)}% 
-                         C ${item.highlight.x + item.highlight.width + 10}% ${item.highlight.y + (item.highlight.height / 2)}%,
-                           90% ${item.highlight.y + (item.highlight.height / 2)}%,
-                           100% ${item.highlight.y + (item.highlight.height / 2)}%`}
+                      d={`M ${item.highlight.x + item.highlight.width} ${item.highlight.y + (item.highlight.height / 2)} 
+                         C ${item.highlight.x + item.highlight.width + 10} ${item.highlight.y + (item.highlight.height / 2)},
+                           90 ${item.highlight.y + (item.highlight.height / 2)},
+                           100 ${item.highlight.y + (item.highlight.height / 2)}`}
                       fill="none"
                       stroke={color}
-                      strokeWidth="2.5"
-                      strokeDasharray="6 3"
+                      strokeWidth="0.5"
+                      strokeDasharray="1 1"
                       markerEnd={`url(#${markerId})`}
                       opacity="0.8"
+                      vectorEffect="non-scaling-stroke"
                     />
                   )
                 })}
