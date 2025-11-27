@@ -92,6 +92,11 @@ export default function DocumentPreviewPage() {
       } else if (response.data) {
         setPreview(response.data)
 
+        // For PDF files or converted documents, get signed URL for PDF viewer
+        if (response.data.pdf_available) {
+          await loadPdfUrl()
+        }
+
         if (forceRegenerate) {
           toast.success('Preview regenerated successfully')
         }
@@ -251,16 +256,6 @@ export default function DocumentPreviewPage() {
     }
   }, [document])
 
-  // Optimize PDF loading: Start downloading immediately when document is available
-  // This parallels the behavior in analysis/page.tsx which is faster
-  useEffect(() => {
-    if (document && !pdfUrl && !isLoadingDocument) {
-      // Check if it's a PDF or a file that might have a converted PDF
-      // We attempt to load it immediately instead of waiting for preview generation
-      loadPdfUrl()
-    }
-  }, [document, pdfUrl, isLoadingDocument])
-
   useEffect(() => {
     // Poll for preview if it's pending
     if (preview?.conversion_method === 'pending') {
@@ -414,55 +409,48 @@ export default function DocumentPreviewPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col min-h-[75vh]">
-                {/* PDF Viewer - Render immediately if it's a PDF or we have a URL */}
-                {(document.file_type === 'pdf' || document.mime_type === 'application/pdf' || pdfUrl) && (
-                  <div className="space-y-4 mb-8">
-                    <h3 className="text-lg font-semibold">PDF Document</h3>
-                    {pdfUrl ? (
-                      <div className="border rounded-lg overflow-hidden">
-                        <PDFViewer
-                          url={pdfUrl}
-                          fileName={document.filename}
-                          showToolbar={true}
-                          initialScale={0.9}
-                          height="75vh"
-                          className="bg-white"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-center h-[60vh] border rounded-lg bg-muted/10">
-                        <div className="text-center">
-                          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-                          <p className="text-muted-foreground font-medium">Downloading PDF...</p>
-                          <p className="text-xs text-muted-foreground mt-2">This usually takes a few seconds</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Preview Metadata Loading State */}
                 {(isLoadingPreview || preview?.conversion_method === 'pending') && (
-                  <div className="space-y-4 border-t pt-6">
+                  <div className="space-y-4">
                     <div className="flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground font-medium">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-sm text-muted-foreground">
                         {preview?.conversion_method === 'pending'
-                          ? 'Generating advanced preview (thumbnails, text)...'
-                          : 'Loading preview metadata...'}
+                          ? 'Generating preview in background...'
+                          : 'Checking preview status...'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <Skeleton className="h-48 w-full" />
-                      <Skeleton className="h-48 w-full" />
-                      <Skeleton className="h-48 w-full" />
-                    </div>
+                    <Skeleton className="h-32 w-full" />
+                    <Skeleton className="h-48 w-full" />
                   </div>
                 )}
 
-                {/* Preview Metadata Content */}
                 {preview && !isLoadingPreview && preview.conversion_method !== 'pending' && (
-                  <div className="space-y-6 border-t pt-6">
+                  <div className="space-y-6">
+                    {/* PDF Viewer */}
+                    {preview.pdf_available && (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold">PDF Document</h3>
+                        {pdfUrl ? (
+                          <div className="border rounded-lg overflow-hidden">
+                            <PDFViewer
+                              url={pdfUrl}
+                              fileName={document.filename}
+                              showToolbar={true}
+                              initialScale={0.9}
+                              height="75vh"
+                              className="bg-white"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-[60vh] border rounded-lg">
+                            <div className="text-center">
+                              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                              <p className="text-muted-foreground">Loading PDF...</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* PDF Thumbnails */}
                     {preview.pdf_available && preview.thumbnails.length > 0 && (
