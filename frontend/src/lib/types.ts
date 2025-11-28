@@ -47,12 +47,12 @@ export interface Document {
   mime_type?: string
   category?: string
   tags: string[]
-  indexed: 'PENDING' | 'PROCESSING' | 'INDEXED' | 'INDEXING_ERROR'
-  status?: 'uploading' | 'processing' | 'processed' | 'error' // Keep for backward compatibility
+  indexed: string
+  status?: 'uploading' | 'processing' | 'processed' | 'error' | 'active' // Keep for backward compatibility
   summary?: string
   language?: string
   tenant_id: string
-  created_by: string
+  created_by: string | any // Allow object for populated user
   user_id?: string // Keep for backward compatibility
   created_at: string
   updated_at: string
@@ -61,6 +61,15 @@ export interface Document {
   storage_path?: string
   download_url?: string
   error_message?: string
+  search_matches?: { text: string; score: number }[] | string[]
+  file_hash?: string
+  version?: number
+  document_metadata?: Record<string, unknown>
+  content?: string
+  extracted_entities?: unknown
+  ocr_status?: string
+  ocr_completed_at?: string
+  signature_fields?: unknown
 }
 
 export interface DocumentUploadResponse {
@@ -161,21 +170,21 @@ export interface UserContextType {
   clerkUser: any // TODO: Replace with proper Clerk user type
   isClerkLoaded: boolean
   isSignedIn: boolean
-  
+
   // Backend user data
   backendUser: BackendUser | null
   userLoading: boolean
   userError: string | null
-  
+
   // Onboarding
   onboarding: OnboardingStatus
-  
+
   // Actions
   markOnboardingComplete: (onboardingData?: any) => Promise<boolean>
   resetOnboarding: () => Promise<boolean>
   checkOnboardingStatus: () => Promise<void>
   refetchUser: () => Promise<void>
-  
+
   // Subscription helpers
   hasValidTrial: () => boolean
   hasPaidSubscription: () => boolean
@@ -222,7 +231,7 @@ export interface UploadContextType {
 // Notifications Types
 export interface Notification {
   id: string
-  type: 'upload' | 'document' | 'user' | 'system' | 'success' | 'error' | 'info'
+  type: 'upload' | 'document' | 'user' | 'system' | 'success' | 'error' | 'info' | 'warning'
   title: string
   message: string
   timestamp: Date
