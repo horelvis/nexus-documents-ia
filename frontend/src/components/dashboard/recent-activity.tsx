@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { 
-  IconFile, 
-  IconUpload, 
-  IconEye, 
+import {
+  IconFile,
+  IconUpload,
+  IconEye,
   IconDownload,
   IconEdit,
   IconTrash,
@@ -21,8 +21,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useDashboardService, type ActivityLog } from "@/lib/services/dashboard.service"
 import { getFileIcon, getRelativeTime } from "@/lib/document-utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export function RecentActivity({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation()
   const [activities, setActivities] = useState<ActivityLog[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,10 +38,10 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
   const loadRecentActivity = async () => {
     setIsLoading(true)
     setError(null)
-    
+
     try {
       const response = await dashboardService.getRecentActivity(15)
-      
+
       if (response.error) {
         setError(response.error)
       } else {
@@ -115,11 +117,11 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
     <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Recent Activity</CardTitle>
-          <CardDescription>Latest actions in your workspace</CardDescription>
+          <CardTitle>{t('dashboard.recentActivity.title')}</CardTitle>
+          <CardDescription>{t('dashboard.recentActivity.description')}</CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={() => router.push(`/${tenantId}/documents`)}>
-          View All
+          {t('dashboard.recentActivity.viewAll')}
         </Button>
       </CardHeader>
       <CardContent className="p-0">
@@ -139,7 +141,7 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
           ) : activities.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <IconFile className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground">No recent activity</p>
+              <p className="text-sm text-muted-foreground">{t('dashboard.recentActivity.empty')}</p>
             </div>
           ) : (
             <div className="divide-y">
@@ -150,7 +152,7 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
                   onClick={() => handleActivityClick(activity)}
                 >
                   <div className={`rounded-full p-2 ${getActivityColor(activity.type)}`}>
-                    {activity.metadata?.filename && activity.metadata?.file_type ? 
+                    {activity.metadata?.filename && activity.metadata?.file_type ?
                       getFileIcon(activity.metadata.file_type, activity.metadata.mime_type, activity.metadata.filename, 'sm') :
                       getActivityIcon(activity.type)
                     }
@@ -166,7 +168,7 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
                       </Badge>
                     </div>
                     {activity.user_name && (
-                      <p className="text-xs text-muted-foreground mt-1">by {activity.user_name}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t('dashboard.recentActivity.by', { user: activity.user_name })}</p>
                     )}
                   </div>
                 </div>

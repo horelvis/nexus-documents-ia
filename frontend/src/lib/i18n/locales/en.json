@@ -91,8 +91,6 @@
     "title": "Dashboard",
     "welcome": "Welcome back",
     "overview": "Overview",
-    "recentDocuments": "Recent Documents",
-    "quickActions": "Quick Actions",
     "statistics": "Statistics",
     "totalDocuments": "Total Documents",
     "activeChats": "Active Chats",
@@ -101,7 +99,98 @@
     "uploadDocument": "Upload Document",
     "startChat": "Start Chat",
     "viewAllDocuments": "View All Documents",
-    "noRecentDocuments": "No recent documents"
+    "noRecentDocuments": "No recent documents",
+    "welcomeMessage": "Here's an overview of your workspace activity and documents.",
+    "workflows": {
+      "title": "Active Workflows",
+      "description": "Monitor and manage your automation processes in real-time.",
+      "loading": "Loading workflows...",
+      "active": "{count} active",
+      "button": "View Workflows"
+    },
+    "recentActivity": {
+      "title": "Recent Activity",
+      "description": "Latest actions in your workspace",
+      "viewAll": "View All",
+      "empty": "No recent activity",
+      "by": "by {user}",
+      "actions": {
+        "upload": "Document upload",
+        "view": "Document view",
+        "share": "Document shared",
+        "download": "Document download",
+        "edit": "Document edit",
+        "delete": "Document delete",
+        "agent": "Agent execution",
+        "user": "User action",
+        "error": "System error",
+        "unknown": "Unknown action"
+      }
+    },
+    "quickActions": {
+      "title": "Quick Actions",
+      "description": "Common tasks and shortcuts",
+      "items": {
+        "upload": {
+          "title": "Upload",
+          "description": "Add files"
+        },
+        "search": {
+          "title": "Search",
+          "description": "Find docs"
+        },
+        "agents": {
+          "title": "AI Chat",
+          "description": "Ask AI"
+        },
+        "team": {
+          "title": "Team",
+          "description": "Manage"
+        },
+        "templates": {
+          "title": "Templates",
+          "description": "Use templates"
+        },
+        "folders": {
+          "title": "Organize",
+          "description": "Folders"
+        },
+        "analytics": {
+          "title": "Analytics",
+          "description": "View stats"
+        },
+        "settings": {
+          "title": "Settings",
+          "description": "Configure"
+        }
+      }
+    },
+    "sharedDocuments": {
+      "title": "Shared Documents",
+      "description": "Documents shared with external parties",
+      "totalShared": "Total shared",
+      "activeLinks": "Active links",
+      "recentShares": "Recent Shares",
+      "manageAll": "Manage All Shares",
+      "noShares": "No recent shares",
+      "failedToLoad": "Failed to load shared documents",
+      "publicLink": "Public link",
+      "views": "{count} views",
+      "accesses": "{count} accesses",
+      "status": {
+        "expired": "Expired",
+        "revoked": "Revoked",
+        "expiresIn": "Expires {time}",
+        "active": "Active"
+      }
+    },
+    "aiInsights": {
+      "title": "AI Insights",
+      "description": "Smart recommendations for your documents",
+      "noInsights": "No insights available at this time",
+      "failedToLoad": "Failed to load insights",
+      "takeAction": "Take Action"
+    }
   },
   "documents": {
     "title": "Documents",

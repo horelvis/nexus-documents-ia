@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useLanguage } from "@/contexts/language-context";
+import { useTranslation } from "@/lib/i18n/hooks";
 import { useApiClient } from "@/lib/api-client"
 export default function DashboardPage() {
   const params = useParams()
@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const [activeWorkflows, setActiveWorkflows] = useState<number>(0)
   const [loadingWorkflows, setLoadingWorkflows] = useState<boolean>(false)
   const apiClient = useApiClient()
-  const { t } = useLanguage()
+  const { t } = useTranslation()
 
   useEffect(() => {
     let isMounted = true

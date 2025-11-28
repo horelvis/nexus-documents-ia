@@ -1,9 +1,9 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { 
-  IconUpload, 
-  IconSearch, 
+import {
+  IconUpload,
+  IconSearch,
   IconRobot,
   IconUsers,
   IconFileText,
@@ -15,6 +15,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useUpload } from "@/contexts/upload-context"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 interface QuickAction {
   id: string
@@ -29,12 +30,13 @@ interface QuickAction {
 export function QuickActions({ tenantId }: { tenantId: string }) {
   const router = useRouter()
   const { openUploadDialog } = useUpload()
+  const { t } = useTranslation()
 
   const actions: QuickAction[] = [
     {
       id: 'upload',
-      title: 'Upload',
-      description: 'Add files',
+      title: t('dashboard.quickActions.items.upload.title'),
+      description: t('dashboard.quickActions.items.upload.description'),
       icon: IconUpload,
       action: openUploadDialog,
       color: 'blue',
@@ -42,56 +44,56 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
     },
     {
       id: 'search',
-      title: 'Search',
-      description: 'Find docs',
+      title: t('dashboard.quickActions.items.search.title'),
+      description: t('dashboard.quickActions.items.search.description'),
       icon: IconSearch,
       action: () => router.push(`/${tenantId}/search`),
       color: 'green'
     },
     {
       id: 'agents',
-      title: 'AI Chat',
-      description: 'Ask AI',
+      title: t('dashboard.quickActions.items.agents.title'),
+      description: t('dashboard.quickActions.items.agents.description'),
       icon: IconRobot,
       action: () => router.push(`/${tenantId}/chat`),
       color: 'purple'
     },
     {
       id: 'team',
-      title: 'Team',
-      description: 'Manage',
+      title: t('dashboard.quickActions.items.team.title'),
+      description: t('dashboard.quickActions.items.team.description'),
       icon: IconUsers,
       action: () => router.push(`/${tenantId}/settings/team`),
       color: 'orange'
     },
     {
       id: 'templates',
-      title: 'Templates',
-      description: 'Use templates',
+      title: t('dashboard.quickActions.items.templates.title'),
+      description: t('dashboard.quickActions.items.templates.description'),
       icon: IconFileText,
       action: () => router.push(`/${tenantId}/templates`),
       color: 'pink'
     },
     {
       id: 'folders',
-      title: 'Organize',
-      description: 'Folders',
+      title: t('dashboard.quickActions.items.folders.title'),
+      description: t('dashboard.quickActions.items.folders.description'),
       icon: IconFolderPlus,
       action: () => router.push(`/${tenantId}/documents`),
       color: 'yellow'
     },
     {
       id: 'analytics',
-      title: 'Analytics',
-      description: 'View stats',
+      title: t('dashboard.quickActions.items.analytics.title'),
+      description: t('dashboard.quickActions.items.analytics.description'),
       icon: IconChartBar,
       action: () => router.push(`/${tenantId}/analytics`),
       color: 'indigo'
     },
     {
       id: 'settings',
-      title: 'Settings',
-      description: 'Configure',
+      title: t('dashboard.quickActions.items.settings.title'),
+      description: t('dashboard.quickActions.items.settings.description'),
       icon: IconSettings,
       action: () => router.push(`/${tenantId}/settings`),
       color: 'gray'
@@ -112,15 +114,15 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
   return (
     <Card className="h-full quick-actions-panel">
       <CardHeader>
-        <CardTitle>Quick Actions</CardTitle>
-        <CardDescription>Common tasks and shortcuts</CardDescription>
+        <CardTitle>{t('dashboard.quickActions.title')}</CardTitle>
+        <CardDescription>{t('dashboard.quickActions.description')}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {actions.map((action) => {
             const Icon = action.icon
             const colorClass = action.color ? colorClasses[action.color as keyof typeof colorClasses] : colorClasses.gray
-            
+
             return (
               <button
                 key={action.id}
@@ -138,7 +140,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
                 )}>
                   <Icon className="h-5 w-5" />
                 </div>
-                
+
                 <div className="flex-1 text-left">
                   <div className="font-semibold text-sm leading-none">
                     {action.title}
@@ -147,13 +149,13 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
                     {action.description}
                   </div>
                 </div>
-                
+
                 <IconArrowRight className="h-4 w-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" />
               </button>
             )
           })}
         </div>
-        
+
         {/* Compact grid for smaller screens */}
         <div className="mt-4 pt-4 border-t sm:hidden">
           <div className="grid grid-cols-4 gap-2">

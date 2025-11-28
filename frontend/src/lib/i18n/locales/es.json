@@ -91,8 +91,6 @@
     "title": "Panel de Control",
     "welcome": "Bienvenido de nuevo",
     "overview": "Resumen",
-    "recentDocuments": "Documentos Recientes",
-    "quickActions": "Acciones Rápidas",
     "statistics": "Estadísticas",
     "totalDocuments": "Total de Documentos",
     "activeChats": "Chats Activos",
@@ -119,6 +117,97 @@
       "successfullyIndexed": "Indexados correctamente",
       "acrossDocuments": "En todos los documentos",
       "accessedRecently": "Accedidos recientemente"
+    },
+    "welcomeMessage": "Aquí tienes un resumen de la actividad de tu espacio de trabajo y documentos.",
+    "workflows": {
+      "title": "Workflows Activos",
+      "description": "Monitoriza y gestiona tus procesos de automatización en tiempo real.",
+      "loading": "Cargando workflows...",
+      "active": "{count} activos",
+      "button": "Ver Workflows"
+    },
+    "recentActivity": {
+      "title": "Actividad Reciente",
+      "description": "Últimas acciones en tu espacio de trabajo",
+      "viewAll": "Ver Todo",
+      "empty": "No hay actividad reciente",
+      "by": "por {user}",
+      "actions": {
+        "upload": "Subida de documento",
+        "view": "Visualización de documento",
+        "share": "Documento compartido",
+        "download": "Descarga de documento",
+        "edit": "Edición de documento",
+        "delete": "Eliminación de documento",
+        "agent": "Ejecución de agente",
+        "user": "Acción de usuario",
+        "error": "Error del sistema",
+        "unknown": "Acción desconocida"
+      }
+    },
+    "quickActions": {
+      "title": "Acciones Rápidas",
+      "description": "Tareas comunes y atajos",
+      "items": {
+        "upload": {
+          "title": "Subir",
+          "description": "Añadir archivos"
+        },
+        "search": {
+          "title": "Buscar",
+          "description": "Encontrar docs"
+        },
+        "agents": {
+          "title": "Chat IA",
+          "description": "Preguntar a IA"
+        },
+        "team": {
+          "title": "Equipo",
+          "description": "Gestionar"
+        },
+        "templates": {
+          "title": "Plantillas",
+          "description": "Usar plantillas"
+        },
+        "folders": {
+          "title": "Organizar",
+          "description": "Carpetas"
+        },
+        "analytics": {
+          "title": "Analítica",
+          "description": "Ver estadísticas"
+        },
+        "settings": {
+          "title": "Ajustes",
+          "description": "Configurar"
+        }
+      }
+    },
+    "sharedDocuments": {
+      "title": "Documentos Compartidos",
+      "description": "Documentos compartidos con partes externas",
+      "totalShared": "Total compartidos",
+      "activeLinks": "Enlaces activos",
+      "recentShares": "Compartidos recientemente",
+      "manageAll": "Gestionar todos",
+      "noShares": "No hay documentos compartidos recientes",
+      "failedToLoad": "Error al cargar documentos compartidos",
+      "publicLink": "Enlace público",
+      "views": "{count} vistas",
+      "accesses": "{count} accesos",
+      "status": {
+        "expired": "Caducado",
+        "revoked": "Revocado",
+        "expiresIn": "Caduca {time}",
+        "active": "Activo"
+      }
+    },
+    "aiInsights": {
+      "title": "Insights IA",
+      "description": "Recomendaciones inteligentes para tus documentos",
+      "noInsights": "No hay insights disponibles en este momento",
+      "failedToLoad": "Error al cargar insights",
+      "takeAction": "Tomar Acción"
     }
   },
   "documents": {
