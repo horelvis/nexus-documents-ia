@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -116,6 +116,7 @@ class GoogleDriveTokenService:
             if record:
                 refresh_token = self._decrypt(record.refresh_token_encrypted)
             else:
+                logger.error("Google did not return a refresh token for user %s during initial connection.", user.id)
                 raise ValueError("Google did not return a refresh token. Prompt user to reconnect.")
 
         if record:
@@ -177,7 +178,7 @@ class GoogleDriveTokenService:
         if (
             creds.token
             and creds.expiry
-            and creds.expiry > datetime.utcnow() + timedelta(seconds=30)
+            and creds.expiry > datetime.now(timezone.utc) + timedelta(seconds=30)
         ):
             return creds.token, creds.expiry
 

@@ -45,9 +45,8 @@ def validate_tenant_access(tenant_id: str, context: dict) -> str
 - ✅ **Added new `validate_service_access` function**
 - ✅ **Backwards compatible with existing API endpoints**
 
-### Ollama Service (`ollama-service/app/core/security.py`)
-- ✅ **New security module created**
-- ✅ **Unified implementation**
+### Ollama Runtime (`genai-ollama` container)
+- ✅ **Centralized runtime consumed by Weaviate/Elysia**
 - ✅ **Optional API key validation (can be disabled)**
 - ✅ **Ready for authentication if needed**
 

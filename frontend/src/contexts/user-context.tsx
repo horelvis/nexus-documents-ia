@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useUser, useClerk, useAuth } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
@@ -8,8 +8,6 @@ import { useApiClient, apiClient as globalApiClient } from '@/lib/api-client'
 import { fetcher } from '@/lib/fetcher'
 import { ConnectionError } from '@/components/errors/connection-error'
 import { Button } from '@/components/ui/button'
-import { syncUserWithBackend } from '@/lib/sync-user'
-
 import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
@@ -23,6 +21,7 @@ export function UserProvider({ children }: UserProviderProps) {
   const apiClient = useApiClient() // This is the local instance
   const { mutate } = useSWRConfig()
   const [isTokenReady, setIsTokenReady] = useState(false)
+  const isSyncingRef = useRef(false)
   
   // Configure global API client with token getter for SWR fetcher
   useEffect(() => {
@@ -133,55 +132,7 @@ export function UserProvider({ children }: UserProviderProps) {
     return pathname.includes('/onboarding') || pathname.includes('/onboarding-simple')
   }, [pathname])
 
-  // ... (rest of syncUserWithBackend and other functions)
-
-  // Auto-sync and Redirect Logic
-  useEffect(() => {
-    // Skip if auth flow or pricing
-    if (pathname.startsWith('/auth/') || pathname === '/pricing') return
-
-    // Auto-sync for new users (Direct Flow)
-    // If we have a clerk user but no backend user (and no loading/error), it means the user needs to be synced/created
-    if (isClerkLoaded && isSignedIn && clerkUser && !backendUser && !userLoading && !userError) {
-       const unsafeMetadata = clerkUser.unsafeMetadata as any
-       const selectedPlan = unsafeMetadata?.selected_plan || 'free'
-       
-       console.log('[UserContext] Auto-syncing new user...')
-       syncUserWithBackend(
-          clerkUser.id, 
-          clerkUser.primaryEmailAddress?.emailAddress || '', 
-          clerkUser.fullName || '',
-          selectedPlan
-       ).then(async (syncedUser) => {
-          // Removed auto-completion of onboarding to force plan selection
-          reloadUser()
-       }).catch(err => {
-          console.error('[UserContext] Auto-sync failed', err)
-       })
-    }
-    
-    // Redirect to onboarding is DISABLED for direct flow
-    /*
-    if (backendUser && !backendUser.onboarding_completed && !isOnboardingPath()) {
-       // Check for invalid/default tenant ID
-       const isInvalidTenantId = !backendUser.tenant_id || 
-       backendUser.tenant_id === 'default' || 
-       backendUser.tenant_id === '00000000-0000-0000-0000-000000000000' ||
-       backendUser.tenant_id === 'undefined' ||
-       backendUser.tenant_id === 'null'
-     
-      if (isInvalidTenantId) {
-         setSyncError('INVALID_TENANT')
-      } else {
-         console.log('[UserContext] Redirecting to onboarding')
-         router.push(getOnboardingPath(backendUser))
-      }
-    }
-    */
-  }, [backendUser, isOnboardingPath, getOnboardingPath, router, isClerkLoaded, isSignedIn, userLoading, userError, clerkUser, apiClient, reloadUser])
-
-
-  // Actions
+  // Actions - Defined BEFORE useEffect to avoid TDZ
   const markOnboardingComplete = useCallback(async (onboardingData?: any): Promise<boolean> => {
     try {
       const response = await apiClient.post('/auth/complete-onboarding', onboardingData)
@@ -208,6 +159,18 @@ export function UserProvider({ children }: UserProviderProps) {
       return false
     }
   }, [apiClient, mutate])
+
+  // Auto-sync and Redirect Logic
+  useEffect(() => {
+    // Skip if auth flow or pricing
+    if (pathname.startsWith('/auth/') || pathname === '/pricing') return
+
+    // Auto-complete for existing users if onboarding is still pending
+    if (backendUser && !backendUser.onboarding_completed) {
+       console.log('[UserContext] Auto-completing onboarding for existing user...')
+       markOnboardingComplete()
+    }
+  }, [backendUser, isOnboardingPath, getOnboardingPath, router, isClerkLoaded, isSignedIn, userLoading, userError, clerkUser, apiClient, reloadUser, markOnboardingComplete])
 
   // Subscription helpers
   const hasValidTrial = useCallback((): boolean => {

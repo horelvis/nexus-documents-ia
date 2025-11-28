@@ -25,8 +25,9 @@ class ElysiaService:
         self.sessions = {}
         self.feedback_storage = []
         # Ollama configuration
-        self.ollama_url = settings.ollama_base_url
-        self.model_name = "gpt-oss:20b"
+        self.provider = settings.llm_provider
+        self.model_api_base = settings.llm_api_base
+        self.model_name = settings.llm_model
         
     async def initialize(self):
         """Initialize Elysia following official documentation"""
@@ -36,7 +37,16 @@ class ElysiaService:
             import os
             
             # Step 1: Configure Elysia for LOCAL Weaviate (current version 0.1.0.dev6)
-            logger.info(f"🔧 Configuring Elysia v{elysia.__version__} with Ollama: {self.ollama_url}")
+            logger.info(
+                f"🔧 Configuring Elysia v{elysia.__version__} with provider "
+                f"{self.provider} @ {self.model_api_base}"
+            )
+
+            # Propagate credentials for cloud providers
+            if self.provider in {"openai", "azure-openai"} and settings.llm_api_key:
+                os.environ["OPENAI_API_KEY"] = settings.llm_api_key
+            elif self.provider == "ollama":
+                os.environ["OLLAMA_API_BASE"] = self.model_api_base
             
             # Configure environment for PR #26 local Weaviate support
             os.environ['WEAVIATE_URL'] = 'http://weaviate:8080'
@@ -50,12 +60,11 @@ class ElysiaService:
             
             # Configure Elysia with PR #26 local Weaviate support
             self.settings.configure(
-                # LLM Configuration - Use local Ollama
-                base_model="gpt-oss:20b",
-                base_provider="ollama",
-                complex_model="gpt-oss:20b", 
-                complex_provider="ollama",
-                model_api_base=self.ollama_url,
+                base_model=self.model_name,
+                base_provider=self.provider,
+                complex_model=self.model_name,
+                complex_provider=self.provider,
+                model_api_base=self.model_api_base,
                 
                 # Local Weaviate Configuration (PR #26)
                 weaviate_url="http://weaviate:8080",
@@ -599,7 +608,8 @@ class ElysiaService:
             "weaviate_cloud_disabled": True,
             "use_local_weaviate": True,
             "active_sessions": len(self.sessions),
-            "ollama_url": self.ollama_url,
+            "llm_provider": self.provider,
+            "llm_api_base": self.model_api_base,
             "model_name": self.model_name
         }
     

@@ -10,7 +10,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
@@ -25,6 +25,7 @@ from app.services.llm_service import LLMService
 from app.services.elasticsearch_client import elasticsearch_client
 from app.services.queue_service import queue_service
 from app.services.text_extraction_client import TextExtractionClient
+from app.services.categorization_ai_client import categorize_with_ai
 
 logger = logging.getLogger(__name__)
 
@@ -94,24 +95,6 @@ class AsyncDocumentService:
             )
         return None
 
-    @staticmethod
-    def _normalize_category(answer: str) -> str:
-        """Extract a valid category label from a free-form LLM answer."""
-        valid_categories = [
-            "contract", "invoice", "report", "legal", "financial",
-            "technical", "correspondence", "presentation", "general"
-        ]
-        if not answer:
-            return "general"
-
-        clean = answer.strip().lower()
-        for category in valid_categories:
-            if category in clean:
-                return category
-
-        first_word = clean.split()[0]
-        return first_word if first_word in valid_categories else "general"
-    
     @classmethod
     async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
         """
@@ -170,7 +153,8 @@ class AsyncDocumentService:
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.vector_service = VectorService(self.tenant_id)
         self.llm_service = LLMService()
-        # Elasticsearch service is now a microservice - no local initialization needed
+        # Mark Elasticsearch microservicio as available (hybrid search uses elasticsearch_client)
+        self.elasticsearch_service = elasticsearch_client
         logger.info(f"✅ Elasticsearch microservice ready for tenant {self.tenant_id}")
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
         
@@ -258,7 +242,7 @@ class AsyncDocumentService:
                     for i, doc_id in enumerate(doc_ids):
                         when_clauses.append((Document.id == doc_id, i))
                     
-                    order_case = func.case(
+                    order_case = case(
                         *when_clauses,
                         else_=len(doc_ids)
                     )
@@ -867,15 +851,9 @@ class AsyncDocumentService:
                 if not doc:
                     return
                 
-                cag_prompt = (
-                    "Clasifica el siguiente documento en una de estas categorías: "
-                    "contract, invoice, report, legal, financial, technical, correspondence, presentation o general. "
-                    "Responde solo con el nombre de la categoría.\n\n"
-                    f"Nombre: {doc.filename}\n"
-                    f"Contenido:\n{text_content[:1200]}"
-                )
-                cag_answer = await self._call_cag_query(
-                    query=cag_prompt,
+                ai_result = await categorize_with_ai(
+                    filename=doc.filename,
+                    content_preview=text_content[:1200],
                     tenant_id=str(doc.tenant_id),
                     user_id=str(doc.created_by or self.user_id or 'system'),
                     context={
@@ -885,28 +863,33 @@ class AsyncDocumentService:
                     }
                 )
 
-                if cag_answer:
-                    category = self._normalize_category(cag_answer)
-                    doc.category = category
-                    doc.document_metadata = doc.document_metadata or {}
-                    doc.document_metadata["auto_categorization"] = {
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "method": "cag",
-                        "model": "cag-service"
-                    }
-                    await db.commit()
-                    logger.info(f"Document {doc_id} auto-categorized as '{category}'")
-                else:
-                    logger.warning(f"CAG categorization failed for {doc_id}, using fallback rules")
+                category = (ai_result or {}).get("category")
+                provider_used = (ai_result or {}).get("provider", "cag")
+                raw_answer = (ai_result or {}).get("raw_answer")
+                model_name = (
+                    settings.OPENAI_CATEGORIZATION_MODEL
+                    if provider_used == "openai"
+                    else "weaviate-service"
+                )
+
+                if not category:
+                    logger.warning(f"AI categorization failed for {doc_id}, using fallback rules")
                     category = self._simple_categorize(doc.filename, text_content)
-                    doc.category = category
-                    doc.document_metadata = doc.document_metadata or {}
-                    doc.document_metadata["auto_categorization"] = {
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "method": "rule_based"
-                    }
-                    await db.commit()
-                    logger.info(f"Document {doc_id} categorized as '{category}' using rules")
+                    provider_used = "rule_based"
+                    raw_answer = None
+                    model_name = "rules"
+
+                doc.category = category
+                doc.document_metadata = doc.document_metadata or {}
+                doc.document_metadata["auto_categorization"] = {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "method": provider_used,
+                    "model": model_name,
+                    "provider": provider_used,
+                    "raw_answer": raw_answer,
+                }
+                await db.commit()
+                logger.info(f"Document {doc_id} auto-categorized as '{category}' via {provider_used}")
                         
         except Exception as e:
             logger.error(f"Error auto-categorizing document {doc_id}: {e}")

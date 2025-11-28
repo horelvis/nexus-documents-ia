@@ -25,8 +25,26 @@ class Settings(BaseSettings):
     elysia_enabled: bool = os.getenv("ELYSIA_ENABLED", "true").lower() == "true"
     elysia_model_provider: str = os.getenv("ELYSIA_MODEL_PROVIDER", "ollama")
     elysia_model_name: str = os.getenv("ELYSIA_MODEL_NAME", "llama3.2:latest")
+
+    # Unified LLM configuration
+    llm_provider: str = os.getenv(
+        "LLM_PROVIDER",
+        os.getenv("ELYSIA_MODEL_PROVIDER", "ollama"),
+    )
+    llm_model: str = os.getenv(
+        "LLM_MODEL",
+        os.getenv("ELYSIA_MODEL_NAME", "llama3.2:latest"),
+    )
+    llm_api_base: str = os.getenv(
+        "LLM_API_BASE",
+        os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434"),
+    )
+    llm_api_key: str = os.getenv(
+        "LLM_API_KEY",
+        os.getenv("OPENAI_API_KEY", ""),
+    )
     
-    # Model configuration (fallback to existing Ollama)
+    # Compatibility fields
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")

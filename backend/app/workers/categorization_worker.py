@@ -6,7 +6,6 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-import httpx
 
 from arq import cron
 from arq.connections import RedisSettings
@@ -14,6 +13,7 @@ from arq.connections import RedisSettings
 from app.core.config import settings
 from app.db.async_database import AsyncSessionLocal
 from app.db.models import Document
+from app.services.categorization_ai_client import categorize_with_ai
 from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,25 +65,35 @@ async def categorize_document(
                     "error": "Document has no extracted content"
                 }
             
-            # Categorize using LangChain service
-            category = await _categorize_with_llm(
-                doc.filename,
-                doc.content[:1000],
-                tenant_id,
-                user_id
+            # Categorize using the configured AI provider
+            ai_result = await categorize_with_ai(
+                filename=doc.filename,
+                content_preview=doc.content[:1000],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                context={
+                    "task": "auto_categorization",
+                    "document_id": str(doc.id),
+                    "filename": doc.filename,
+                }
             )
+            category = (ai_result or {}).get("category")
+            provider_used = (ai_result or {}).get("provider", "cag")
             
             if not category:
                 # Fallback to rule-based
                 category = _simple_categorize(doc.filename, doc.content)
+                provider_used = "rule_based"
             
             # Update document
             doc.category = category
             doc.document_metadata = doc.document_metadata or {}
             doc.document_metadata["auto_categorization"] = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "method": "llm" if category else "rule_based",
-                "worker": "arq"
+                "method": provider_used if category else "rule_based",
+                "worker": "arq",
+                "provider": provider_used,
+                "raw_answer": (ai_result or {}).get("raw_answer"),
             }
             
             await db.commit()
@@ -225,77 +235,6 @@ async def auto_categorize_pending_documents(ctx: Dict[str, Any]) -> Dict[str, An
             "error": str(e)
         }
 
-
-async def _categorize_with_llm(
-    filename: str,
-    content_preview: str,
-    tenant_id: str,
-    user_id: str
-) -> Optional[str]:
-    """Helper function to categorize using CAG microservice"""
-    try:
-        prompt = (
-            "Clasifica este documento en una de las categorías: "
-            "contract, invoice, report, legal, financial, technical, correspondence, presentation o general. "
-            "Responde solo con el nombre de la categoría.
-
-"
-            f"Nombre: {filename}
-"
-            f"Contenido:
-{content_preview}"
-        )
-
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post(
-                f"{settings.CAG_SERVICE_URL.rstrip('/')}/api/v1/cag/query",
-                json={
-                    "query": prompt,
-                    "tenant_id": str(tenant_id),
-                    "user_id": str(user_id or 'system'),
-                    "context": {
-                        "task": "auto_categorization",
-                        "filename": filename
-                    }
-                },
-                headers={
-                    "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": str(tenant_id)
-                }
-            )
-
-            if response.status_code == 200:
-                answer = response.json().get("answer", "")
-                category = _normalize_category(answer)
-                if category:
-                    return category
-            else:
-                logger.warning(
-                    "CAG categorization request failed | status=%s body=%s",
-                    response.status_code,
-                    response.text[:200]
-                )
-
-    except Exception as e:
-        logger.error(f"Error in LLM categorization: {e}")
-
-    return None
-
-
-def _normalize_category(answer: str) -> Optional[str]:
-    """Normalize arbitrary LLM response to one of the supported categories."""
-    if not answer:
-        return None
-    valid_categories = [
-        "contract", "invoice", "report", "legal", "financial",
-        "technical", "correspondence", "presentation", "general"
-    ]
-    clean = answer.strip().lower()
-    for category in valid_categories:
-        if category in clean:
-            return category
-    first_word = clean.split()[0]
-    return first_word if first_word in valid_categories else None
 
 def _simple_categorize(filename: str, content: str) -> str:
     """Simple rule-based categorization as fallback"""

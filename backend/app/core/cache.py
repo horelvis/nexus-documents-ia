@@ -467,11 +467,24 @@ class DistributedCache:
         redis_stats = self.redis_cache.get_stats() if self.use_redis else {}
         memory_stats = self.memory_cache.get_stats()
 
+        total_hits = redis_stats.get('hits', 0) + memory_stats.get('hits', 0)
+        total_misses = redis_stats.get('misses', 0) + memory_stats.get('misses', 0)
+        overall_total_requests = total_hits + total_misses
+
+        combined_hit_rate = (
+            (total_hits / overall_total_requests * 100)
+            if overall_total_requests > 0
+            else 0
+        )
+
         return {
             'redis': redis_stats,
             'memory': memory_stats,
             'using_redis': self.use_redis,
-            'combined_hit_rate': memory_stats.get('hit_rate', 0)  # Simplified
+            'combined_hit_rate': round(combined_hit_rate, 2),
+            'total_hits': total_hits,
+            'total_misses': total_misses,
+            'overall_total_requests': overall_total_requests,
         }
 
 

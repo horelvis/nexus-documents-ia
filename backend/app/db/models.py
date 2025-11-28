@@ -925,7 +925,7 @@ class LGPDDeletionAudit(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # Don't FK since user will be deleted
     user_email = Column(String(255), nullable=False)  # Keep for audit
-    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    requested_by = Column(UUID(as_uuid=True), nullable=True) # Removed ForeignKey, made nullable
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     
     reason = Column(Text, nullable=True)
@@ -946,7 +946,7 @@ class LGPDDeletionAudit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # Relationships
-    requested_by_user = relationship("User")
+    # requested_by_user = relationship("User") # Removed relationship as FK is removed
     tenant = relationship("Tenant")
     
     __table_args__ = (

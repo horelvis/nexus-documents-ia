@@ -14,8 +14,8 @@ graph TB
             LangChain[🔗 langchain-service<br/>Port: 8001]
             Langroid[🎯 langroid-service<br/>Port: 8002]
             Storage[☁️ storage-service<br/>Port: 8003]
-            Ollama[🦙 ollama-service<br/>Port: 8004]
-            CAG[📊 cag-service<br/>Port: 8005]
+            Ollama[🦙 genai-ollama<br/>Port: 11434]
+            AgentGateway[📊 weaviate-service (CAG)<br/>Port: 8007]
               LangExtract[🏷️ langextract-service<br/>Port: 8006]
               Elasticsearch[🔍 elasticsearch-service<br/>Port: 8008]
         end
@@ -37,7 +37,7 @@ graph TB
       API --> Langroid
       API --> Storage
       API --> Ollama
-      API --> CAG
+    API --> AgentGateway
       API --> LangExtract
       API --> Elasticsearch
 

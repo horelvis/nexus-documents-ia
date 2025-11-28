@@ -84,5 +84,5 @@ python-json-logger>=2.0.0
 # Metrics
 prometheus-client>=0.20.0
 
-# Metrics
-prometheus-client>=0.20.0
+# System Monitoring
+psutil>=5.9.0,<6.0.0 # For system metrics collection

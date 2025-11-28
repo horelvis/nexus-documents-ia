@@ -19,9 +19,9 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Copiar archivo de requisitos desde el directorio padre
-COPY ../requirements.txt .
-COPY ../pyproject.toml .
+# Copiar archivo de requisitos desde el directorio del backend
+COPY requirements.txt .
+COPY pyproject.toml .
 
 # Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
@@ -29,13 +29,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Verificar que uvicorn está instalado
 RUN pip show uvicorn || pip install uvicorn
 
-# Copiar código fuente desde el directorio padre
-COPY ../app ./app
-COPY ../scripts ./scripts
-COPY ../alembic ./alembic
-
-# Crear directorio de credenciales
-RUN mkdir -p /app/credentials
+# Copiar código fuente y configuración desde el directorio del backend
+COPY app ./app
+COPY scripts ./scripts
+COPY alembic ./alembic
 
 # Exponer puerto
 EXPOSE 8000

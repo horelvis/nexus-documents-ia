@@ -45,7 +45,6 @@ import { useDocumentEvent, useDocumentEvents, DocumentsUpdatedPayload } from "@/
 import { useNotifications } from "@/contexts/app-state-context"
 import { useUserContext } from "@/contexts/user-context"
 import { useDocumentService } from "@/lib/services/document.service"
-import { useSearchService } from "@/lib/services/search.service"
 import { useDocumentInsightsService, type RecentDocument } from "@/lib/services/document-insights.service"
 import { useApiClient } from "@/lib/api-client"
 import { Document as ApiDocument } from "@/lib/types"
@@ -190,19 +189,15 @@ export default function DocumentsPage() {
   const { emitDocumentEvent } = useDocumentEvents()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
-  const searchService = useSearchService()
   const documentInsightsService = useDocumentInsightsService()
   const documentServiceRef = useRef(documentService)
-  const searchServiceRef = useRef(searchService)
   const documentInsightsServiceRef = useRef(documentInsightsService)
+  const isFetchingRef = useRef(false)
+  const lastRequestSignatureRef = useRef<string | null>(null)
 
   useEffect(() => {
     documentServiceRef.current = documentService
   }, [documentService])
-
-  useEffect(() => {
-    searchServiceRef.current = searchService
-  }, [searchService])
 
   useEffect(() => {
     documentInsightsServiceRef.current = documentInsightsService
@@ -212,10 +207,30 @@ export default function DocumentsPage() {
 
 
   // Load documents from API - simple pattern
-  const loadDocuments = useCallback(async () => {
+  const loadDocuments = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    const normalizedSearch = searchQuery.trim()
+    const requestSignature = JSON.stringify({
+      search: normalizedSearch,
+      useDeepSearch,
+      viewMode,
+      perPage,
+      selectedFilter,
+      currentPage,
+    })
+
+    if (isFetchingRef.current && !force) {
+      return
+    }
+
+    if (!force && lastRequestSignatureRef.current === requestSignature) {
+      return
+    }
+
+    isFetchingRef.current = true
     setIsLoading(true)
     setError(null)
     
+    let succeeded = false
     try {
       if (selectedFilter === 'recent') {
         const limit = viewMode === 'table' ? 100 : perPage
@@ -247,87 +262,21 @@ export default function DocumentsPage() {
         setDocuments(mappedRecentDocuments)
         setTotalDocuments(mappedRecentDocuments.length)
         setTotalPages(1)
+        succeeded = true
         return
       }
 
       let response;
       const statusFilter = selectedFilter !== 'all' && selectedFilter !== 'recent' ? selectedFilter : undefined
-      const trimmedQuery = searchQuery.trim()
-      const shouldSearch = useDeepSearch && trimmedQuery.length >= 3
+      const trimmedQuery = normalizedSearch.length >= 3 ? normalizedSearch : undefined
+      const itemsPerPage = viewMode === 'table' ? 100 : perPage
       
-      // Usar búsqueda semántica por contenido cuando hay un query de búsqueda válido (>= 3 chars)
-      if (shouldSearch) {
-        // Use semantic search for content
-        const searchResults = await searchServiceRef.current.searchDocuments({
-          query: trimmedQuery,
-          limit: viewMode === 'table' ? 100 : perPage
-        })
-        
-        if (searchResults.error) {
-          console.warn('Semantic search failed, falling back to regular search:', searchResults.error)
-          // Fallback to regular document search instead of showing error
-          response = await documentServiceRef.current.getDocuments({
-            search: trimmedQuery,
-            status: statusFilter,
-            per_page: viewMode === 'table' ? 100 : perPage,
-            page: viewMode === 'table' ? 1 : currentPage
-          })
-        } else {
-        
-        // Transform search results to match document format
-        const documents = searchResults.data?.map(result => {
-          const doc = result.document || result || {}
-          return {
-            ...doc,
-            id: doc.id || '',
-            title: doc.title || doc.filename || 'Untitled',
-            filename: doc.filename || 'unknown',
-            status: 'active' as const,
-            created_by: doc.created_by || {},
-            tenant_id: tenantId,
-            indexed: doc.indexed || 'INDEXED',
-            file_hash: doc.file_hash || '',
-            version: doc.version || 1,
-            category: doc.category || '',
-            document_metadata: doc.document_metadata || {},
-            content: doc.content || '',
-            extracted_entities: doc.extracted_entities || null,
-            ocr_status: doc.ocr_status || null,
-            ocr_completed_at: doc.ocr_completed_at || null,
-            signature_fields: doc.signature_fields || null,
-            file_type: doc.file_type || 'unknown',
-            mime_type: doc.mime_type || 'application/octet-stream',
-            file_size: doc.file_size || 0,
-            created_at: doc.created_at || new Date().toISOString(),
-            updated_at: doc.updated_at || new Date().toISOString(),
-            tags: doc.tags || [],
-            description: doc.description || ''
-          }
-        }) || []
-        response = {
-          data: {
-            items: documents,
-            total: documents.length,
-            page: 1,
-            per_page: documents.length,
-            pages: 1
-          }
-        }
-        }
-      } else {
-        // Use regular document listing (or fallback if query too short)
-        // Only pass search param if it meets the length requirement (logic for SQL fallback)
-        // If < 3 chars, effectiveSearch is undefined, so we load all docs.
-        const effectiveSearch = trimmedQuery.length >= 3 ? trimmedQuery : undefined
-        const itemsPerPage = viewMode === 'table' ? 100 : perPage
-        
-        response = await documentServiceRef.current.getDocuments({
-          search: effectiveSearch,
-          status: statusFilter,
-          per_page: itemsPerPage,
-          page: viewMode === 'table' ? 1 : currentPage
-        })
-      }
+      response = await documentServiceRef.current.getDocuments({
+        search: trimmedQuery,
+        status: statusFilter,
+        per_page: itemsPerPage,
+        page: viewMode === 'table' ? 1 : currentPage
+      })
       
       if (response?.error) {
         setError(response.error)
@@ -347,15 +296,22 @@ export default function DocumentsPage() {
         setDocuments(safeDocuments)
         setTotalPages(response.data.pages || 1)
         setTotalDocuments(response.data.total || 0)
+        succeeded = true
       } else {
         setError('Invalid response from server')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents')
     } finally {
+      if (succeeded) {
+        lastRequestSignatureRef.current = requestSignature
+      } else if (!force) {
+        lastRequestSignatureRef.current = null
+      }
+      isFetchingRef.current = false
       setIsLoading(false)
     }
-  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage, t])
+  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage])
 
   // Reload when dependencies change
   useEffect(() => {
@@ -408,11 +364,11 @@ export default function DocumentsPage() {
       setSelectedFilter('all')
       storePreference('filter', 'all')
       setCurrentPage(1)
-      loadDocuments()
+      loadDocuments({ force: true })
       return
     }
     
-    loadDocuments()
+    loadDocuments({ force: true })
   }, [addNotification, loadDocuments, tenantId, t, storePreference])
 
   useDocumentEvent("documents:updated", handleDocumentsUpdated)
@@ -813,7 +769,7 @@ export default function DocumentsPage() {
           <Card className="text-center py-12">
             <CardContent>
               <p className="text-red-600 mb-4">{error}</p>
-              <Button onClick={loadDocuments} variant="outline">
+              <Button onClick={() => loadDocuments({ force: true })} variant="outline">
                 {t('documentsPage.tryAgainButton')}
               </Button>
             </CardContent>

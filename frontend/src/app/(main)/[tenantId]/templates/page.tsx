@@ -17,7 +17,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { useApiClient } from "@/lib/api-client"
-import { useTranslation } from "@/lib/i18n/hooks"
 
 interface Template {
   id: string
@@ -37,13 +36,17 @@ interface DriveStatus {
   expires_at?: string
 }
 
+const formatTimestamp = (value?: string) => {
+  if (!value) return "Unknown"
+  return new Date(value).toLocaleDateString()
+}
+
 export default function TemplatesPage() {
   const params = useParams<{ tenantId: string }>()
   const tenantId = params?.tenantId ?? ""
   const router = useRouter()
   const { toast } = useToast()
   const apiClient = useApiClient()
-  const { t, language } = useTranslation()
 
   const [isLoading, setIsLoading] = useState(true)
   const [templates, setTemplates] = useState<Template[]>([])
@@ -52,15 +55,23 @@ export default function TemplatesPage() {
   const [driveStatus, setDriveStatus] = useState<DriveStatus | null>(null)
   const [driveLoading, setDriveLoading] = useState(true)
 
-  const formatTimestamp = (value?: string) => {
-    if (!value) return t('templatesPage.templateCard.unknown')
-    const locale = language === 'es' ? 'es-ES' : 'en-US';
-    return new Date(value).toLocaleDateString(locale)
-  }
-
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
+    
+    // Check Google Drive status first
+    if (!driveStatus?.connected) {
+      const driveErrorMessage = 'Google Drive is not connected. Please connect your Google Drive to load templates.'
+      setError(driveErrorMessage)
+      toast({
+        title: 'Google Drive required',
+        description: driveErrorMessage,
+        variant: 'destructive',
+      })
+      setIsLoading(false)
+      return // Stop here if Drive is not connected
+    }
+
     try {
       const response = await apiClient.get<Template[]>('/engine-templates?status=active')
       if (response.error) {
@@ -83,17 +94,17 @@ export default function TemplatesPage() {
       setTemplates(normalized)
     } catch (err) {
       console.error('[templates] load error', err)
-      const message = t('templatesPage.errorLoading.description')
+      const message = 'Unable to load templates right now. Please try again later.'
       setError(message)
       toast({
-        title: t('templatesPage.errorLoading.title'),
+        title: 'Error loading templates',
         description: message,
         variant: 'destructive',
       })
     } finally {
       setIsLoading(false)
     }
-  }, [apiClient, toast, t])
+  }, [apiClient, toast, driveStatus])
 
   const fetchDriveStatus = useCallback(async () => {
     setDriveLoading(true)
@@ -130,14 +141,14 @@ export default function TemplatesPage() {
     try {
       const response = await apiClient.get<{ authorization_url?: string }>('/google-drive/oauth-url')
       if (response.error || !response.data?.authorization_url) {
-        throw new Error(response.error || t('templatesPage.toast.connectDriveFailed.description'))
+        throw new Error(response.error || 'Failed to initiate Google Drive connection')
       }
       window.location.href = response.data.authorization_url
     } catch (err) {
       console.error('[templates] connect drive error', err)
       toast({
-        title: t('templatesPage.toast.connectDriveFailed.title'),
-        description: err instanceof Error ? err.message : t('templatesPage.genericError'),
+        title: 'Cannot connect Google Drive',
+        description: err instanceof Error ? err.message : 'Unknown error',
         variant: 'destructive',
       })
     }
@@ -146,16 +157,16 @@ export default function TemplatesPage() {
   const startEditing = async (template: Template) => {
     if (driveLoading) {
       toast({
-        title: t('templatesPage.toast.checkingDrive.title'),
-        description: t('templatesPage.toast.checkingDrive.description'),
+        title: 'Checking Google Drive',
+        description: 'Please wait while we verify your Drive connection',
       })
       return
     }
 
     if (!driveStatus?.connected) {
       toast({
-        title: t('templatesPage.toast.connectDriveFirst.title'),
-        description: t('templatesPage.toast.connectDriveFirst.description'),
+        title: 'Connect Google Drive first',
+        description: 'You must connect your Google account to edit templates.',
         variant: 'destructive',
       })
       return
@@ -169,12 +180,12 @@ export default function TemplatesPage() {
       })
 
       if (response.error || !response.data) {
-        throw new Error(response.error || t('templatesPage.toast.editSessionFailed.description'))
+        throw new Error(response.error || 'Failed to create editing session')
       }
 
       toast({
-        title: t('templatesPage.toast.editSessionCreated.title'),
-        description: t('templatesPage.toast.editSessionCreated.description', { templateName: template.name }),
+        title: 'Edit session created',
+        description: `Opening Google Docs for ${template.name}`,
       })
 
       window.open(
@@ -185,8 +196,8 @@ export default function TemplatesPage() {
     } catch (err) {
       console.error('[templates] start edit error', err)
       toast({
-        title: t('templatesPage.toast.editSessionFailed.title'),
-        description: err instanceof Error ? err.message : t('templatesPage.toast.editSessionFailed.description'),
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to start editing session',
         variant: 'destructive',
       })
     } finally {
@@ -212,20 +223,20 @@ export default function TemplatesPage() {
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{t('templatesPage.title')}</h1>
+          <h1 className="text-3xl font-bold">Document Templates</h1>
           <p className="text-muted-foreground">
-            {t('templatesPage.subtitle')}
+            Manage and edit document templates stored in the Nexus backend
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" asChild>
             <Link href={`/${tenantId}/templates/sessions`}>
               <IconClock className="mr-2 h-4 w-4" />
-              {t('templatesPage.editSessionsButton')}
+              Edit Sessions
             </Link>
           </Button>
           <Button onClick={() => router.push(`/${tenantId}/documents?upload=template`)}>
-            {t('templatesPage.uploadTemplateButton')}
+            Upload Template
           </Button>
         </div>
       </div>
@@ -234,12 +245,12 @@ export default function TemplatesPage() {
         <Card className="border-dashed border-primary/30 bg-primary/5">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-5">
             <div>
-              <h2 className="text-base font-semibold">{t('templatesPage.connectGoogleDrive.title')}</h2>
+              <h2 className="text-base font-semibold">Connect Google Drive</h2>
               <p className="text-sm text-muted-foreground">
-                {t('templatesPage.connectGoogleDrive.description')}
+                You need to grant access so we can create temporary Google Docs for editing.
               </p>
             </div>
-            <Button onClick={handleConnectGoogleDrive}>{t('templatesPage.connectGoogleDrive.button')}</Button>
+            <Button onClick={handleConnectGoogleDrive}>Connect Google Drive</Button>
           </CardContent>
         </Card>
       )}
@@ -256,11 +267,11 @@ export default function TemplatesPage() {
       {templates.length === 0 && !error ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground space-y-2">
-            <p className="font-medium">{t('templatesPage.noTemplates.title')}</p>
+            <p className="font-medium">Aún no hay plantillas para este tenant.</p>
             <p className="text-sm">
-              {t('templatesPage.noTemplates.description1')}{' '}
+              Sube una nueva plantilla ODT usando el botón "Upload Template" o conviértela desde{' '}
               <Link className="underline text-primary" href={`/${tenantId}/documents`}>
-                {t('templatesPage.noTemplates.documentsLibrary')}
+                la biblioteca de documentos
               </Link>.
             </p>
           </CardContent>
@@ -278,23 +289,23 @@ export default function TemplatesPage() {
                   <Badge variant="outline">{template.category}</Badge>
                 </div>
                 <CardDescription className="line-clamp-2">
-                  {template.description || t('templatesPage.templateCard.noDescription')}
+                  {template.description || 'No description provided'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground line-clamp-4">
-                  {template.description || t('templatesPage.templateCard.noDescription')}
+                  {template.description || 'No description provided'}
                 </p>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <div className="flex items-center space-x-1">
                     <IconClock className="w-3 h-3" />
-                    <span>{t('templatesPage.templateCard.updated')} {formatTimestamp(template.updated_at || template.created_at)}</span>
+                    <span>Updated {formatTimestamp(template.updated_at || template.created_at)}</span>
                   </div>
                   {template.status === 'active' ? (
                     <div className="flex items-center space-x-1 text-green-600">
                       <IconCheck className="w-3 h-3" />
-                      <span>{t('templatesPage.templateCard.active')}</span>
+                      <span>Active</span>
                     </div>
                   ) : (
                     <Badge variant="outline">{template.status}</Badge>
@@ -302,7 +313,7 @@ export default function TemplatesPage() {
                 </div>
 
                 <div className="text-xs text-muted-foreground">
-                  {t('templatesPage.templateCard.sourceFile')}{template.template_file_name || t('templatesPage.templateCard.noOdtUploaded')}
+                  Source file: {template.template_file_name || 'No ODT uploaded yet'}
                 </div>
 
                 <div className="flex space-x-2">
@@ -314,12 +325,12 @@ export default function TemplatesPage() {
                     {editingSessions.has(template.id) ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        {t('templatesPage.templateCard.preparingButton')}
+                        Preparing...
                       </>
                     ) : (
                       <>
                         <IconEdit className="w-4 h-4 mr-2" />
-                        {t('templatesPage.templateCard.editTemplateButton')}
+                        Edit Template
                       </>
                     )}
                   </Button>
@@ -334,14 +345,14 @@ export default function TemplatesPage() {
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <IconUser className="w-5 h-5" />
-            <span>{t('templatesPage.howItWorks.title')}</span>
+            <span>How Template Editing Works</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>{t('templatesPage.howItWorks.step1')}</p>
-          <p>{t('templatesPage.howItWorks.step2')}</p>
-          <p>{t('templatesPage.howItWorks.step3')}</p>
-          <p>{t('templatesPage.howItWorks.step4')}</p>
+          <p>1. Click "Edit Template" to request a Google Docs session from the backend.</p>
+          <p>2. Edit the temporary document in Google Docs with full formatting support.</p>
+          <p>3. When you finish, finalize the session so the ODT is stored again.</p>
+          <p>4. Temporary documents automatically expire after a few hours.</p>
         </CardContent>
       </Card>
     </div>

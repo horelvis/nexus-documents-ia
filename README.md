@@ -290,28 +290,38 @@ sequenceDiagram
     participant F as 🖥️ Frontend
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant ES as 🔎 Elasticsearch
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
 
+    Note over U, G: 📤 Ingesta y Procesamiento
     U->>F: Upload Document
     F->>A: POST /api/v1/documents
     A->>D: Process Document
     D->>G: Store File
     D->>P: Save Metadata
-    D->>E: Generate Embeddings
-    E->>W: Store Vectors
+    
+    par Indexing & Embedding
+        D->>ES: Index Content (Full-Text + Metadata)
+        D->>W: Store Vectors (Semantic Embeddings)
+    end
+    
     D->>A: Document Processed
     A->>F: Success Response
 
+    Note over U, G: 🔍 Búsqueda Híbrida (Hybrid Search)
     U->>F: Search Query
     F->>A: GET /api/v1/search
-    A->>E: Semantic Search
-    E->>W: Vector Search
-    W->>E: Similar Documents
-    E->>A: Search Results
-    A->>F: Results + Metadata
+    A->>ES: Hybrid Search (Keyword + Semantic Boost)
+    ES-->>A: Results + Content Highlights
+    
+    opt Fallback / Semantic Only
+        A->>W: Vector Similarity Search
+        W-->>A: Semantic Results
+    end
+    
+    A->>F: Ranked Results (Cards with Highlights)
 ```
 
 ### 🛡️ **Características de Seguridad**
@@ -448,10 +458,10 @@ flowchart TD
 | Servicio | Puerto | Tecnología | Endpoint Principal | Descripción |
 |----------|--------|------------|-------------------|-------------|
 | **Main API** | `8000` | FastAPI | `/api/v1/` | Pasarela principal y orquestación |
-| **CAG Service** | `8008` | FastAPI | `/` | Análisis de contenido y agentes |
+| **Agent Gateway (Elysia)** | `8007` | FastAPI | `/api/v1/cag/*` | Categorización, chat y embeddings (sobre Weaviate/Elysia) |
 | **LangExtract Service** | `8009` | FastAPI | `/` | Extracción automática de entidades |
 | **TextExtract Service** | `8012` | FastAPI | `/` | Parsing determinístico/OCR |
-| **Weaviate Service** | `8007` | FastAPI | `/` | Proxy vectorial multi-tenant |
+| **Weaviate Core** | `8080` | Weaviate | `/v1/` | Vector DB multi-tenant |
 | **Storage Service** | `8003` | FastAPI | `/` | Operaciones GCS y signed URLs |
 | **Elasticsearch Service** | `8005` | FastAPI | `/` | Búsqueda híbrida + filtros |
 | **Temporalio Service** | `8010` | FastAPI | `/` | Workflows durables y signals |
@@ -485,11 +495,10 @@ graph TB
 
         subgraph "Backend Services"
             API[🚀 api<br/>8000]
-            CAG[📊 cag-service<br/>8008]
+            AgentGateway[📊 weaviate-service (CAG)<br/>8007]
             LangExtract[🏷️ langextract-service<br/>8009]
             TextExtract[📑 textextract-service<br/>8012]
             Storage[☁️ storage-service<br/>8003]
-            WeaviateSvc[🔍 weaviate-service<br/>8007]
             ElasticSvc[🔎 elasticsearch-service<br/>8005]
             TemporalSvc[🔄 temporalio-service<br/>8010]
             TemplateSvc[🧩 template-editor-service<br/>8011]
@@ -509,7 +518,7 @@ graph TB
 
     NextJS --> API
 
-    API --> CAG
+    API --> AgentGateway
     API --> LangExtract
     API --> TextExtract
     API --> Storage

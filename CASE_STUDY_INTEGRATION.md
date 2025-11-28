@@ -216,7 +216,7 @@ DEFAULT_LLM_MODEL=llama3.1:8b
 DEFAULT_EMBEDDING_MODEL=nomic-embed-text
 
 # Ollama
-OLLAMA_BASE_URL=http://ollama-service:11434
+OLLAMA_BASE_URL=http://genai-ollama:11434
 
 # Qdrant
 QDRANT_HOST=qdrant

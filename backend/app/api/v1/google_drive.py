@@ -61,20 +61,26 @@ def oauth_callback(
 ):
     try:
         payload = _decode_state(state)
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"❌ OAuth Callback: Invalid state token: {e}")
         return RedirectResponse(settings.GOOGLE_OAUTH_ERROR_REDIRECT_URL)
 
     user = db.query(User).filter(User.id == payload["user_id"]).one_or_none()
     if not user:
+        logger.error(f"❌ OAuth Callback: User not found for ID: {payload.get('user_id')}")
         return RedirectResponse(settings.GOOGLE_OAUTH_ERROR_REDIRECT_URL)
 
     service = GoogleDriveTokenService(db)
     try:
+        logger.info("OAuth Callback: Exchanging code for tokens...")
         credentials = service.exchange_code(code, state=state)
+        logger.info("OAuth Callback: Tokens exchanged. Fetching user info...")
         userinfo = service.fetch_userinfo(credentials.token)
+        logger.info("OAuth Callback: User info fetched. Upserting tokens...")
         service.upsert_tokens(user, credentials, userinfo)
-    except Exception:
-        logger.exception("Failed to store Google Drive tokens for user %s", user.id)
+        logger.info("OAuth Callback: Tokens upserted successfully.")
+    except Exception as e:
+        logger.error("❌ Failed to store Google Drive tokens for user %s: %s", user.id, str(e), exc_info=True)
         return RedirectResponse(settings.GOOGLE_OAUTH_ERROR_REDIRECT_URL)
 
     return RedirectResponse(settings.GOOGLE_OAUTH_SUCCESS_REDIRECT_URL)

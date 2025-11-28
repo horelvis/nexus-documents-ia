@@ -396,10 +396,10 @@ class HealthCheckManager:
                 f"{settings.WEAVIATE_SERVICE_URL}/health"
             ))
 
-        if hasattr(settings, 'ELASTICSEARCH_URL'):
+        if hasattr(settings, 'ELASTICSEARCH_SERVICE_URL'):
             self.add_check(ExternalServiceHealthCheck(
                 "elasticsearch",
-                f"{settings.ELASTICSEARCH_URL}/_cluster/health"
+                f"{settings.ELASTICSEARCH_SERVICE_URL.rstrip('/')}/health"
             ))
 
     async def run_all_checks(self) -> Dict[str, HealthCheckResult]:

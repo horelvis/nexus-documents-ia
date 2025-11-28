@@ -104,3 +104,8 @@ backups/
 .pyarmor_pack/
 *.pyc
 *.pyo
+
+# Legacy services removed from repo but still present locally in some environments
+backend/microservices/cag-service/
+backend/microservices/ollama-service/
+backend/crewai_official_test/

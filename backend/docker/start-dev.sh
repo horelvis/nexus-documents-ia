@@ -5,21 +5,24 @@
 
 set -e
 
-echo "🚀 Starting Nexus Document Backend in DEVELOPMENT mode..."
-echo "📁 This mode mounts your source code as volumes for live reloading"
-echo ""
+# Change directory to the script's location to ensure relative paths work
+cd "$(dirname "$0")"
 
-# Check if .env file exists in backend root
-if [ ! -f ".env" ]; then
-    echo "❌ Error: .env file not found in backend root directory"
-    echo "Please create a .env file in backend/ directory with your configuration"
-    echo "You can copy from .env.example: cp ../.env.example ../.env"
+# Define the paths for docker-compose file and env file
+COMPOSE_FILE="docker-compose.yml"
+ENV_FILE=".env"
+
+# Check if .env file exists in the correct location
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Error: .env file not found at $(pwd)/$ENV_FILE"
+    echo "Please create a .env file in the current directory (backend/docker/) with your configuration"
+    echo "You can copy from .env.example: cp .env.example .env"
     exit 1
 fi
 
 # Stop any existing containers
 echo "🛑 Stopping any existing containers..."
-docker compose down
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
 
 # Check if images need to be built (only if Dockerfile or requirements.txt changed)
 echo "🔍 Checking if images need to be rebuilt..."
@@ -29,7 +32,7 @@ PYPROJECT_CHANGED=$(find .. -name "pyproject.toml" -newer .docker_built 2>/dev/n
 
 if [ ! -f .docker_built ] || [ "$DOCKERFILE_CHANGED" -gt 0 ] || [ "$REQUIREMENTS_CHANGED" -gt 0 ] || [ "$PYPROJECT_CHANGED" -gt 0 ]; then
     echo "🔨 Building development images (changes detected)..."
-    docker compose build
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
     touch .docker_built
     echo "✅ Images built and timestamp updated"
 else
@@ -38,11 +41,11 @@ fi
 
 # Start services
 echo "🎯 Starting services in development mode..."
-docker compose up -d 
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d 
 
 # Start the unified worker (using both compose files together)
 echo "👷 Starting unified background worker..."
-docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
+docker compose -f "$COMPOSE_FILE" -f docker-compose.worker.yml --env-file "$ENV_FILE" up -d unified-worker
 
 # Wait a bit for Ollama to be ready
 echo "⏳ Waiting for Ollama service to be ready..."
@@ -50,19 +53,20 @@ sleep 5
 
 # Initialize Ollama models if needed
 echo "🤖 Checking Ollama models..."
-if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "all-minilm"; then
+if ! docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T genai-ollama ollama list 2>/dev/null | grep -q "all-minilm"; then
     echo "📥 Downloading fast embedding model (all-minilm)..."
-    docker compose exec -T ollama-service ollama pull all-minilm:latest || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T genai-ollama ollama pull all-minilm:latest || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
 else
     echo "✅ Embedding model already present"
 fi
 
-if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "llama3.2"; then
+if ! docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T genai-ollama ollama list 2>/dev/null | grep -q "llama3.2"; then
     echo "📥 Downloading LLM model (llama3.2)..."
-    docker compose exec -T ollama-service ollama pull llama3.2 || echo "⚠️  Failed to download LLM model. You may need to pull it manually."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T genai-ollama ollama pull llama3.2 || echo "⚠️  Failed to download LLM model. You may need to pull it manually."
 else
     echo "✅ LLM model already present"
 fi
+
 
 # Show status
 echo ""

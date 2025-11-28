@@ -1,7 +1,8 @@
-const baseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  ""
+// Direct API Configuration:
+// We prioritize the environment variable NEXT_PUBLIC_API_URL.
+// If not set, we default to the backend on port 8000.
+// This avoids the Next.js Proxy bottleneck.
+const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://nexus-docs360.es:8000";
 
 export const API_CONFIG = {
   BASE_URL: baseUrl,
@@ -25,7 +26,7 @@ export const API_CONFIG = {
     DOCUMENT_CONTENT: (id: string) => `/documents/${id}/content`,
     
     // Search
-    SEARCH: '/search',
+    SEARCH: '/search/',
     SEARCH_ASK: '/search/ask',
     
     // Admin

@@ -145,7 +145,7 @@ SERVER_HOST=0.0.0.0,\
 MICROSERVICE_LANGCHAIN_URL=https://langchain-service-pre-300252412370.europe-west1.run.app,\
 MICROSERVICE_LANGROID_URL=https://langroid-service-pre-300252412370.europe-west1.run.app,\
 MICROSERVICE_STORAGE_URL=https://storage-service-pre-300252412370.europe-west1.run.app,\
-MICROSERVICE_OLLAMA_URL=https://ollama-service-pre-300252412370.europe-west1.run.app" \
+MICROSERVICE_OLLAMA_URL=https://genai-ollama-pre-300252412370.europe-west1.run.app" \
     --add-cloudsql-instances=$CLOUD_SQL_INSTANCE
 
 echo ""

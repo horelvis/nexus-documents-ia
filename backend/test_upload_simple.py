@@ -124,7 +124,7 @@ async def monitor_cag_service():
     print("\n🔍 Checking CAG Service...")
     
     # Use service name when running inside Docker
-    cag_url = "http://cag-service:8008/health" if os.path.exists('/.dockerenv') else "http://localhost:8008/health"
+    cag_url = "http://weaviate-service:8000/health" if os.path.exists('/.dockerenv') else "http://localhost:8007/health"
     
     async with httpx.AsyncClient() as client:
         try:

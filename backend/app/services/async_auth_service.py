@@ -257,6 +257,26 @@ class AsyncAuthService:
             )
 
     @staticmethod
+    async def fetch_clerk_user_profile(user_id: str) -> dict:
+        """Fetch detailed user profile from Clerk API"""
+        import httpx
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{settings.CLERK_API_URL}/users/{user_id}",
+                    headers={"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"},
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch Clerk profile for {user_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service unavailable"
+            )
+
+    @staticmethod
     async def sync_user_from_clerk(
         db: AsyncSession,
         clerk_user_id: str,

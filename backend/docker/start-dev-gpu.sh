@@ -54,12 +54,12 @@ sleep 10
 
 # Verify GPU is being used
 echo "🔍 Verifying GPU usage in Ollama..."
-docker compose exec -T ollama-service nvidia-smi 2>/dev/null || echo "GPU check failed"
+docker compose exec -T genai-ollama nvidia-smi 2>/dev/null || echo "GPU check failed"
 
 # Download models
 echo "📥 Ensuring models are available..."
-docker compose exec -T ollama-service ollama pull all-minilm:latest || true
-docker compose exec -T ollama-service ollama pull llama3.2 || true
+docker compose exec -T genai-ollama ollama pull all-minilm:latest || true
+docker compose exec -T genai-ollama ollama pull llama3.2 || true
 
 echo ""
 echo "✅ GPU-accelerated environment started!"
@@ -71,7 +71,7 @@ echo "   • Multiple parallel requests supported"
 echo ""
 echo "📊 Monitor GPU usage:"
 echo "   watch nvidia-smi"
-echo "   docker compose exec ollama-service nvidia-smi"
+echo "   docker compose exec genai-ollama nvidia-smi"
 echo ""
 echo "🛑 Stop services:"
 echo "   docker compose -f docker-compose.yml -f docker-compose.gpu.yml down"

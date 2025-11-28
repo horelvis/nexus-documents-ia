@@ -4,15 +4,15 @@ echo "🔄 Switching to faster embedding model (all-minilm)..."
 
 # 1. Download the new model
 echo "📥 Downloading all-minilm model..."
-docker compose exec -T ollama-service ollama pull all-minilm:latest
+docker compose exec -T genai-ollama ollama pull all-minilm:latest
 
 # 2. Remove old model to save space (optional)
 echo "🗑️  Removing old nomic-embed-text model (optional)..."
-docker compose exec -T ollama-service ollama rm nomic-embed-text 2>/dev/null || echo "Old model not found or in use"
+docker compose exec -T genai-ollama ollama rm nomic-embed-text 2>/dev/null || echo "Old model not found or in use"
 
 # 3. Restart services
 echo "🔄 Restarting services with new configuration..."
-docker compose restart langchain-service ollama-service api
+docker compose restart langchain-service genai-ollama api
 
 # 4. Wait for services
 echo "⏳ Waiting for services to be ready..."

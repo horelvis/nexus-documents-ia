@@ -116,40 +116,9 @@ export function useUserOnboarding() {
     }
   }
 
-  const syncUserWithBackend = async () => {
-    if (!user) throw new Error('No user found')
-
-    try {
-      const response = await apiClient.post('/auth/sync-user', {
-        clerk_user_id: user.id,
-        email: user.emailAddresses[0]?.emailAddress,
-        full_name: `${user.firstName || ''} ${user.lastName || ''}`.trim()
-      })
-
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
-      setStatus(prev => ({
-        ...prev,
-        hasCompletedSync: true,
-        isNewUser: false
-      }))
-
-      return response.data
-    } catch (error) {
-      setStatus(prev => ({
-        ...prev,
-        error: error instanceof Error ? error.message : 'Sync failed'
-      }))
-      throw error
-    }
-  }
-
   return {
     ...status,
     checkOnboardingStatus,
-    markOnboardingComplete,
-    syncUserWithBackend
+    markOnboardingComplete
   }
 }

@@ -15,14 +15,14 @@ echo "Ollama is ready. Pulling required models..."
 
 # Pull the embedding model
 echo "Pulling nomic-embed-text model..."
-docker compose exec ollama-service ollama pull nomic-embed-text
+docker compose exec genai-ollama ollama pull nomic-embed-text
 
 # Pull the LLM model
 echo "Pulling llama3.2 model..."
-docker compose exec ollama-service ollama pull llama3.2
+docker compose exec genai-ollama ollama pull llama3.2
 
 # List all available models
 echo "Available models:"
-docker compose exec ollama-service ollama list
+docker compose exec genai-ollama ollama list
 
 echo "Ollama initialization complete!"

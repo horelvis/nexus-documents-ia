@@ -152,7 +152,7 @@ async def search_documents(
 
     try:
         # Always try Elasticsearch first (has the content)
-        if search_type in ["auto", "elasticsearch"]:
+        if search_type in ["auto", "elasticsearch", "hybrid", "keyword", "semantic"]:
             try:
 
                 # Prepare filters

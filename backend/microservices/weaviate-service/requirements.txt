@@ -1,6 +1,6 @@
 # Weaviate and Elysia integration
 weaviate-client>=4.9.0
-git+https://github.com/weaviate/elysia.git@main
+git+https://github.com/weaviate/elysia.git@v0.2.8
 
 # FastAPI and core
 fastapi>=0.104.0

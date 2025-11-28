@@ -8,6 +8,7 @@ import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
 import uuid
+from pathlib import Path
 
 try:
     from pythonjsonlogger.jsonlogger import JsonFormatter
@@ -51,7 +52,9 @@ class StructuredLogger:
 
         # File handler for production
         if not settings.DEBUG:
-            file_handler = logging.FileHandler('logs/nexus.log')
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            file_handler = logging.FileHandler(log_dir / 'nexus.log')
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 

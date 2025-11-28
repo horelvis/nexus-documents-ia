@@ -48,7 +48,7 @@ cd backend/docker && docker compose up -d
 - `microservices/langchain-service/app` → Container's `/app/app`
 - `microservices/langroid-service/app` → Container's `/app/app`
 - `microservices/storage-service/app` → Container's `/app/app`
-- `microservices/ollama-service/app` → Container's `/app/app`
+- `microservices/ollama-service/app` (legacy, replaced by `genai-ollama` container)
 
 #### Production Mode
 ```bash
@@ -461,4 +461,3 @@ export function MyComponent() {
 3. **Simple dependencies**: Minimal useEffect dependencies
 4. **Clear error handling**: Always handle errors explicitly
 5. **Predictable behavior**: No background processes or automatic updates
-

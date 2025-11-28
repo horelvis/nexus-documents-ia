@@ -41,8 +41,10 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Encryption
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
-if not ENCRYPTION_KEY and not settings.DEBUG:
-    raise ValueError("ENCRYPTION_KEY environment variable is required in production")
+if not ENCRYPTION_KEY:
+    if not settings.DEBUG:
+        logger.warning("⚠️ ENCRYPTION_KEY not found in environment variables. Using SECRET_KEY as fallback. This is not recommended for production.")
+    ENCRYPTION_KEY = settings.SECRET_KEY
 
 # CORS security - strict origins for production
 PRODUCTION_CORS_ORIGINS = [

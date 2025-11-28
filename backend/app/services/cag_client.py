@@ -17,8 +17,8 @@ class CAGClient:
     """Client for interacting with the CAG microservice"""
     
     def __init__(self):
-        # Use docker service name for container-to-container communication
-        self.base_url = "http://cag-service:8008"
+        # Use configured service (now served by the Weaviate/Elysia gateway)
+        self.base_url = settings.CAG_SERVICE_URL.rstrip("/")
         self.timeout = httpx.Timeout(30.0, connect=5.0)
         self.api_key = settings.MICROSERVICES_API_KEY
         

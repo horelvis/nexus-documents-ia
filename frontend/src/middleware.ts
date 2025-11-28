@@ -22,6 +22,11 @@ const isSubscriptionRoute = createRouteMatcher([
 ])
 
 export default clerkMiddleware(async (auth, req) => {
+  // Skip Next.js proxy API routes so they can reach the backend without Clerk interception
+  if (req.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
   // Check if route needs authentication
   if (!isPublicRoute(req)) {
     await auth.protect()

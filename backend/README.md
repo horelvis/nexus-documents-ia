@@ -87,6 +87,8 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 ### System Architecture
 
 ```
+
+> Cambia `LLM_PROVIDER`, `LLM_MODEL` y `LLM_API_BASE` para apuntar a OpenAI (`llm_provider=openai`, `llm_api_base=https://api.openai.com/v1`) u otro servidor compatible; sólo necesitas definir `LLM_API_KEY` cuando el proveedor lo requiera.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    NEXUS DOCUMENT BACKEND ARCHITECTURE              │
 └─────────────────────────────────────────────────────────────────────┘
@@ -243,10 +245,9 @@ nexus-document-backend/
 │   │   └── main.py              # FastAPI application
 │   │
 │   ├── microservices/           # Microservice applications
-│   │   ├── cag-service/                 # Content Analysis & Generative agents
 │   │   ├── langextract-service/         # Entity extraction pipeline
 │   │   ├── textextract-service/         # Deterministic text/OCR extraction
-│   │   ├── weaviate-service/            # Vector proxy + multi-tenant guards
+│   │   ├── weaviate-service/            # Vector proxy + CAG/Elysia gateway
 │   │   ├── elasticsearch-service/       # Hybrid keyword/vector bridge
 │   │   ├── storage-service/             # Async storage + signed URLs
 │   │   ├── template-editor-service/     # Workflow template editor APIs
@@ -406,11 +407,11 @@ cd backend/docker
 # 4. Add tests in tests/
 
 # Run specific microservice
-docker compose up cag-service
+docker compose up weaviate-service
 
 # View logs
 docker compose logs -f api
-docker compose logs -f cag-service
+docker compose logs -f weaviate-service
 
 # Access database
 docker compose exec db psql -U postgres -d nexus_docs
@@ -487,7 +488,7 @@ GCS_BUCKET_PREFIX=nexus-docs
 
 # Microservices
 MICROSERVICE_API_KEY=your-unified-api-key
-CAG_SERVICE_URL=http://cag-service:8000
+CAG_SERVICE_URL=http://weaviate-service:8000
 LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
 TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
 STORAGE_SERVICE_URL=http://storage-service:8000
@@ -503,7 +504,11 @@ STRIPE_WEBHOOK_SECRET=your-webhook-secret
 
 # AI/ML
 OPENAI_API_KEY=your-openai-key
-OLLAMA_BASE_URL=http://ollama-service:11434
+OLLAMA_BASE_URL=http://genai-ollama:11434
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.2:latest
+LLM_API_BASE=http://genai-ollama:11434
+# LLM_API_KEY=sk-your-provider-key
 ```
 
 ## API Documentation

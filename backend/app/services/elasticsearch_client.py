@@ -5,6 +5,7 @@ HTTP client for communicating with elasticsearch-service
 import httpx
 import logging
 from typing import List, Dict, Any, Optional
+from fastapi import HTTPException
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -119,89 +120,11 @@ class ElasticsearchClient:
             return response.get("results", [])
 
         except Exception as e:
-            logger.warning(f"Microservice unavailable, falling back to direct Elasticsearch: {e}")
-
-            # Fallback to direct Elasticsearch search
-            try:
-                from elasticsearch import Elasticsearch
-                from app.core.config import settings
-
-                client = Elasticsearch([settings.ELASTICSEARCH_URL])
-
-                # Enhanced search query with better matching
-                search_body = {
-                    "query": {
-                        "bool": {
-                            "should": [
-                                # Exact match with boost
-                                {
-                                    "multi_match": {
-                                        "query": query,
-                                        "fields": ["title^3", "description^2", "content"],
-                                        "type": "best_fields",
-                                        "boost": 2
-                                    }
-                                },
-                                # Wildcard match for partial matches (like propuesta in propuesta_signed.pdf)
-                                {
-                                    "wildcard": {
-                                        "title": {
-                                            "value": f"*{query}*",
-                                            "boost": 1.5
-                                        }
-                                    }
-                                },
-                                {
-                                    "wildcard": {
-                                        "content": {
-                                            "value": f"*{query}*",
-                                            "boost": 1.0
-                                        }
-                                    }
-                                }
-                            ],
-                            "minimum_should_match": 1,
-                            "filter": {
-                                "term": {"tenant_id": tenant_id}
-                            }
-                        }
-                    },
-                    "size": limit,
-                    "sort": ["_score"]
-                }
-
-                # Format index name (replace hyphens with underscores)
-                index_name = f"nexus_{tenant_id.replace('-', '_')}_documents"
-
-                response = client.search(
-                    index=index_name,
-                    body=search_body
-                )
-
-                results = []
-                for hit in response["hits"]["hits"]:
-                    result = {
-                        "document": {
-                            "id": hit["_source"]["doc_id"],
-                            "title": hit["_source"]["title"],
-                            "content": hit["_source"]["content"][:500] + "..." if hit["_source"].get("content") else "",
-                            "file_type": hit["_source"]["file_type"],
-                            "category": hit["_source"].get("category"),
-                            "tags": hit["_source"].get("tags", []),
-                            "created_at": hit["_source"].get("created_at"),
-                            "tenant_id": hit["_source"]["tenant_id"]
-                        },
-                        "score": hit["_score"],
-                        "matches": [{"text": hit["_source"]["content"][:200] + "..." if hit["_source"].get("content") else "", "score": hit["_score"]}]
-                    }
-                    results.append(result)
-
-                logger.info(f"✅ Direct Elasticsearch fallback returned {len(results)} results")
-                return results
-
-            except Exception as fallback_error:
-                logger.error(f"❌ Direct Elasticsearch fallback also failed: {fallback_error}")
-                return []
+            logger.error(f"❌ Elasticsearch microservice request failed: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Search service unavailable"
+            ) from e
 
     async def semantic_search(
         self,

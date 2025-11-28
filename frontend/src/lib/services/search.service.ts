@@ -79,7 +79,7 @@ export function useSearchService() {
       ...(params.date_to && { date_to: params.date_to })
     })
 
-    return apiClient.get<SearchResult[]>(`/search/?${queryParams.toString()}`)
+    return apiClient.get<SearchResult[]>(`/search?${queryParams.toString()}`)
   }
 
   const searchElasticsearch = async (params: SearchParams) => {

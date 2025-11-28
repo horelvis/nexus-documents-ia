@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     
     # CORS - Valores por defecto para desarrollo
     # CORS Origins - Configuración para desarrollo con IPs dinámicas
@@ -157,18 +157,19 @@ class Settings(BaseSettings):
     
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://weaviate-service:8000")
+    AUTO_CATEGORIZATION_PROVIDER: str = os.getenv("AUTO_CATEGORIZATION_PROVIDER", "cag")
+    AUTO_CATEGORIZATION_TEMPERATURE: float = float(os.getenv("AUTO_CATEGORIZATION_TEMPERATURE", "0.0"))
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+    OPENAI_CATEGORIZATION_MODEL: str = os.getenv("OPENAI_CATEGORIZATION_MODEL", "gpt-4.1-mini")
     
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     
     # Temporalio Service
-    TEMPORALIO_SERVICE_URL: str = os.getenv("TEMPORALIO_SERVICE_URL", "http://temporalio-service:8000")
-    TEMPLATE_EDITOR_SERVICE_URL: str = os.getenv(
-        "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
-    )
-
-    # Ollama
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
+    TEMPORALIO_SERVICE_URL: str = "http://temporalio-service:8010"
+    ENGINE_TEMPLATE_SERVICE_URL: str = "http://engine-template-service:8011"
+    OLLAMA_BASE_URL: str = "http://genai-ollama:11434"
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
     EMBEDDING_MODEL: str = "nomic-embed-text"
     

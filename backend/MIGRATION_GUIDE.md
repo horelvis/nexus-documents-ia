@@ -126,7 +126,7 @@ EMBEDDING_MODEL=nomic-embed-text
    ```bash
    # Observar comportamiento de ambos sistemas
    docker-compose logs -f weaviate-service
-   docker-compose logs -f cag-service
+   docker-compose logs -f weaviate-service
    ```
 
 ### **FASE 4: Migración de Datos**
@@ -174,10 +174,10 @@ Una vez confirmado que el sistema funciona correctamente:
 
 ```bash
 # Detener servicios legacy
-docker-compose stop qdrant cag-service
+docker-compose stop qdrant weaviate-service
 
 # Opcional: Eliminar contenedores legacy
-docker-compose rm qdrant cag-service
+docker-compose rm qdrant weaviate-service
 
 # Opcional: Limpiar volúmenes
 docker volume rm backend_qdrant_data
@@ -195,7 +195,7 @@ docker-compose logs -f api | grep "MIGRATION\|WEAVIATE\|QDRANT"
 docker-compose logs -f weaviate-service
 
 # Legacy CAG + Qdrant  
-docker-compose logs -f cag-service
+docker-compose logs -f weaviate-service
 
 # Base de datos vectoriales
 docker-compose logs weaviate
