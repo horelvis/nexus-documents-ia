@@ -17,7 +17,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { 
+import {
   IconFile,
   IconFileText,
   IconFileTypePdf,
@@ -67,7 +67,7 @@ interface DocumentItemProps {
 // Helper functions
 const getFileIcon = (fileType: string, mimeType?: string, filename?: string) => {
   let type = fileType?.toLowerCase()
-  
+
   // Fallback: extract from mime_type or filename
   if (!type && mimeType) {
     if (mimeType.includes('pdf')) type = 'pdf'
@@ -76,7 +76,7 @@ const getFileIcon = (fileType: string, mimeType?: string, filename?: string) => 
     else if (mimeType.includes('image')) type = 'image'
     else if (mimeType.includes('text')) type = 'txt'
   }
-  
+
   if (!type && filename) {
     const ext = filename.split('.').pop()?.toLowerCase()
     type = ext || 'unknown'
@@ -146,9 +146,9 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-function DocumentItem({ 
-  document, 
-  showScore, 
+function DocumentItem({
+  document,
+  showScore,
   showHighlights,
   useDetailedView = false,
   onDocumentClick,
@@ -165,7 +165,7 @@ function DocumentItem({
 
   const handleAction = (action: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    
+
     switch (action) {
       case 'download':
         onDownload?.(document)
@@ -192,7 +192,7 @@ function DocumentItem({
             <div className="flex-shrink-0">
               {getFileIcon(document.file_type, document.mime_type, document.filename)}
             </div>
-            
+
             {/* Document Info */}
             <div className="flex-grow min-w-0">
               <div className="flex items-start justify-between gap-2 mb-1">
@@ -206,15 +206,15 @@ function DocumentItem({
                     </p>
                   )}
                 </div>
-                
+
                 {/* Status Badge */}
                 {document.indexed && (
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Badge 
-                          className={getStatusColor(document.indexed)} 
-                          variant="secondary" 
+                        <Badge
+                          className={getStatusColor(document.indexed)}
+                          variant="secondary"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {getStatusLabel(document.indexed)}
@@ -239,24 +239,26 @@ function DocumentItem({
               )}
 
               {/* Highlights */}
-              {showHighlights && document.matches && document.matches.length > 0 && (
+              {showHighlights && (document.search_matches || document.matches) && (document.search_matches || document.matches).length > 0 && (
                 <div className="mb-2">
-                  <p className="text-xs text-muted-foreground mb-1">Matches:</p>
+                  <p className="text-xs text-muted-foreground mb-1">Relevant content:</p>
                   <div className="space-y-1">
-                    {document.matches.slice(0, 2).map((match: any, idx: number) => (
-                      <p key={idx} className="text-xs bg-yellow-50 p-1 rounded border-l-2 border-yellow-200 line-clamp-2">
-                        ...{match.text || match}...
-                      </p>
+                    {(document.search_matches || document.matches).slice(0, 2).map((match: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="text-xs bg-yellow-50 dark:bg-yellow-900/20 p-1 rounded border-l-2 border-yellow-200 dark:border-yellow-700 line-clamp-2 [&>mark]:bg-yellow-200 [&>mark]:text-yellow-900 [&>mark]:px-0.5 [&>mark]:rounded-sm dark:[&>mark]:bg-yellow-900/40 dark:[&>mark]:text-yellow-100"
+                        dangerouslySetInnerHTML={{ __html: match.text || match }}
+                      />
                     ))}
-                    {document.matches.length > 2 && (
+                    {(document.search_matches || document.matches).length > 2 && (
                       <p className="text-xs text-muted-foreground">
-                        +{document.matches.length - 2} more matches
+                        +{(document.search_matches || document.matches).length - 2} more matches
                       </p>
                     )}
                   </div>
                 </div>
               )}
-              
+
               {/* Metadata and Actions */}
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -266,12 +268,12 @@ function DocumentItem({
                   <span>•</span>
                   <span>{document.category || 'Sin Categoría'}</span>
                 </div>
-                
+
                 {/* Actions */}
                 <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                   {/* 3 Main Actions */}
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     variant="ghost"
                     onClick={(e) => {
                       e.stopPropagation()
@@ -282,8 +284,8 @@ function DocumentItem({
                   >
                     <IconEye className="h-3.5 w-3.5" />
                   </Button>
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     variant="ghost"
                     onClick={(e) => handleAction('download', e)}
                     title="Download"
@@ -291,8 +293,8 @@ function DocumentItem({
                   >
                     <IconDownload className="h-3.5 w-3.5" />
                   </Button>
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     variant="ghost"
                     onClick={(e) => handleAction('share', e)}
                     title="Share"
@@ -300,12 +302,12 @@ function DocumentItem({
                   >
                     <IconShare2 className="h-3.5 w-3.5" />
                   </Button>
-                  
+
                   {/* More Actions Dropdown */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         variant="ghost"
                         onClick={(e) => e.stopPropagation()}
                         title="More actions"
@@ -334,7 +336,7 @@ function DocumentItem({
                       {onDelete && (
                         <>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem 
+                          <DropdownMenuItem
                             onClick={(e) => handleAction('delete', e)}
                             className="text-red-600 focus:text-red-600"
                           >
@@ -347,7 +349,7 @@ function DocumentItem({
                   </DropdownMenu>
                 </div>
               </div>
-              
+
               {/* Tags */}
               {(document.tags || []).length > 0 && (
                 <div className="flex flex-wrap gap-0.5">
@@ -374,7 +376,7 @@ function DocumentItem({
           <div className="flex-shrink-0">
             {getFileIcon(document.file_type, document.mime_type, document.filename)}
           </div>
-          
+
           {/* Document Info */}
           <div className="flex-grow min-w-0">
             <div className="flex items-start justify-between gap-2 mb-1">
@@ -388,15 +390,15 @@ function DocumentItem({
                   </p>
                 )}
               </div>
-              
+
               {/* Status Badge */}
               {document.indexed && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Badge 
-                        className={getStatusColor(document.indexed)} 
-                        variant="secondary" 
+                      <Badge
+                        className={getStatusColor(document.indexed)}
+                        variant="secondary"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {getStatusLabel(document.indexed)}
@@ -421,18 +423,20 @@ function DocumentItem({
             )}
 
             {/* Highlights */}
-            {showHighlights && document.matches && document.matches.length > 0 && (
+            {showHighlights && (document.search_matches || document.matches) && (document.search_matches || document.matches).length > 0 && (
               <div className="mb-2">
-                <p className="text-xs text-muted-foreground mb-1">Matches:</p>
+                <p className="text-xs text-muted-foreground mb-1">Relevant content:</p>
                 <div className="space-y-1">
-                  {document.matches.slice(0, 2).map((match: any, idx: number) => (
-                    <p key={idx} className="text-xs bg-yellow-50 p-1 rounded border-l-2 border-yellow-200 line-clamp-2">
-                      ...{match.text || match}...
-                    </p>
+                  {(document.search_matches || document.matches).slice(0, 2).map((match: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="text-xs bg-yellow-50 dark:bg-yellow-900/20 p-1 rounded border-l-2 border-yellow-200 dark:border-yellow-700 line-clamp-2 [&>mark]:bg-yellow-200 [&>mark]:text-yellow-900 [&>mark]:px-0.5 [&>mark]:rounded-sm dark:[&>mark]:bg-yellow-900/40 dark:[&>mark]:text-yellow-100"
+                      dangerouslySetInnerHTML={{ __html: match.text || match }}
+                    />
                   ))}
-                  {document.matches.length > 2 && (
+                  {(document.search_matches || document.matches).length > 2 && (
                     <p className="text-xs text-muted-foreground">
-                      +{document.matches.length - 2} more matches
+                      +{(document.search_matches || document.matches).length - 2} more matches
                     </p>
                   )}
                 </div>
@@ -459,7 +463,7 @@ function DocumentItem({
                   </div>
                 )}
               </div>
-              
+
               {/* Actions */}
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button
@@ -471,7 +475,7 @@ function DocumentItem({
                 >
                   <IconDownload className="h-3 w-3" />
                 </Button>
-                
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -499,7 +503,7 @@ function DocumentItem({
                     {onDelete && (
                       <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={(e) => handleAction('delete', e)}
                           className="text-red-600 focus:text-red-600"
                         >

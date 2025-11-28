@@ -5,7 +5,7 @@ import React, { createContext, useContext, useState, ReactNode } from 'react'
 // Notification types
 interface Notification {
   id: string
-  type: 'upload' | 'document' | 'user' | 'system' | 'success' | 'error' | 'info'
+  type: 'upload' | 'document' | 'user' | 'system' | 'success' | 'error' | 'info' | 'warning'
   title: string
   message: string
   timestamp: Date
@@ -55,13 +55,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }
 
   const markAsRead = (id: string) => {
-    setNotifications(prev => 
+    setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     )
   }
 
   const markAllAsRead = () => {
-    setNotifications(prev => 
+    setNotifications(prev =>
       prev.map(n => ({ ...n, read: true }))
     )
   }
@@ -107,16 +107,16 @@ export function useAppState() {
 // useConnection removed. Show ConnectionError only on real API failures.
 
 export function useNotifications() {
-  const { 
-    notifications, 
-    addNotification, 
-    markAsRead, 
-    markAllAsRead, 
-    removeNotification, 
+  const {
+    notifications,
+    addNotification,
+    markAsRead,
+    markAllAsRead,
+    removeNotification,
     clearAllNotifications,
-    unreadCount 
+    unreadCount
   } = useAppState()
-  
+
   return {
     notifications,
     addNotification,

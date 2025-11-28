@@ -512,7 +512,9 @@
         "edit": "Edit",
         "convertToTemplate": "Convert to template",
         "delete": "Delete"
-      }
+      },
+      "relevantContent": "Relevant content:",
+      "moreMatches": "more matches"
     },
     "empty": {
       "title": "No documents found",

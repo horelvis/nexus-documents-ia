@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { DocumentList } from "@/components/documents/document-list"
 import {
   IconPlus,
   IconSearch,
@@ -274,34 +275,38 @@ export default function DocumentsPage() {
           })
         } else {
 
-          // Transform search results to match document format
           const documents = searchResults.data?.map(result => {
             const doc = result.document || result || {}
+            const docAny = doc as any
+            // Map matches from search result (sibling to document) or use existing search_matches
+            const matches = result.matches || docAny.search_matches || docAny.matches || []
+
             return {
               ...doc,
               id: doc.id || '',
               title: doc.title || doc.filename || 'Untitled',
               filename: doc.filename || 'unknown',
               status: 'active' as const,
-              created_by: doc.created_by || {},
+              created_by: docAny.created_by || {},
               tenant_id: tenantId,
               indexed: doc.indexed || 'INDEXED',
-              file_hash: doc.file_hash || '',
-              version: doc.version || 1,
-              category: doc.category || '',
-              document_metadata: doc.document_metadata || {},
-              content: doc.content || '',
-              extracted_entities: doc.extracted_entities || null,
-              ocr_status: doc.ocr_status || null,
-              ocr_completed_at: doc.ocr_completed_at || null,
-              signature_fields: doc.signature_fields || null,
+              file_hash: docAny.file_hash || '',
+              version: docAny.version || 1,
+              category: docAny.category || '',
+              document_metadata: docAny.document_metadata || {},
+              content: docAny.content || '',
+              extracted_entities: docAny.extracted_entities || null,
+              ocr_status: docAny.ocr_status || null,
+              ocr_completed_at: docAny.ocr_completed_at || null,
+              signature_fields: docAny.signature_fields || null,
               file_type: doc.file_type || 'unknown',
               mime_type: doc.mime_type || 'application/octet-stream',
               file_size: doc.file_size || 0,
               created_at: doc.created_at || new Date().toISOString(),
               updated_at: doc.updated_at || new Date().toISOString(),
               tags: doc.tags || [],
-              description: doc.description || ''
+              description: doc.description || '',
+              search_matches: matches
             }
           }) || []
           response = {
@@ -820,193 +825,19 @@ export default function DocumentsPage() {
             </Card>
           )}
 
-          {/* Documents List */}
+          {/* Documents Grid View */}
           {!isLoading && !error && viewMode === 'grid' && filteredDocuments.length > 0 && (
-            <div className="space-y-2">
-              {filteredDocuments.map((document: any) => (
-                <Card
-                  key={document.id}
-                  className="hover:shadow-lg transition-shadow cursor-pointer group"
-                  onClick={() => handleViewDocument(document)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0">
-                        {getFileIcon(document.file_type, document.mime_type, document.filename)}
-                      </div>
-
-                      <div className="flex-grow min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <div className="min-w-0 flex-1">
-                            <h3
-                              className="text-base font-medium truncate cursor-pointer hover:text-blue-600 transition-colors"
-                              title={document.title || document.filename}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleFullPagePreview(document)
-                              }}
-                            >
-                              {document.title || document.filename}
-                            </h3>
-                            {document.description && (
-                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                                {document.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{t('documentsPage.grid.size', { size: formatFileSize(document.file_size) })}</span>
-                            <span>•</span>
-                            <span>{t('documentsPage.grid.uploaded', { date: new Date(document.created_at).toLocaleDateString() })}</span>
-                            <span>•</span>
-                            <span>{document.category || t('documentsPage.grid.noCategory')}</span>
-                          </div>
-
-                          <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleFullPagePreview(document)
-                              }}
-                              title={t('documentsPage.grid.tooltips.preview')}
-                              className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                            >
-                              <IconEye className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDownloadDocument(document)
-                              }}
-                              title={t('documentsPage.grid.tooltips.download')}
-                              className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                            >
-                              <IconDownload className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleShareDocument(document)
-                              }}
-                              title={t('documentsPage.grid.tooltips.share')}
-                              className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                            >
-                              <IconShare2 className="h-3.5 w-3.5" />
-                            </Button>
-
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={(e) => e.stopPropagation()}
-                                  title={t('documentsPage.grid.tooltips.more')}
-                                  className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                                >
-                                  <IconDotsVertical className="h-3.5 w-3.5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleViewDocument(document)}>
-                                  <IconEye className="mr-2 h-4 w-4" />
-                                  {t('documentsPage.grid.actions.viewDetails')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDownloadDocument(document)}>
-                                  <IconDownload className="mr-2 h-4 w-4" />
-                                  {t('documentsPage.grid.actions.download')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleRequestSignature(document)}>
-                                  <IconSignature className="mr-2 h-4 w-4" />
-                                  {t('documentsPage.grid.actions.requestSignature')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEditDocument(document)}>
-                                  <IconEdit className="mr-2 h-4 w-4" />
-                                  {t('documentsPage.grid.actions.edit')}
-                                </DropdownMenuItem>
-                                {isTenantAdmin && (
-                                  <DropdownMenuItem
-                                    onClick={(event) => {
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                      handleConvertToTemplate(document)
-                                    }}
-                                    disabled={convertingDocumentId === document.id}
-                                  >
-                                    {convertingDocumentId === document.id ? (
-                                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <IconFileTypeDoc className="mr-2 h-4 w-4" />
-                                    )}
-                                    {t('documentsPage.grid.actions.convertToTemplate')}
-                                  </DropdownMenuItem>
-                                )}
-
-
-                                <DropdownMenuSeparator />
-
-                                <DropdownMenuItem
-                                  onClick={() => handleDeleteDocument(document)}
-                                  className="text-red-600 focus:text-red-600"
-                                >
-                                  <IconTrash className="mr-2 h-4 w-4" />
-                                  {t('documentsPage.grid.actions.delete')}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </div>
-
-                        {(document.tags || []).length > 0 && (
-                          <div className="flex flex-wrap gap-0.5">
-                            {(document.tags || []).map((tag: string) => (
-                              <Badge key={tag} variant="outline" className="text-xs px-1.5 py-0 h-5">
-                                {tag}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Search Highlights */}
-                    {document.search_matches && document.search_matches.length > 0 && (
-                      <div className="mt-3 pt-3 border-t">
-                        <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                          {t('documentsPage.grid.relevantContent', 'Relevant content:')}
-                        </p>
-                        <div className="space-y-1.5">
-                          {document.search_matches.slice(0, 2).map((match: any, idx: number) => (
-                            <div
-                              key={idx}
-                              className="text-xs text-muted-foreground bg-muted/50 p-2 rounded border border-border/50"
-                            >
-                              <div
-                                className="line-clamp-2 [&>mark]:bg-yellow-200 [&>mark]:text-yellow-900 [&>mark]:px-0.5 [&>mark]:rounded-sm dark:[&>mark]:bg-yellow-900/40 dark:[&>mark]:text-yellow-100"
-                                dangerouslySetInnerHTML={{ __html: match.text || match }}
-                              />
-                            </div>
-                          ))}
-                          {document.search_matches.length > 2 && (
-                            <p className="text-xs text-muted-foreground pl-1">
-                              +{document.search_matches.length - 2} {t('documentsPage.grid.moreMatches', 'more matches')}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <DocumentList
+              documents={filteredDocuments}
+              viewMode="grid"
+              showHighlights={true}
+              useDetailedView={true}
+              onDocumentClick={handleViewDocument}
+              onDownload={handleDownloadDocument}
+              onDelete={handleDeleteDocument}
+              onShare={handleShareDocument}
+              onSignature={handleRequestSignature}
+            />
           )}
 
           {/* Documents Table */}

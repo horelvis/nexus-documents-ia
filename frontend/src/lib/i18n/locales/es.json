@@ -557,7 +557,9 @@
         "edit": "Editar",
         "convertToTemplate": "Convertir a plantilla",
         "delete": "Eliminar"
-      }
+      },
+      "relevantContent": "Contenido relevante:",
+      "moreMatches": "coincidencias más"
     },
     "empty": {
       "title": "No se encontraron documentos",
