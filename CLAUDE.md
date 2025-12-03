@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Install dependencies**: `cd frontend && npm install`
 
 ### Full Stack Development
-- **Backend services**: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Qdrant, microservices with live reload)
+- **Backend services**: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
 - **Frontend**: `cd frontend && npm run dev` (runs on port 3000)
 - **API Documentation**: Available at `http://localhost:8000/docs` when backend is running
 
@@ -45,10 +45,9 @@ cd backend/docker && docker compose up -d
 
 **What's mounted:**
 - `backend/` → Container's `/app` (main API)
-- `microservices/langchain-service/app` → Container's `/app/app`
-- `microservices/langroid-service/app` → Container's `/app/app`
 - `microservices/storage-service/app` → Container's `/app/app`
-- `microservices/ollama-service/app` → Container's `/app/app`
+- `microservices/weaviate-service/app` → Container's `/app/app`
+- `microservices/elasticsearch-service/app` → Container's `/app/app`
 
 #### Production Mode
 ```bash
@@ -79,9 +78,9 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 
 **Backend**: FastAPI with Python 3.9+, using async/await patterns throughout
 **Frontend**: Next.js 15 with App Router, TypeScript, and Clerk authentication
-**Database**: PostgreSQL for relational data, Qdrant for vector embeddings
+**Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
 **Storage**: Google Cloud Storage for files
-**AI/ML**: Multiple LLM integrations (Ollama, LangChain, Langroid)
+**AI/ML**: Ollama LLMs with Elysia agentic framework (Emma AI)
 
 ### Key Architectural Patterns
 
@@ -93,11 +92,12 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 
 #### Microservices Design
 - **Main API** (port 8000): Core business logic, authentication, document management
-- **LangChain Service** (port 8001): Document processing, embeddings, basic LLM operations
-- **Langroid Service** (port 8002): Advanced AI agents and multi-agent conversations
 - **Storage Service** (port 8003): Google Cloud Storage operations with signed URLs
-- **Ollama Service** (port 8004): Local LLM hosting and inference
-- **Gotenberg Service** (port 8005): Document conversion, PDF generation, thumbnail creation
+- **Weaviate Service** (port 8007): Emma AI with Elysia framework, vector search, RAG capabilities
+- **Elasticsearch Service** (port 8008): Full-text search, document indexing, hybrid search
+- **Gotenberg Service** (port 3000): Document conversion, PDF generation, thumbnail creation
+- **Background Worker** (port 8100): Async task processing with Celery
+- **Temporal.io** (port 7233): Workflow orchestration for complex document pipelines
 
 #### Database Schema Highlights
 - **Multi-tenant models**: All core entities have tenant_id foreign keys
@@ -129,8 +129,11 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 - **Alembic**: Database migration management
 - **Clerk**: Authentication and user management
 - **Stripe**: Payment processing integration
-- **Qdrant**: Vector database for semantic search
+- **Weaviate**: Vector database for semantic search with Elysia integration
+- **Elasticsearch**: Full-text search and document indexing
 - **Redis**: Caching and session storage
+- **Celery**: Distributed task queue for async processing
+- **Temporal.io**: Workflow orchestration engine
 
 #### Frontend Technologies
 - **Next.js 15**: React framework with App Router

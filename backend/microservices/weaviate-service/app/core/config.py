@@ -5,6 +5,9 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
+DEBUG_DEFAULT = os.getenv("DEBUG", "true").lower() == "true"
+
+
 class Settings(BaseSettings):
     """Weaviate Service settings"""
     
@@ -14,7 +17,7 @@ class Settings(BaseSettings):
     MICROSERVICES_API_KEY: str = Field(
         validation_alias=AliasChoices("MICROSERVICES_API_KEY")
     )
-    debug: bool = os.getenv("DEBUG", "true").lower() == "true"
+    debug: bool = DEBUG_DEFAULT
     
     # Weaviate configuration
     weaviate_url: str = os.getenv("WEAVIATE_URL", "http://weaviate:8080")
@@ -76,7 +79,11 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    
+    request_logging_enabled: bool = os.getenv(
+        "REQUEST_LOGGING_ENABLED",
+        "true" if DEBUG_DEFAULT else "false"
+    ).lower() == "true"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

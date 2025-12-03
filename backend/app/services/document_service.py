@@ -14,7 +14,7 @@ from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
 from app.services.embedding_service import EmbeddingService
-from app.services.vector_service import VectorService  # Added VectorService import
+from app.services.weaviate_client import weaviate_client
 from app.services.text_extraction_client import TextExtractionClient
 from app.services.elasticsearch_client import elasticsearch_client  # Added Elasticsearch Client
 from app.services.langextract_client import langextract_client
@@ -61,7 +61,7 @@ class DocumentService:
             
         self.user_id = user_id
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.vector_service = VectorService(self.tenant_id, self.user_id)  # Pass user_id to VectorService
+        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
@@ -252,12 +252,16 @@ class DocumentService:
 
         # Parallel Indexing: Weaviate + Elasticsearch
         logger.info(f"Starting parallel indexing for document {db_document.id}")
-        
+
         # Task 1: Weaviate (Vector Store)
-        weaviate_task = self.vector_service.add_document(
-            doc_id=str(db_document.id),
-            text=document_text,
-            metadata=document_metadata,
+        weaviate_document_data = {
+            "doc_id": str(db_document.id),
+            "text": document_text,
+            "metadata": document_metadata,
+        }
+        weaviate_task = weaviate_client.add_document(
+            collection_name=self.collection_name,
+            document_data=weaviate_document_data
         )
 
         # Task 2: Elasticsearch (Keyword/Hybrid)
@@ -277,7 +281,7 @@ class DocumentService:
         es_result = results[1]
 
         # Analyze results
-        weaviate_success = isinstance(weaviate_result, bool) and weaviate_result
+        weaviate_success = isinstance(weaviate_result, dict) and weaviate_result.get("success", False)
         es_success = isinstance(es_result, bool) and es_result
 
         # Log outcomes
@@ -496,7 +500,7 @@ class DocumentService:
                 logger.warning(f"Failed to delete file from storage: {document.file_path}")
             
             # Eliminar del vector store
-            await self.vector_service.delete_document(doc_id=doc_id) # Ensure single call to vector_service
+            await weaviate_client.delete_document(collection_name=self.collection_name, doc_id=doc_id)
             
             # Note: Document chunks are managed by the vector service, not in the main database
             # Eliminar documento de la base de datos

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, RefreshCw, Eye, Trash2, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import { Document, DocumentPreviewResponse } from '@/lib/types'
 import { useDocumentService } from '@/lib/services/document.service'
 import { useDocumentInsightsService } from '@/lib/services/document-insights.service'
-import PDFViewer from '@/components/documents/pdf-viewer'
+import PDFEntityViewer, { DocumentEntity as PdfDocumentEntity } from '@/components/documents/pdf-entity-viewer'
 import { ShareDocumentDialog } from '@/components/documents/share-document-dialog'
 import { ImagePreview } from '@/components/documents/image-preview'
 import { API_CONFIG } from '@/lib/config'
@@ -53,11 +53,31 @@ export default function DocumentPreviewPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [isExtractingEntities, setIsExtractingEntities] = useState(false)
+  const [focusedEntity, setFocusedEntity] = useState<PdfDocumentEntity | null>(null)
 
   const documentService = useDocumentService()
   const insightsService = useDocumentInsightsService()
   const { t } = useTranslation()
   const { emitDocumentEvent } = useDocumentEvents()
+  const pdfViewerRef = useRef<HTMLDivElement | null>(null)
+
+  const normalizeEntityForPdf = (entity: any): PdfDocumentEntity => ({
+    class: entity.class || entity.type || 'otros',
+    text: entity.text || entity.name || '',
+    attributes: entity.attributes || entity.metadata || {},
+    source_indices: entity.source_indices || entity.metadata?.source_indices || null,
+    page: entity.page || entity.metadata?.page
+  })
+
+  const handleEntitySelect = (entity: any) => {
+    const normalized = normalizeEntityForPdf(entity)
+    if (!normalized.text) return
+
+    setFocusedEntity(normalized)
+    if (pdfViewerRef.current) {
+      pdfViewerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   // Helper function to construct full URLs for images (used for PDF thumbnails)
   const getFullImageUrl = (path: string) => {
@@ -552,12 +572,13 @@ export default function DocumentPreviewPage() {
               const shouldShowPdfSection = isNativePdf || (preview && preview.pdf_available)
               return shouldShowPdfSection
             })() && (
-              <div className="flex-1 flex flex-col min-h-0">
+              <div ref={pdfViewerRef} className="flex-1 flex flex-col min-h-0">
                 {pdfUrl ? (
                   <div className="flex-1 bg-card rounded-lg border overflow-hidden">
-                    <PDFViewer
+                    <PDFEntityViewer
                       url={pdfUrl}
                       fileName={document.filename}
+                      focusedEntity={focusedEntity}
                       showToolbar={true}
                       initialScale={0.9}
                       height="100%"
@@ -800,15 +821,14 @@ export default function DocumentPreviewPage() {
                                   <div
                                     key={idx}
                                     className="text-sm py-1 px-2 rounded hover:bg-muted cursor-pointer transition-colors"
-                                    onClick={() => {
-                                      router.push(`/${tenantId}/search?q=${encodeURIComponent(entityText)}`)
-                                    }}
-                                    title={`${t('common.search')}: ${entityText}`}
+                                    onClick={() => handleEntitySelect(entity)}
                                   >
                                     <span className="font-medium">{entityText}</span>
-                                    {entity.metadata?.role && (
+                                    {(
+                                      entity.metadata?.role || entity.attributes?.role
+                                    ) && (
                                       <span className="text-xs text-muted-foreground ml-2">
-                                        ({entity.metadata.role})
+                                        ({entity.metadata?.role || entity.attributes?.role})
                                       </span>
                                     )}
                                   </div>

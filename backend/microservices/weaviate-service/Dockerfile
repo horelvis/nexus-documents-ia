@@ -20,6 +20,10 @@ RUN pip install --prefer-binary -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 
+# Apply Elysia patches for local Weaviate support
+# This fixes a bug where ClientManager doesn't receive local Weaviate parameters
+COPY elysia_patches/collection.py /usr/local/lib/python3.12/site-packages/elysia/preprocessing/collection.py
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:8007/health || exit 1

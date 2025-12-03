@@ -11,7 +11,7 @@ interface Entity {
   id: string
   name: string
   email: string
-  type: 'contact' | 'organization' | 'user' | 'agent'
+  type: string
   role?: string
 }
 
@@ -24,10 +24,11 @@ interface RichInputWithMentionsProps {
   mentionTrigger?: string
   className?: string
   disabled?: boolean
+  autoInsertEntityTag?: boolean
 }
 
 export const RichInputWithMentions = forwardRef<HTMLDivElement, RichInputWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', className, disabled = false, ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', className, disabled = false, autoInsertEntityTag = true, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -85,15 +86,9 @@ export const RichInputWithMentions = forwardRef<HTMLDivElement, RichInputWithMen
       
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
-      
-      // Create entity tag instead of plain text
-      const entityTag = createEntityTag({
-        type: entity.type,
-        id: entity.id,
-        name: entity.name
-      })
-      
-      const newValue = beforeMention + entityTag + afterMention
+      const newValue = autoInsertEntityTag
+        ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
+        : beforeMention + afterMention
       
       onChange(newValue)
       setEntitySearchOpen(false)

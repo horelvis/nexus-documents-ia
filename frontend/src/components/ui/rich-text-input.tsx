@@ -1,10 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect, forwardRef } from "react"
+import { useState, useRef, forwardRef } from "react"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
-import { IconUser, IconBuilding, IconRobot, IconX } from "@tabler/icons-react"
-import { parseEntityTags, findEntityAtPosition } from "./entity-renderer"
+import { findEntityAtPosition } from "./entity-renderer"
 import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
 import { createEntityTag } from "./entity-renderer"
 
@@ -12,7 +10,7 @@ interface Entity {
   id: string
   name: string
   email: string
-  type: 'contact' | 'organization' | 'user' | 'agent'
+  type: string
   role?: string
 }
 
@@ -25,6 +23,7 @@ interface RichTextInputProps {
   documentId?: string
   onEntitySelect?: (entity: Entity) => void
   mentionTrigger?: string
+  autoInsertEntityTag?: boolean
   onKeyDown?: (e: React.KeyboardEvent) => void
 }
 
@@ -38,30 +37,14 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
     documentId,
     onEntitySelect,
     mentionTrigger = '@',
+    autoInsertEntityTag = true,
     onKeyDown,
     ...props 
   }, ref) => {
-    const [isEditing, setIsEditing] = useState(false)
-    const [inputValue, setInputValue] = useState("")
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
-    
     const inputRef = useRef<HTMLInputElement>(null)
-    const containerRef = useRef<HTMLDivElement>(null)
-
-    // Parse the value to show entities as badges
-    const parts = parseEntityTags(value)
-
-    const handleContainerClick = () => {
-      if (!disabled) {
-        setIsEditing(true)
-        setInputValue(value)
-        setTimeout(() => {
-          inputRef.current?.focus()
-        }, 0)
-      }
-    }
 
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,14 +129,9 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
       
-      // Create entity tag
-      const entityTag = createEntityTag({
-        type: entity.type,
-        id: entity.id,
-        name: entity.name
-      })
-      
-      const newValue = beforeMention + entityTag + afterMention
+      const newValue = autoInsertEntityTag
+        ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
+        : beforeMention + afterMention
       
       onChange(newValue)
       setEntitySearchOpen(false)
@@ -162,14 +140,6 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
       
       if (onEntitySelect) {
         onEntitySelect(entity)
-      }
-    }
-
-    const removeEntity = (partIndex: number) => {
-      const part = parts[partIndex]
-      if (part && part.type === 'entity') {
-        const newValue = value.substring(0, part.start) + value.substring(part.end)
-        onChange(newValue)
       }
     }
 
@@ -206,40 +176,6 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
           />
         )}
         
-        {/* Preview with badges */}
-        {value.includes('<@') && (
-          <div className="flex items-center flex-wrap gap-1 p-2 bg-muted/30 border rounded-md">
-            <span className="text-xs text-muted-foreground mr-2">Preview:</span>
-            {parts.map((part, index) => {
-              if (part.type === 'text' && part.content) {
-                return (
-                  <span key={index} className="whitespace-pre-wrap">
-                    {part.content}
-                  </span>
-                )
-              }
-
-              if (part.type === 'entity' && part.entity) {
-                const { type, name } = part.entity
-                const Icon = type === 'organization' ? IconBuilding : 
-                            type === 'agent' ? IconRobot : IconUser
-
-                return (
-                  <Badge 
-                    key={index} 
-                    variant="secondary" 
-                    className="inline-flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary/20 border-primary/20"
-                  >
-                    <Icon className="h-3 w-3" />
-                    <span>{name}</span>
-                  </Badge>
-                )
-              }
-
-              return null
-            })}
-          </div>
-        )}
       </div>
     )
   }

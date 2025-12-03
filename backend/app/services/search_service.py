@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.services.vector_service import VectorService
+from app.services.weaviate_client import weaviate_client
 from app.services.elasticsearch_client import elasticsearch_client
 from app.services.elysia_insights_service import ElysiaInsightsService
 from app.db.database import SessionLocal
@@ -23,10 +23,10 @@ class SearchService:
     
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
-        self.vector_service = VectorService(tenant_id)  # Weaviate - Primary
+        self.collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
         self.elysia = ElysiaInsightsService(default_tenant=tenant_id, default_user="search_service")
         # Elasticsearch is now a microservice - no local initialization needed
-        
+
         logger.info(f"SearchService initialized for tenant: {tenant_id}")
         logger.info("Using hybrid architecture: Elasticsearch (primary) + Weaviate (semantic specialized)")
     
@@ -109,15 +109,18 @@ class SearchService:
                 # Use Weaviate for semantic search when explicitly requested
                 logger.info("🚀 Using Weaviate for semantic search (specialized mode)")
                 if doc_ids:
-                    vector_results = await self.vector_service.search_by_document_ids(
+                    vector_results = await weaviate_client.search_by_document_ids(
+                        self.collection_name,
                         doc_ids=doc_ids,
                         query=query,
                         limit=limit
                     )
                 else:
-                    vector_results = await self.vector_service.search_similar(
+                    vector_results = await weaviate_client.search_similar(
+                        self.collection_name,
                         query=query,
-                        limit=limit
+                        limit=limit,
+                        tenant_id=self.tenant_id
                     )
                 
                 # Enrich with complete document data
@@ -475,27 +478,29 @@ class SearchService:
         """
         try:
             logger.debug(f"Semantic search for query: {query[:100]}...")
-            
-            # Por ahora, llamamos directamente al método síncrono del vector_service
-            # En el futuro, se puede agregar lógica de filtros adicionales aquí
+
             if filters:
-                # Aplicar filtros si están presentes
                 doc_ids = filters.get('doc_ids')
                 if doc_ids:
-                    results = await self.vector_service.search_by_document_ids(
+                    results = await weaviate_client.search_by_document_ids(
+                        self.collection_name,
                         doc_ids=doc_ids,
                         query=query,
                         limit=limit
                     )
                 else:
-                    results = await self.vector_service.search_similar(
+                    results = await weaviate_client.search_similar(
+                        self.collection_name,
                         query=query,
-                        limit=limit
+                        limit=limit,
+                        tenant_id=self.tenant_id
                     )
             else:
-                results = await self.vector_service.search_similar(
+                results = await weaviate_client.search_similar(
+                    self.collection_name,
                     query=query,
-                    limit=limit
+                    limit=limit,
+                    tenant_id=self.tenant_id
                 )
             
             # Formatear resultados para que coincidan con la estructura esperada por los tests
@@ -522,7 +527,7 @@ class SearchService:
             Información del vector store
         """
         try:
-            return await self.vector_service.get_collection_info()
+            return await weaviate_client.get_collection_info(self.collection_name)
         except Exception as e:
             logger.error(f"Error getting vector store info: {str(e)}")
             return {}

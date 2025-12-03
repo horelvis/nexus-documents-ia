@@ -26,7 +26,8 @@ import {
   IconDotsVertical,
   IconBrain,
   IconRefresh,
-  IconAlertTriangle
+  IconAlertTriangle,
+  IconX
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -50,6 +51,7 @@ import { useSearchService } from "@/lib/services/search.service"
 import { useDocumentInsightsService, type RecentDocument } from "@/lib/services/document-insights.service"
 import { useApiClient } from "@/lib/api-client"
 import { Document as ApiDocument } from "@/lib/types"
+import type { Entity as SearchEntity } from "@/lib/services/entity.service"
 import {
   EditDocumentDialog,
   DeleteDocumentDialog,
@@ -58,6 +60,7 @@ import {
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 import { useTranslation } from "@/lib/i18n/hooks"
+import { createEntityTag } from "@/components/ui/entity-renderer"
 
 type DocumentFilterOption = 'all' | 'recent';
 
@@ -163,6 +166,7 @@ export default function DocumentsPage() {
 
   // Local state for search input
   const [localSearchQuery, setLocalSearchQuery] = useState(searchQuery)
+  const [selectedEntities, setSelectedEntities] = useState<SearchEntity[]>([])
 
   const handleFilterChange = (value: DocumentFilterOption) => {
     setSelectedFilter(value)
@@ -170,7 +174,20 @@ export default function DocumentsPage() {
   }
 
   const handleSearchConfirm = () => {
-    setSearchQuery(localSearchQuery)
+    const mentionQuery = selectedEntities
+      .map(entity => createEntityTag({
+        type: entity.type || 'entity',
+        id: entity.id,
+        name: entity.name
+      }))
+      .join(' ')
+
+    const combinedQuery = [localSearchQuery.trim(), mentionQuery]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+
+    setSearchQuery(combinedQuery)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -713,11 +730,27 @@ export default function DocumentsPage() {
                       onKeyDown={handleKeyDown}
                       className="pl-10 border bg-background shadow-sm"
                       documentId="general"
+                      autoInsertEntityTag={false}
                       onEntitySelect={(entity) => {
-                        console.log("Entity selected in document search:", entity)
-                        handleSearchConfirm()
+                        handleEntitySelectForSearch(entity)
                       }}
                     />
+                    {selectedEntities.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedEntities.map(entity => (
+                          <Badge key={entity.id} variant="secondary" className="flex items-center gap-1">
+                            <span>{entity.name}</span>
+                            <button
+                              type="button"
+                              className="hover:text-destructive"
+                              onClick={() => handleRemoveSearchEntity(entity.id)}
+                            >
+                              <IconX className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
@@ -968,3 +1001,15 @@ export default function DocumentsPage() {
     </div>
   )
 }
+  const handleEntitySelectForSearch = (entity: SearchEntity) => {
+    setSelectedEntities(prev => {
+      if (prev.some(e => e.id === entity.id)) {
+        return prev
+      }
+      return [...prev, entity]
+    })
+  }
+
+  const handleRemoveSearchEntity = (entityId: string) => {
+    setSelectedEntities(prev => prev.filter(entity => entity.id !== entityId))
+  }

@@ -10,7 +10,7 @@ interface Entity {
   id: string
   name: string
   email: string
-  type: 'contact' | 'organization' | 'user' | 'agent'  // TODO: Only 'user' and 'agent' are currently implemented in backend
+  type: string  // backend may return dynamic entity types
   role?: string
 }
 
@@ -73,8 +73,7 @@ export function EntitySearchMenu({
           if (response.data?.entities && response.data.entities.length > 0) {
             // Type cast the entities to ensure type safety
             const typedEntities = response.data.entities.map(entity => ({
-              ...entity,
-              type: entity.type as Entity['type']
+              ...entity
             }))
             setEntities(typedEntities)
             console.log(`[${timestamp}] Found ${typedEntities.length} entities`)

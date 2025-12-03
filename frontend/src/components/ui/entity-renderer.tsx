@@ -4,8 +4,8 @@ import { ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { IconUser, IconBuilding, IconRobot } from "@tabler/icons-react"
 
-interface EntityTag {
-  type: 'user' | 'contact' | 'organization' | 'agent'
+export interface EntityTag {
+  type: string
   id: string
   name: string
 }
@@ -30,44 +30,59 @@ export function parseEntityTags(text: string): Array<{
     start: number,
     end: number
   }> = []
-  
-  const entityRegex = /<@(user|contact|organization|agent):([^:]+):([^>]+)>/g
-  let lastIndex = 0
-  let match
 
-  while ((match = entityRegex.exec(text)) !== null) {
-    // Add text before the entity
-    if (match.index > lastIndex) {
+  const legacyRegex = /<@([^:>]+):([^:>]+):([^>]+)>/g
+  const matches: Array<{
+    start: number
+    end: number
+    content: string
+    entity?: EntityTag
+  }> = []
+
+  let match: RegExpExecArray | null
+
+  while ((match = legacyRegex.exec(text)) !== null) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      content: match[0],
+      entity: {
+        type: match[1],
+        id: match[2],
+        name: match[3]
+      }
+    })
+  }
+
+  matches.sort((a, b) => a.start - b.start)
+
+  let cursor = 0
+  for (const entry of matches) {
+    if (entry.start > cursor) {
       parts.push({
         type: 'text',
-        content: text.substring(lastIndex, match.index),
-        start: lastIndex,
-        end: match.index
+        content: text.substring(cursor, entry.start),
+        start: cursor,
+        end: entry.start
       })
     }
 
-    // Add the entity
     parts.push({
       type: 'entity',
-      content: match[0],
-      entity: {
-        type: match[1] as EntityTag['type'],
-        id: match[2],
-        name: match[3]
-      },
-      start: match.index,
-      end: match.index + match[0].length
+      content: entry.content,
+      entity: entry.entity,
+      start: entry.start,
+      end: entry.end
     })
 
-    lastIndex = match.index + match[0].length
+    cursor = entry.end
   }
 
-  // Add remaining text
-  if (lastIndex < text.length) {
+  if (cursor < text.length) {
     parts.push({
       type: 'text',
-      content: text.substring(lastIndex),
-      start: lastIndex,
+      content: text.substring(cursor),
+      start: cursor,
       end: text.length
     })
   }

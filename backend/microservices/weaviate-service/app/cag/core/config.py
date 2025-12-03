@@ -1,13 +1,19 @@
 """Configuration for CAG Service"""
 import os
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """CAG Service settings"""
-    
+
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
     # Service configuration
     service_name: str = "cag-service"
     service_port: int = 8008
@@ -63,10 +69,6 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
 
 settings = Settings()

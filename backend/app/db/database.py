@@ -12,6 +12,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 
+from fastapi import HTTPException
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,9 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"❌ Database session error: {str(e)}")
         db.rollback()

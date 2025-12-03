@@ -1,7 +1,6 @@
 "use client"
 
 import { InputWithMentions, TextareaWithMentions } from "./input-with-mentions"
-import { EntityRenderer, extractPlainText } from "./entity-renderer"
 
 interface InputWithEntityPreviewProps {
   value: string
@@ -12,7 +11,6 @@ interface InputWithEntityPreviewProps {
   mentionTrigger?: string
   className?: string
   disabled?: boolean
-  showPreview?: boolean
   variant?: 'input' | 'textarea'
   rows?: number
   onKeyDown?: (e: React.KeyboardEvent) => void
@@ -21,7 +19,6 @@ interface InputWithEntityPreviewProps {
 export function InputWithEntityPreview({
   value,
   onChange,
-  showPreview = true,
   variant = 'input',
   ...props
 }: InputWithEntityPreviewProps) {
@@ -53,14 +50,6 @@ export function InputWithEntityPreview({
           disabled={props.disabled}
           onKeyDown={props.onKeyDown}
         />
-      )}
-      
-      {/* Preview with rendered entities */}
-      {showPreview && value.includes('<@') && (
-        <div className="text-sm bg-muted/30 border rounded-md p-2">
-          <div className="text-xs text-muted-foreground mb-1">Preview:</div>
-          <EntityRenderer text={value} />
-        </div>
       )}
     </div>
   )

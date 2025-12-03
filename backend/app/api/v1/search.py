@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.models import User, Document
 from app.services.search_service import SearchService
-from app.services.vector_service import VectorService
+from app.services.weaviate_client import weaviate_client
 from app.services.reindex_service import ReindexService
 from app.services.cag_client import CAGClient
 from app.schemas.document import ChatMessage
@@ -312,9 +312,9 @@ async def check_search_system_health(
     """
     Verifica la salud del sistema de búsqueda semántica.
     """
-    vector_service = VectorService(tenant_id=tenant_id)
-    health_info = await vector_service.check_system_health()
-    
+    # Use weaviate_client to check health
+    health_info = await weaviate_client.health_check()
+
     return health_info
 
 
@@ -324,21 +324,12 @@ async def fix_embedding_model(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Intenta descargar automáticamente el modelo de embeddings si falta.
+    Endpoint removido - el modelo de embeddings ahora es manejado por el microservicio de Weaviate.
     """
-    vector_service = VectorService(tenant_id=tenant_id)
-    success = await vector_service._ensure_embedding_model()
-    
-    if success:
-        return {
-            "message": "Embedding model is now available",
-            "success": True
-        }
-    else:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to ensure embedding model availability"
-        )
+    raise HTTPException(
+        status_code=501,
+        detail="Embedding model management is now handled by the Weaviate microservice"
+    )
 
 
 @router.get("/reindex/status", response_model=dict)
@@ -432,24 +423,12 @@ async def fix_collection_and_reindex(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Arregla problemas de dimensiones y reindexa automáticamente.
+    Endpoint removido - los problemas de dimensiones ahora son manejados por el microservicio de Weaviate.
     """
-    vector_service = VectorService(tenant_id=tenant_id)
-    
-    # Trigger dimension fix
-    fix_success = await vector_service._auto_fix_dimension_mismatch()
-    
-    if fix_success:
-        return {
-            "message": "Collection fix and reindexing initiated successfully",
-            "status": "in_progress",
-            "success": True
-        }
-    else:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to initiate collection fix and reindexing"
-        )
+    raise HTTPException(
+        status_code=501,
+        detail="Collection dimension management is now handled by the Weaviate microservice"
+    )
 
 
 @router.post("/auto-reindex", response_model=dict)

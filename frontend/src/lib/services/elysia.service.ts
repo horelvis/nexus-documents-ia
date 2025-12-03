@@ -32,13 +32,64 @@ export interface ElysiaAgent {
   status: 'active' | 'inactive'
 }
 
+const normalizedBaseUrl = (API_CONFIG.BASE_URL || '').replace(/\/$/, '')
+const BASE_API_URL = `${normalizedBaseUrl}${API_CONFIG.API_V1}`
+const ELYSIA_QUERY_PATH = '/weaviate/elysia/query'
+const ELYSIA_TOOLS_PATH = '/weaviate/elysia/tools'
+
+const fetchWithTimeout = async (url: string, options: RequestInit = {}) => {
+  const controller = new AbortController()
+  const timeoutMs = API_CONFIG.TIMEOUT ?? 30000
+  const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } catch (error) {
+    const errorName = (error as { name?: string })?.name
+
+    if (errorName === 'AbortError') {
+      throw new Error(`Elysia request timed out after ${Math.ceil(timeoutMs / 1000)}s`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+const parseResponse = async <T>(response: Response, defaultErrorPrefix: string): Promise<T> => {
+  const rawPayload = await response.text()
+  let data: any = null
+
+  if (rawPayload) {
+    try {
+      data = JSON.parse(rawPayload)
+    } catch {
+      data = rawPayload
+    }
+  }
+
+  if (!response.ok) {
+    const detail =
+      typeof data === 'string'
+        ? data
+        : data?.detail || data?.message || data?.error || ''
+    const message = detail
+      ? `${defaultErrorPrefix}: ${detail}`
+      : `${defaultErrorPrefix} (status ${response.status})`
+    throw new Error(message)
+  }
+
+  return data as T
+}
+
 export function useElysiaService() {
   const { getToken } = useAuth()
+  const apiBase = BASE_API_URL
 
   const queryElysia = useCallback(async (query: ElysiaQuery): Promise<ElysiaResponse> => {
     const token = await getToken()
 
-    const response = await fetch(`/api/v1/weaviate/elysia/query`, {
+    const response = await fetchWithTimeout(`${apiBase}${ELYSIA_QUERY_PATH}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -47,24 +98,25 @@ export function useElysiaService() {
       body: JSON.stringify(query)
     })
 
-    if (!response.ok) {
-      throw new Error(`Elysia query failed: ${response.status}`)
-    }
-
-    return await response.json()
-  }, [getToken])
+    return await parseResponse<ElysiaResponse>(response, 'Elysia query failed')
+  }, [getToken, apiBase])
 
   const getAvailableAgents = useCallback(async (): Promise<ElysiaAgent[]> => {
     try {
       const token = await getToken()
-      const response = await fetch(`/api/v1/weaviate/elysia/tools`, {
+      const response = await fetchWithTimeout(`${apiBase}${ELYSIA_TOOLS_PATH}`, {
         headers: {
           'Authorization': `Bearer ${token || ''}`
         }
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to get agents: ${response.status}`)
+      const data = await parseResponse<{ tools?: ElysiaAgent[] }>(
+        response,
+        'Failed to get agents'
+      )
+
+      if (data?.tools && Array.isArray(data.tools) && data.tools.length > 0) {
+        return data.tools
       }
 
       return [
@@ -78,7 +130,7 @@ export function useElysiaService() {
       console.error('Error getting Elysia agents:', error)
       return []
     }
-  }, [getToken])
+  }, [getToken, apiBase])
 
   const sendMessage = useCallback(async (
     message: string,

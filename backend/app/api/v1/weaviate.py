@@ -4,9 +4,8 @@ from typing import Dict, Any, Optional
 import logging
 import httpx
 
-from app.api.dependencies import get_current_tenant
+from app.api.dependencies import get_current_tenant_id
 from app.core.config import settings
-from app.db.models import Tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -17,7 +16,7 @@ WEAVIATE_SERVICE_URL = settings.WEAVIATE_SERVICE_URL
 @router.post("/elysia/query")
 async def elysia_query(
     request: Request,
-    current_tenant: Tenant = Depends(get_current_tenant)
+    tenant_id: str = Depends(get_current_tenant_id)
 ):
     """Proxy Elysia queries to Weaviate service"""
     try:
@@ -25,7 +24,7 @@ async def elysia_query(
         body = await request.json()
         
         # Ensure tenant_id is set to current tenant
-        body["tenant_id"] = str(current_tenant.id)
+        body["tenant_id"] = tenant_id
         
         # Get microservice API key from settings
         microservice_key = settings.microservices_api_key
@@ -116,12 +115,12 @@ async def elysia_list_tools():
 @router.post("/elysia/feedback")
 async def elysia_feedback(
     request: Request,
-    current_tenant: Tenant = Depends(get_current_tenant)
+    tenant_id: str = Depends(get_current_tenant_id)
 ):
     """Submit feedback to Elysia for learning"""
     try:
         body = await request.json()
-        body["tenant_id"] = str(current_tenant.id)
+        body["tenant_id"] = tenant_id
         
         microservice_key = settings.microservices_api_key
         

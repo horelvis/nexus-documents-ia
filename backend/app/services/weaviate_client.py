@@ -252,7 +252,7 @@ class WeaviateClient:
                     url,
                     list(migration_data.keys()),
                 )
-                
+
                 response = await client.post(url, json=migration_data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
@@ -263,6 +263,53 @@ class WeaviateClient:
                 e,
             )
             raise
+
+    async def delete_document(self, collection_name: str, doc_id: str) -> bool:
+        """Delete a document from Weaviate collection"""
+        try:
+            async with httpx.AsyncClient() as client:
+                url = f"{self.base_url}/weaviate/collections/{collection_name}/documents/{doc_id}"
+                logger.debug("Deleting document from Weaviate | url=%s", url)
+                response = await client.delete(url, headers=self.headers)
+                response.raise_for_status()
+                return True
+        except Exception as e:
+            logger.exception("❌ Failed to delete document | collection=%s doc_id=%s error=%s", collection_name, doc_id, e)
+            return False
+
+    async def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
+        """Get information about a Weaviate collection"""
+        try:
+            async with httpx.AsyncClient() as client:
+                url = f"{self.base_url}/weaviate/collections/{collection_name}/info"
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.exception("❌ Failed to get collection info | collection=%s error=%s", collection_name, e)
+            return {"error": str(e)}
+
+    async def search_similar(self, collection_name: str, query: str, limit: int = 5, tenant_id: str = None) -> List[Dict[str, Any]]:
+        """Search for similar documents using Weaviate semantic search"""
+        search_request = {
+            "query": query,
+            "limit": limit,
+            "tenant_id": tenant_id,
+            "search_type": "hybrid"
+        }
+        result = await self.search_documents(collection_name, search_request)
+        return result.get("results", [])
+
+    async def search_by_document_ids(self, collection_name: str, doc_ids: List[str], query: str = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search within specific documents by their IDs"""
+        search_request = {
+            "query": query or "",
+            "limit": limit,
+            "doc_ids": doc_ids,
+            "search_type": "keyword" if not query else "hybrid"
+        }
+        result = await self.search_documents(collection_name, search_request)
+        return result.get("results", [])
 
 
 # Global client instance

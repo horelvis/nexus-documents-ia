@@ -33,7 +33,7 @@ from app.db.models import (
 from app.db.agent_models import AgentExecution, AgentExecutionLog, AgentDefinition
 from app.services.async_storage_service import AsyncStorageService
 from app.services.elasticsearch_client import elasticsearch_client
-from app.services.vector_service import VectorService
+from app.services.weaviate_client import weaviate_client
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -460,23 +460,24 @@ class LGPDDeletionService:
     async def _delete_from_vector_services(self, user: User) -> Dict[str, Any]:
         """Delete user data from vector databases"""
         deletion_results = {}
-        
+
         try:
-            vector_service = VectorService(str(user.tenant_id))
-            
+            collection_name = f"Nexus_{str(user.tenant_id).replace('-', '_')}_documents"
+
             # Delete all documents by user from vector database
-            # This would require implementing user-based deletion in VectorService
+            # This would require implementing user-based deletion in WeaviateClient
             # For now, we'll log the requirement
-            deletion_results["qdrant"] = {
+            deletion_results["weaviate"] = {
                 "status": "manual_cleanup_required",
-                "note": "Vector embeddings need manual cleanup by tenant"
+                "note": "Vector embeddings need manual cleanup by tenant",
+                "collection": collection_name
             }
-            
-            logger.warning(f"Vector service cleanup required for user {user.id}")
-            
+
+            logger.warning(f"Weaviate cleanup required for user {user.id} in collection {collection_name}")
+
         except Exception as e:
-            deletion_results["qdrant"] = {"status": "failed", "error": str(e)}
-        
+            deletion_results["weaviate"] = {"status": "failed", "error": str(e)}
+
         return deletion_results
     
     async def _delete_from_elasticsearch(self, user: User) -> Dict[str, Any]:

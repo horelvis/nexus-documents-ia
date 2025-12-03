@@ -416,14 +416,14 @@ async def delete_all_documents(
     
     try:
         # Delete from vector store first
-        from app.services.vector_service import VectorService
-        vector_service = VectorService(tenant_id=tenant_id)
-        
+        from app.services.weaviate_client import weaviate_client
+
         # Delete collection if exists
-        collection_name = f"documents_{tenant_id}"
+        collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
         try:
-            await vector_service.client.delete_collection(collection_name)
-            logger.info(f"Deleted vector collection: {collection_name}")
+            # Weaviate client doesn't have a delete_collection method yet
+            # This would need to be implemented in the microservice
+            logger.warning(f"Weaviate collection deletion not yet implemented: {collection_name}")
         except Exception as e:
             logger.warning(f"Could not delete vector collection: {e}")
         
@@ -479,24 +479,24 @@ async def clear_vector_database(
         )
     
     tenant_id = str(current_user.tenant_id)
-    
+
     try:
-        from app.services.vector_service import VectorService
-        vector_service = VectorService(tenant_id=tenant_id)
-        
-        collection_name = f"documents_{tenant_id}"
+        from app.services.weaviate_client import weaviate_client
+
+        collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
         collections_cleared = []
-        
+
         # Delete and recreate collection
         try:
-            await vector_service.client.delete_collection(collection_name)
-            logger.info(f"Deleted vector collection: {collection_name}")
-            
-            # Recreate empty collection
-            await vector_service._ensure_collection_exists()
-            logger.info(f"Recreated empty vector collection: {collection_name}")
-            
-            collections_cleared.append(collection_name)
+            # Weaviate client doesn't have delete_collection or _ensure_collection_exists methods
+            # This would need to be implemented in the microservice
+            logger.warning(f"Weaviate collection clear not yet implemented: {collection_name}")
+            raise HTTPException(
+                status_code=501,
+                detail="Vector database clear operation not yet implemented for Weaviate"
+            )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error clearing vector collection: {e}")
             raise

@@ -129,7 +129,7 @@ async def search_public_knowledge_get(
     jurisdictions: Optional[List[Jurisdiction]] = Query(None, description="Filter by jurisdictions"),
     topics: Optional[List[str]] = Query(None, description="Filter by topics"),
     verified_only: bool = Query(False, description="Only verified documents"),
-    search_type: str = Query("hybrid", regex="^(vector|keyword|hybrid)$", description="Search type")
+    search_type: str = Query("hybrid", pattern="^(vector|keyword|hybrid)$", description="Search type")
 ):
     """
     Search the public knowledge base (GET method for simpler queries).

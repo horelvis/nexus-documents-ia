@@ -314,6 +314,20 @@ class ElasticsearchClient:
             logger.error(f"Failed to create index via microservice: {e}")
             return False
 
+    async def get_document(self, tenant_id: str, doc_id: str) -> Dict[str, Any]:
+        """Get a single document by ID via microservice"""
+        try:
+            response = await self._make_request(
+                "GET",
+                f"/document/{tenant_id}/{doc_id}"
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to get document via microservice: {e}")
+            return {}
+
 
 # Global client instance
 elasticsearch_client = ElasticsearchClient()

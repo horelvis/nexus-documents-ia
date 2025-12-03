@@ -6,7 +6,7 @@ export interface Entity {
   id: string
   name: string
   email: string
-  type: 'contact' | 'organization' | 'user' | 'agent'
+  type: string
   role?: string
   metadata?: Record<string, any>
 }

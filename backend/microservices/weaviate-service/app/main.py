@@ -2,6 +2,44 @@
 Weaviate Microservice with Elysia Integration
 Provides advanced RAG capabilities using Weaviate + Elysia decision trees
 """
+import warnings
+
+# Suppress httpx deprecation warning from litellm (uses data= instead of content=)
+# This is a known issue in litellm: https://github.com/BerriAI/litellm/issues
+warnings.filterwarnings(
+    "ignore",
+    message="Use 'content=<...>' to upload raw bytes/text content.",
+    category=DeprecationWarning,
+    module="httpx._models"
+)
+
+# Suppress pydantic v2 deprecation warnings (class Config -> model_config)
+# These will be fixed in future but are not breaking changes
+try:
+    from pydantic import PydanticDeprecatedSince20
+    warnings.filterwarnings("ignore", category=PydanticDeprecatedSince20)
+except ImportError:
+    pass
+warnings.filterwarnings(
+    "ignore",
+    message=".*class-based `config` is deprecated.*",
+    category=DeprecationWarning
+)
+
+# Suppress FastAPI regex deprecation warning
+warnings.filterwarnings(
+    "ignore",
+    message="`regex` has been deprecated.*",
+    category=DeprecationWarning
+)
+
+# Suppress Click shell_completion deprecation from spacy
+warnings.filterwarnings(
+    "ignore",
+    message=".*Importing 'parser.split_arg_string' is deprecated.*",
+    category=DeprecationWarning
+)
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -105,6 +143,9 @@ app.add_middleware(
 # Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if not settings.request_logging_enabled:
+        return await call_next(request)
+
     start_time = time.time()
     
     # Skip health check spam

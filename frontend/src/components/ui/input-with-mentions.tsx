@@ -10,7 +10,7 @@ interface Entity {
   id: string
   name: string
   email: string
-  type: 'contact' | 'organization' | 'user' | 'agent'
+  type: string
   role?: string
 }
 
@@ -21,6 +21,7 @@ interface InputWithMentionsProps extends Omit<InputProps, 'onChange' | 'value'> 
   placeholder?: string
   onEntitySelect?: (entity: Entity) => void
   mentionTrigger?: string // Default: '@'
+  autoInsertEntityTag?: boolean
 }
 
 interface TextareaWithMentionsProps extends Omit<TextareaProps, 'onChange' | 'value'> {
@@ -31,10 +32,11 @@ interface TextareaWithMentionsProps extends Omit<TextareaProps, 'onChange' | 'va
   onEntitySelect?: (entity: Entity) => void
   mentionTrigger?: string // Default: '@'
   variant?: 'input' | 'textarea'
+  autoInsertEntityTag?: boolean
 }
 
 const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -84,15 +86,9 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
       
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
-      
-      // Create entity tag instead of plain text
-      const entityTag = createEntityTag({
-        type: entity.type,
-        id: entity.id,
-        name: entity.name
-      })
-      
-      const newValue = beforeMention + entityTag + afterMention
+      const newValue = autoInsertEntityTag
+        ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
+        : beforeMention + afterMention
       
       onChange(newValue)
       setEntitySearchOpen(false)
@@ -197,7 +193,7 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
 InputWithMentions.displayName = "InputWithMentions"
 
 const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -247,15 +243,9 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
       
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
-      
-      // Create entity tag instead of plain text
-      const entityTag = createEntityTag({
-        type: entity.type,
-        id: entity.id,
-        name: entity.name
-      })
-      
-      const newValue = beforeMention + entityTag + afterMention
+      const newValue = autoInsertEntityTag
+        ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
+        : beforeMention + afterMention
       
       onChange(newValue)
       setEntitySearchOpen(false)

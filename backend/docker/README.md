@@ -76,18 +76,31 @@ This directory contains Docker configurations for running the Nexus Document Bac
 
 ## Services Overview
 
-| Service | Dev Port | Prod Port | Description |
-|---------|----------|-----------|-------------|
-| Main API | 8000 | 8000 | FastAPI main application |
-| LangChain | 8001 | 8001 | Document processing & embeddings |
-| Langroid | 8002 | 8002 | Advanced AI agents |
-| Storage | 8003 | 8003 | Google Cloud Storage service |
-| Ollama API | 8004 | 8004 | LLM API wrapper |
-| Ollama Server | 11434 | 11434 | Ollama LLM server |
-| **Gotenberg** | **3001** | **3001** | **Document conversion to PDF** |
-| PostgreSQL | 5432 | 5432 | Main database |
-| Redis | 6379 | 6379 | Cache & sessions |
-| Qdrant | 6333 | 6333 | Vector database |
+### Microservices
+
+| Service | Port | Description |
+|---------|------|-------------|
+| Main API | 8000 | FastAPI main application |
+| Storage Service | 8003 | Google Cloud Storage operations |
+| Weaviate Service | 8007 | Emma AI (Elysia + Weaviate vector DB) |
+| Elasticsearch Service | 8008 | Full-text search & document indexing |
+| LangExtract Service | 8010 | Document language extraction |
+| TextExtract Service | 8011 | OCR & text extraction |
+| Template Editor Service | 8012 | Document template management |
+| Background Worker | 8100 | Celery async task worker |
+
+### Infrastructure
+
+| Service | Port | Description |
+|---------|------|-------------|
+| PostgreSQL | 5432 | Main relational database |
+| Redis | 6379 | Cache, sessions & Celery broker |
+| Weaviate | 8080 | Vector database for semantic search |
+| Elasticsearch | 9200 | Full-text search engine |
+| Ollama Server | 11434 | Local LLM server (qwen3:32b, etc.) |
+| Gotenberg | 3000 | Document conversion to PDF |
+| Temporal.io Server | 7233 | Workflow orchestration |
+| Temporal.io UI | 8233 | Workflow management dashboard |
 
 ## Environment Setup
 

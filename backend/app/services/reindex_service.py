@@ -12,7 +12,7 @@ from app.db.models import Document
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.document_service import DocumentService
-from app.services.vector_service import VectorService
+from app.services.weaviate_client import weaviate_client
 from app.services.storage_factory import StorageServiceFactory
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class ReindexService:
     def __init__(self, tenant_id: str = None, user_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         self.user_id = user_id
-        self.vector_service = VectorService(tenant_id=self.tenant_id, user_id=self.user_id)
+        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
         self.storage_service = StorageServiceFactory.create_storage_service(
             tenant_id=self.tenant_id,
             user_id=self.user_id
@@ -68,12 +68,13 @@ class ReindexService:
             # Check which INDEXED ones are missing from vector store
             for doc in indexed_documents:
                 # Try to search for this specific document in vector store
-                results = await self.vector_service.search_by_document_ids(
+                results = await weaviate_client.search_by_document_ids(
+                    collection_name=self.collection_name,
                     doc_ids=[str(doc.id)],
                     query=doc.title or doc.filename,
                     limit=1
                 )
-                
+
                 # If no results found, document needs reindexing
                 if not results:
                     documents_needing_reindex.append(doc)
