@@ -21,15 +21,25 @@ class Settings(BaseSettings):
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY", "")  # For cloud instances
     weaviate_timeout: int = int(os.getenv("WEAVIATE_TIMEOUT", "30"))
     
-    # Elysia configuration
+    # Elysia / LLM configuration
     elysia_enabled: bool = os.getenv("ELYSIA_ENABLED", "true").lower() == "true"
-    elysia_model_provider: str = os.getenv("ELYSIA_MODEL_PROVIDER", "ollama")
-    elysia_model_name: str = os.getenv("ELYSIA_MODEL_NAME", "llama3.2:latest")
+    elysia_model_provider: str = os.getenv(
+        "LLM_PROVIDER", os.getenv("ELYSIA_MODEL_PROVIDER", "ollama")
+    ).lower()
+    elysia_model_name: str = os.getenv(
+        "LLM_MODEL", os.getenv("ELYSIA_MODEL_NAME", "llama3.2:latest")
+    )
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     
     # Model configuration (fallback to existing Ollama)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+
+    # Google Gemini configuration
+    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     
     # Embedding configuration
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text:latest")

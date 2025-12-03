@@ -1,6 +1,5 @@
 from typing import List, Optional, Dict, Any
 import os
-import datetime
 import logging
 import io
 import shutil
@@ -71,6 +70,9 @@ async def create_document(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     category: Optional[str] = Form(None),
+    cliente: Optional[str] = Form(None),
+    periodo: Optional[str] = Form(None),
+    tipo_documento: Optional[str] = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(require_document_upload_permission_async),
     tenant_id: str = Depends(get_current_tenant_id_async),
@@ -93,7 +95,10 @@ async def create_document(
         title=title,
         description=description,
         tags=tag_list,
-        category=category
+        category=category,
+        cliente=cliente,
+        periodo=periodo,
+        tipo_documento=tipo_documento
     )
     
     # Proactive Preview Generation: Enqueue background task
@@ -137,13 +142,15 @@ async def get_document(
         file_type=doc.file_type,
         file_size=doc.file_size,
         mime_type=doc.mime_type,
+        category=doc.category,
         tenant_id=doc.tenant_id,
         created_by=doc.created_by,
         indexed=doc.indexed,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         tags=tags_list,
-        extracted_entities=doc.extracted_entities
+        extracted_entities=doc.extracted_entities,
+        document_metadata=doc.document_metadata
     )
 
 
@@ -432,34 +439,14 @@ async def get_document_preview(
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        # Optimización: Verificar cache antes de descargar el archivo
+        # Verificar cache antes de descargar el archivo
         if not force_regenerate:
             cached_preview = await preview_service.get_preview_info(doc_id)
             if cached_preview:
                 return cached_preview
-            
-            # Si no hay cache y no forzamos, generar en background y devolver pending
-            await queue_service.enqueue_preview_generation(
-                document_id=doc_id,
-                tenant_id=tenant_id,
-                user_id=str(current_user.id),
-                preview_type="all",
-                priority="high"
-            )
-            
-            return {
-                "type": "pending",
-                "conversion_method": "pending",
-                "pdf_available": False,
-                "message": "Preview generation started in background",
-                "original_format": document.file_type,
-                "file_size": document.file_size,
-                "generated_at": None,
-                "thumbnails": []
-            }
-        
-        # Si force_regenerate=True, ejecutamos síncronamente (fallback/debug)
-        # Descargar archivo para procesamiento usando el storage interno del servicio
+
+        # Generar síncronamente bajo demanda del usuario (no encolar)
+        # El encolado solo se usa para generación proactiva en uploads
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, document.filename or 'document')
         
@@ -581,30 +568,45 @@ async def recategorize_document(
     """
     doc = await document_service.get_document(db=db, doc_id=doc_id)
     
-    # Check if document has content
-    if not doc.content:
+    # Require at least a lightweight preview for categorization
+    metadata = doc.document_metadata or {}
+    preview_candidates = [
+        metadata.get("text_preview"),
+        metadata.get("summary"),
+        doc.description,
+        doc.title,
+        doc.filename,
+    ]
+    content_preview = next((str(value).strip() for value in preview_candidates if value), None)
+
+    if not content_preview:
         return {
             "document_id": doc_id,
             "status": "failed",
-            "error": "Document has no extracted content"
+            "error": "Document has no available preview to categorize"
         }
     
-    job_id = await queue_service.enqueue_document_categorization(
-        document_id=doc_id,
+    result = await document_service.categorize_document(
+        db,
+        doc_id,
+        content_preview=content_preview,
         tenant_id=tenant_id,
         user_id=str(current_user.id),
-        priority="high"
+        source="manual_api"
     )
     
-    if job_id:
+    if result.get("success"):
         return {
             "document_id": doc_id,
-            "status": "queued",
-            "job_id": job_id,
-            "message": "Document queued for recategorization"
+            "status": "updated",
+            "category": result.get("category")
         }
-    else:
-        return {"status": "failed", "error": "Failed to queue document"}
+    
+    return {
+        "document_id": doc_id,
+        "status": "failed",
+        "error": result.get("error", "Unable to categorize document")
+    }
 
 
 @router.post("/recategorize-all")
@@ -618,7 +620,7 @@ async def recategorize_all_documents(
     """
     Recategoriza todos los documentos del tenant.
     """
-    query = select(DBDocument.id).filter(
+    query = select(DBDocument).filter(
         DBDocument.tenant_id == tenant_id,
         DBDocument.indexed > 0
     )
@@ -633,49 +635,48 @@ async def recategorize_all_documents(
         )
     
     result = await db.execute(query)
-    document_ids = [str(row[0]) for row in result.fetchall()]
+    documents = result.scalars().all()
     
-    if not document_ids:
+    if not documents:
         return {"total_documents": 0, "message": "No documents found"}
     
-    job_id = await queue_service.enqueue_batch_categorization(
-        document_ids=document_ids,
-        tenant_id=tenant_id,
-        user_id=str(current_user.id),
-        batch_size=batch_size,
-        priority="default"
-    )
+    target_docs = documents[:batch_size] if batch_size else documents
+    processed = 0
+    failures = 0
+    for doc in target_docs:
+        metadata = doc.document_metadata or {}
+        preview_candidates = [
+            metadata.get("text_preview"),
+            metadata.get("summary"),
+            doc.description,
+            doc.title,
+            doc.filename,
+        ]
+        content_preview = next(
+            (str(value).strip() for value in preview_candidates if value), None
+        )
+        if not content_preview:
+            failures += 1
+            continue
+        
+        result = await document_service.categorize_document(
+            db,
+            str(doc.id),
+            content_preview=content_preview,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            source="bulk_api",
+        )
+        if result.get("success"):
+            processed += 1
+        else:
+            failures += 1
     
-    if job_id:
-        return {
-            "total_documents": len(document_ids),
-            "status": "queued",
-            "job_id": job_id
-        }
-    else:
-        return {"status": "failed", "error": "Failed to queue documents"}
-
-
-@router.get("/categorization/job/{job_id}")
-async def get_categorization_job_status(job_id: str):
-    """
-    Obtiene el estado de un trabajo de categorización.
-    """
-    status = await queue_service.get_job_status(job_id)
-    if status:
-        return status
-    raise HTTPException(status_code=404, detail="Job not found")
-
-
-@router.get("/categorization/queue-stats")
-async def get_categorization_queue_stats():
-    """
-    Obtiene estadísticas de la cola de categorización.
-    """
-    stats = await queue_service.get_queue_stats()
     return {
-        "queues": stats,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "total_documents": len(target_docs),
+        "processed": processed,
+        "failed": failures,
+        "message": "Categorization executed directly via CAG"
     }
 
 

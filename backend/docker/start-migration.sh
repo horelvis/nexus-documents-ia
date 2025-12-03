@@ -54,8 +54,8 @@ curl -s http://localhost:8080/v1/.well-known/ready > /dev/null && echo "    ✅ 
 echo "  🧠 Weaviate Service + Elysia..."
 curl -s http://localhost:8007/health > /dev/null && echo "    ✅ Weaviate Service healthy" || echo "    ❌ Weaviate Service unhealthy"
 
-echo "  🤖 CAG Service (CrewAI)..."
-curl -s http://localhost:8008/health > /dev/null && echo "    ✅ CAG Service healthy" || echo "    ❌ CAG Service unhealthy"
+echo "  🤖 Integrated CAG endpoints..."
+curl -s http://localhost:8007/api/v1/cag/health > /dev/null && echo "    ✅ CAG API healthy" || echo "    ❌ CAG API unhealthy"
 
 echo ""
 echo "🎯 Migration Status Check..."
@@ -69,7 +69,7 @@ echo "  - Migration API: http://localhost:8000/api/v1/migration/"
 echo "  - Weaviate: http://localhost:8080"
 echo "  - Weaviate Service: http://localhost:8007"
 echo "  - Qdrant (legacy): http://localhost:6333"
-echo "  - CAG Service: http://localhost:8008"
+echo "  - CAG API (via Weaviate Service): http://localhost:8007/api/v1/cag"
 
 echo ""
 echo "🧠 Advanced Elysia Tools Available:"

@@ -132,9 +132,9 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 
 MICROSERVICES ARCHITECTURE:
 ╔══════════════════════════════════════════════════════════════════════╗
-║ • CAG Service (8008): Contenido + agentes para análisis avanzado     ║
+║ • Weaviate Service + CAG (8007): Vector proxy y agentes contextuales ║
 ║ • LangExtract Service (8009): Extracción automática de entidades     ║
-║ • TextExtract Service (8012): Extracción determinística/OCR          ║
+║ • TextExtract Service (8000): Extracción determinística/OCR          ║
 ║ • Weaviate Service (8007): Proxy vectorial multi-tenant             ║
 ║ • Temporalio Service (8010): Workflows durables + Process Library    ║
 ║ • Template Editor Service (8011): Gestión de plantillas colaborativa ║
@@ -243,10 +243,9 @@ nexus-document-backend/
 │   │   └── main.py              # FastAPI application
 │   │
 │   ├── microservices/           # Microservice applications
-│   │   ├── cag-service/                 # Content Analysis & Generative agents
 │   │   ├── langextract-service/         # Entity extraction pipeline
 │   │   ├── textextract-service/         # Deterministic text/OCR extraction
-│   │   ├── weaviate-service/            # Vector proxy + multi-tenant guards
+│   │   ├── weaviate-service/            # Vector proxy + integrated CAG/agents
 │   │   ├── elasticsearch-service/       # Hybrid keyword/vector bridge
 │   │   ├── storage-service/             # Async storage + signed URLs
 │   │   ├── template-editor-service/     # Workflow template editor APIs
@@ -342,7 +341,7 @@ nexus-document-backend/
 6. **Access the application**
    - API Documentation: http://localhost:8000/docs
    - Main API: http://localhost:8000
-   - CAG Service: http://localhost:8008
+   - CAG API (vía Weaviate): http://localhost:8007/api/v1/cag
    - LangExtract Service: http://localhost:8009
    - Temporalio Service: http://localhost:8010
 
@@ -405,12 +404,9 @@ cd backend/docker
 # 3. Add service logic in app/services/
 # 4. Add tests in tests/
 
-# Run specific microservice
-docker compose up cag-service
-
 # View logs
 docker compose logs -f api
-docker compose logs -f cag-service
+docker compose logs -f weaviate-service
 
 # Access database
 docker compose exec db psql -U postgres -d nexus_docs
@@ -487,9 +483,10 @@ GCS_BUCKET_PREFIX=nexus-docs
 
 # Microservices
 MICROSERVICE_API_KEY=your-unified-api-key
-CAG_SERVICE_URL=http://cag-service:8000
+CAG_SERVICE_URL=http://weaviate-service:8000
 LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
 TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+```
 STORAGE_SERVICE_URL=http://storage-service:8000
 WEAVIATE_SERVICE_URL=http://weaviate-service:8000
 ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8000
@@ -570,52 +567,54 @@ API rate limits by subscription tier:
 
 ## Microservices
 
-### 1. CAG Service (Port 8008)
+> **Nota:** salvo la API principal y las UIs públicas, ningún microservicio publica puertos al host. Todos escuchan en la red `backend-network` con sus URLs internas (`http://{service}:puerto`). Usa `docker compose exec <service> /bin/sh` si necesitas probarlos manualmente.
+
+### 1. CAG API integrada (`http://api:8000`)
 - **Contenido + agentes**: Ejecuta cadenas de razonamiento y genera resúmenes/insights avanzados.
 - **Embeddings inteligentes**: Coordina llamadas a Ollama/OpenAI y publica resultados en Weaviate.
 - **API principal**: `POST /analyze`, `POST /agents/run`, `GET /health`.
 
-### 2. LangExtract Service (Port 8009)
+### 2. LangExtract Service (`http://langextract-service:8000`)
 - **Extracción automática** de entidades en cada upload (personas, empresas, importes, fechas).
 - **LLM specialization** con prompts médicos/legales según tenant.
 - **Endpoints**: `POST /extract`, `POST /bulk`, `GET /health`.
 
-### 3. TextExtract Service (Port 8012)
+### 3. TextExtract Service (`http://textextract-service:8000`)
 - **Parsing determinístico/OCR** para PDFs complejos y anexos escaneados.
 - **Normalización**: limpia tablas, firmas y campos estructurados antes de LangExtract.
 - **Endpoints**: `POST /parse`, `POST /ocr`, `GET /health`.
 
-### 4. Storage Service (Port 8003)
+### 4. Storage Service (`http://storage-service:8000`)
 - **Operaciones GCS** asíncronas (upload, delete, versioning) con signed URLs.
 - **Metadata hooks**: emite eventos para CAG/LangExtract tras completar el guardado.
 - **Endpoints**: `POST /upload`, `GET /download/{id}`, `DELETE /files/{id}`.
 
-### 5. Weaviate Service (Port 8007)
-- **Proxy multi-tenant** frente a Weaviate core (auth, cuotas, métricas).
-- **Operaciones**: creación de collections, búsqueda híbrida y filtros por tenant.
-- **Endpoints**: `POST /vectors/upsert`, `POST /search`, `GET /stats`.
+### 5. Weaviate Service + CAG (`http://weaviate-service:8000`)
+- **Proxy multi-tenant** frente a Weaviate core (auth, cuotas, métricas) + agentes integrados.
+- **Operaciones**: collections, búsqueda híbrida y endpoints `/api/v1/cag/*`.
+- **Endpoints**: `POST /weaviate/search`, `POST /api/v1/cag/query`, `GET /health`.
 
-### 6. Elasticsearch Service (Port 8005)
+### 6. Elasticsearch Service (`http://elasticsearch-service:8000`)
 - **Búsqueda híbrida** (keyword + vector), filtros avanzados y analytics.
 - **Fallback**: entrega resultados cuando no hay embeddings o se requiere BM25 puro.
 - **Endpoints**: `POST /search`, `POST /reindex`, `GET /health`.
 
-### 7. Temporalio Service (Port 8010)
+### 7. Temporalio Service (`http://temporalio-service:8000`)
 - **Orquestación durable** para workflows (contract renewal, onboarding, etc.).
 - **Signals & Queries**: controla ejecuciones en vivo y expone visibilidad agregada.
 - **Endpoints**: `POST /workflows/start`, `GET /workflows/status/{id}`, `POST /workflows/cancel`.
 
-### 8. Template Editor Service (Port 8011)
+### 8. Template Editor Service (`http://template-editor-service:8000`)
 - **Process Library**: administra plantillas, formularios dinámicos e inputs validados.
 - **Colaboración**: controla versiones, permisos y publicación por tenant.
 - **Endpoints**: `GET /templates`, `POST /templates`, `PATCH /templates/{id}`.
 
-### 9. Gotenberg Service (Port 3000 interno)
+### 9. Gotenberg Service (`http://gotenberg:3000`, solo interno)
 - **Conversión de documentos** (HTML/Office → PDF), generación de thumbnails y snapshots para el visor.
 - **Pipeline legal + preview**: Storage lo invoca tras cada upload para producir versiones firmables y el preview incrustado en la UI.
 - **Endpoints**: `POST /convert/html`, `POST /convert/office`, `POST /merge`.
 
-### 10. Ollama Host (Port 11434)
+### 10. Ollama Host (`http://genai-ollama:11434`, solo interno)
 - **LLM local** para inferencias privadas (Llama 3.x, GPT-OSS, Mistral).
 - **Streaming** y soporte para modelos embebidos utilizados por CAG/LangExtract.
 - **Endpoints**: `/api/generate`, `/api/embeddings`, `/api/tags`.
@@ -654,6 +653,22 @@ cd backend/tests
 ```bash
 pytest tests/test_api/test_documents.py -v
 ```
+
+**Elysia + Weaviate smoke test (search + agent):**
+```bash
+# MICROSERVICES_API_KEY must be exported beforehand
+export MICROSERVICES_API_KEY=<<your-key>>
+./scripts/run_elysia_smoke.sh
+```
+Optional overrides:
+```
+BASE_URL=http://localhost:8000 \
+TENANT_ID=default \
+SEARCH_QUERY="contratos cloud" \
+CAG_QUERY="Resume los riesgos..." \
+./scripts/run_elysia_smoke.sh
+```
+The script issues a semantic search and an `/api/v1/cag/query` call, failing fast if any step returns a non-200 status.
 
 ### Test Coverage
 

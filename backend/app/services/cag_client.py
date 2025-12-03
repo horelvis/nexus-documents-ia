@@ -17,10 +17,66 @@ class CAGClient:
     """Client for interacting with the CAG microservice"""
     
     def __init__(self):
-        # Use docker service name for container-to-container communication
-        self.base_url = "http://cag-service:8008"
+        # Use configured service URL (now served by weaviate-service)
+        self.base_url = settings.CAG_SERVICE_URL.rstrip("/")
         self.timeout = httpx.Timeout(30.0, connect=5.0)
         self.api_key = settings.MICROSERVICES_API_KEY
+        self.default_model = (
+            settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL
+        )
+
+    async def query(
+        self,
+        *,
+        query: str,
+        tenant_id: str,
+        user_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_iterations: int = 4,
+    ) -> Dict[str, Any]:
+        """Execute a generic /api/v1/cag/query call."""
+        payload_context = context.copy() if context else {}
+        payload = {
+            "query": query,
+            "tenant_id": str(tenant_id),
+            "user_id": str(user_id),
+            "context": payload_context,
+            "model": model or self.default_model,
+            "temperature": temperature,
+            "max_iterations": max_iterations,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/cag/query",
+                    json=payload,
+                    headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            logger.error("CAG query HTTP error: %s", exc)
+            return {"success": False, "error": str(exc)}
+
+        if response.status_code != 200:
+            logger.error("CAG query failed: %s - %s", response.status_code, response.text)
+            return {
+                "success": False,
+                "error": f"CAG service error: {response.status_code}",
+                "status_code": response.status_code,
+            }
+
+        result = response.json()
+        metadata = result.get("metadata") or {}
+        metadata.setdefault("engine", "elysia")
+        result["metadata"] = metadata
+        return result
         
     async def process_with_agent(
         self,
@@ -42,79 +98,70 @@ class CAGClient:
             Agent response with reasoning, actions, and final answer
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # Use the query endpoint for conversational interactions
-                request_data = {
-                    "query": message,
-                    "tenant_id": context.get("tenant_id"),
-                    "user_id": context.get("user_id"),
-                    "context": {
-                        "conversation_id": context.get("conversation_id"),
-                        "message_history": context.get("message_history", []),
-                        "working_memory": context.get("working_memory", {}),
-                        "is_welcome": context.get("is_welcome", False),  # Pass welcome flag directly
-                        "agent_type": agent_type,
-                        "tools": tools or [
-                            "search_documents",
-                            "analyze_document", 
-                            "get_statistics",
-                            "extract_entities"
-                        ]
-                    },
-                    "model": "gemma3:12b-it-qat",
-                    "temperature": 0.7,
-                    "max_iterations": 5
+            llm_model = (
+                settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL
+            )
+            tenant_id = context.get("tenant_id") or settings.DEFAULT_TENANT
+            user_id = context.get("user_id") or "virtual_assistant"
+            agent_context = {
+                "conversation_id": context.get("conversation_id"),
+                "message_history": context.get("message_history", []),
+                "working_memory": context.get("working_memory", {}),
+                "is_welcome": context.get("is_welcome", False),
+                "agent_type": agent_type,
+                "tools": tools
+                or [
+                    "search_documents",
+                    "analyze_document",
+                    "get_statistics",
+                    "extract_entities",
+                ],
+            }
+
+            result = await self.query(
+                query=message,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                context=agent_context,
+                model=llm_model,
+                temperature=0.7,
+                max_iterations=5,
+            )
+
+            metadata = result.get("metadata", {}) or {}
+            documents = metadata.get("documents", [])
+            decision_path = metadata.get("decision_path", [])
+            tools_used = metadata.get("tools_used", [])
+            cag_success = result.get("success", False)
+            cag_error = result.get("error")
+
+            if not cag_success or cag_error:
+                logger.warning("CAG reported failure: %s", cag_error)
+                return {
+                    "error": cag_error or "CAG processing failed",
+                    "fallback": True,
+                    "response": None,
+                    "metadata": metadata,
                 }
-                
-                # Call CAG service query endpoint for conversational processing
-                response = await client.post(
-                    f"{self.base_url}/api/v1/cag/query",
-                    json=request_data,
-                    headers={
-                        "X-API-Key": self.api_key,
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    # Check if CAG actually failed even with HTTP 200
-                    cag_success = result.get("success", False)
-                    cag_error = result.get("error")
-                    
-                    if not cag_success or cag_error:
-                        # CAG failed, return error to trigger fallback
-                        logger.warning(f"CAG reported failure: {cag_error}")
-                        return {
-                            "error": cag_error or "CAG processing failed",
-                            "fallback": True,
-                            "response": None,
-                            "metadata": result.get("metadata", {})
-                        }
-                    
-                    # Transform successful CAG response to match expected format
-                    return {
-                        "response": result.get("response") or result.get("answer", ""),
-                        "success": True,
-                        "quality_score": result.get("quality_score", 0),
-                        "confidence": result.get("confidence", 0.7),
-                        "iterations": result.get("iterations", 1),
-                        "context_chunks_used": result.get("context_chunks_used", 0),
-                        "tools_used": result.get("tools_used", []),
-                        "reasoning_steps": result.get("iterations", 1),
-                        "suggestions": result.get("suggestions", []),
-                        "metadata": result.get("metadata", {}),
-                        "error": None  # Clear error for successful responses
-                    }
-                else:
-                    logger.error(f"CAG service error: {response.status_code} - {response.text}")
-                    return {
-                        "error": f"CAG service error: {response.status_code}",
-                        "fallback": True,
-                        "response": "Lo siento, no pude procesar tu solicitud con el agente. Intentando método alternativo..."
-                    }
-                    
+
+            return {
+                "response": result.get("response") or result.get("answer", ""),
+                "success": True,
+                "quality_score": result.get("quality_score", 0),
+                "confidence": result.get("confidence", 0.7),
+                "iterations": result.get("iterations", 1),
+                "context_chunks_used": result.get("context_chunks_used", 0),
+                "tools_used": tools_used,
+                "decision_path": decision_path,
+                "reasoning_steps": result.get("iterations", 1),
+                "suggestions": result.get("suggestions", []),
+                "metadata": metadata,
+                "documents": documents,
+                "engine": metadata.get("engine"),
+                "agents_used": metadata.get("agents_used", []),
+                "error": None,
+            }
+
         except httpx.TimeoutException:
             logger.error("CAG service timeout")
             return {

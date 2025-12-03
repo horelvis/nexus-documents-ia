@@ -21,10 +21,11 @@ from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 from app.services.weaviate_client import weaviate_client
-from app.services.llm_service import LLMService
 from app.services.elasticsearch_client import elasticsearch_client
 from app.services.queue_service import queue_service
 from app.services.text_extraction_client import TextExtractionClient
+from app.services.langextract_client import langextract_client
+from .document_classifier import classify_document_type
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,6 @@ class AsyncDocumentService:
         self.storage_service = None
         self.embedding_service = None
         self.vector_service = None
-        self.llm_service = None
         self.elasticsearch_service = None  # NEW: Elasticsearch for hybrid search
         self._initialized = False
 
@@ -111,6 +111,29 @@ class AsyncDocumentService:
 
         first_word = clean.split()[0]
         return first_word if first_word in valid_categories else "general"
+
+    @staticmethod
+    def _build_categorization_preview(
+        doc: Document,
+        text_content: Optional[str] = None
+    ) -> Optional[str]:
+        """Build the snippet used for LLM categorization."""
+        candidates: List[Optional[str]] = [text_content]
+        metadata = doc.document_metadata or {}
+        candidates.extend([
+            metadata.get("text_preview"),
+            metadata.get("summary"),
+            doc.description,
+            doc.title,
+            doc.filename,
+        ])
+        for candidate in candidates:
+            if not candidate:
+                continue
+            text = str(candidate).strip()
+            if text:
+                return text[:1200]
+        return None
     
     @classmethod
     async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
@@ -169,7 +192,6 @@ class AsyncDocumentService:
         
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.vector_service = VectorService(self.tenant_id)
-        self.llm_service = LLMService()
         # Elasticsearch service is now a microservice - no local initialization needed
         logger.info(f"✅ Elasticsearch microservice ready for tenant {self.tenant_id}")
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
@@ -439,7 +461,10 @@ class AsyncDocumentService:
         title: str,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        category: Optional[str] = None
+        category: Optional[str] = None,
+        cliente: Optional[str] = None,
+        periodo: Optional[str] = None,
+        tipo_documento: Optional[str] = None
     ) -> Document:
         """Upload a new document"""
         try:
@@ -452,7 +477,16 @@ class AsyncDocumentService:
             # Generate unique filename
             file_id = str(uuid.uuid4())
             stored_filename = f"{file_id}.{file_ext}"
-            
+
+            # Build document metadata
+            document_metadata = {}
+            if cliente:
+                document_metadata['cliente'] = cliente
+            if periodo:
+                document_metadata['periodo'] = periodo
+            if tipo_documento:
+                document_metadata['tipo_documento'] = tipo_documento
+
             # Create document record
             doc = Document(
                 id=uuid.uuid4(),
@@ -464,6 +498,7 @@ class AsyncDocumentService:
                 file_size=file_size,
                 mime_type=file.content_type,
                 category=category,
+                document_metadata=document_metadata if document_metadata else None,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id,
                 indexed=IndexingStatus.PROCESSING  # Set initial status
@@ -554,6 +589,12 @@ class AsyncDocumentService:
                 len(text) if text else 0,
                 extraction.language,
             )
+            
+            # Auto-classify document type
+            if text:
+                from app.services.document_classifier import classify_document_type
+                tipo_documento = classify_document_type(text[:4000])  # Simple keyword classifier
+                logger.info(f"Auto-classified document {doc_id} as: {tipo_documento}")
             
             if text:
                 try:
@@ -654,35 +695,68 @@ class AsyncDocumentService:
                 
                 # Update document status and perform routing in single session
                 async with AsyncSessionLocal() as db:
-                    stmt = select(Document).filter(Document.id == doc_id)
+                    stmt = select(Document).options(selectinload(Document.tags)).filter(Document.id == doc_id)
                     result = await db.execute(stmt)
                     doc = result.scalar_one_or_none()
                     
                     if doc:
                         doc.indexed = IndexingStatus.PROCESSING
+                        # Auto-classify document type
+                        # Use langextract for labor classification
+                        try:
+                            labor_classif = await self.langextract_client.classify_labor_document(text[:4000])
+                            tipo_documento = labor_classif.get('tipo_documento', 'otro')
+                            logger.info(f"LangExtract classified {doc_id} as: {tipo_documento}")
+                        except Exception as e:
+                            logger.warning(f"LangExtract classification failed for {doc_id}: {e}, fallback 'otro'")
+                            tipo_documento = 'otro'
+                        
                         # Generate summary instead of storing first 1000 chars
                         summary = await self._generate_document_summary(text, doc_info["filename"])
-                        doc.content = summary[:1000]  # Store summary (max 1000 chars)
-                        current_metadata = doc.document_metadata or {}
+                        current_metadata = dict(doc.document_metadata or {})
+                        current_metadata["tipo_documento"] = tipo_documento
                         current_metadata["text_extraction"] = metadata.get("text_extraction", {})
+                        if summary:
+                            current_metadata["summary"] = summary
+                            current_metadata.setdefault("text_preview", summary[:500])
                         doc.document_metadata = current_metadata
-                        await db.commit()
-                        logger.info(f"Document {doc_id} summary generated; starting search indexing pipeline")
-                        
-                        es_success = False
-                        es_error: Optional[str] = None
 
-                        logger.info(f"🔍 MANDATORY Elasticsearch indexing for document {doc_id} (title: {doc.title})")
-                        
-                        # Prepare metadata for Elasticsearch
-                        es_metadata = {
+                        # Cache frequently accessed scalar fields to avoid lazy loads after commit
+                        cached_doc = {
+                            "title": doc.title,
+                            "filename": doc.filename,
+                            "description": doc.description,
                             "file_type": doc.file_type,
                             "category": doc.category,
                             "tags": [tag.name for tag in doc.tags] if doc.tags else [],
                             "created_at": doc.created_at.isoformat() if doc.created_at else None,
                             "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                             "file_size": doc.file_size,
-                            "tenant_id": doc.tenant_id
+                            "mime_type": doc.mime_type,
+                            "tenant_id": str(doc.tenant_id),
+                            "created_by": str(doc.created_by) if doc.created_by else None,
+                        }
+
+                        await db.commit()
+                        logger.info(f"Document {doc_id} summary generated; starting search indexing pipeline")
+                        
+                        es_success = False
+                        es_error: Optional[str] = None
+
+                        logger.info(
+                            f"🔍 MANDATORY Elasticsearch indexing for document {doc_id} "
+                            f"(title: {cached_doc['title']})"
+                        )
+                        
+                        # Prepare metadata for Elasticsearch
+                        es_metadata = {
+                            "file_type": cached_doc["file_type"],
+                            "category": cached_doc["category"],
+                            "tags": cached_doc["tags"],
+                            "created_at": cached_doc["created_at"],
+                            "updated_at": cached_doc["updated_at"],
+                            "file_size": cached_doc["file_size"],
+                            "tenant_id": cached_doc["tenant_id"]
                         }
                         
                         logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
@@ -691,9 +765,9 @@ class AsyncDocumentService:
                             es_success = await elasticsearch_client.index_document(
                                 tenant_id=self.tenant_id,
                                 doc_id=str(doc_id),
-                                title=doc.title,
+                                title=cached_doc["title"],
                                 content=text[:5000],  # Index more content for better search
-                                description=doc.description,
+                                description=cached_doc["description"],
                                 metadata=es_metadata
                             )
                         except Exception as es_exc:
@@ -703,43 +777,12 @@ class AsyncDocumentService:
                         
                         if es_success:
                             logger.info(f"✅ Document {doc_id} successfully indexed in Elasticsearch")
-                            
+
                             # Perform routing analysis in the same session
                             await self._perform_routing_analysis(db, doc_info, text, file_ext)
-                            
-                            # NEW: Extract entities with LangExtract
-                            try:
-                                logger.info(f"🧠 Starting entity extraction for document {doc_id}")
-                                entities_result = await self._extract_entities_langextract(
-                                    text=text,
-                                    doc_type=doc.category or "general",
-                                    filename=doc.filename
-                                )
-                                
-                                if entities_result.get("success"):
-                                    doc.extracted_entities = entities_result.get("extractions", [])
-                                    await db.commit()
-                                    logger.info(
-                                        f"✅ Entities extracted for {doc_id}: "
-                                        f"{entities_result.get('total_extractions', 0)} entities found "
-                                        f"(type: {entities_result.get('extraction_type', 'unknown')})"
-                                    )
-                                else:
-                                    # Store empty array to indicate extraction was attempted
-                                    doc.extracted_entities = []
-                                    await db.commit()
-                                    logger.warning(
-                                        f"⚠️ Entity extraction failed for {doc_id}: "
-                                        f"{entities_result.get('error', 'Unknown error')}"
-                                    )
-                            except Exception as entity_error:
-                                logger.error(f"❌ Entity extraction exception for {doc_id}: {entity_error}")
-                                # Don't fail the whole process if entity extraction fails
-                                try:
-                                    doc.extracted_entities = []
-                                    await db.commit()
-                                except Exception:
-                                    pass  # If even this fails, continue without entities
+
+                            # Entity extraction moved to after auto-categorization (line ~877)
+                            # to avoid duplicate LangExtract calls
                         else:
                             logger.error(f"❌ Document {doc_id} failed to index in Elasticsearch")
                         
@@ -765,7 +808,7 @@ class AsyncDocumentService:
                                 await queue_service.enqueue_index_retry(
                                     document_id=str(doc.id),
                                     tenant_id=self.tenant_id,
-                                    user_id=self.user_id or str(doc.created_by),
+                                    user_id=self.user_id or (str(cached_doc["created_by"]) if cached_doc["created_by"] else None),
                                     priority="high" if not es_success else "default"
                                 )
                             except Exception as enqueue_error:
@@ -780,20 +823,58 @@ class AsyncDocumentService:
                                 f"Document {doc_id} fully indexed across Elasticsearch and Weaviate"
                             )
                 
-                # Queue document for auto-categorization
+                # Auto-categorize immediately via CAG/Elysia
                 try:
-                    await queue_service.enqueue_document_categorization(
-                        document_id=doc_id,
+                    category = await self._auto_categorize_document(
+                        doc_id,
+                        text_content=text_for_embedding,
                         tenant_id=self.tenant_id,
                         user_id=self.user_id,
-                        priority="default"
+                        source="auto_ingest",
                     )
-                    logger.info(f"Document {doc_id} queued for categorization")
+                    if category:
+                        logger.info(
+                            f"Document {doc_id} categorized automatically as '{category}'"
+                        )
                 except Exception as e:
-                    logger.warning(f"Failed to queue categorization for {doc_id}: {e}")
-                    # Don't fail the whole process if categorization queueing fails
+                    logger.warning(f"Auto-categorization failed for {doc_id}: {e}")
+
+                # Extract entities via LangExtract (generates visualization_html)
+                try:
+                    # Use CAG category or default to 'general'
+                    doc_type = category if category else "general"
+                    entity_result = await langextract_client.extract_entities(
+                        text=text_for_embedding[:50000],
+                        document_type=doc_type,
+                        filename=doc_info.get("filename"),
+                    )
+
+                    if entity_result.get("success"):
+                        async with AsyncSessionLocal() as db:
+                            stmt = select(Document).filter(Document.id == doc_id)
+                            result = await db.execute(stmt)
+                            doc = result.scalar_one_or_none()
+
+                            if doc:
+                                # Save extracted entities
+                                doc.extracted_entities = entity_result.get("extractions", [])
+
+                                # Save visualization_html and summary in document_metadata
+                                # IMPORTANT: Copy dict to trigger SQLAlchemy change detection for JSONB
+                                updated_metadata = dict(doc.document_metadata or {})
+                                updated_metadata["categorization"] = updated_metadata.get("categorization", {})
+                                updated_metadata["categorization"]["visualization_html"] = entity_result.get("visualization_html")
+                                updated_metadata["extraction_summary"] = entity_result.get("summary", {})
+                                doc.document_metadata = updated_metadata  # Reassign to trigger change
+
+                                await db.commit()
+                                logger.info(
+                                    f"Document {doc_id}: extracted {len(doc.extracted_entities)} entities with visualization"
+                                )
+                except Exception as e:
+                    logger.warning(f"Entity extraction failed for {doc_id}: {e}")
                 
-                # Routing is now handled in the same DB session above to avoid greenlet errors
+                # Routing legacy deshabilitado
             else:
                 logger.warning(f"No text extracted from document {doc_id}")
                 raise Exception("No text could be extracted from the document")
@@ -855,85 +936,101 @@ class AsyncDocumentService:
         
         return {"success": True, "message": "Document deleted successfully"}
     
-    async def _auto_categorize_document(self, doc_id: str, text_content: str):
-        """Auto-categorize document using the LangChain service"""
+    async def _auto_categorize_document(
+        self,
+        doc_id: str,
+        text_content: Optional[str] = None,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        source: str = "auto",
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[str]:
+        """Auto-categorize a document using LangExtract (no CAG fallback)."""
+        session = db
+        owns_session = False
+        if session is None:
+            session = AsyncSessionLocal()
+            owns_session = True
         try:
-            async with AsyncSessionLocal() as db:
-                # Get document info
-                stmt = select(Document).filter(Document.id == doc_id)
-                result = await db.execute(stmt)
-                doc = result.scalar_one_or_none()
-                
-                if not doc:
-                    return
-                
-                cag_prompt = (
-                    "Clasifica el siguiente documento en una de estas categorías: "
-                    "contract, invoice, report, legal, financial, technical, correspondence, presentation o general. "
-                    "Responde solo con el nombre de la categoría.\n\n"
-                    f"Nombre: {doc.filename}\n"
-                    f"Contenido:\n{text_content[:1200]}"
-                )
-                cag_answer = await self._call_cag_query(
-                    query=cag_prompt,
-                    tenant_id=str(doc.tenant_id),
-                    user_id=str(doc.created_by or self.user_id or 'system'),
-                    context={
-                        "task": "auto_categorization",
-                        "document_id": str(doc.id),
-                        "filename": doc.filename
-                    }
-                )
+            stmt = select(Document).filter(Document.id == doc_id)
+            result = await session.execute(stmt)
+            doc = result.scalar_one_or_none()
 
-                if cag_answer:
-                    category = self._normalize_category(cag_answer)
-                    doc.category = category
-                    doc.document_metadata = doc.document_metadata or {}
-                    doc.document_metadata["auto_categorization"] = {
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "method": "cag",
-                        "model": "cag-service"
-                    }
-                    await db.commit()
-                    logger.info(f"Document {doc_id} auto-categorized as '{category}'")
-                else:
-                    logger.warning(f"CAG categorization failed for {doc_id}, using fallback rules")
-                    category = self._simple_categorize(doc.filename, text_content)
-                    doc.category = category
-                    doc.document_metadata = doc.document_metadata or {}
-                    doc.document_metadata["auto_categorization"] = {
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "method": "rule_based"
-                    }
-                    await db.commit()
-                    logger.info(f"Document {doc_id} categorized as '{category}' using rules")
-                        
+            if not doc:
+                logger.warning(f"Cannot categorize missing document {doc_id}")
+                return None
+
+            snippet = self._build_categorization_preview(doc, text_content)
+            if not snippet:
+                logger.warning(f"No preview available to categorize document {doc_id}")
+                return None
+
+            # Use LangExtract for intelligent categorization
+            logger.info(f"📋 Categorizando documento {doc_id} con LangExtract")
+            categorization_result = await langextract_client.categorize_document(
+                text=snippet,
+                filename=doc.filename,
+                context=f"Document ID: {doc_id}"
+            )
+
+            if categorization_result.get("error"):
+                logger.warning(f"LangExtract categorization error: {categorization_result.get('error')}")
+                return None
+
+            category = categorization_result.get("detected_type", "general")
+            confidence = categorization_result.get("confidence", 0.0)
+            reasoning = categorization_result.get("reasoning", "")
+
+            # Update document with categorization
+            doc.category = category
+            # IMPORTANT: Copy dict to trigger SQLAlchemy change detection for JSONB
+            updated_metadata = dict(doc.document_metadata or {})
+            updated_metadata["auto_categorization"] = {
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "method": "langextract",
+                "model": "gemini-2.0-flash",
+                "source": source,
+                "detected_type": category,
+                "confidence": confidence,
+                "reasoning": reasoning,
+            }
+            doc.document_metadata = updated_metadata  # Reassign to trigger change
+            await session.commit()
+
+            logger.info(f"✅ Document {doc_id} categorized as '{category}' (confidence: {confidence:.2f})")
+            return category
+
         except Exception as e:
             logger.error(f"Error auto-categorizing document {doc_id}: {e}")
-            # Don't fail the whole process if categorization fails
-    
-    def _simple_categorize(self, filename: str, content: str) -> str:
-        """Simple rule-based categorization as fallback"""
-        filename_lower = filename.lower()
-        content_lower = content.lower()[:1000]  # Check first 1000 chars
-        
-        # Check filename and content for patterns
-        if any(word in filename_lower for word in ["contract", "agreement", "terms"]):
-            return "contract"
-        elif any(word in filename_lower for word in ["invoice", "bill", "receipt"]):
-            return "invoice"
-        elif any(word in filename_lower for word in ["report", "analysis"]):
-            return "report"
-        elif any(word in content_lower for word in ["whereas", "agreement", "party", "shall"]):
-            return "contract"
-        elif any(word in content_lower for word in ["invoice", "total", "payment due", "bill to"]):
-            return "invoice"
-        elif any(word in content_lower for word in ["executive summary", "findings", "conclusion"]):
-            return "report"
-        elif filename_lower.endswith((".pptx", ".ppt")):
-            return "presentation"
-        else:
-            return "general"
+            await session.rollback()
+            return None
+        finally:
+            if owns_session:
+                await session.close()
+
+    async def categorize_document(
+        self,
+        db: AsyncSession,
+        doc_id: str,
+        *,
+        content_preview: Optional[str],
+        tenant_id: str,
+        user_id: str,
+        source: str = "manual",
+    ) -> Dict[str, Any]:
+        """Public helper to categorize/re-categorize a document."""
+        category = await self._auto_categorize_document(
+            doc_id,
+            text_content=content_preview,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            source=source,
+            db=db,
+        )
+        if category:
+            return {"success": True, "category": category}
+        return {"success": False, "error": "Unable to categorize document"}
     
     def _get_indexed_status_string(self, indexed_value: int) -> str:
         """Convert indexed integer value to string representation"""
@@ -947,27 +1044,51 @@ class AsyncDocumentService:
             return "NOT_INDEXED"
     
     async def generate_summary(self, db: AsyncSession, doc_id: str) -> Dict[str, str]:
-        """Generate document summary using LLM"""
+        """Generate document summary using Elysia and persist it in metadata."""
         try:
-            # Get document
             document = await self.get_document(db, doc_id)
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
-            
-            # Check if document has text content
-            if not document.text_content:
-                raise HTTPException(status_code=400, detail="Document has no text content to summarize")
-            
-            # TODO: Implement actual LLM summary generation
-            # For now, return a simple summary
-            text_preview = document.text_content[:500] if document.text_content else ""
-            word_count = len(document.text_content.split()) if document.text_content else 0
-            
+
+            metadata = dict(document.document_metadata or {})
+            preview_candidates = [
+                metadata.get("text_preview"),
+                metadata.get("summary"),
+                document.description,
+                document.title,
+                document.filename,
+            ]
+            source_text = next((str(value).strip() for value in preview_candidates if value), None)
+
+            if not source_text:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Document has no available preview to summarize"
+                )
+
+            summary = await self._call_cag_query(
+                query=(
+                    "Genera un resumen ejecutivo (máximo 200 palabras) del siguiente contenido.\n"
+                    f"Documento: {document.filename}\n\n{source_text}"
+                ),
+                tenant_id=self.tenant_id,
+                user_id=self.user_id or str(document.created_by),
+                context={"task": "document_summary", "document_id": str(document.id)},
+                timeout=30.0,
+            )
+            if not summary:
+                summary = self._create_simple_summary(source_text, document.filename)
+
+            metadata["summary"] = summary
+            metadata.setdefault("text_preview", summary[:500])
+            document.document_metadata = metadata
+            await db.commit()
+
             return {
-                "summary": f"This document contains {word_count} words. Preview: {text_preview}...",
+                "summary": summary,
                 "status": "generated"
             }
-            
+
         except HTTPException:
             raise
         except Exception as e:
@@ -1175,7 +1296,6 @@ class AsyncDocumentService:
     async def _generate_document_summary(self, text: str, filename: str) -> str:
         """Generate a concise summary of the document"""
         try:
-            # Prepare text for summarization (limit to reasonable size)
             text_for_summary = text[:5000] if len(text) > 5000 else text
             
             cag_answer = await self._call_cag_query(
@@ -1201,7 +1321,8 @@ class AsyncDocumentService:
                     
         except Exception as e:
             logger.warning(f"Failed to generate LLM summary: {e}")
-            return self._create_simple_summary(text, filename)
+        
+        return self._create_simple_summary(text, filename)
     
     def _create_simple_summary(self, text: str, filename: str) -> str:
         """Create a simple summary without LLM"""
@@ -1240,37 +1361,18 @@ class AsyncDocumentService:
             return f"{doc_type_display}: {filename}. Content preview: {text[:200]}..."
     
     async def _perform_routing_analysis(self, db: AsyncSession, doc_info: dict, text: str, file_ext: str):
-        """Perform routing analysis using the same DB session"""
-        try:
-            from app.services.agent_router_service import AgentRouterService
-            
-            # Initialize router service
-            router_service = AgentRouterService(
-                tenant_id=doc_info["tenant_id"],
-                user_id=doc_info["user_id"]
-            )
-            
-            # Analyze and route document
-            routing_result = await router_service.analyze_and_route_document(
-                db=db,
-                document_id=doc_info["id"],
-                content=text,
-                filename=doc_info["filename"],
-                file_type=file_ext
-            )
-            
-            if routing_result.get("success"):
-                logger.info(
-                    f"Document {doc_info['id']} routed successfully: "
-                    f"Type: {routing_result.get('document_type')}, "
-                    f"Agents: {len(routing_result.get('assigned_agents', []))}"
-                )
-            else:
-                logger.warning(f"Document routing failed for {doc_info['id']}: {routing_result.get('error')}")
-                
-        except Exception as e:
-            logger.warning(f"Failed to route document {doc_info['id']} with Agent Router: {e}")
-            # Don't fail the whole process if routing fails
+        """
+        Routing de documentos desactivado.
+
+        Este método pertenecía al pipeline legacy de AgentRouter, pero ahora la orquestación
+        corre dentro del servicio de Elysia/CAG. Lo dejamos como no-op para evitar disparar
+        el stack antiguo hasta que exista una integración oficial con el nuevo motor.
+        """
+        logger.debug(
+            "Routing legacy deshabilitado para el documento %s; "
+            "Elysia/CAG se encargará de la orquestación.",
+            doc_info.get("id"),
+        )
     
     async def get_document_agents(self, db: AsyncSession, doc_id: str) -> Dict[str, Any]:
         """
@@ -1356,121 +1458,18 @@ class AsyncDocumentService:
         doc_type: str = "general", 
         filename: str = None
     ) -> Dict[str, Any]:
-        """
-        Extract entities using LangExtract microservice
-        
-        Args:
-            text: Document text to analyze
-            doc_type: Type of document (contract, invoice, report, general)
-            filename: Optional filename for context
-            
-        Returns:
-            Dictionary with extraction results
-        """
+        """Proxy to the shared LangExtract client."""
         try:
-            import httpx
-            from app.core.config import settings
-            
-            logger.info(f"🧠 Extracting entities with LangExtract for {doc_type} document")
-            
-            # Map document categories to LangExtract types
-            langextract_type_mapping = {
-                "contract": "contract",
-                "legal": "contract", 
-                "invoice": "invoice",
-                "financial": "invoice",
-                "report": "report",
-                "compliance": "report",
-                "technical": "report",
-                "correspondence": "general",
-                "hr": "general",
-                "general": "general"
-            }
-            
-            extraction_type = langextract_type_mapping.get(doc_type, "general")
-            
-            # Prepare request payload
-            request_payload = {
-                "text": text[:50000],  # Limit text size to avoid timeouts
-                "document_type": extraction_type,
-                "filename": filename,
-                "provider": "ollama"  # Use Ollama by default
-            }
-            
-            # Call LangExtract microservice
-            microservice_url = f"{settings.LANGEXTRACT_SERVICE_URL}/api/v1/extraction/extract"
-            headers = {
-                "X-API-Key": settings.MICROSERVICES_API_KEY,
-                "Content-Type": "application/json"
-            }
-            
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info(f"📞 Calling LangExtract service at {microservice_url}")
-                response = await client.post(microservice_url, json=request_payload, headers=headers)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    # Process and structure the result
-                    if result.get("success", False):
-                        extractions = result.get("extractions", [])
-                        entities_summary = result.get("summary", {})
-                        metadata = result.get("metadata", {})
-                        
-                        logger.info(f"✅ LangExtract completed: {len(extractions)} extractions found")
-                        logger.info(f"🔍 Entity types: {list(result.get('entities', {}).keys())}")
-                        
-                        # Format entities for storage in DB
-                        formatted_entities = []
-                        for extraction in extractions:
-                            formatted_entities.append({
-                                "name": extraction.get("text", ""),
-                                "type": extraction.get("class", "other"),
-                                "role": extraction.get("attributes", {}).get("role", ""),
-                                "context": extraction.get("attributes", {}).get("type", ""),
-                                "metadata": {
-                                    "extraction_method": "langextract",
-                                    "provider": metadata.get("provider", "ollama"),
-                                    "model": metadata.get("model", "unknown"),
-                                    "confidence": extraction.get("attributes", {}).get("confidence", 0.8),
-                                    "source_indices": extraction.get("source_indices"),
-                                    "document_type": extraction_type
-                                }
-                            })
-                        
-                        return {
-                            "success": True,
-                            "extractions": formatted_entities,
-                            "summary": entities_summary,
-                            "total_extractions": len(extractions),
-                            "extraction_type": extraction_type,
-                            "provider": metadata.get("provider", "ollama"),
-                            "visualization_html": result.get("visualization_html")
-                        }
-                    else:
-                        error_msg = result.get("error", "Unknown extraction error")
-                        logger.error(f"❌ LangExtract service returned error: {error_msg}")
-                        return {
-                            "success": False,
-                            "error": error_msg,
-                            "extractions": [],
-                            "extraction_type": extraction_type
-                        }
-                else:
-                    error_msg = f"LangExtract service returned {response.status_code}: {response.text}"
-                    logger.error(f"❌ LangExtract service HTTP error: {error_msg}")
-                    return {
-                        "success": False,
-                        "error": error_msg,
-                        "extractions": [],
-                        "extraction_type": extraction_type
-                    }
-                    
-        except Exception as e:
-            logger.error(f"❌ LangExtract entity extraction failed: {e}")
+            return await langextract_client.extract_entities(
+                text=text,
+                document_type=doc_type,
+                filename=filename,
+            )
+        except Exception as exc:
+            logger.error("❌ LangExtract entity extraction failed: %s", exc)
             return {
                 "success": False,
-                "error": str(e),
+                "error": str(exc),
                 "extractions": [],
-                "extraction_type": "general"
+                "extraction_type": doc_type or "general",
             }

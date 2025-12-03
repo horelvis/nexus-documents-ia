@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import {
@@ -58,13 +58,14 @@ export default function TemplatesPage() {
     return new Date(value).toLocaleDateString(locale)
   }
 
-  const loadData = useCallback(async () => {
+  const loadData = async () => {
     setIsLoading(true)
     setError(null)
     try {
       const response = await apiClient.get<Template[]>('/engine-templates?status=active')
       if (response.error) {
-        throw new Error(response.error)
+        setError(response.error)
+        return
       }
 
       const items = Array.isArray(response.data) ? response.data : []
@@ -82,41 +83,36 @@ export default function TemplatesPage() {
 
       setTemplates(normalized)
     } catch (err) {
-      console.error('[templates] load error', err)
-      const message = t('templatesPage.errorLoading.description')
-      setError(message)
-      toast({
-        title: t('templatesPage.errorLoading.title'),
-        description: message,
-        variant: 'destructive',
-      })
+      setError('Error loading templates')
     } finally {
       setIsLoading(false)
     }
-  }, [apiClient, toast, t])
+  }
 
-  const fetchDriveStatus = useCallback(async () => {
+  const fetchDriveStatus = async () => {
     setDriveLoading(true)
     try {
       const response = await apiClient.get<DriveStatus>('/google-drive/status')
       if (response.error) {
-        throw new Error(response.error)
+        setDriveStatus({ connected: false })
+        return
       }
       setDriveStatus(response.data || { connected: false })
     } catch (err) {
-      console.error('[templates] drive status error', err)
       setDriveStatus({ connected: false })
     } finally {
       setDriveLoading(false)
     }
-  }, [apiClient])
+  }
 
+  // Load data on mount
   useEffect(() => {
     loadData()
-  }, [loadData])
-
-  useEffect(() => {
     fetchDriveStatus()
+  }, [])
+
+  // Listen for Google Drive connection events
+  useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (event.data?.type === 'google-drive-connected' || event.data?.type === 'google-drive-error') {
         fetchDriveStatus()
@@ -124,7 +120,7 @@ export default function TemplatesPage() {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [fetchDriveStatus])
+  }, [])
 
   const handleConnectGoogleDrive = async () => {
     try {

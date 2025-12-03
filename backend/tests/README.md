@@ -88,7 +88,6 @@ backend/tests/
 ├── test_services/           # Tests de servicios
 │   ├── test_document_service.py
 │   ├── test_embedding_service.py
-│   ├── test_llm_service.py
 │   ├── test_storage_service.py
 │   └── test_vector_service.py
 └── test_utils/              # Tests de utilidades
@@ -145,7 +144,7 @@ def test_documents(db_session, test_tenant, test_user):
 
 # Servicios mockeados
 @pytest.fixture
-def mock_llm_service():
+def mock_elysia_service():
     # Mock del servicio LLM
 
 @pytest.fixture

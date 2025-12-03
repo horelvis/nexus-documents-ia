@@ -157,6 +157,7 @@ class Document(DocumentBase):
     updated_at: datetime
     tags: List[Tag] = []
     extracted_entities: Optional[List[Dict[str, Any]]] = []
+    document_metadata: Optional[Dict[str, Any]] = None
     
     @computed_field
     @property

@@ -15,11 +15,18 @@ from app.schemas.text_extraction import HealthResponse
 
 # Configure loguru
 logger.remove()
+# Normalize log level and fallback to INFO if invalid
+configured_level = (settings.log_level or "INFO").upper()
+try:
+    logger.level(configured_level)
+except ValueError:
+    configured_level = "INFO"
+
 logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | "
            "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level=settings.log_level,
+    level=configured_level,
 )
 
 
@@ -28,6 +35,7 @@ async def lifespan(_: FastAPI):
     """Application lifespan manager."""
     prepare_nltk_data(settings.nltk_data_dir)
     logger.info("🚀 Starting {} v{}", settings.service_name, settings.service_version)
+    logger.info("📡 Listening on port {}", settings.service_port)
     logger.info("Allowed extensions: {}", ", ".join(settings.allowed_extensions))
     yield
     logger.info("👋 Shutting down {}", settings.service_name)
@@ -85,7 +93,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=settings.service_port,
         reload=True,
         log_level=settings.log_level.lower(),
     )

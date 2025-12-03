@@ -40,7 +40,7 @@ def check_system_status():
         ("http://localhost:8004", "Ollama Service"),
         ("http://localhost:8005", "Gotenberg Service"),
         ("http://localhost:8007", "Weaviate Service"),
-        ("http://localhost:8008", "CAG Service"),
+        ("http://localhost:8007", "CAG Service"),
         ("http://localhost:8009", "LangExtract Service"),
         ("http://localhost:8010", "Temporalio Service"),
     ]

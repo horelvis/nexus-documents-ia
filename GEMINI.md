@@ -33,7 +33,7 @@ This document serves as the primary context and instruction set for GEMINI sessi
 *   **Queue:** Redis / Celery (and Temporalio for workflows).
 *   **Infrastructure:** Docker, Google Cloud Platform (Cloud Run, Cloud SQL).
 *   **Microservices:**
-    *   `cag-service`: Content Analysis & Agents.
+    *   `weaviate-service`: Vector search + integrated CAG/agents.
     *   `langextract-service`: Entity Extraction.
     *   `temporalio-service`: Workflow orchestration.
     *   `gotenberg-service`: PDF conversion.

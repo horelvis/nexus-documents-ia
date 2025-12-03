@@ -14,6 +14,7 @@ import Link from "next/link"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useTranslation } from "@/lib/i18n/hooks";
 import { useApiClient } from "@/lib/api-client"
+import { DocumentCategorization } from "@/components/documents/document-categorization"
 export default function DashboardPage() {
   const params = useParams()
   const tenantId = params.tenantId as string
@@ -151,6 +152,11 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 px-4 lg:px-6 @3xl/main:grid-cols-2">
         <SharedDocumentsPanel tenantId={tenantId} />
         <AIInsightsPanel tenantId={tenantId} />
+      </div>
+
+      {/* Categorization Controls */}
+      <div className="px-4 lg:px-6">
+        <DocumentCategorization />
       </div>
     </div>
   )

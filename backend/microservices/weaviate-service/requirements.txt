@@ -23,6 +23,10 @@ redis>=5.0.0
 
 # Logging and monitoring
 structlog>=23.2.0
+loguru>=0.7.0
+
+# CAG / Agent tooling (delegated to Elysia)
+qdrant-client>=1.7.0
 
 # Development
 pytest>=7.4.0

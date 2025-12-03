@@ -23,6 +23,9 @@ export interface SingleDocumentParams {
   category?: string
   tags?: string
   description?: string
+  cliente?: string
+  periodo?: string
+  tipo_documento?: string
 }
 
 export class DocumentService {
@@ -48,6 +51,15 @@ export class DocumentService {
     }
     if (params.category) {
       formData.append('category', params.category)
+    }
+    if (params.cliente) {
+      formData.append('cliente', params.cliente)
+    }
+    if (params.periodo) {
+      formData.append('periodo', params.periodo)
+    }
+    if (params.tipo_documento) {
+      formData.append('tipo_documento', params.tipo_documento)
     }
 
     return this.apiClient.upload<DocumentUploadResponse>(

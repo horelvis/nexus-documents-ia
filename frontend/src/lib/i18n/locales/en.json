@@ -265,6 +265,7 @@
   "chatPage": {
     "assistantName": "Emma Assistant",
     "assistantSubtitle": "AI-powered document intelligence",
+    "emmaResponding": "Emma generating response...",
     "mode": {
       "chat": "Chat",
       "settings": "Settings"
@@ -581,6 +582,23 @@
       }
     }
   },
+  "virtualAssistant": {
+    "title": "Emma",
+    "subtitle": "Your intelligent assistant",
+    "typing": "Typing...",
+    "conversationCleared": "Conversation cleared. How can I help you?",
+    "newConversation": "New conversation",
+    "clearChat": "Clear chat",
+    "settings": "Settings",
+    "help": "Help",
+    "inputPlaceholder": "Type your message... (Shift+Enter for new line)",
+    "sendHint": "Enter to send • Shift+Enter for new line",
+    "uploadDocument": "Upload document",
+    "errorServiceUnavailable": "Assistant service unavailable. Error: {error}",
+    "errorGeneric": "Error: {error}",
+    "errorProcessing": "Could not process your request.",
+    "welcomeDefault": "Hello! I'm Emma, your intelligent assistant. How can I help you today?"
+  },
   "sidebar": {
     "dashboard": "Dashboard",
     "documents": {
@@ -612,6 +630,7 @@
       "teams": "Team Management",
       "settings": "Tenant Settings",
       "providers": "Signature Providers",
+      "publicKnowledge": "Legal Knowledge Base",
       "billing": "Billing",
       "templates": "Document Templates"
     },
@@ -622,5 +641,101 @@
       "sign": "Sign Document"
     },
     "nexusDocument": "Nexus Document"
+  },
+  "documentPreview": {
+    "backToSearch": "Back to Search",
+    "backToDocuments": "Back to Documents",
+    "share": "Share",
+    "regenerate": "Regenerate",
+    "deleteConfirm": {
+      "title": "Delete Document",
+      "description": "Are you sure you want to delete this document? This action cannot be undone."
+    },
+    "documentInfo": {
+      "title": "Document Information",
+      "type": "Type",
+      "size": "Size",
+      "status": "Status",
+      "category": "Category",
+      "tags": "Tags"
+    },
+    "extractedEntities": {
+      "title": "Extracted Entities",
+      "extracting": "Extracting entities...",
+      "noEntities": "No entities found"
+    }
+  },
+  "publicKnowledgePage": {
+    "title": "Public Legal Knowledge Base",
+    "subtitle": "Access legislation, regulations, jurisprudence and legal templates shared across all tenants",
+    "infoNotice": "This knowledge base contains verified public legal documents that are available to all system users.",
+    "stats": {
+      "title": "Knowledge Base Statistics",
+      "description": "Summary of documents available in the public base",
+      "totalDocs": "Total Documents",
+      "verifiedDocs": "Verified Documents",
+      "categories": "Categories",
+      "jurisdictions": "Jurisdictions"
+    },
+    "categorySelection": {
+      "title": "Enabled Categories",
+      "description": "Select document categories that Emma will use to answer legal queries"
+    },
+    "search": {
+      "title": "Search Knowledge Base",
+      "description": "Search legislation, regulations, jurisprudence and other legal documents",
+      "placeholder": "E.g.: data protection, GDPR, labor rights..."
+    },
+    "results": {
+      "title": "Results found: {count}",
+      "searchTime": "Search time: {ms}ms",
+      "noResults": "No documents found matching your search"
+    },
+    "table": {
+      "title": "Title",
+      "category": "Category",
+      "jurisdiction": "Jurisdiction",
+      "reference": "Legal Reference",
+      "verified": "Verified",
+      "score": "Relevance"
+    },
+    "categories": {
+      "legislation": "Legislation",
+      "regulation": "Regulation",
+      "jurisprudence": "Jurisprudence",
+      "template": "Template",
+      "guideline": "Guideline",
+      "reference": "Reference",
+      "form": "Form",
+      "treaty": "Treaty"
+    },
+    "jurisdictions": {
+      "es": "Spain",
+      "eu": "European Union",
+      "int": "International",
+      "regional": "Regional"
+    },
+    "categoryInfo": {
+      "legislation": {
+        "title": "Legislation",
+        "description": "Laws, codes and official regulations from sources like BOE and EUR-Lex"
+      },
+      "regulation": {
+        "title": "Regulation",
+        "description": "Regulations, ministerial orders and implementing legislation"
+      },
+      "jurisprudence": {
+        "title": "Jurisprudence",
+        "description": "Judgments from the Supreme Court, ECJ and relevant courts"
+      },
+      "treaty": {
+        "title": "Treaties",
+        "description": "International treaties, conventions and multilateral agreements"
+      }
+    },
+    "notifications": {
+      "loadFailed": "Failed to load statistics",
+      "searchFailed": "Search failed"
+    }
   }
 }

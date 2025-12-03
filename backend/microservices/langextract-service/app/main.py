@@ -7,6 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from loguru import logger
 import sys
+import logging
+import warnings
+
+# Silence absl and langextract warnings
+logging.getLogger("absl").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module="langextract")
 
 from .core.config import settings
 from .api import extraction
@@ -25,24 +31,47 @@ logger.add(
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info(f"Starting {settings.service_name} v{settings.service_version}")
-    logger.info(f"Default provider: {settings.default_provider}")
-    logger.info(f"Ollama endpoint: {settings.ollama_host}")
+    provider = (settings.default_provider or "ollama").lower()
+    model = settings.llm_model  # Required - no fallback
+    logger.info(f"Default provider: {provider} | model: {model}")
     
-    # Test Ollama connection
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.ollama_host}/api/tags")
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                logger.info(f"✅ Ollama connected. Available models: {len(models)}")
-                for model in models[:3]:  # Show first 3 models
-                    logger.info(f"  - {model.get('name', 'unknown')}")
-            else:
-                logger.warning(f"⚠️  Ollama connection issue: {response.status_code}")
-    except Exception as e:
-        logger.warning(f"⚠️  Could not connect to Ollama: {e}")
-        logger.info("Will use fallback extraction methods if needed")
+    if provider == "ollama":
+        ollama_endpoint = (settings.ollama_host or "http://ollama:11434").rstrip("/")
+        logger.info(f"Ollama endpoint: {ollama_endpoint}")
+        # Test Ollama connection
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{ollama_endpoint}/api/tags")
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    logger.info(f"✅ Ollama connected. Available models: {len(models)}")
+                    for model in models[:3]:  # Show first 3 models
+                        logger.info(f"  - {model.get('name', 'unknown')}")
+                else:
+                    logger.warning(f"⚠️  Ollama connection issue: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not connect to Ollama: {e}")
+            logger.info("Will use fallback extraction methods if needed")
+    elif provider == "openai":
+        api_base = (settings.llm_api_base or "https://api.openai.com/v1").rstrip("/")
+        logger.info(f"OpenAI endpoint: {api_base}")
+        if not (settings.openai_api_key or settings.llm_api_key):
+            logger.warning("⚠️  OpenAI provider selected but no API key configured")
+    elif provider == "gemini":
+        api_base = (settings.llm_api_base or "https://generativelanguage.googleapis.com").rstrip("/")
+        logger.info(f"Gemini endpoint: {api_base}")
+        if not (settings.gemini_api_key or settings.llm_api_key):
+            logger.warning("⚠️  Gemini provider selected but no API key configured")
+    elif provider in ("anthropic", "claude"):
+        logger.info(f"🤖 Using Anthropic Claude provider")
+        logger.info(f"   Model: {settings.llm_model}")
+        if not settings.llm_api_key:
+            logger.error("❌ Anthropic provider selected but LLM_API_KEY not configured")
+            raise ValueError("LLM_API_KEY is required for Anthropic provider")
+    else:
+        logger.error(f"❌ Unknown provider '{provider}'. Valid providers: ollama, openai, gemini, anthropic")
+        raise ValueError(f"Invalid LLM_PROVIDER: {provider}")
     
     yield
     

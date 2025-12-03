@@ -19,6 +19,7 @@ import {
 import { useVirtualAssistant } from "@/contexts/virtual-assistant-context"
 import { useUpload } from "@/contexts/upload-context"
 import { useRouter, usePathname } from "next/navigation"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 interface ChatSidebarProps {
   isOpen: boolean
@@ -36,7 +37,8 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
     createNewConversation,
     loadWelcomeMessage,
   } = useVirtualAssistant()
-  
+  const { t } = useTranslation()
+
   const [input, setInput] = useState("")
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -122,15 +124,15 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
       <div className="flex items-center justify-between p-4 border-b bg-primary/5">
         <div className="flex items-center gap-3">
           <Avatar className="h-10 w-10">
-            <AvatarImage src="/assistant-avatar.png" />
+            <AvatarImage src="/emma-avatar.svg" />
             <AvatarFallback className="bg-primary text-primary-foreground">
               <Bot className="h-5 w-5" />
             </AvatarFallback>
           </Avatar>
           <div>
-            <h3 className="font-semibold">Asistente Virtual</h3>
+            <h3 className="font-semibold">{t('virtualAssistant.title')}</h3>
             <p className="text-xs text-muted-foreground">
-              {isLoading ? "Escribiendo..." : "Siempre disponible"}
+              {isLoading ? t('virtualAssistant.typing') : t('virtualAssistant.subtitle')}
             </p>
           </div>
         </div>
@@ -140,7 +142,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
             size="icon"
             onClick={createNewConversation}
             className="h-8 w-8"
-            title="Nueva conversación"
+            title={t('virtualAssistant.newConversation')}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -153,10 +155,10 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={clearConversation}>
                 <Trash2 className="h-4 w-4 mr-2" />
-                Limpiar chat
+                {t('virtualAssistant.clearChat')}
               </DropdownMenuItem>
-              <DropdownMenuItem>Configuración</DropdownMenuItem>
-              <DropdownMenuItem>Ayuda</DropdownMenuItem>
+              <DropdownMenuItem>{t('virtualAssistant.settings')}</DropdownMenuItem>
+              <DropdownMenuItem>{t('virtualAssistant.help')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
@@ -190,7 +192,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
                 <Avatar className="h-8 w-8 flex-shrink-0">
                   {message.role === "assistant" ? (
                     <>
-                      <AvatarImage src="/assistant-avatar.png" />
+                      <AvatarImage src="/emma-avatar.svg" />
                       <AvatarFallback className="bg-primary text-primary-foreground">
                         <Bot className="h-4 w-4" />
                       </AvatarFallback>
@@ -290,7 +292,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
           {isLoading && !isStreaming && (
             <div className="flex gap-3">
               <Avatar className="h-8 w-8">
-                <AvatarImage src="/assistant-avatar.png" />
+                <AvatarImage src="/emma-avatar.svg" />
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   <Bot className="h-4 w-4" />
                 </AvatarFallback>
@@ -322,7 +324,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
             size="icon" 
             className="h-10 w-10"
             onClick={() => setUploadDialogOpen(true)}
-            title="Subir documento"
+            title={t('virtualAssistant.uploadDocument')}
           >
             <Paperclip className="h-4 w-4" />
           </Button>
@@ -331,7 +333,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
             value={input}
             onChange={handleInputChange}
             onKeyPress={handleKeyPress}
-            placeholder="Escribe tu mensaje... (Shift+Enter para nueva línea)"
+            placeholder={t('virtualAssistant.inputPlaceholder')}
             className="flex-1 min-h-[40px] max-h-[120px] resize-none"
             disabled={isLoading}
             rows={1}
@@ -353,7 +355,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-2 text-center">
-          Enter para enviar • Shift+Enter para nueva línea
+          {t('virtualAssistant.sendHint')}
         </p>
       </div>
     </div>

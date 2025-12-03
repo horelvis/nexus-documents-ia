@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useRef, useMemo } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { 
   MessageSquare, 
@@ -37,36 +37,48 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [randomPrompts, setRandomPrompts] = useState<string[]>([])
   const [hasStartedChat, setHasStartedChat] = useState(false)
   const [initialQuery, setInitialQuery] = useState<string | null>(null)
+  const [documentContext, setDocumentContext] = useState<{ id: string; name: string } | null>(null)
   const elysiaChatRef = useRef<ElysiaChatRef>(null)
   const { t } = useTranslation()
 
-  const examplePrompts = useMemo(() => ([
-    t('chatPage.examplePrompts.0'),
-    t('chatPage.examplePrompts.1'),
-    t('chatPage.examplePrompts.2'),
-    t('chatPage.examplePrompts.3'),
-    t('chatPage.examplePrompts.4'),
-    t('chatPage.examplePrompts.5'),
-    t('chatPage.examplePrompts.6'),
-    t('chatPage.examplePrompts.7')
-  ]), [t]);
-
-  const getRandomPrompts = useCallback((count: number = 4): string[] => {
-    const shuffled = [...examplePrompts].sort(() => 0.5 - Math.random())
+  // Get prompts - simple function, no useCallback needed
+  const getRandomPrompts = (count: number = 4): string[] => {
+    const prompts = [
+      t('chatPage.examplePrompts.0'),
+      t('chatPage.examplePrompts.1'),
+      t('chatPage.examplePrompts.2'),
+      t('chatPage.examplePrompts.3'),
+      t('chatPage.examplePrompts.4'),
+      t('chatPage.examplePrompts.5'),
+      t('chatPage.examplePrompts.6'),
+      t('chatPage.examplePrompts.7')
+    ]
+    const shuffled = [...prompts].sort(() => 0.5 - Math.random())
     return shuffled.slice(0, count)
-  }, [examplePrompts]);
+  }
 
   useEffect(() => {
     const queryParam = searchParams.get('q')
-    if (queryParam) {
+    const documentId = searchParams.get('documentId')
+    const documentName = searchParams.get('documentName')
+
+    if (documentId && documentName) {
+      // User came from document list - set document context and simple prompt
+      const decodedName = decodeURIComponent(documentName)
+      setDocumentContext({ id: documentId, name: decodedName })
+      // Simple user-visible prompt
+      setInitialQuery(`Analiza el documento "${decodedName}"`)
+      setHasStartedChat(true)
+    } else if (queryParam) {
       setInitialQuery(queryParam)
       setHasStartedChat(true)
     }
   }, [searchParams])
 
+  // Initialize prompts once on mount
   useEffect(() => {
     setRandomPrompts(getRandomPrompts(4))
-  }, [getRandomPrompts])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshPrompts = () => {
     setRandomPrompts(getRandomPrompts(4))
@@ -179,15 +191,16 @@ export default function ChatPage({ params }: ChatPageProps) {
 
           {/* Chat Component */}
           <div className="flex-1 min-h-0 pb-4">
-            <ElysiaChat 
+            <ElysiaChat
               ref={elysiaChatRef}
               tenantId={tenantId}
               className="h-full"
               initialMessage={t('chatPage.initialMessage')}
               initialQuery={initialQuery || undefined}
+              documentId={documentContext?.id}
               onFirstQuery={() => setHasStartedChat(true)}
               isAdmin={backendUser ? (
-                backendUser.is_superuser || 
+                backendUser.is_superuser ||
                 backendUser.roles?.some((role: any) => role.name === 'admin') ||
                 !backendUser.is_team_member
               ) : false}

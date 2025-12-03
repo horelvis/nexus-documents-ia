@@ -27,8 +27,9 @@ except Exception as e:
 
 from app.core.config import settings
 from app.core.security import verify_api_key
-from app.api import weaviate_router, elysia_router
-from app.api.bpmn_ai import router as bpmn_ai_router
+from app.api import weaviate_router, elysia_router, public_knowledge_router
+from app.cag.api.cag import router as cag_router
+from app.cag.api.vector import router as cag_vector_router
 
 # Configure logging
 logging.basicConfig(
@@ -57,6 +58,15 @@ async def lifespan(app: FastAPI):
             if not elysia_service.tree or not elysia_service.tools_registered:
                 await elysia_service.initialize()
             logger.info("✅ Elysia framework initialized")
+
+        # Initialize integrated CAG engine
+        try:
+            from app.cag.services.cag_service import cag_service
+            await cag_service.initialize()
+            logger.info("✅ CAG engine initialized inside weaviate-service")
+        except Exception as cag_error:
+            logger.error(f"❌ Failed to initialize integrated CAG engine: {cag_error}")
+            raise cag_error
             
     except Exception as e:
         logger.error(f"❌ Service initialization failed: {e}")
@@ -112,7 +122,9 @@ async def log_requests(request: Request, call_next):
 # Include routers
 app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
 app.include_router(elysia_router, prefix="/elysia", tags=["elysia"])
-app.include_router(bpmn_ai_router, prefix="/bpmn-ai", tags=["BPM AI"])
+app.include_router(public_knowledge_router, tags=["public-knowledge"])
+app.include_router(cag_router)
+app.include_router(cag_vector_router)
 
 # Health check
 @app.get("/health")

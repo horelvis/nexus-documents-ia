@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { ElysiaMarkdownFormat } from "./ElysiaMarkdownFormat"
 import { DisplayRenderer } from "./displays/DisplayRenderer"
 import { ElysiaRenderChatProps, ElysiaMessage } from "./types"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export function ElysiaRenderChat(props: ElysiaRenderChatProps) {
   const {
@@ -216,8 +217,11 @@ function MessageDisplay({
       {/* Message Content */}
       <div className="flex-1 max-w-[85%]">
         <Card className={cn("p-4", getMessageColor())}>
-          {/* Message Header */}
-          <div className="flex items-center justify-between mb-2">
+          {/* Message Header - hidden for user messages */}
+          <div className={cn(
+            "flex items-center justify-between mb-2",
+            message.type === "user" && "hidden"
+          )}>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="text-xs">
                 {message.type}
@@ -345,10 +349,12 @@ function MessageDisplay({
 
 // Loading Message Component
 function LoadingMessage() {
+  const { t } = useTranslation()
+
   return (
     <div className="flex gap-3">
       <Avatar className="h-8 w-8">
-        <AvatarImage src="/elysia-avatar.png" />
+        <AvatarImage src="/emma-avatar.svg" />
         <AvatarFallback className="bg-primary text-primary-foreground">
           <Bot className="h-4 w-4" />
         </AvatarFallback>
@@ -360,7 +366,7 @@ function LoadingMessage() {
             <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
             <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
           </div>
-          <span className="text-sm text-muted-foreground">Emma is thinking...</span>
+          <span className="text-sm text-muted-foreground">{t('chatPage.emmaResponding')}</span>
         </div>
         <div className="space-y-2">
           <Skeleton className="h-4 w-full" />

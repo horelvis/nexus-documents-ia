@@ -35,14 +35,16 @@ graph TB
         NotificationSvc[📧 Notification Service<br/>Email + Webhooks]
     end
 
-    %% Microservicios de IA
-    subgraph "🧠 AI Microservices"
-        EmmaAI[🤖 Emma AI Service<br/>Elysia Framework + Weaviate<br/>Port: 8007]
-        LangChainSvc[🔗 LangChain Service<br/>LLM Processing<br/>Port: 8001]
-        LangroidSvc[🎯 Langroid Service<br/>Multi-agent<br/>Port: 8002]
-        OllamaSvc[🦙 Ollama Service<br/>Local LLMs<br/>Port: 8004]
-        CAG_Svc[📊 CAG Service<br/>Content Analysis<br/>Port: 8005]
-        LangExtractSvc[🏷️ LangExtract Service<br/>Entity Extraction<br/>Port: 8006]
+    %% Microservicios de IA y Workflows
+    subgraph "🧠 AI + Workflow Services"
+        WeaviateSvc[🤖 Weaviate + Elysia Service<br/>Internal: 8000]
+        LangExtractSvc[🏷️ LangExtract Service<br/>Internal: 8000]
+        TextExtractSvc[📑 TextExtract Service<br/>Internal: 8000]
+        TemporalSvc[🔄 Temporalio Service<br/>Internal: 8000]
+        TemplateSvc[🧩 Template Editor Service<br/>Internal: 8000]
+        ElasticSvc[🔎 Elasticsearch Service<br/>Internal: 8000]
+        GotenbergSvc[📄 Gotenberg Service<br/>Internal: 3000]
+        OllamaSvc[🦙 Ollama Host<br/>Internal: 11434]
     end
 
     %% Capa de Datos
@@ -84,15 +86,17 @@ graph TB
     FastAPI --> TeamSvc
     FastAPI --> NotificationSvc
 
+    DocumentSvc --> TextExtractSvc
     DocumentSvc --> LangExtractSvc
-    SearchSvc --> EmmaAI
-    AgentSvc --> EmmaAI
-    EmmaAI --> LangChainSvc
-    EmmaAI --> LangroidSvc
-    EmmaAI --> OllamaSvc
-
-    DocumentSvc --> CAG_Svc
-    CAG_Svc --> OllamaSvc
+    DocumentSvc --> WeaviateSvc
+    DocumentSvc --> GotenbergSvc
+    SearchSvc --> WeaviateSvc
+    SearchSvc --> ElasticSvc
+    AgentSvc --> WeaviateSvc
+    WeaviateSvc --> TemporalSvc
+    TemplateSvc --> StorageSvc
+    LangExtractSvc --> OllamaSvc
+    WeaviateSvc --> OllamaSvc
 
     DocumentSvc --> PostgreSQL
     SearchSvc --> PostgreSQL
@@ -100,22 +104,23 @@ graph TB
     AuthSvc --> PostgreSQL
     TeamSvc --> PostgreSQL
 
-    EmmaAI --> Weaviate
-    LangChainSvc --> Weaviate
+    WeaviateSvc --> Weaviate
+    TemporalSvc --> Weaviate
+    LangExtractSvc --> Weaviate
     SearchSvc --> Weaviate
 
     DocumentSvc --> Redis
     SearchSvc --> Redis
     AuthSvc --> Redis
 
-    SearchSvc --> Elasticsearch
+    ElasticSvc --> Elasticsearch
 
     StorageSvc --> GCS
     SignatureSvc --> SignatureProviders
     NotificationSvc --> EmailSvc
 
-    EmmaAI --> WebSearch
-    EmmaAI --> WeatherAPI
+    WeaviateSvc --> WebSearch
+    WeaviateSvc --> WeatherAPI
 
     FastAPI --> Stripe
 
@@ -130,7 +135,18 @@ graph TB
     class NextJS,Mobile,AdminUI frontend
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
-    class EmmaAI,LangChainSvc,LangroidSvc,OllamaSvc,CAG_Svc,LangExtractSvc microservice
+    class WeaviateSvc,LangExtractSvc,TextExtractSvc,TemporalSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaSvc microservice
     class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
+
+## Rol de Elysia en la Arquitectura
+
+El bloque `Weaviate + Elysia Service` del diagrama representa la **AI-native database** de Weaviate (Elysia). Esta capa sustituye al antiguo combo “vector DB + motor RAG” y ofrece un stack unificado que incluye:
+
+- **Vectores + embeddings multimodales** (texto, imagen, audio)
+- **Documentos crudos y metadata relacional**
+- **Motor RAG con indexación híbrida grafo/vector**
+- **Seleccionador de herramientas y orquestación de workflows IA**
+
+Elysia se encarga también de gestionar el modelo LLM que se utilizará (Ollama local u OpenAI) leyendo la configuración global (`LLM_PROVIDER`, `LLM_MODEL`, `OPENAI_MODEL`). De esta forma, los servicios de negocio y el API principal solo necesitan “hablar” con `weaviate-service` y no deben duplicar lógica para elegir modelos, gestionar embeddings o buscar documentos.

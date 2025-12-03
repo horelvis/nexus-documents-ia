@@ -23,6 +23,18 @@
 - **🌐 Capacidades Multimodales**: Procesa texto, PDFs con firmas digitales y metadatos complejos
 - **⚖️ Chain of Thought**: Visualización transparente del proceso de razonamiento de la IA (solo para administradores)
 
+### 🧠 Elysia AI-Native Database
+
+Emma se apoya en **Elysia**, la nueva base de datos AI-native construida por Weaviate. No es únicamente un vector store, sino una capa unificada que integra:
+
+- **Vectores + embeddings multimodales** (texto, imagen, audio)
+- **Documentos crudos y metadata estructurada**
+- **RAG engine integrado** con indexación híbrida grafo + vector
+- **Motor de búsqueda + Decision Trees** en el mismo plano de datos
+
+Esto nos permite tratar a Elysia como el verdadero **centro neuronal** del sistema: los microservicios no necesitan reinventar la rueda para cada LLM o pipeline de herramientas, sino que delegan en Elysia la orquestación y selección de modelos.  
+La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL` y `OPENAI_MODEL`, pero es Elysia quien decide cómo ejecutar cada consulta (gpt-oss local u OpenAI) sin duplicar lógica en cada servicio.
+
 ## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
 ### Emma AI Assistant
@@ -125,15 +137,14 @@ graph TB
 
     %% Microservicios de IA
     subgraph "🧠 AI & Workflow Services"
-        CAG_Svc[📊 CAG Service<br/>Content Analysis & Agents<br/>Port: 8008]
-        LangExtractSvc[🏷️ LangExtract Service<br/>Entity Extraction<br/>Port: 8009]
-        TextExtractSvc[📑 TextExtract Service<br/>Deterministic Parsing<br/>Port: 8012]
-        WeaviateSvc[🔍 Weaviate Service<br/>Vector Proxy<br/>Port: 8007]
-        TemporalioSvc[🔄 Temporalio Service<br/>Durable Workflows<br/>Port: 8010]
-        TemplateSvc[🧩 Template Editor Service<br/>Process Library<br/>Port: 8011]
-        ElasticSvc[🔎 Elasticsearch Service<br/>Hybrid Search<br/>Port: 8005]
-        GotenbergSvc[📄 Gotenberg Service<br/>Document Conversion<br/>Port: 3000 int.]
-        OllamaHost[🦙 Ollama Host<br/>Local LLMs<br/>Port: 11434]
+        LangExtractSvc[🏷️ LangExtract Service<br/>Entity Extraction<br/>Port: 8000 (internal)]
+        TextExtractSvc[📑 TextExtract Service<br/>Deterministic Parsing<br/>Port: 8000 (internal)]
+        WeaviateSvc[🔍 Weaviate Service + CAG<br/>Vector Proxy + Agents<br/>Port: 8000 (internal)]
+        TemporalioSvc[🔄 Temporalio Service<br/>Durable Workflows<br/>Port: 8000 (internal)]
+        TemplateSvc[🧩 Template Editor Service<br/>Process Library<br/>Port: 8000 (internal)]
+        ElasticSvc[🔎 Elasticsearch Service<br/>Hybrid Search<br/>Port: 8000 (internal)]
+        GotenbergSvc[📄 Gotenberg Service<br/>Document Conversion<br/>Internal Port: 3000]
+        OllamaHost[🦙 Ollama Host<br/>Local LLMs<br/>Port: 11434 (internal)]
     end
 
     %% Capa de Datos
@@ -177,17 +188,17 @@ graph TB
 
     DocumentSvc --> LangExtractSvc
     DocumentSvc --> TextExtractSvc
-    DocumentSvc --> CAG_Svc
+    DocumentSvc --> WeaviateSvc
     SearchSvc --> WeaviateSvc
     SearchSvc --> ElasticSvc
-    AgentSvc --> CAG_Svc
+    AgentSvc --> WeaviateSvc
     AgentSvc --> TemporalioSvc
     TemplateSvc --> TemporalioSvc
-    TemporalioSvc --> CAG_Svc
+    TemporalioSvc --> WeaviateSvc
     DocumentSvc --> GotenbergSvc
 
     LangExtractSvc --> OllamaHost
-    CAG_Svc --> OllamaHost
+    WeaviateSvc --> OllamaHost
 
     DocumentSvc --> PostgreSQL
     SearchSvc --> PostgreSQL
@@ -196,7 +207,6 @@ graph TB
     TeamSvc --> PostgreSQL
 
     LangExtractSvc --> WeaviateSvc
-    CAG_Svc --> WeaviateSvc
     WeaviateSvc --> Weaviate
 
     DocumentSvc --> Redis
@@ -226,7 +236,7 @@ graph TB
     class NextJS,Mobile,AdminUI frontend
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
-    class CAG_Svc,LangExtractSvc,TextExtractSvc,WeaviateSvc,TemporalioSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaHost microservice
+    class LangExtractSvc,TextExtractSvc,WeaviateSvc,TemporalioSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaHost microservice
     class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
@@ -258,15 +268,16 @@ graph TB
 - **Notification Service**: Sistema de notificaciones y webhooks
 
 #### 🧠 **Microservicios de IA y Workflows**
-- **CAG Service** (8008): Análisis de contenido, generación de insights y cadenas de agentes
-- **LangExtract Service** (8009): Extracción automática de entidades sobre cada upload
-- **TextExtract Service** (8012): Parsing determinístico/OCR para documentos complejos
-- **Weaviate Service** (8007): Proxy vectorial multi-tenant con guardrails y métricas
-- **Temporalio Service** (8010): Ejecución de workflows durables conectados al Process Library
-- **Template Editor Service** (8011): Gestión colaborativa de plantillas y formularios AI
-- **Elasticsearch Service** (8005): Búsqueda híbrida (keyword + vector) y analytics
-- **Gotenberg Service** (3000 int.): Conversión y generación de PDFs a partir de HTML/Office
-- **Ollama Host** (11434): Modelos LLM locales (Llama 3.x, GPT-OSS) para baja latencia
+> **Seguridad de red**: salvo la API principal (8000) y las UIs públicas, ningún microservicio publica un puerto al host. Todos escuchan en su puerto interno dentro de la red `backend-network` y se consumen vía DNS (`http://{servicio}:puerto`). Para depurar desde tu máquina usa `docker compose exec <servicio> <cmd>`.
+
+- **Weaviate Service + CAG** (`http://weaviate-service:8000`): Proxy vectorial multi-tenant con agentes y análisis contextual
+- **LangExtract Service** (`http://langextract-service:8000`): Extracción automática de entidades sobre cada upload
+- **TextExtract Service** (`http://textextract-service:8000`): Parsing determinístico/OCR para documentos complejos
+- **Temporalio Service** (`http://temporalio-service:8000`): Ejecución de workflows durables conectados al Process Library
+- **Template Editor Service** (`http://template-editor-service:8000`): Gestión colaborativa de plantillas y formularios AI
+- **Elasticsearch Service** (`http://elasticsearch-service:8000`): Búsqueda híbrida (keyword + vector) y analytics
+- **Gotenberg Service** (`http://gotenberg:3000`, interno solamente): Conversión y generación de PDFs a partir de HTML/Office
+- **Ollama Host** (`http://genai-ollama:11434`, interno solamente): Modelos LLM locales (Llama 3.x, GPT-OSS) para baja latencia
 
 #### 💾 **Capa de Datos**
 - **PostgreSQL 15**: Base de datos relacional multi-tenant
@@ -448,17 +459,17 @@ flowchart TD
 | Servicio | Puerto | Tecnología | Endpoint Principal | Descripción |
 |----------|--------|------------|-------------------|-------------|
 | **Main API** | `8000` | FastAPI | `/api/v1/` | Pasarela principal y orquestación |
-| **CAG Service** | `8008` | FastAPI | `/` | Análisis de contenido y agentes |
 | **LangExtract Service** | `8009` | FastAPI | `/` | Extracción automática de entidades |
-| **TextExtract Service** | `8012` | FastAPI | `/` | Parsing determinístico/OCR |
-| **Weaviate Service** | `8007` | FastAPI | `/` | Proxy vectorial multi-tenant |
+| **TextExtract Service** | `8000 (solo red interna)` | FastAPI | `/` | Parsing determinístico/OCR |
+| **Weaviate Service + CAG** | `8007` | FastAPI | `/` | Proxy vectorial + agentes y análisis |
 | **Storage Service** | `8003` | FastAPI | `/` | Operaciones GCS y signed URLs |
 | **Elasticsearch Service** | `8005` | FastAPI | `/` | Búsqueda híbrida + filtros |
 | **Temporalio Service** | `8010` | FastAPI | `/` | Workflows durables y signals |
 | **Template Editor Service** | `8011` | FastAPI | `/` | Gestión de plantillas y formularios |
+| **Background Worker** | `8100 (solo red interna)` | FastAPI + Celery | `/health` | Previews, emails y reintentos de indexación |
 | **Temporalio Web UI** | `8233` | Temporal UI | `/` | Monitoreo de workflows |
 | **Frontend** | `3000` | Next.js | `/` | Interfaz principal |
-| **Gotenberg** | `3000 (interno)` | Gotenberg 8 | `/` | Conversión de documentos a PDF |
+| **Gotenberg** | `3000 (solo red interna)` | Gotenberg 8 | `/` | Conversión de documentos a PDF |
 | **Ollama Host** | `11434` | Ollama | `/api/generate` | Modelos LLM locales |
 
 ### 🐳 **Arquitectura Docker**
@@ -485,14 +496,14 @@ graph TB
 
         subgraph "Backend Services"
             API[🚀 api<br/>8000]
-            CAG[📊 cag-service<br/>8008]
             LangExtract[🏷️ langextract-service<br/>8009]
-            TextExtract[📑 textextract-service<br/>8012]
+            TextExtract[📑 textextract-service<br/>8000]
             Storage[☁️ storage-service<br/>8003]
-            WeaviateSvc[🔍 weaviate-service<br/>8007]
+            WeaviateSvc[🔍 weaviate-service + CAG<br/>8007]
             ElasticSvc[🔎 elasticsearch-service<br/>8005]
             TemporalSvc[🔄 temporalio-service<br/>8010]
             TemplateSvc[🧩 template-editor-service<br/>8011]
+            BackgroundWorker[⚙️ background-worker<br/>8100]
         end
 
         subgraph "Infrastructure"
@@ -502,12 +513,13 @@ graph TB
             Elasticsearch[(🧠 elasticsearch<br/>9200)]
             TemporalServer[(⏱️ temporalio-server<br/>7233)]
             TemporalUI[(🖥️ temporalio-ui<br/>8233)]
-            Gotenberg[(📄 gotenberg<br/>3000 int.)]
+            Gotenberg[(📄 gotenberg<br/>3000 interno)]
             Ollama[(🦙 genai-ollama<br/>11434)]
         end
     end
 
     NextJS --> API
+    API --> BackgroundWorker
 
     API --> CAG
     API --> LangExtract

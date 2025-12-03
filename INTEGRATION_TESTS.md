@@ -667,8 +667,7 @@ backend/tests/
 │   ├── test_documents.py
 │   └── test_search.py
 ├── test_services/           # Tests de servicios
-│   ├── test_storage_service.py
-│   └── test_llm_service.py
+│   └── test_storage_service.py
 └── test_utils/              # Tests de utilidades
     └── test_security.py
 ```

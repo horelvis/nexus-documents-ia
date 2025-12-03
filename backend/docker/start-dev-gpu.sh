@@ -45,8 +45,8 @@ echo "🎯 Starting services with GPU acceleration..."
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 # Start worker
-echo "👷 Starting background worker..."
-docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
+echo "👷 Starting background-worker service..."
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d background-worker
 
 # Wait for Ollama
 echo "⏳ Waiting for Ollama to start with GPU..."

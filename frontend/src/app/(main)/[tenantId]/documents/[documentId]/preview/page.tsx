@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Download, RefreshCw, Eye, Share2, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Download, RefreshCw, Eye, Trash2, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +19,19 @@ import { ShareDocumentDialog } from '@/components/documents/share-document-dialo
 import { ImagePreview } from '@/components/documents/image-preview'
 import { API_CONFIG } from '@/lib/config'
 import { DocumentStatusIndicator } from '@/components/documents/document-status-indicator'
+import { useTranslation } from '@/lib/i18n/hooks'
+import { useDocumentEvents } from '@/contexts/document-events-context'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 export default function DocumentPreviewPage() {
   const params = useParams()
@@ -36,11 +49,15 @@ export default function DocumentPreviewPage() {
   const [isLoadingPdf, setIsLoadingPdf] = useState(false)
   const [isLoadingImage, setIsLoadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [viewStartTime, setViewStartTime] = useState<number | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [isExtractingEntities, setIsExtractingEntities] = useState(false)
 
   const documentService = useDocumentService()
   const insightsService = useDocumentInsightsService()
+  const { t } = useTranslation()
+  const { emitDocumentEvent } = useDocumentEvents()
 
   // Helper function to construct full URLs for images (used for PDF thumbnails)
   const getFullImageUrl = (path: string) => {
@@ -113,7 +130,6 @@ export default function DocumentPreviewPage() {
 
     setIsLoadingPdf(true)
     try {
-      console.log('[DocumentPreviewPage] Attempting to load PDF URL for document:', document.id, 'file_type:', document.file_type)
       let result
 
       if (document.file_type === 'pdf' || document.mime_type === 'application/pdf') {
@@ -124,16 +140,12 @@ export default function DocumentPreviewPage() {
       }
 
       if ('blob' in result && result.blob) {
-        console.log('[DocumentPreviewPage] Received blob for PDF, type:', result.blob.type, 'size:', result.blob.size)
         const localUrl = URL.createObjectURL(result.blob)
         setPdfUrl(localUrl)
-        console.log('[DocumentPreviewPage] Created object URL:', localUrl)
       } else {
-        console.error('[DocumentPreviewPage] Failed to download PDF blob:', 'error' in result ? result.error : 'Unknown error')
         setError('Failed to load PDF preview')
       }
     } catch (err) {
-      console.error('[DocumentPreviewPage] Error in loadPdfUrl:', err)
       setError('An unexpected error occurred while loading PDF')
     } finally {
       setIsLoadingPdf(false)
@@ -163,34 +175,29 @@ export default function DocumentPreviewPage() {
   }
 
   const handleDownload = async () => {
-    if (!document) {
-      toast.error('No document selected')
-      return
-    }
+    if (!document) return
 
     try {
-      toast.info('Downloading document...')
-      console.log('Downloading document:', document.id, document.filename)
+      toast.info(t('documentsPage.notifications.downloading.title'), {
+        description: t('documentsPage.notifications.downloading.message', { filename: document.filename })
+      })
 
       const result = await documentService.downloadDocument(document.id)
-      console.log('Download result:', result)
 
       if ('error' in result) {
-        console.error('Download error:', result.error)
-        toast.error('Download failed', { description: result.error })
+        toast.error(t('documentsPage.notifications.downloadFailed.title'), {
+          description: t('documentsPage.notifications.downloadFailed.message', { error: result.error })
+        })
         return
       }
 
-      // Verify we have a blob
       if (!result.blob || !(result.blob instanceof Blob)) {
-        console.error('Invalid blob received:', result)
-        toast.error('Download failed', { description: 'Invalid file data received' })
+        toast.error(t('documentsPage.notifications.invalidFile.title'), {
+          description: t('documentsPage.notifications.invalidFile.message')
+        })
         return
       }
 
-      console.log('Creating download link for:', result.filename, 'size:', result.blob.size)
-
-      // Create download link
       const url = URL.createObjectURL(result.blob)
       const a = window.document.createElement('a')
       a.href = url
@@ -199,23 +206,49 @@ export default function DocumentPreviewPage() {
       window.document.body.appendChild(a)
       a.click()
 
-      // Cleanup
       setTimeout(() => {
         window.document.body.removeChild(a)
         URL.revokeObjectURL(url)
       }, 100)
 
-      toast.success('Document downloaded successfully')
+      toast.success(t('documentsPage.notifications.downloadComplete.title'), {
+        description: t('documentsPage.notifications.downloadComplete.message', { filename: document.filename })
+      })
     } catch (error) {
-      console.error('Download exception:', error)
-      toast.error('Download failed', {
-        description: error instanceof Error ? error.message : 'Unknown error'
+      toast.error(t('documentsPage.notifications.downloadFailed.title'), {
+        description: t('documentsPage.notifications.downloadFailed.message', { error: error instanceof Error ? error.message : 'Unknown error' })
       })
     }
   }
 
-  const handleShare = () => {
-    setShareDialogOpen(true)
+  const handleDelete = async () => {
+    if (!document) return
+
+    setIsDeleting(true)
+    try {
+      const response = await documentService.deleteDocument(document.id)
+      if (response.error) {
+        toast.error(t('documentsPage.notifications.deleteFailed.title'), {
+          description: t('documentsPage.notifications.deleteFailed.message', { error: response.error })
+        })
+      } else {
+        toast.success(t('documentsPage.notifications.deleteSuccess.title'), {
+          description: t('documentsPage.notifications.deleteSuccess.message')
+        })
+        emitDocumentEvent("documents:updated", {
+          tenantId,
+          source: "delete"
+        })
+        router.push(`/${tenantId}/documents`)
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+      toast.error(t('documentsPage.notifications.deleteFailed.title'), {
+        description: t('documentsPage.notifications.deleteFailed.message', { error: errorMessage })
+      })
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const formatFileSize = (bytes: number) => {
@@ -224,24 +257,6 @@ export default function DocumentPreviewPage() {
     const sizes = ['Bytes', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString()
-  }
-
-  const getPreviewStatusBadge = (preview: DocumentPreviewResponse) => {
-    if (preview.conversion_method === 'gotenberg') {
-      return (
-        <Badge className="bg-green-100 text-green-800 border-green-200">
-          Gotenberg Conversion
-        </Badge>
-      )
-    } else if (preview.conversion_method === 'fallback') {
-      return <Badge variant="secondary">Fallback Preview</Badge>
-    } else {
-      return <Badge variant="outline">Native Preview</Badge>
-    }
   }
 
   // Load document and preview on mount
@@ -255,24 +270,68 @@ export default function DocumentPreviewPage() {
     }
   }, [document])
 
-  // Load PDF URL only after we confirm from preview that PDF is available
-  // This prevents worker initialization errors
+  // Load PDF URL - for native PDFs load immediately, for others wait for conversion
   useEffect(() => {
+    const isNativePdf = document?.file_type === 'pdf' || document?.mime_type === 'application/pdf'
+
+    // For native PDFs, load immediately without waiting for preview
+    if (document && isNativePdf && !pdfUrl && !isLoadingPdf) {
+      loadPdfUrl()
+      return
+    }
+
+    // For converted PDFs, wait until preview confirms it's available
     if (preview && preview.pdf_available && !pdfUrl && !isLoadingPdf) {
       loadPdfUrl()
     }
-  }, [preview, pdfUrl, isLoadingPdf, loadPdfUrl])
+  }, [document, preview, pdfUrl, isLoadingPdf, loadPdfUrl])
+
+  // Track polling attempts to stop infinite polling
+  const [pollingAttempts, setPollingAttempts] = useState(0)
+  const MAX_POLLING_ATTEMPTS = 5
 
   useEffect(() => {
-    // Poll for preview if thumbnails are still being generated
-    // For PDFs, thumbnails might take a moment to generate even though the PDF is available
-    if (preview && !preview.pdf_available && preview.conversion_method === 'none') {
+    // Poll for preview if conversion is pending or in progress (max 5 attempts)
+    const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+    if (preview && !preview.pdf_available && isPending && pollingAttempts < MAX_POLLING_ATTEMPTS) {
       const timer = setTimeout(() => {
+        setPollingAttempts(prev => prev + 1)
         generatePreview(false)
-      }, 2000)
+      }, 3000)
       return () => clearTimeout(timer)
     }
-  }, [preview])
+  }, [preview, pollingAttempts])
+
+  // Poll for entities if document is processing (no entities yet)
+  const [entityPollingAttempts, setEntityPollingAttempts] = useState(0)
+  const MAX_ENTITY_POLLING_ATTEMPTS = 10
+
+  useEffect(() => {
+    const hasNoEntities = !document?.extracted_entities || document.extracted_entities.length === 0
+    const isProcessing = document && document.indexed < 1
+
+    // Start polling if document has no entities and might still be processing
+    if (document && hasNoEntities && entityPollingAttempts < MAX_ENTITY_POLLING_ATTEMPTS) {
+      setIsExtractingEntities(true)
+      const timer = setTimeout(async () => {
+        setEntityPollingAttempts(prev => prev + 1)
+        // Refresh document to check for entities
+        const response = await documentService.getDocument(documentId)
+        if (response.data) {
+          setDocument(response.data)
+          // Stop polling if entities found
+          if (response.data.extracted_entities && response.data.extracted_entities.length > 0) {
+            setIsExtractingEntities(false)
+          }
+        }
+      }, 10000)
+      return () => clearTimeout(timer)
+    } else if (document?.extracted_entities && document.extracted_entities.length > 0) {
+      setIsExtractingEntities(false)
+    } else if (entityPollingAttempts >= MAX_ENTITY_POLLING_ATTEMPTS) {
+      setIsExtractingEntities(false)
+    }
+  }, [document, entityPollingAttempts, documentId])
 
   // Track view start time for potential future metrics
   useEffect(() => {
@@ -310,6 +369,8 @@ export default function DocumentPreviewPage() {
       URL.revokeObjectURL(imageUrl)
       setImageUrl(null)
     }
+    // Reset polling attempts for new document
+    setPollingAttempts(0)
   }, [documentId])
 
   return (
@@ -342,41 +403,65 @@ export default function DocumentPreviewPage() {
             }}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            {searchParams.get('returnTo') === 'search' ? 'Back to Search' : 'Back to Documents'}
+            {searchParams.get('returnTo') === 'search' ? t('documentPreview.backToSearch') : t('documentPreview.backToDocuments')}
           </Button>
-
-          {document && (
-            <div>
-              <h1 className="text-2xl font-bold">{document.title || document.filename}</h1>
-              <p className="text-muted-foreground">
-                {formatFileSize(document.file_size)} • {document.file_type}
-              </p>
-            </div>
-          )}
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleShare}>
-            <Share2 className="h-4 w-4 mr-2" />
-            Share
-          </Button>
-
           {document && (
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-2" />
-              Download
+              {t('common.download')}
             </Button>
           )}
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => generatePreview(true)}
-            disabled={isLoadingPreview || preview?.conversion_method === 'pending'}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview || preview?.conversion_method === 'pending' ? 'animate-spin' : ''}`} />
-            Regenerate
-          </Button>
+          {document && (
+            <Button variant="outline" size="sm" onClick={() => setShareDialogOpen(true)}>
+              <Share2 className="h-4 w-4 mr-2" />
+              {t('documentPreview.share')}
+            </Button>
+          )}
+
+          {document && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={isDeleting}>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {t('common.delete')}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t('documentPreview.deleteConfirm.title')}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t('documentPreview.deleteConfirm.description')}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {isDeleting ? t('common.loading') : t('common.delete')}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+
+          {/* Only show Regenerate for non-native PDFs that need conversion */}
+          {document?.file_type !== 'pdf' && document?.mime_type !== 'application/pdf' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => generatePreview(true)}
+              disabled={isLoadingPreview || preview?.conversion_method === 'pending'}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview || preview?.conversion_method === 'pending' ? 'animate-spin' : ''}`} />
+              {t('documentPreview.regenerate')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -405,209 +490,215 @@ export default function DocumentPreviewPage() {
       {document && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
           {/* Main Preview Area */}
-          <div className="lg:col-span-3 flex flex-col">
-            <Card className="flex-1 flex flex-col">
-              <CardHeader className="flex-shrink-0">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <Eye className="h-5 w-5" />
-                    Document Preview
-                  </CardTitle>
-                  {preview && getPreviewStatusBadge(preview)}
+          <div className="lg:col-span-3 flex flex-col min-h-0">
+            {/* Show loading skeleton only for non-native PDFs that need conversion */}
+            {(() => {
+              const isNativePdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
+              if (isNativePdf) return false
+              const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+              if (pollingAttempts >= MAX_POLLING_ATTEMPTS) return false
+              return isLoadingPreview || (preview && !preview.pdf_available && isPending)
+            })() && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <span className="text-sm text-muted-foreground">
+                    {isLoadingPreview
+                      ? 'Checking preview status...'
+                      : `Generating preview in background... (${pollingAttempts + 1}/${MAX_POLLING_ATTEMPTS})`}
+                  </span>
                 </div>
-              </CardHeader>
-              <CardContent className="flex-1 flex flex-col min-h-[75vh]">
-                {(isLoadingPreview || (preview && !preview.pdf_available && preview.conversion_method === 'none')) && (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span className="text-sm text-muted-foreground">
-                        {isLoadingPreview
-                          ? 'Checking preview status...'
-                          : 'Generating preview in background...'}
-                      </span>
+                <Skeleton className="h-32 w-full" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            )}
+
+            {/* Show message when conversion failed/timed out */}
+            {(() => {
+              const isNativePdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
+              if (isNativePdf) return false
+              const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+              return preview && !preview.pdf_available && isPending && pollingAttempts >= MAX_POLLING_ATTEMPTS
+            })() && (
+              <div className="text-center py-12 space-y-4">
+                <div className="w-16 h-16 mx-auto bg-muted rounded-full flex items-center justify-center">
+                  <Eye className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold">Preview Not Available</h3>
+                  <p className="text-muted-foreground max-w-md mx-auto">
+                    The document conversion is taking longer than expected. You can download the original file or try regenerating the preview.
+                  </p>
+                  <div className="flex justify-center gap-2 mt-4">
+                    <Button variant="outline" size="sm" onClick={handleDownload}>
+                      <Download className="h-4 w-4 mr-2" />
+                      Download Original
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      setPollingAttempts(0)
+                      generatePreview(true)
+                    }}>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Try Again
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Show PDF viewer for native PDFs or when converted PDF is available */}
+            {(() => {
+              const isNativePdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
+              const shouldShowPdfSection = isNativePdf || (preview && preview.pdf_available)
+              return shouldShowPdfSection
+            })() && (
+              <div className="flex-1 flex flex-col min-h-0">
+                {pdfUrl ? (
+                  <div className="flex-1 bg-card rounded-lg border overflow-hidden">
+                    <PDFViewer
+                      url={pdfUrl}
+                      fileName={document.filename}
+                      showToolbar={true}
+                      initialScale={0.9}
+                      height="100%"
+                      className="h-full"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center bg-card rounded-lg border">
+                    <div className="text-center">
+                      <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                      <p className="text-muted-foreground">Loading PDF...</p>
                     </div>
-                    <Skeleton className="h-32 w-full" />
-                    <Skeleton className="h-48 w-full" />
                   </div>
                 )}
+              </div>
+            )}
 
-                {preview && preview.pdf_available && (
-                  <div className="space-y-6">
-                    {/* PDF Viewer */}
-                    {preview.pdf_available && (
-                      <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">PDF Document</h3>
-                        {pdfUrl ? (
-                          <div className="border rounded-lg overflow-hidden">
-                            <PDFViewer
-                              url={pdfUrl}
-                              fileName={document.filename}
-                              showToolbar={true}
-                              initialScale={0.9}
-                              height="75vh"
-                              className="bg-white"
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center h-[60vh] border rounded-lg">
-                            <div className="text-center">
-                              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-                              <p className="text-muted-foreground">Loading PDF...</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
+            {/* Image Preview */}
+            {preview?.type === 'image_preview' && document && (
+              <div className="flex-1 flex flex-col min-h-0 bg-card rounded-lg border">
+                {isLoadingImage && (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                      <p className="text-muted-foreground">Loading image...</p>
+                    </div>
+                  </div>
+                )}
+                {imageUrl && !isLoadingImage && (
+                  <div className="flex-1 min-h-0 p-4">
+                    <ImagePreview
+                      src={imageUrl}
+                      alt={document.title || document.filename}
+                      fileName={document.filename}
+                      originalDimensions={preview.original_dimensions}
+                      fileSize={document.file_size}
+                      mimeType={document.mime_type}
+                      className="h-full"
+                    />
+                  </div>
+                )}
+                {!imageUrl && !isLoadingImage && error && (
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-red-600">Failed to load image</p>
+                  </div>
+                )}
+              </div>
+            )}
 
-                    {/* PDF Thumbnails */}
-                    {preview.pdf_available && preview.thumbnails.length > 0 && (
-                      <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">Page Thumbnails</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                          {preview.thumbnails.map((thumbnail, index) => {
-                            const thumbnailUrl = getFullImageUrl(thumbnail)
+            {/* Text Preview */}
+            {preview?.text_preview && (
+              <div className="flex-1 bg-card rounded-lg border">
+                <ScrollArea className="h-full w-full">
+                  <div className="p-4">
+                    <pre className="text-sm whitespace-pre-wrap font-mono">
+                      {preview.text_preview}
+                    </pre>
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
 
-                            return (
-                              <div key={index} className="space-y-2">
-                                <div className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border-2 border-border hover:border-primary/50 transition-colors">
-                                  <img
-                                    src={thumbnailUrl}
-                                    alt={`Page ${index + 1}`}
-                                    className="w-full h-full object-contain cursor-pointer hover:scale-105 transition-transform"
-                                    onClick={() => {
-                                      // Open in new tab for full view
-                                      window.open(thumbnailUrl, '_blank')
-                                    }}
-                                  />
-                                </div>
-                                <p className="text-sm text-center text-muted-foreground">
-                                  Page {index + 1}
-                                </p>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Image Preview */}
-                    {preview.type === 'image_preview' && document && (
-                      <div className="h-full flex flex-col">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold">Image Preview</h3>
-                        </div>
-                        {isLoadingImage && (
-                          <div className="flex-1 flex items-center justify-center">
-                            <div className="text-center">
-                              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-                              <p className="text-muted-foreground">Loading image...</p>
-                            </div>
-                          </div>
-                        )}
-                        {imageUrl && !isLoadingImage && (
-                          <div className="flex-1 min-h-0">
-                            <div className="relative w-full h-full">
-                              <ImagePreview
-                                src={imageUrl}
-                                alt={document.title || document.filename}
-                                fileName={document.filename}
-                                originalDimensions={preview.original_dimensions}
-                                fileSize={document.file_size}
-                                mimeType={document.mime_type}
-                                className="h-full"
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {!imageUrl && !isLoadingImage && error && (
-                          <div className="flex-1 flex items-center justify-center">
-                            <p className="text-red-600">Failed to load image</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Text Preview */}
-                    {preview.text_preview && (
-                      <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">Text Content</h3>
-                        <ScrollArea className="h-96 w-full rounded-lg border">
-                          <div className="p-4">
-                            <pre className="text-sm whitespace-pre-wrap font-mono">
-                              {preview.text_preview}
-                            </pre>
-                          </div>
-                        </ScrollArea>
-                      </div>
-                    )}
-
-                    {/* Unsupported Format */}
-                    {preview.type === 'unsupported_fallback' && (
-                      <div className="text-center py-12 space-y-4">
-                        <div className="w-16 h-16 mx-auto bg-muted rounded-full flex items-center justify-center">
-                          <Eye className="h-8 w-8 text-muted-foreground" />
-                        </div>
-                        <div className="space-y-2">
-                          <h3 className="text-lg font-semibold">Preview Not Available</h3>
-                          <p className="text-muted-foreground max-w-md mx-auto">
-                            {preview.message}
-                          </p>
-                          {preview.supported_formats && (
-                            <div className="text-sm text-muted-foreground">
-                              <p className="mb-2">Supported formats:</p>
-                              <div className="flex flex-wrap gap-2 justify-center">
-                                {Object.entries(preview.supported_formats).map(([category, formats]) => (
-                                  <Badge key={category} variant="outline">
-                                    {formats.join(', ')}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+            {/* Unsupported Format */}
+            {preview?.type === 'unsupported_fallback' && (
+              <div className="flex-1 bg-card rounded-lg border flex items-center justify-center">
+                <div className="text-center py-12 space-y-4">
+                  <div className="w-16 h-16 mx-auto bg-muted rounded-full flex items-center justify-center">
+                    <Eye className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-semibold">Preview Not Available</h3>
+                    <p className="text-muted-foreground max-w-md mx-auto">
+                      {preview.message}
+                    </p>
+                    {preview.supported_formats && (
+                      <div className="text-sm text-muted-foreground">
+                        <p className="mb-2">Supported formats:</p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          {Object.entries(preview.supported_formats).map(([category, formats]) => (
+                            <Badge key={category} variant="outline">
+                              {formats.join(', ')}
+                            </Badge>
+                          ))}
                         </div>
                       </div>
                     )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Sidebar with Document Info */}
-          <div className="lg:col-span-1">
+          {/* Sidebar with Document Info and Entities */}
+          <div className="lg:col-span-1 space-y-4">
+            {/* Document Information Card */}
             <Card>
-              <CardHeader>
-                <CardTitle>Document Information</CardTitle>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{t('documentPreview.documentInfo.title')}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <h4 className="font-medium">File Details</h4>
-                  <div className="text-sm space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Type:</span>
-                      <span>{document.file_type}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Size:</span>
-                      <span>{formatFileSize(document.file_size)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Estado:</span>
-                      <DocumentStatusIndicator
-                        status={document.indexed}
-                        showDescription={true}
-                        size="md"
-                      />
-                    </div>
-                  </div>
+              <CardContent className="space-y-3">
+                {/* Document Name */}
+                <div className="pb-2 border-b">
+                  <h3 className="font-semibold text-sm truncate" title={document.title || document.filename}>
+                    {document.title || document.filename}
+                  </h3>
                 </div>
 
+                {/* File Details */}
+                <div className="text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t('documentPreview.documentInfo.type')}:</span>
+                    <span className="font-medium">{document.file_type.toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t('documentPreview.documentInfo.size')}:</span>
+                    <span>{formatFileSize(document.file_size)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">{t('documentPreview.documentInfo.status')}:</span>
+                    <DocumentStatusIndicator
+                      status={document.indexed}
+                      showDescription={true}
+                      size="sm"
+                    />
+                  </div>
+                  {document.category && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{t('documentPreview.documentInfo.category')}:</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {document.category}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tags */}
                 {document.tags.length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-2">
-                      <h4 className="font-medium">Tags</h4>
+                      <span className="text-sm text-muted-foreground">{t('documentPreview.documentInfo.tags')}:</span>
                       <div className="flex flex-wrap gap-1">
                         {document.tags.map((tag, index) => (
                           <Badge key={index} variant="outline" className="text-xs">
@@ -619,69 +710,117 @@ export default function DocumentPreviewPage() {
                   </>
                 )}
 
-                {document.description && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Description</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {document.description}
-                      </p>
-                    </div>
-                  </>
-                )}
+              </CardContent>
+            </Card>
 
-                {preview && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Preview Details</h4>
-                      <div className="text-sm space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Method:</span>
-                          <span className="capitalize">{preview.conversion_method}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">PDF Available:</span>
-                          <span>{preview.pdf_available ? 'Yes' : 'No'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Cached:</span>
-                          <span>{preview.cached ? 'Yes' : 'No'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Generated:</span>
-                          <span className="text-xs">{formatDate(preview.generated_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <Separator />
-                <div className="space-y-2">
-                  <h4 className="font-medium">Actions</h4>
-                  <div className="space-y-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start"
-                      onClick={handleDownload}
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Download Original
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start"
-                      onClick={() => router.push(`/${tenantId}/documents/${documentId}`)}
-                    >
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      View Details
-                    </Button>
+            {/* Entities Card - Below Document Info */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span>{t('documentPreview.extractedEntities.title')}</span>
+                  {document.extracted_entities && document.extracted_entities.length > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {document.extracted_entities.length}
+                    </Badge>
+                  )}
+                  {isExtractingEntities && (
+                    <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Extracting state */}
+                {isExtractingEntities && (!document.extracted_entities || document.extracted_entities.length === 0) && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>{t('documentPreview.extractedEntities.extracting')}</span>
                   </div>
-                </div>
+                )}
+
+                {/* No entities found */}
+                {!isExtractingEntities && (!document.extracted_entities || document.extracted_entities.length === 0) && (
+                  <div className="text-sm text-muted-foreground py-4 text-center">
+                    {t('documentPreview.extractedEntities.noEntities')}
+                  </div>
+                )}
+
+                {/* Entities list */}
+                {document.extracted_entities && document.extracted_entities.length > 0 && (
+                  <ScrollArea className="max-h-[400px]">
+                    <div className="space-y-3">
+                      {(() => {
+                        // Group entities by type
+                        const grouped: Record<string, any[]> = {}
+                        document.extracted_entities.forEach((e: any) => {
+                          const type = e.type || e.class || 'other'
+                          if (!grouped[type]) grouped[type] = []
+                          grouped[type].push(e)
+                        })
+
+                        const typeLabels: Record<string, string> = {
+                          trabajador: 'Trabajador',
+                          person: 'Persona',
+                          empresa: 'Empresa',
+                          organization: 'Organización',
+                          amount: 'Importe',
+                          liquido: 'Líquido',
+                          devengo: 'Devengo',
+                          deduccion: 'Deducción',
+                          fecha: 'Fecha',
+                          date: 'Fecha',
+                          periodo: 'Período',
+                          invoice_number: 'Nº Factura',
+                          iban: 'IBAN',
+                          cliente: 'Cliente'
+                        }
+
+                        const typeColors: Record<string, string> = {
+                          trabajador: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+                          person: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+                          empresa: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
+                          organization: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
+                          amount: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
+                          liquido: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
+                          devengo: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+                          deduccion: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
+                          fecha: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
+                          date: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
+                          periodo: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                        }
+
+                        return Object.entries(grouped).map(([type, entities]) => (
+                          <div key={type} className="space-y-1.5">
+                            <div className={`text-xs font-medium uppercase px-2 py-1 rounded ${typeColors[type] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                              {typeLabels[type] || type}
+                            </div>
+                            <div className="pl-2 space-y-1">
+                              {entities.map((entity: any, idx: number) => {
+                                const entityText = entity.name || entity.text
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="text-sm py-1 px-2 rounded hover:bg-muted cursor-pointer transition-colors"
+                                    onClick={() => {
+                                      router.push(`/${tenantId}/search?q=${encodeURIComponent(entityText)}`)
+                                    }}
+                                    title={`${t('common.search')}: ${entityText}`}
+                                  >
+                                    <span className="font-medium">{entityText}</span>
+                                    {entity.metadata?.role && (
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        ({entity.metadata.role})
+                                      </span>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      })()}
+                    </div>
+                  </ScrollArea>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -689,14 +828,11 @@ export default function DocumentPreviewPage() {
       )}
 
       {/* Share Dialog */}
-      {document && (
-        <ShareDocumentDialog
-          documentId={document.id}
-          documentTitle={document.title || document.filename}
-          open={shareDialogOpen}
-          onOpenChange={setShareDialogOpen}
-        />
-      )}
+      <ShareDocumentDialog
+        document={document}
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+      />
     </div>
   )
 }

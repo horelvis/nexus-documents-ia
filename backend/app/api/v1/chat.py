@@ -13,7 +13,7 @@ from app.db.async_database import get_async_db
 from app.db.models import User
 from app.schemas.document import ChatMessage
 from app.services.search_service import SearchService
-from app.services.llm_service import LLMService
+from app.services.elysia_insights_service import ElysiaInsightsService
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
@@ -54,8 +54,8 @@ async def suggest_document_tags(
     """
     Sugiere etiquetas basadas en el contenido de texto proporcionado.
     """
-    llm_service = LLMService()
-    suggested_tags = await llm_service.suggest_tags(text, num_tags)
+    insights = ElysiaInsightsService(default_tenant=tenant_id, default_user=str(current_user.id))
+    suggested_tags = await insights.suggest_tags(text, num_tags=num_tags)
     
     return {"suggested_tags": suggested_tags}
 
@@ -70,7 +70,7 @@ async def extract_document_metadata(
     """
     Extrae metadatos estructurados del texto proporcionado.
     """
-    llm_service = LLMService()
-    metadata = await llm_service.extract_metadata(text)
+    insights = ElysiaInsightsService(default_tenant=tenant_id, default_user=str(current_user.id))
+    metadata = await insights.extract_metadata(text)
     
     return {"metadata": metadata}

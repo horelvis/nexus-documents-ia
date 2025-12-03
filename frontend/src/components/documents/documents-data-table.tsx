@@ -13,10 +13,10 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { 
-  IconEye, 
-  IconDownload, 
-  IconEdit, 
+import {
+  IconEye,
+  IconDownload,
+  IconEdit,
   IconTrash,
   IconPhoto,
   IconDotsVertical,
@@ -31,7 +31,8 @@ import {
   IconSignature,
   IconRefresh,
   IconFileTypeDoc,
-  IconLoader2
+  IconLoader2,
+  IconMessageCircle
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -72,6 +73,7 @@ interface DocumentsDataTableProps {
   onShareDocument: (document: ApiDocument) => void
   onRequestSignature?: (document: ApiDocument) => void
   onConvertToTemplate?: (document: ApiDocument) => void
+  onAskEmma?: (document: ApiDocument) => void
   canConvertToTemplate?: boolean
   convertLoadingId?: string | null
 }
@@ -87,6 +89,7 @@ export function DocumentsDataTable({
   onShareDocument,
   onRequestSignature,
   onConvertToTemplate,
+  onAskEmma,
   canConvertToTemplate,
   convertLoadingId,
 }: DocumentsDataTableProps) {
@@ -188,8 +191,8 @@ export function DocumentsDataTable({
         const document = row.original
         return (
           <div>
-            <div 
-              className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+            <div
+              className="font-medium cursor-pointer hover:text-primary hover:underline transition-colors"
               onClick={(e) => {
                 e.stopPropagation()
                 onFullPagePreview(document)
@@ -322,6 +325,12 @@ export function DocumentsDataTable({
                   <IconEye className="mr-2 h-4 w-4" />
                   View Details
                 </DropdownMenuItem>
+                {onAskEmma && (
+                  <DropdownMenuItem onClick={() => onAskEmma(document)}>
+                    <IconMessageCircle className="mr-2 h-4 w-4" />
+                    Ask Emma
+                  </DropdownMenuItem>
+                )}
                 {onRequestSignature && (
                   <DropdownMenuItem onClick={() => onRequestSignature(document)}>
                     <IconSignature className="mr-2 h-4 w-4" />
@@ -345,11 +354,11 @@ export function DocumentsDataTable({
                     Convert to Template
                   </DropdownMenuItem>
                 )}
-                
-                
+
+
                 <DropdownMenuSeparator />
-                
-                <DropdownMenuItem 
+
+                <DropdownMenuItem
                   onClick={() => onDeleteDocument(document)}
                   className="text-red-600 focus:text-red-600"
                 >

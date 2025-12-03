@@ -5,6 +5,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    # API expone puerto para el host; otros servicios internos no lo necesitan
     ports:
       - "0.0.0.0:8000:8000"
     depends_on:
@@ -24,6 +25,8 @@ services:
         condition: service_healthy
       textextract-service:
         condition: service_healthy
+      background-worker:
+        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -34,17 +37,17 @@ services:
       - SIGNATURE_ENCRYPTION_KEY=${SIGNATURE_ENCRYPTION_KEY}
       - ALLOW_ALL_CORS=true
       # Services URLs
-      - STORAGE_SERVICE_URL=http://storage-service:8000
-      - STORAGE_SERVICE_INTERNAL_URL=http://storage-service:8000
-      - CAG_SERVICE_URL=http://weaviate-service:8000
-      - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
-      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
-      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
-      - ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8000
-      - TEMPORALIO_SERVICE_URL=http://temporalio-service:8000
-      - TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8000
-      - OLLAMA_BASE_URL=http://genai-ollama:11434
-      - GOTENBERG_BASE_URL=http://gotenberg:3000
+      - STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8000}
+      - STORAGE_SERVICE_INTERNAL_URL=${STORAGE_SERVICE_INTERNAL_URL:-http://storage-service:8000}
+      - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - LANGEXTRACT_SERVICE_URL=${LANGEXTRACT_SERVICE_URL:-http://langextract-service:8000}
+      - TEXT_EXTRACTION_SERVICE_URL=${TEXT_EXTRACTION_SERVICE_URL:-http://textextract-service:8000}
+      - ELASTICSEARCH_SERVICE_URL=${ELASTICSEARCH_SERVICE_URL:-http://elasticsearch-service:8000}
+      - TEMPORALIO_SERVICE_URL=${TEMPORALIO_SERVICE_URL:-http://temporalio-service:8000}
+      - TEMPLATE_EDITOR_SERVICE_URL=${TEMPLATE_EDITOR_SERVICE_URL:-http://template-editor-service:8000}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://genai-ollama:11434}
+      - GOTENBERG_BASE_URL=${GOTENBERG_BASE_URL:-http://gotenberg:3000}
       # Infrastructure
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
@@ -76,8 +79,7 @@ services:
     build:
       context: ../microservices/elasticsearch-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8005:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -107,8 +109,7 @@ services:
     build:
       context: ../microservices/storage-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8003:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     env_file:
@@ -134,14 +135,20 @@ services:
     build:
       context: ../microservices/langextract-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8009:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     env_file:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:32b}
+      - LLM_API_BASE=${LLM_API_BASE:-http://genai-ollama:11434}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OLLAMA_HOST=http://genai-ollama:11434
     volumes:
       # Montar código fuente para desarrollo
@@ -158,8 +165,7 @@ services:
     build:
       context: ../microservices/textextract-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8012:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     env_file:
@@ -180,8 +186,7 @@ services:
     build:
       context: ../microservices/weaviate-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8007:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     depends_on:
       weaviate:
         condition: service_healthy
@@ -192,6 +197,14 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_URL=http://weaviate:8080
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://genai-ollama:11434}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SERPER_API_KEY=${SERPER_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:7b}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm:latest}
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/weaviate-service/app:/app/app:ro
@@ -207,8 +220,7 @@ services:
     build:
       context: ../microservices/temporalio-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8010:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     depends_on:
       temporalio-server:
         condition: service_healthy
@@ -246,8 +258,7 @@ services:
     build:
       context: ../microservices/template-editor-service
       dockerfile: Dockerfile
-    ports:
-      - "0.0.0.0:8011:8000"
+    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     env_file:
@@ -266,11 +277,44 @@ services:
       timeout: 10s
       retries: 3
 
+
+  # Background worker microservice (previews, emails, indexing retries)
+  background-worker:
+    build:
+      context: ..
+      dockerfile: microservices/background-worker/Dockerfile
+    command: ["/app/backend/microservices/background-worker/start.sh"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
+    networks:
+      - backend-network
+    volumes:
+      - ../:/app/backend
+      - ../../credentials:/app/credentials:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health').status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+
   # TemporalIO Server - DEVELOPMENT MODE (auto-setup to install schema)
   temporalio-server:
     image: temporalio/auto-setup:1.24.2
-    ports:
-      - "0.0.0.0:7233:7233"   # gRPC port
     depends_on:
       db:
         condition: service_healthy
@@ -289,6 +333,7 @@ services:
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
     volumes:
       - ./temporalio-config:/etc/temporal/config
+      - ./temporalio-config/auto-setup.sh:/etc/temporal/auto-setup.sh:ro
       - temporalio_data:/etc/temporal/data
     healthcheck:
       test: ["CMD", "temporal", "workflow", "list", "--address", "temporalio-server:7233"]
@@ -315,8 +360,6 @@ services:
   # Base de datos PostgreSQL
   db:
     image: postgres:15-alpine
-    ports:
-      - "0.0.0.0:5432:5432"
     environment:
       POSTGRES_SERVER: db
       POSTGRES_USER: ${POSTGRES_USER:-nexus_user}
@@ -339,8 +382,6 @@ services:
   # Redis para cache y sesiones
   redis:
     image: redis:7-alpine
-    ports:
-      - "0.0.0.0:6379:6379"
     networks:
       - backend-network
     volumes:
@@ -355,8 +396,6 @@ services:
   # Weaviate para embeddings vectoriales
   weaviate:
     image: semitechnologies/weaviate:1.28.3
-    ports:
-      - "0.0.0.0:8080:8080"
     environment:
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
@@ -378,8 +417,6 @@ services:
   # Elasticsearch para búsqueda híbrida
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    ports:
-      - "0.0.0.0:9200:9200"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -397,33 +434,22 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Qdrant para vectores (alternativo a Weaviate)
-  qdrant:
-    image: qdrant/qdrant:v1.7.4
-    ports:
-      - "0.0.0.0:6333:6333"
-    networks:
-      - backend-network
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  # Ollama para modelos de lenguaje local
+  # Ollama para modelos de lenguaje local (con GPU)
   genai-ollama:
     image: ollama/ollama:latest
-    ports:
-      - "0.0.0.0:11434:11434"
     networks:
       - backend-network
     volumes:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 30s
@@ -434,8 +460,7 @@ services:
   # Gotenberg para conversión de documentos
   gotenberg:
     image: gotenberg/gotenberg:8.7.0
-    ports:
-      - "0.0.0.0:3000:3000"
+    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     command:
@@ -460,6 +485,5 @@ volumes:
   redis_data:
   weaviate_data:
   elasticsearch_data:
-  qdrant_data:
   ollama_data:
   temporalio_data:

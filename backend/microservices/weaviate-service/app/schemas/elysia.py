@@ -94,6 +94,13 @@ class ToolExecution(BaseModel):
     context: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
+class Suggestion(BaseModel):
+    """A contextual suggestion for the user"""
+    text: str
+    action: Optional[str] = None  # Optional action identifier
+    icon: Optional[str] = None    # Optional icon name
+
+
 class ElysiaResponse(BaseModel):
     """Schema for Elysia query responses"""
     query: str
@@ -108,7 +115,9 @@ class ElysiaResponse(BaseModel):
     execution_time_ms: int
     iterations: int
     learning_applied: bool = False
-    
+    suggestions: List[Suggestion] = Field(default_factory=list, description="Contextual suggestions based on available tools and user context")
+    available_tools: List[str] = Field(default_factory=list, description="List of available tool names")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -121,7 +130,12 @@ class ElysiaResponse(BaseModel):
                 "confidence_score": 0.95,
                 "execution_time_ms": 1250,
                 "iterations": 2,
-                "learning_applied": True
+                "learning_applied": True,
+                "suggestions": [
+                    {"text": "Analyze document contracts", "action": "analyze_contracts", "icon": "file-text"},
+                    {"text": "Search in my documents", "action": "search", "icon": "search"}
+                ],
+                "available_tools": ["analyze_contract_risks", "search_web", "compare_documents"]
             }
         }
 

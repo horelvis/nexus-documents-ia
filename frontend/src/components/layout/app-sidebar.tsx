@@ -23,6 +23,7 @@ import {
   IconGitBranch,
   IconRobot,
   IconFileText,
+  IconScale,
 } from "@tabler/icons-react"
 
 import { NavDocuments } from "@/components/navigation/nav-documents"
@@ -186,6 +187,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         url: "/admin/signature-providers",
         icon: IconSignature,
         color: "pink",
+      },
+      {
+        title: t('sidebar.admin.publicKnowledge'),
+        url: "/admin/public-knowledge",
+        icon: IconScale,
+        color: "blue",
       },
       {
         title: t('sidebar.admin.billing'),

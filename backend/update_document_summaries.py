@@ -15,7 +15,7 @@ sys.path.insert(0, '/app' if os.path.exists('/.dockerenv') else '.')
 # Database configuration
 if os.path.exists('/.dockerenv'):
     DATABASE_URL = "postgresql+asyncpg://postgres:password@db:5432/nexus_db"
-    CAG_SERVICE_URL = "http://cag-service:8000"
+    CAG_SERVICE_URL = "http://weaviate-service:8000"
 else:
     DATABASE_URL = "postgresql+asyncpg://postgres:password@localhost:5432/nexus_db"
     CAG_SERVICE_URL = os.getenv("CAG_SERVICE_URL", "http://localhost:8000")

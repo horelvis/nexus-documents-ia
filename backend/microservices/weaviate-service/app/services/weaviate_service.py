@@ -23,6 +23,7 @@ class WeaviateService:
     def __init__(self):
         self.client = None
         self.embedding_model = None
+        self._initialized = False
 
     def _build_property_filter(self, key: str, value: Any):
         """Create filter for property supporting list/dict inputs"""
@@ -66,6 +67,8 @@ class WeaviateService:
         
     async def initialize(self):
         """Initialize Weaviate client and embeddings"""
+        if self._initialized and self.client:
+            return
         try:
             # Initialize Weaviate client v4 syntax - always use local (not WCD)
             # Parse host and port from URL
@@ -110,9 +113,12 @@ class WeaviateService:
             except Exception as e:
                 logger.warning(f"⚠️ Could not connect to Ollama for embeddings: {e}")
                 self.embedding_model = None
+            
+            self._initialized = True
                 
         except Exception as e:
             logger.error(f"❌ Failed to initialize Weaviate: {e}")
+            self._initialized = False
             raise
     
     async def cleanup(self):
@@ -121,6 +127,7 @@ class WeaviateService:
             # Weaviate client doesn't need explicit cleanup
             self.client = None
             logger.info("✅ Weaviate client cleaned up")
+        self._initialized = False
     
     async def create_collection(self, collection_name: str, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a new Weaviate collection"""
@@ -497,7 +504,44 @@ class WeaviateService:
         except Exception as e:
             logger.error(f"❌ Search failed in {collection_name}: {e}")
             raise
-    
+
+    async def get_document_by_id(self, collection_name: str, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific document by its PostgreSQL document ID"""
+        try:
+            await self.initialize()
+
+            if not self.client.collections.exists(collection_name):
+                logger.warning(f"⚠️ Collection {collection_name} does not exist")
+                return None
+
+            collection = self.client.collections.get(collection_name)
+
+            # Search for document by document_id property
+            import weaviate.classes.query as wq
+            response = collection.query.fetch_objects(
+                filters=wq.Filter.by_property("document_id").equal(document_id),
+                limit=1
+            )
+
+            if response.objects and len(response.objects) > 0:
+                item = response.objects[0]
+                return {
+                    "id": item.properties.get("document_id", str(item.uuid) if item.uuid else ""),
+                    "title": item.properties.get("title", ""),
+                    "content": item.properties.get("content", ""),
+                    "metadata": item.properties.get("metadata", {}),
+                    "tenant_id": item.properties.get("tenant_id", ""),
+                    "document_type": item.properties.get("document_type", ""),
+                    "tags": item.properties.get("tags", [])
+                }
+
+            logger.warning(f"⚠️ Document {document_id} not found in {collection_name}")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get document {document_id}: {e}")
+            return None
+
     async def get_collection_info(self, collection_name: str) -> CollectionInfo:
         """Get information about a collection"""
         try:

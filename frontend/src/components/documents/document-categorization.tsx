@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -18,8 +18,8 @@ import {
   IconCategory,
   IconChartBar
 } from '@tabler/icons-react'
-import { useDocumentService } from '@/lib/services/document.service'
-import { useToast } from '@/components/ui/use-toast'
+import { useToast } from '@/hooks/use-toast'
+import { useApiClient } from '@/lib/api-client'
 
 interface CategoryStats {
   total_documents: number
@@ -45,23 +45,29 @@ export function DocumentCategorization() {
   const [results, setResults] = useState<CategorizeResult[]>([])
   const [progress, setProgress] = useState(0)
   const { toast } = useToast()
-  const documentService = useDocumentService()
+  const apiClient = useApiClient()
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
-      const response = await fetch('/api/v1/categorization/stats', {
-        headers: {
-          'Authorization': `Bearer ${await getAuthToken()}`
-        }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
+      const response = await apiClient.get<CategoryStats>('/categorization/stats')
+      if (response.data) {
+        setStats(response.data)
+      } else if (response.error) {
+        toast({
+          title: "Error loading stats",
+          description: response.error,
+          variant: "destructive"
+        })
       }
     } catch (error) {
       console.error('Failed to load stats:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load categorization stats",
+        variant: "destructive"
+      })
     }
-  }
+  }, [apiClient, toast])
 
   const categorizeAll = async () => {
     setIsProcessing(true)
@@ -69,21 +75,14 @@ export function DocumentCategorization() {
     setResults([])
 
     try {
-      const response = await fetch('/api/v1/categorization/categorize', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await getAuthToken()}`
-        },
-        body: JSON.stringify({
-          categorize_all_pending: true,
-          include_tags: true,
-          force_recategorize: false
-        })
+      const response = await apiClient.post('/categorization/categorize', {
+        categorize_all_pending: true,
+        include_tags: true,
+        force_recategorize: false
       })
 
-      if (response.ok) {
-        const data = await response.json()
+      if (response.data) {
+        const data = response.data as any
         setResults(data.results)
         
         toast({
@@ -94,11 +93,13 @@ export function DocumentCategorization() {
         
         // Reload stats
         await loadStats()
+      } else if (response.error) {
+        throw new Error(response.error)
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to categorize documents",
+        description: error instanceof Error ? error.message : "Failed to categorize documents",
         variant: "destructive"
       })
     } finally {
@@ -108,38 +109,28 @@ export function DocumentCategorization() {
 
   const scheduleBatch = async () => {
     try {
-      const response = await fetch('/api/v1/categorization/schedule-batch?batch_size=100', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${await getAuthToken()}`
-        }
-      })
+      const response = await apiClient.post('/categorization/schedule-batch?batch_size=100')
 
-      if (response.ok) {
+      if (!response.error) {
         toast({
           title: "Batch Scheduled",
           description: "Background categorization has been scheduled",
         })
+      } else {
+        throw new Error(response.error)
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to schedule batch",
+        description: error instanceof Error ? error.message : "Failed to schedule batch",
         variant: "destructive"
       })
     }
   }
 
-  // Get auth token (you'd implement this based on your auth system)
-  const getAuthToken = async () => {
-    // Implementation depends on your auth system
-    return 'your-auth-token'
-  }
-
-  // Load stats on mount
-  useState(() => {
+  useEffect(() => {
     loadStats()
-  }, [])
+  }, [loadStats])
 
   return (
     <div className="space-y-6">

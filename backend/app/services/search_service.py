@@ -4,13 +4,14 @@ Hybrid Search Service combining Elasticsearch and Weaviate
 - Weaviate: Semantic specialization (20% cases)
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService
 from app.services.elasticsearch_client import elasticsearch_client
+from app.services.elysia_insights_service import ElysiaInsightsService
 from app.db.database import SessionLocal
 from app.db.models import Document
 
@@ -22,8 +23,8 @@ class SearchService:
     
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
-        self.llm_service = LLMService()
         self.vector_service = VectorService(tenant_id)  # Weaviate - Primary
+        self.elysia = ElysiaInsightsService(default_tenant=tenant_id, default_user="search_service")
         # Elasticsearch is now a microservice - no local initialization needed
         
         logger.info(f"SearchService initialized for tenant: {tenant_id}")
@@ -47,14 +48,18 @@ class SearchService:
         try:
             logger.info(f"Chat query for tenant {self.tenant_id}: {query[:100]}...")
             
-            # Usar LLMService con RAG
-            response = await self.llm_service.generate_response(
+            response = await self.elysia.generate_response(
                 query=query,
+                tenant_id=self.tenant_id,
+                user_id="search_service",
                 doc_ids=doc_ids,
-                tenant_id=self.tenant_id
+                context={"service": "search_chat"}
             )
             
-            logger.debug(f"Generated response with {len(response.get('sources', []))} sources")
+            logger.debug(
+                "Generated response with %d sources",
+                len(response.get("sources") or []),
+            )
             return response
             
         except Exception as e:
@@ -118,6 +123,7 @@ class SearchService:
                 # Enrich with complete document data
                 results = await self._enrich_search_results(vector_results)
             
+            results = self._ensure_query_matches(results, query)
             logger.info(f"✅ {search_type.capitalize()} search returned {len(results)} results")
             return results
             
@@ -232,8 +238,106 @@ class SearchService:
                 "text": content[:200] + "..." if len(content) > 200 else content,
                 "score": score
             })
-        
+
         return matches
+
+    def _ensure_query_matches(self, results: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+        """
+        Ensure each result contains highlight snippets that relate to the query.
+        This fixes the frontend "Relevant content" section showing unrelated text.
+        """
+        if not results or not query:
+            return results
+
+        query_terms = self._extract_query_terms(query)
+        if not query_terms:
+            return results
+
+        for result in results:
+            existing_matches = result.get("matches") or result.get("search_matches")
+            if existing_matches:
+                continue
+
+            document_payload = result.get("document") or {}
+            snippet_source = (
+                document_payload.get("content")
+                or document_payload.get("description")
+                or document_payload.get("title")
+                or ""
+            )
+
+            if not snippet_source:
+                continue
+
+            snippets = self._build_highlight_snippets(snippet_source, query_terms)
+            if not snippets:
+                continue
+
+            formatted_matches = [{"text": snippet, "score": result.get("score", 0.0)} for snippet in snippets]
+            result["matches"] = formatted_matches
+            document_payload["search_matches"] = formatted_matches
+            result["document"] = document_payload
+
+        return results
+
+    def _extract_query_terms(self, query: str) -> List[str]:
+        """Split the query into relevant lowercase terms for highlighting."""
+        parts = [part.strip().lower() for part in re.split(r"\s+", query) if part.strip()]
+        # Prefer longer terms to avoid highlighting filler words
+        meaningful = [term for term in parts if len(term) >= 3]
+        return meaningful or parts
+
+    def _build_highlight_snippets(
+        self,
+        text: str,
+        terms: List[str],
+        fragment_size: int = 160,
+        max_fragments: int = 2
+    ) -> List[str]:
+        """
+        Build highlight snippets that include the query terms and wrap matches with <mark>.
+        """
+        if not text:
+            return []
+
+        lower_text = text.lower()
+        snippets: List[str] = []
+
+        for term in terms:
+            idx = lower_text.find(term)
+            if idx == -1:
+                continue
+
+            start = max(0, idx - fragment_size // 2)
+            end = min(len(text), idx + len(term) + fragment_size // 2)
+            snippet = text[start:end].strip()
+            snippet = self._apply_highlight(snippet, terms)
+            snippets.append(snippet)
+
+            if len(snippets) >= max_fragments:
+                break
+
+        if not snippets:
+            snippet = text[:fragment_size].strip()
+            snippet = self._apply_highlight(snippet, terms)
+            return [snippet] if snippet else []
+
+        return snippets
+
+    def _apply_highlight(self, snippet: str, terms: List[str]) -> str:
+        """Wrap matching terms in the snippet with <mark> tags."""
+        if not snippet:
+            return snippet
+
+        highlighted = snippet
+        for term in sorted(set(terms), key=len, reverse=True):
+            try:
+                pattern = re.compile(re.escape(term), re.IGNORECASE)
+                highlighted = pattern.sub(lambda match: f"<mark>{match.group(0)}</mark>", highlighted)
+            except re.error:
+                continue
+
+        return highlighted
     
     async def ask_documents(
         self, 
@@ -281,7 +385,12 @@ class SearchService:
             Lista de tags sugeridos
         """
         try:
-            return await self.llm_service.suggest_tags(text, num_tags)
+            return await self.elysia.suggest_tags(
+                text,
+                tenant_id=self.tenant_id,
+                user_id="search_service",
+                num_tags=num_tags,
+            )
         except Exception as e:
             logger.error(f"Error suggesting tags: {str(e)}")
             return ["documento", "texto"]
@@ -297,7 +406,11 @@ class SearchService:
             Diccionario con metadatos
         """
         try:
-            return await self.llm_service.extract_metadata(text)
+            return await self.elysia.extract_metadata(
+                text,
+                tenant_id=self.tenant_id,
+                user_id="search_service",
+            )
         except Exception as e:
             logger.error(f"Error extracting metadata: {str(e)}")
             return {"título": "Documento", "tipo": "texto"}
@@ -314,7 +427,12 @@ class SearchService:
             Resumen del documento
         """
         try:
-            return await self.llm_service.summarize_text(text, max_length)
+            return await self.elysia.summarize_text(
+                text,
+                tenant_id=self.tenant_id,
+                user_id="search_service",
+                max_length=max_length,
+            )
         except Exception as e:
             logger.error(f"Error summarizing document: {str(e)}")
             return "Resumen no disponible."

@@ -9,6 +9,9 @@ export const UploadDocumentSchema = z.object({
   category: z.string().optional(),
   tags: z.string().optional(),
   description: z.string().optional(),
+  // Metadatos para documentos laborales (tipo_documento auto-detectado)
+  cliente: z.string().optional(),
+  periodo: z.string().optional(),
   files: z.array(z.instanceof(File)).min(1, 'At least one file is required'),
 })
 
@@ -34,6 +37,45 @@ export interface Tenant {
   created_at: string
   updated_at: string
   settings?: Record<string, unknown>
+}
+
+// Tipos para entidades extraídas
+export interface ExtractedEntity {
+  class: string
+  text: string
+  attributes: Record<string, any>
+  source_indices?: [number, number] | null
+}
+
+// Tipos para metadata estructurada del documento
+export interface DocumentMetadata {
+  categorization?: {
+    timestamp?: string
+    confidence?: number
+    reasoning?: string
+    method?: string
+    alternative_types?: Array<{ type: string; confidence: number }>
+    visualization_html?: string
+  }
+  extraction_summary?: {
+    // Para nóminas
+    trabajador?: string
+    periodo?: string
+    liquido_total?: string
+    salario_base?: string
+    // Para facturas
+    invoice_number?: string
+    customer?: string
+    total_amount?: string
+    dates?: Record<string, string>
+    // Para contratos
+    parties?: string[]
+    // Otros campos dinámicos
+    [key: string]: any
+  }
+  text_preview?: string
+  summary?: string
+  [key: string]: any
 }
 
 export interface Document {
@@ -64,9 +106,9 @@ export interface Document {
   search_matches?: { text: string; score: number }[] | string[]
   file_hash?: string
   version?: number
-  document_metadata?: Record<string, unknown>
+  document_metadata?: DocumentMetadata
   content?: string
-  extracted_entities?: unknown
+  extracted_entities?: ExtractedEntity[]
   ocr_status?: string
   ocr_completed_at?: string
   signature_fields?: unknown

@@ -91,7 +91,7 @@ class TestValidationSimple:
         print("\n🎯 Test 6: Verificando CAG Service...")
 
         try:
-            response = requests.get("http://localhost:8008/health", timeout=5)
+            response = requests.get("http://localhost:8007/health", timeout=5)
             if response.status_code == 200:
                 print("✅ CAG Service: OK")
             else:
@@ -162,7 +162,7 @@ class TestValidationSimple:
             "Elasticsearch": ("localhost", 9200),
             "Storage Service": ("localhost", 8003),
             "Weaviate Service": ("localhost", 8007),
-            "CAG Service": ("localhost", 8008),
+            "CAG Service": ("localhost", 8007),
             "Gotenberg": ("localhost", 3333)
         }
 

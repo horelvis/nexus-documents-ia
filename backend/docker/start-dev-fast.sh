@@ -40,9 +40,9 @@ fi
 echo "🎯 Starting services with live code reloading..."
 docker compose -f docker-compose.dev.yml up -d
 
-# Start the unified worker (using both compose files together)
-echo "👷 Starting unified background worker..."
-docker compose -f docker-compose.dev.yml -f docker-compose.worker.yml up -d unified-worker
+# Start the background worker microservice
+echo "👷 Starting background-worker service..."
+docker compose -f docker-compose.dev.yml up -d background-worker
 
 # Wait a bit for services to be ready
 echo "⏳ Waiting for services to be ready..."
@@ -82,15 +82,13 @@ echo "   • PostgreSQL:        localhost:5432"
 echo "   • Redis:             localhost:6379"
 echo "   • Weaviate:          localhost:8080"
 echo "   • Elasticsearch:     localhost:9200"
-echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
 echo "   docker compose -f docker-compose.dev.yml logs -f [service-name]"
-echo "   docker compose -f docker-compose.dev.yml -f docker-compose.worker.yml logs -f unified-worker"
+echo "   docker compose -f docker-compose.dev.yml logs -f background-worker"
 echo ""
 echo "🛑 Stop services with:"
 echo "   docker compose -f docker-compose.dev.yml down"
-echo "   docker compose -f docker-compose.dev.yml -f docker-compose.worker.yml down"
 echo ""
 echo "💡 Code changes will automatically reload services!"
 echo "⚡ No rebuilds needed - just save your files!"

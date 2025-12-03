@@ -38,5 +38,6 @@ RUN python -c "from app.core.nltk_bootstrap import prepare_nltk_data; prepare_nl
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Run the application
+# Expose service port and run the application
+EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

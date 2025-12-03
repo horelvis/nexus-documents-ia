@@ -132,5 +132,126 @@
     "uploadError": "Échec du téléversement du fichier",
     "fileTooLarge": "Le fichier est trop volumineux",
     "unsupportedFormat": "Format de fichier non supporté"
+  },
+  "chatPage": {
+    "emmaResponding": "Emma génère une réponse..."
+  },
+  "virtualAssistant": {
+    "title": "Emma",
+    "subtitle": "Votre assistant intelligent",
+    "typing": "En train d'écrire...",
+    "conversationCleared": "Conversation effacée. Comment puis-je vous aider?",
+    "newConversation": "Nouvelle conversation",
+    "clearChat": "Effacer le chat",
+    "settings": "Paramètres",
+    "help": "Aide",
+    "inputPlaceholder": "Tapez votre message... (Shift+Enter pour nouvelle ligne)",
+    "sendHint": "Enter pour envoyer • Shift+Enter pour nouvelle ligne",
+    "uploadDocument": "Téléverser un document",
+    "errorServiceUnavailable": "Service d'assistant indisponible. Erreur: {error}",
+    "errorGeneric": "Erreur: {error}",
+    "errorProcessing": "Impossible de traiter votre demande.",
+    "welcomeDefault": "Bonjour! Je suis Emma, votre assistant intelligent. Comment puis-je vous aider aujourd'hui?"
+  },
+  "sidebar": {
+    "admin": {
+      "publicKnowledge": "Base de Connaissances Juridiques"
+    }
+  },
+  "documentPreview": {
+    "backToSearch": "Retour à la recherche",
+    "backToDocuments": "Retour aux documents",
+    "share": "Partager",
+    "regenerate": "Régénérer",
+    "deleteConfirm": {
+      "title": "Supprimer le document",
+      "description": "Êtes-vous sûr de vouloir supprimer ce document ? Cette action est irréversible."
+    },
+    "documentInfo": {
+      "title": "Informations du document",
+      "type": "Type",
+      "size": "Taille",
+      "status": "Statut",
+      "category": "Catégorie",
+      "tags": "Tags"
+    },
+    "extractedEntities": {
+      "title": "Entités extraites",
+      "extracting": "Extraction des entités...",
+      "noEntities": "Aucune entité trouvée"
+    }
+  },
+  "publicKnowledgePage": {
+    "title": "Base de Connaissances Juridiques Publique",
+    "subtitle": "Accédez à la législation, aux règlements, à la jurisprudence et aux modèles juridiques partagés entre tous les tenants",
+    "infoNotice": "Cette base de connaissances contient des documents juridiques publics vérifiés disponibles pour tous les utilisateurs du système.",
+    "stats": {
+      "title": "Statistiques de la Base de Connaissances",
+      "description": "Résumé des documents disponibles dans la base publique",
+      "totalDocs": "Total des Documents",
+      "verifiedDocs": "Documents Vérifiés",
+      "categories": "Catégories",
+      "jurisdictions": "Juridictions"
+    },
+    "categorySelection": {
+      "title": "Catégories Activées",
+      "description": "Sélectionnez les catégories de documents qu'Emma utilisera pour répondre aux questions juridiques"
+    },
+    "search": {
+      "title": "Rechercher dans la Base de Connaissances",
+      "description": "Recherchez la législation, les règlements, la jurisprudence et autres documents juridiques",
+      "placeholder": "Ex: protection des données, RGPD, droits du travail..."
+    },
+    "results": {
+      "title": "Résultats trouvés: {count}",
+      "searchTime": "Temps de recherche: {ms}ms",
+      "noResults": "Aucun document trouvé correspondant à votre recherche"
+    },
+    "table": {
+      "title": "Titre",
+      "category": "Catégorie",
+      "jurisdiction": "Juridiction",
+      "reference": "Référence Juridique",
+      "verified": "Vérifié",
+      "score": "Pertinence"
+    },
+    "categories": {
+      "legislation": "Législation",
+      "regulation": "Règlement",
+      "jurisprudence": "Jurisprudence",
+      "template": "Modèle",
+      "guideline": "Guide",
+      "reference": "Référence",
+      "form": "Formulaire",
+      "treaty": "Traité"
+    },
+    "jurisdictions": {
+      "es": "Espagne",
+      "eu": "Union Européenne",
+      "int": "International",
+      "regional": "Régional"
+    },
+    "categoryInfo": {
+      "legislation": {
+        "title": "Législation",
+        "description": "Lois, codes et réglementations officielles de sources comme BOE et EUR-Lex"
+      },
+      "regulation": {
+        "title": "Règlement",
+        "description": "Règlements, arrêtés ministériels et législation d'application"
+      },
+      "jurisprudence": {
+        "title": "Jurisprudence",
+        "description": "Arrêts de la Cour Suprême, CJUE et tribunaux pertinents"
+      },
+      "treaty": {
+        "title": "Traités",
+        "description": "Traités internationaux, conventions et accords multilatéraux"
+      }
+    },
+    "notifications": {
+      "loadFailed": "Échec du chargement des statistiques",
+      "searchFailed": "Échec de la recherche"
+    }
   }
 }

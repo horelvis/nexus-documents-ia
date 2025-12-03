@@ -449,6 +449,8 @@ export default function SimpleSearchPage() {
           )}
         </CardContent>
       </Card>
+        </div>
+      </div>
 
       {/* Search Results */}
       {searchError && (

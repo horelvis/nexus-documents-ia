@@ -75,7 +75,9 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
     try {
       // Enable debug mode for admin users
       const debugEnabled = isAdmin
-      const result = await sendMessage(query, conversationId, tenantId, debugEnabled)
+      // Pass document context if available
+      const context = documentId ? { document_id: documentId, focus_document: true } : undefined
+      const result = await sendMessage(query, conversationId, tenantId, debugEnabled, context)
       
       // Add result message
       const resultMessage: ElysiaMessage = {
@@ -109,7 +111,7 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
     } finally {
       setIsLoading(false)
     }
-  }, [backendUser?.id, tenantId, isLoading, sendMessage, conversationId])
+  }, [backendUser?.id, tenantId, isLoading, sendMessage, conversationId, documentId, isAdmin])
 
   // Expose sendQuery method via ref
   // Handle document interactions

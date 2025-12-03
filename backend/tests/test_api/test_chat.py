@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-def test_chat_with_documents(client, test_documents, normal_user_token_headers, mock_embedding_service, mock_llm_service):
+def test_chat_with_documents(client, test_documents, normal_user_token_headers, mock_embedding_service, mock_elysia_service):
     """Prueba de chat con documentos"""
     doc_ids = [str(doc.id) for doc in test_documents[:2]]
     
@@ -20,7 +20,7 @@ def test_chat_with_documents(client, test_documents, normal_user_token_headers, 
     assert content["answer"] is not None
     assert "mock answer" in content["answer"].lower()
 
-def test_suggest_tags(client, normal_user_token_headers, mock_llm_service):
+def test_suggest_tags(client, normal_user_token_headers, mock_elysia_service):
     """Prueba de sugerencia de etiquetas"""
     response = client.post(
         "/api/v1/chat/suggest-tags",
@@ -37,7 +37,7 @@ def test_suggest_tags(client, normal_user_token_headers, mock_llm_service):
     assert isinstance(content["suggested_tags"], list)
     assert len(content["suggested_tags"]) == 5
 
-def test_extract_metadata(client, normal_user_token_headers, mock_llm_service):
+def test_extract_metadata(client, normal_user_token_headers, mock_elysia_service):
     """Prueba de extracción de metadatos"""
     response = client.post(
         "/api/v1/chat/extract-metadata",

@@ -24,7 +24,7 @@ touch backend/app/db/{database.py,models.py}
 touch backend/app/db/repositories/{documents.py,users.py,tenants.py}
 
 # Archivos en services
-touch backend/app/services/{auth_service.py,document_service.py,storage_service.py,embedding_service.py,llm_service.py,vector_service.py}
+touch backend/app/services/{auth_service.py,document_service.py,storage_service.py,embedding_service.py,elysia_insights_service.py,langextract_client.py,vector_service.py}
 
 # Archivos en schemas
 touch backend/app/schemas/{auth.py,document.py,user.py,tenant.py}
@@ -45,4 +45,3 @@ touch backend/scripts/{init_db.py,seed_data.py}
 touch backend/{.env.example,requirements.txt,pyproject.toml,README.md}
 
 echo "Estructura del proyecto creada correctamente."
-

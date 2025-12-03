@@ -8,7 +8,10 @@ from loguru import logger
 from ..schemas.extraction import (
     ExtractionRequest,
     ExtractionResponse,
-    StatsResponse
+    StatsResponse,
+    CategorizeRequest,
+    CategorizeResponse,
+    AlternativeType
 )
 from ..services.extractor import get_extractor
 from ..core.config import settings
@@ -43,10 +46,10 @@ async def extract_document(
         # Get extractor service
         extractor = get_extractor()
         
-        # Perform extraction
+        # Perform extraction (document_type is now a string, not enum)
         result = await extractor.extract(
             text=request.text,
-            document_type=request.document_type.value,
+            document_type=request.document_type,
             filename=request.filename,
             provider=request.provider.value if request.provider else None
         )
@@ -82,4 +85,80 @@ async def get_extraction_stats(
         return StatsResponse(**stats)
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/categorize", response_model=CategorizeResponse)
+async def categorize_document_type(
+    request: CategorizeRequest,
+    _: bool = Depends(verify_api_key)
+) -> CategorizeResponse:
+    """
+    Detecta automáticamente el tipo de documento usando análisis inteligente del LLM.
+    NO usa mapeos hardcodeados - el análisis se basa en contenido y estructura.
+
+    Tipos soportados:
+    - contract: Contratos, acuerdos legales
+    - invoice: Facturas, recibos
+    - report: Informes, análisis
+    - nomina: Nóminas laborales
+    - modelo_111: Modelo tributario 111 (IRPF trimestral)
+    - modelo_190: Modelo tributario 190 (Resumen anual)
+    - modelo_303: Modelo tributario 303 (IVA)
+    - certificado: Certificados laborales
+    - comunicacion_itss: Comunicaciones ITSS
+    - correspondence: Cartas, emails
+    - technical: Documentación técnica
+    - legal: Documentos legales generales
+    - general: Otros documentos
+    """
+    try:
+        logger.info(f"📋 Categorizando documento: {request.filename or 'Sin nombre'}")
+
+        extractor = get_extractor()
+
+        # Detectar tipo de documento de forma inteligente
+        result = await extractor.detect_document_type(
+            text=request.text,
+            filename=request.filename,
+            context=request.context
+        )
+
+        if not result.get("detected_type"):
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo detectar el tipo de documento"
+            )
+
+        logger.info(
+            f"✅ Detectado: {result['detected_type']} "
+            f"(confianza: {result.get('confidence', 0):.2f})"
+        )
+
+        # Construir respuesta con alternativas
+        alternatives = [
+            AlternativeType(type=alt["type"], confidence=alt["confidence"])
+            for alt in result.get("alternative_types", [])
+        ]
+
+        # Debug: verificar visualization_html
+        viz_html = result.get("visualization_html")
+        logger.info(f"🔧 En endpoint: visualization_html = {viz_html is not None}")
+        if viz_html:
+            logger.info(f"🔧 Length: {len(viz_html)}")
+
+        return CategorizeResponse(
+            detected_type=result["detected_type"],
+            confidence=result.get("confidence", 0.0),
+            reasoning=result.get("reasoning", ""),
+            alternative_types=alternatives,
+            extractions=result.get("extractions", []),
+            summary=result.get("summary", {}),
+            visualization_html=viz_html  # ✅ AGREGADO
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error en categorización: {e}")
         raise HTTPException(status_code=500, detail=str(e))

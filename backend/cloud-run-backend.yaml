@@ -138,7 +138,7 @@ spec:
         - name: ELASTICSEARCH_URL
           value: "https://elasticsearch-cluster-pre.example.com"
         - name: CAG_SERVICE_URL
-          value: "https://cag-service-HASH-uc.a.run.app"
+          value: "https://weaviate-service-HASH-uc.a.run.app"
         - name: LANGEXTRACT_SERVICE_URL
           value: "https://langextract-service-HASH-uc.a.run.app"
         - name: TEXT_EXTRACTION_SERVICE_URL

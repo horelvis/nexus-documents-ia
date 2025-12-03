@@ -3,9 +3,9 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { 
-  IconFile, 
-  IconDownload, 
+import {
+  IconFile,
+  IconDownload,
   IconEye,
   IconTag,
   IconCalendar,
@@ -16,6 +16,7 @@ import {
   IconFileText
 } from "@tabler/icons-react"
 import { formatDistanceToNow } from "date-fns"
+import { DocumentEntitiesPanel } from "./document-entities-panel"
 
 interface DocumentCardProps {
   document: any
@@ -36,6 +37,9 @@ export function DocumentCard({
   const getFileIcon = (fileType: string) => {
     const type = fileType?.toLowerCase()
     if (type === 'pdf') return <IconFileTypePdf className="h-5 w-5 text-red-500" />
+    if (type === 'odt') return <IconFileTypeDocx className="h-5 w-5 text-cyan-500" />
+    if (type === 'ods') return <IconFileSpreadsheet className="h-5 w-5 text-teal-500" />
+    if (type === 'odp') return <IconFileText className="h-5 w-5 text-amber-500" />
     if (type === 'docx' || type === 'doc') return <IconFileTypeDocx className="h-5 w-5 text-blue-500" />
     if (type === 'xlsx' || type === 'xls' || type === 'csv') return <IconFileSpreadsheet className="h-5 w-5 text-green-500" />
     if (['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)) return <IconPhoto className="h-5 w-5 text-purple-500" />
@@ -58,7 +62,11 @@ export function DocumentCard({
           <div className="flex items-start gap-3 flex-1 min-w-0">
             {getFileIcon(document.file_type)}
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-base truncate" title={document.title}>
+              <h3
+                className="font-semibold text-base truncate cursor-pointer hover:text-primary hover:underline"
+                title={document.title}
+                onClick={onView}
+              >
                 {document.title}
               </h3>
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
@@ -105,17 +113,30 @@ export function DocumentCard({
         
         {highlights && highlights.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium mb-1">Relevant content:</p>
+            <p className="text-xs font-medium mb-1">Contenido relevante:</p>
             <div className="space-y-1">
               {highlights.slice(0, 2).map((highlight, index) => (
-                <p key={index} className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
+                <p
+                  key={index}
+                  className="text-xs text-muted-foreground dark:text-slate-100 bg-muted/80 dark:bg-slate-900/50 border border-border dark:border-slate-800 p-2 rounded-md shadow-sm [&>mark]:bg-primary/20 [&>mark]:text-primary"
+                >
                   ...{highlight}...
                 </p>
               ))}
             </div>
           </div>
         )}
-        
+
+        {document.extracted_entities && document.extracted_entities.length > 0 && (
+          <div className="mb-3 pt-3 border-t">
+            <DocumentEntitiesPanel
+              entities={document.extracted_entities}
+              summary={document.document_metadata?.extraction_summary}
+              compact
+            />
+          </div>
+        )}
+
         {document.tags && document.tags.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             <IconTag className="h-3 w-3 text-muted-foreground" />

@@ -19,7 +19,6 @@ from app.db.models import User, Document, Tenant, DocumentShare, SignatureReques
 from app.services.async_document_service import AsyncDocumentService
 from app.services.search_service import SearchService
 from app.services.vector_service_direct import VectorServiceDirect
-from app.services.llm_service import LLMService
 from app.services.cag_client import CAGClient
 
 logger = logging.getLogger(__name__)
@@ -67,7 +66,6 @@ class VirtualAssistantAgent:
     """
     
     def __init__(self):
-        self.llm_service = LLMService()  # Keep for fallback
         self.cag_client = CAGClient()  # Primary agent service
         self.vector_service = None  # Initialized when needed
         self.capabilities = list(AgentCapability)
@@ -299,37 +297,6 @@ class VirtualAssistantAgent:
                                 requires_confirmation=False
                             )
                     
-                    # Intelligent fallback using local LLM with real data for non-welcome messages
-                    try:
-                        # Analyze intent and get relevant data
-                        intent_analysis = await self._analyze_intent_simple(message, context)
-                        action_results = []
-                        
-                        # Execute relevant tools based on intent
-                        if any(word in message.lower() for word in ["firma", "firmar", "signature", "sign", "pendiente", "pending"]):
-                            stats = await self._get_statistics(context)
-                            action_results.append({
-                                "action": "get_statistics", 
-                                "success": True, 
-                                "result": stats
-                            })
-                            
-                        # Use local LLM to generate natural response
-                        llm_response = await self._generate_response(intent_analysis, action_results, context)
-                        
-                        return AgentResponse(
-                            message=llm_response["message"],
-                            actions_taken=action_results,
-                            suggestions=llm_response.get("suggestions", ["Buscar documentos", "Ver estadísticas", "Ayuda"]),
-                            confidence=llm_response.get("confidence", 0.7),
-                            metadata={"fallback": True, "agent": "local_LLM"},
-                            requires_confirmation=llm_response.get("requires_confirmation", False)
-                        )
-                        
-                    except Exception as fallback_error:
-                        logger.error(f"LLM fallback error: {fallback_error}")
-                    
-                    # Final fallback
                     return AgentResponse(
                         message="Lo siento, tengo dificultades para procesar tu solicitud en este momento. ¿Podrías reformularla o intentarlo de nuevo?",
                         actions_taken=[],
@@ -354,68 +321,8 @@ class VirtualAssistantAgent:
             )
     
     async def _analyze_intent(self, message: str, context: AgentContext) -> Dict[str, Any]:
-        """
-        Analyze user intent using LLM with context
-        """
-        # Build context prompt
-        history_context = self._format_history(context.message_history[-5:])  # Last 5 messages
-        
-        prompt = f"""Analiza la siguiente solicitud del usuario y extrae la intención, entidades y parámetros.
-
-Historial de conversación:
-{history_context}
-
-Mensaje actual del usuario: "{message}"
-
-IMPORTANTE: 
-- Si el usuario responde "Sí", "OK", "Adelante", "Continúa" o similar, es una CONFIRMACIÓN de la acción sugerida anteriormente
-- Si el mensaje anterior del asistente ofrecía opciones, ejecuta la primera opción mencionada
-- Evita pedir confirmación repetidamente
-
-Capacidades disponibles:
-- Buscar documentos (search_documents)
-- Analizar contenido de documentos (analyze_document)
-- Solicitar firmas digitales (signature_request)
-- Compartir documentos (share_document)
-- Obtener estadísticas (get_statistics)
-- Extraer información de documentos (extract_entities)
-- Comparar documentos (compare_documents)
-
-Responde en formato JSON:
-{{
-    "primary_intent": "search_documents|analyze_document|get_statistics|confirmation|general",
-    "is_confirmation": true/false,
-    "confirmed_action": "acción_a_ejecutar_si_es_confirmación",
-    "entities": {{
-        "document_names": [],
-        "dates": [],
-        "people": [],
-        "actions": []
-    }},
-    "parameters": {{}},
-    "confidence": 0.0-1.0,
-    "requires_clarification": false,
-    "clarification_needed": ""
-}}"""
-
-        try:
-            response = await self.llm_service.generate_completion(
-                prompt=prompt,
-                temperature=0.3,
-                max_tokens=500
-            )
-            
-            # Parse JSON response
-            return self._parse_json_response(response)
-            
-        except Exception as e:
-            logger.error(f"Intent analysis error: {e}")
-            return {
-                "primary_intent": "general",
-                "entities": {},
-                "parameters": {},
-                "confidence": 0.5
-            }
+        """Lightweight heuristic analysis used only during fallbacks."""
+        return await self._analyze_intent_simple(message, context)
     
     async def _plan_actions(self, intent_analysis: Dict[str, Any], context: AgentContext) -> Dict[str, Any]:
         """
@@ -620,20 +527,8 @@ Responde en formato JSON:
             "recommendations": []
         }
         
-        # Use LLM to generate deeper analysis if we have content
         if doc.get("summary"):
-            prompt = f"""Analiza el siguiente documento y extrae información clave:
-
-Documento: {doc['filename']}
-Resumen: {doc.get('summary', '')}
-
-Proporciona:
-1. Puntos clave
-2. Entidades importantes (personas, fechas, cantidades)
-3. Recomendaciones de acciones"""
-
-            llm_response = await self.llm_service.generate_completion(prompt, temperature=0.5)
-            analysis["detailed_analysis"] = llm_response
+            analysis["detailed_analysis"] = doc.get("summary")
         
         return analysis
     
@@ -754,62 +649,25 @@ Proporciona:
         action_results: List[Dict[str, Any]],
         context: AgentContext
     ) -> Dict[str, str]:
-        """
-        Generate natural language response based on action results
-        """
-        # Build context for response generation
+        """Generate a lightweight natural language response based on action results."""
         successful_actions = [r for r in action_results if r.get("success")]
-        failed_actions = [r for r in action_results if not r.get("success")]
-        
-        # Format results for LLM
-        results_summary = self._format_action_results(successful_actions)
-        
-        prompt = f"""Genera una respuesta natural y útil basada en los siguientes resultados:
-
-Intención del usuario: {intent_analysis.get('primary_intent')}
-Resultados de las acciones:
-{results_summary}
-
-Contexto de conversación:
-{self._format_history(context.message_history[-3:])}
-
-IMPORTANTE: 
-- Si hay enlaces a documentos (formato: [título](/documents/id/preview)), MANTÉN EL FORMATO EXACTO del enlace
-- Los enlaces ya están formateados correctamente, NO los modifiques
-- Puedes agregar contexto alrededor de los enlaces, pero mantén el formato markdown
-
-Genera una respuesta que:
-1. Sea clara y concisa
-2. Incluya los resultados relevantes CON LOS ENLACES INTACTOS
-3. Sugiera próximos pasos si es apropiado
-4. Use un tono profesional pero amigable
-5. Esté en español
-6. Use formato markdown para resaltar información importante
-
-Respuesta:"""
-
-        try:
-            response = await self.llm_service.generate_completion(
-                prompt=prompt,
-                temperature=0.7,
-                max_tokens=500
-            )
-            
-            return {
-                "message": response,
-                "confidence": 0.85 if successful_actions else 0.5,
-                "requires_confirmation": any(
-                    r.get("result", {}).get("status") == "ready_to_create" 
-                    for r in successful_actions
-                )
-            }
-            
-        except Exception as e:
-            logger.error(f"Response generation error: {e}")
+        if not successful_actions:
             return {
                 "message": self._generate_fallback_response(action_results),
-                "confidence": 0.6
+                "confidence": 0.4,
+                "requires_confirmation": False
             }
+        
+        results_summary = self._format_action_results(successful_actions)
+        message = (
+            "He completado las siguientes acciones:\n"
+            f"{results_summary or 'Sin resultados detallados.'}"
+        )
+        return {
+            "message": message,
+            "confidence": 0.75,
+            "requires_confirmation": False
+        }
     
     async def _generate_suggestions(
         self,
@@ -1032,48 +890,14 @@ Respuesta:"""
         """
         Simple intent analysis for fallback scenarios
         """
-        try:
-            prompt = f"""Analiza brevemente la siguiente pregunta del usuario:
-            
-"{message}"
-
-Responde en formato JSON:
-{{
-    "primary_intent": "search_documents|get_statistics|signature_request|general",
-    "entities": {{"document_names": [], "actions": []}},
-    "confidence": 0.0-1.0
-}}
-
-Ejemplos:
-- "¿tengo documentos por firmar?" → "signature_request"
-- "buscar contratos" → "search_documents" 
-- "estadísticas" → "get_statistics"
-"""
-
-            response = await self.llm_service.generate_response(
-                prompt=prompt,
-                max_tokens=200,
-                temperature=0.1
-            )
-            
-            # Parse JSON response
-            try:
-                import json
-                return json.loads(response.strip())
-            except:
-                # Fallback analysis
-                if any(word in message.lower() for word in ["firma", "firmar", "signature", "sign"]):
-                    return {"primary_intent": "signature_request", "entities": {}, "confidence": 0.8}
-                elif any(word in message.lower() for word in ["buscar", "search", "encontrar"]):
-                    return {"primary_intent": "search_documents", "entities": {}, "confidence": 0.8}
-                elif any(word in message.lower() for word in ["estadísticas", "stats", "números"]):
-                    return {"primary_intent": "get_statistics", "entities": {}, "confidence": 0.8}
-                else:
-                    return {"primary_intent": "general", "entities": {}, "confidence": 0.5}
-                    
-        except Exception as e:
-            logger.error(f"Simple intent analysis error: {e}")
-            return {"primary_intent": "general", "entities": {}, "confidence": 0.3}
+        lower_msg = message.lower()
+        if any(word in lower_msg for word in ["firma", "firmar", "signature", "sign"]):
+            return {"primary_intent": "signature_request", "entities": {}, "confidence": 0.8}
+        if any(word in lower_msg for word in ["buscar", "search", "encontrar"]):
+            return {"primary_intent": "search_documents", "entities": {}, "confidence": 0.8}
+        if any(word in lower_msg for word in ["estadísticas", "stats", "números"]):
+            return {"primary_intent": "get_statistics", "entities": {}, "confidence": 0.8}
+        return {"primary_intent": "general", "entities": {}, "confidence": 0.5}
 
 
 # Singleton instance

@@ -4,6 +4,9 @@
 
 Esta guía describe el proceso de migración gradual desde el sistema legacy **Qdrant + CrewAI** hacia el nuevo sistema avanzado **Weaviate + Elysia** en NexusDocs360.
 
+> **¿Por qué Elysia?**  
+> Elysia es la nueva base de datos AI-native de Weaviate. Combina vectores, embeddings multimodales, documentos crudos, metadata estructurada, RAG engine e indexación grafo+vector en una única capa. Eso significa que Emma AI y el resto de microservicios no deben duplicar lógica de selección de modelos ni reconstruir pipelines cada vez: configuramos `LLM_PROVIDER`, `LLM_MODEL`/`OPENAI_MODEL` y Elysia se encarga de orquestar la consulta con el modelo adecuado (Ollama local u OpenAI) y las herramientas necesarias.
+
 ### 🎯 Objetivos de la Migración
 
 - **Capacidades mejoradas**: Decision trees dinámicos con Elysia
@@ -21,9 +24,9 @@ API Principal (8000) → CAG Service (8008) → Qdrant (6333) + CrewAI
 
 ### **DURANTE (Paralelo)**
 ```
-                    ┌→ CAG Service (8008) → Qdrant (6333) + CrewAI    [LEGACY]
+                    ┌→ CAG Service (8008) → Qdrant (6333) + CrewAI    [LEGACY - SOLO SI ES NECESARIO]
 API Principal (8000) ┤
-                    └→ Weaviate Service (8007) → Weaviate (8080) + Elysia [NUEVO]
+                    └→ Weaviate Service (8007) → Weaviate (8080) + Elysia + CAG integrado [NUEVO]
 ```
 
 ### **DESPUÉS (Weaviate + Elysia)**
@@ -126,7 +129,7 @@ EMBEDDING_MODEL=nomic-embed-text
    ```bash
    # Observar comportamiento de ambos sistemas
    docker-compose logs -f weaviate-service
-   docker-compose logs -f cag-service
+   docker-compose logs -f weaviate-service
    ```
 
 ### **FASE 4: Migración de Datos**
@@ -174,10 +177,10 @@ Una vez confirmado que el sistema funciona correctamente:
 
 ```bash
 # Detener servicios legacy
-docker-compose stop qdrant cag-service
+docker-compose stop qdrant weaviate-service
 
 # Opcional: Eliminar contenedores legacy
-docker-compose rm qdrant cag-service
+docker-compose rm qdrant weaviate-service
 
 # Opcional: Limpiar volúmenes
 docker volume rm backend_qdrant_data
@@ -195,7 +198,7 @@ docker-compose logs -f api | grep "MIGRATION\|WEAVIATE\|QDRANT"
 docker-compose logs -f weaviate-service
 
 # Legacy CAG + Qdrant  
-docker-compose logs -f cag-service
+docker-compose logs -f weaviate-service
 
 # Base de datos vectoriales
 docker-compose logs weaviate

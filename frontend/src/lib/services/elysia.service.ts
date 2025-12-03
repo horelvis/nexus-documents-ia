@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/nextjs'
+import { useCallback, useMemo } from 'react'
 import { API_CONFIG } from '../config'
 
 export interface ElysiaQuery {
@@ -34,13 +35,9 @@ export interface ElysiaAgent {
 export function useElysiaService() {
   const { getToken } = useAuth()
 
-  /**
-   * Query Elysia agents directly - they auto-select based on query
-   */
-  async function queryElysia(query: ElysiaQuery): Promise<ElysiaResponse> {
+  const queryElysia = useCallback(async (query: ElysiaQuery): Promise<ElysiaResponse> => {
     const token = await getToken()
-    
-    // Call through main API
+
     const response = await fetch(`/api/v1/weaviate/elysia/query`, {
       method: 'POST',
       headers: {
@@ -55,12 +52,9 @@ export function useElysiaService() {
     }
 
     return await response.json()
-  }
+  }, [getToken])
 
-  /**
-   * Get available Elysia tools/agents
-   */
-  async function getAvailableAgents(): Promise<ElysiaAgent[]> {
+  const getAvailableAgents = useCallback(async (): Promise<ElysiaAgent[]> => {
     try {
       const token = await getToken()
       const response = await fetch(`/api/v1/weaviate/elysia/tools`, {
@@ -73,9 +67,6 @@ export function useElysiaService() {
         throw new Error(`Failed to get agents: ${response.status}`)
       }
 
-      const data = await response.json()
-      
-      // Convert tools to agent format
       return [
         { name: 'text_response', description: 'Generación de respuestas de texto', capabilities: ['conversación', 'respuestas'], status: 'active' },
         { name: 'cited_summarize', description: 'Resúmenes con citas de documentos', capabilities: ['resumen', 'citas', 'documentos'], status: 'active' },
@@ -87,18 +78,15 @@ export function useElysiaService() {
       console.error('Error getting Elysia agents:', error)
       return []
     }
-  }
+  }, [getToken])
 
-  /**
-   * Send message to Elysia with automatic agent selection
-   */
-  async function sendMessage(
-    message: string, 
+  const sendMessage = useCallback(async (
+    message: string,
     sessionId: string,
     tenantId: string,
     enableDebug: boolean = false,
     context?: Record<string, any>
-  ): Promise<ElysiaResponse> {
+  ): Promise<ElysiaResponse> => {
     return queryElysia({
       query: message,
       session_id: sessionId,
@@ -106,24 +94,21 @@ export function useElysiaService() {
       enable_debug: enableDebug,
       context
     })
-  }
+  }, [queryElysia])
 
-  /**
-   * Get welcome message using Elysia
-   */
-  async function getWelcomeMessage(sessionId: string, tenantId: string): Promise<ElysiaResponse> {
+  const getWelcomeMessage = useCallback(async (sessionId: string, tenantId: string): Promise<ElysiaResponse> => {
     return queryElysia({
       query: "Genera un mensaje de bienvenida personalizado para el usuario",
       session_id: sessionId,
       tenant_id: tenantId,
       context: { is_welcome: true }
     })
-  }
+  }, [queryElysia])
 
-  return {
+  return useMemo(() => ({
     queryElysia,
     getAvailableAgents,
     sendMessage,
     getWelcomeMessage
-  }
+  }), [queryElysia, getAvailableAgents, sendMessage, getWelcomeMessage])
 }

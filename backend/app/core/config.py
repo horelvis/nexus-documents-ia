@@ -148,7 +148,7 @@ class Settings(BaseSettings):
     USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
 
     # Text extraction microservice
-    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8012")
+    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
 
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
@@ -160,6 +160,7 @@ class Settings(BaseSettings):
     
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
+    BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
     
     # Temporalio Service
     TEMPORALIO_SERVICE_URL: str = os.getenv("TEMPORALIO_SERVICE_URL", "http://temporalio-service:8000")
@@ -167,9 +168,12 @@ class Settings(BaseSettings):
         "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
     )
 
-    # Ollama
+    # LLM / AI providers
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = "nomic-embed-text"
     
     # Gotenberg Service (direct container)
@@ -259,6 +263,14 @@ class Settings(BaseSettings):
     @property
     def LANGGRAPH_API_KEY(self) -> str:
         return self.MICROSERVICES_API_KEY
+
+    @property
+    def LANGGRAPH_SERVICE_URL(self) -> str:
+        """
+        Compatibility property for legacy LangGraph clients.
+        All LangGraph traffic is now handled by the integrated CAG engine.
+        """
+        return self.CAG_SERVICE_URL
     
     @property
     def STORAGE_API_KEY(self) -> str:

@@ -212,7 +212,7 @@ export default function PDFViewer({
       style={{ minHeight: resolvedHeight, height: resolvedHeight }}
     >
       {showToolbar && (
-        <div className="flex items-center justify-between p-4 border-b bg-background">
+        <div className="flex items-center justify-between p-4 border-b bg-card">
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
@@ -398,7 +398,7 @@ export default function PDFViewer({
 
       {/* Status bar */}
       {showToolbar && (
-        <div className="flex items-center justify-between px-4 py-2 border-t bg-muted/50 text-sm text-muted-foreground">
+        <div className="flex items-center justify-between px-4 py-2 border-t bg-card text-sm text-muted-foreground">
           <div className="flex items-center space-x-4">
             <span>{fileName}</span>
             {numPages > 0 && (

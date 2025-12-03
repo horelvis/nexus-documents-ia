@@ -12,12 +12,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
   IconFile,
   IconFileText,
   IconFileTypePdf,
@@ -33,7 +27,8 @@ import {
   IconSignature,
   IconDotsVertical,
   IconAlertTriangle,
-  IconWeight
+  IconWeight,
+  IconMessageCircle
 } from "@tabler/icons-react"
 import { formatDistanceToNow } from "date-fns"
 
@@ -49,6 +44,7 @@ interface DocumentListProps {
   onDelete?: (document: any) => void
   onShare?: (document: any) => void
   onSignature?: (document: any) => void
+  onAskEmma?: (document: any) => void
   emptyMessage?: string
 }
 
@@ -62,6 +58,7 @@ interface DocumentItemProps {
   onDelete?: (document: any) => void
   onShare?: (document: any) => void
   onSignature?: (document: any) => void
+  onAskEmma?: (document: any) => void
 }
 
 // Helper functions
@@ -71,6 +68,9 @@ const getFileIcon = (fileType: string, mimeType?: string, filename?: string) => 
   // Fallback: extract from mime_type or filename
   if (!type && mimeType) {
     if (mimeType.includes('pdf')) type = 'pdf'
+    else if (mimeType.includes('opendocument.text')) type = 'odt'
+    else if (mimeType.includes('opendocument.spreadsheet')) type = 'ods'
+    else if (mimeType.includes('opendocument.presentation')) type = 'odp'
     else if (mimeType.includes('word') || mimeType.includes('document')) type = 'docx'
     else if (mimeType.includes('sheet') || mimeType.includes('excel')) type = 'xlsx'
     else if (mimeType.includes('image')) type = 'image'
@@ -85,6 +85,12 @@ const getFileIcon = (fileType: string, mimeType?: string, filename?: string) => 
   switch (type) {
     case 'pdf':
       return <IconFileTypePdf className="h-6 w-6 text-red-500" />
+    case 'odt':
+      return <IconFileTypeDocx className="h-6 w-6 text-cyan-500" />
+    case 'ods':
+      return <IconFileSpreadsheet className="h-6 w-6 text-teal-500" />
+    case 'odp':
+      return <IconFileText className="h-6 w-6 text-amber-500" />
     case 'docx':
     case 'doc':
     case 'document':
@@ -109,35 +115,6 @@ const getFileIcon = (fileType: string, mimeType?: string, filename?: string) => 
   }
 }
 
-const getStatusColor = (status: string) => {
-  switch (status?.toLowerCase()) {
-    case 'indexed':
-      return 'bg-green-100 text-green-800 border-green-200'
-    case 'processing':
-    case 'indexing':
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    case 'pending':
-      return 'bg-blue-100 text-blue-800 border-blue-200'
-    case 'error':
-    case 'indexing_error':
-      return 'bg-red-100 text-red-800 border-red-200'
-    default:
-      return 'bg-gray-100 text-gray-800 border-gray-200'
-  }
-}
-
-const getStatusLabel = (status: string) => {
-  switch (status?.toLowerCase()) {
-    case 'indexed': return 'Indexed'
-    case 'processing': return 'Processing'
-    case 'indexing': return 'Indexing'
-    case 'pending': return 'Pending'
-    case 'error': return 'Error'
-    case 'indexing_error': return 'Index Error'
-    default: return status || 'Unknown'
-  }
-}
-
 const formatFileSize = (bytes: number) => {
   if (!bytes || bytes === 0) return '0 B'
   const k = 1024
@@ -155,14 +132,9 @@ function DocumentItem({
   onDownload,
   onDelete,
   onShare,
-  onSignature
+  onSignature,
+  onAskEmma
 }: DocumentItemProps) {
-  const handleClick = () => {
-    if (onDocumentClick) {
-      onDocumentClick(document)
-    }
-  }
-
   const handleAction = (action: string, e: React.MouseEvent) => {
     e.stopPropagation()
 
@@ -179,14 +151,17 @@ function DocumentItem({
       case 'signature':
         onSignature?.(document)
         break
+      case 'askEmma':
+        onAskEmma?.(document)
+        break
     }
   }
 
   if (useDetailedView) {
     // Detailed view matching Document Library design
     return (
-      <Card className="hover:shadow-lg transition-shadow cursor-pointer group">
-        <CardContent className="p-4" onClick={handleClick}>
+      <Card className="hover:shadow-lg transition-shadow cursor-default group">
+        <CardContent className="p-4">
           <div className="flex items-start gap-3">
             {/* File Icon */}
             <div className="flex-shrink-0">
@@ -195,38 +170,33 @@ function DocumentItem({
 
             {/* Document Info */}
             <div className="flex-grow min-w-0">
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-base font-medium truncate" title={document.title || document.filename}>
-                    {document.title || document.filename}
-                  </h3>
-                  {document.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                      {document.description}
-                    </p>
-                  )}
-                </div>
-
-                {/* Status Badge */}
-                {document.indexed && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Badge
-                          className={getStatusColor(document.indexed)}
-                          variant="secondary"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {getStatusLabel(document.indexed)}
-                        </Badge>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Processing status: {getStatusLabel(document.indexed)}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="min-w-0 flex-1">
+                <h3
+                  className="text-base font-medium truncate cursor-pointer hover:text-primary hover:underline"
+                  title={document.title || document.filename}
+                  onClick={() => onDocumentClick?.(document)}
+                >
+                  {document.title || document.filename}
+                </h3>
+                {document.description && (
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                    {document.description}
+                  </p>
+                )}
+                {document.category && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] uppercase tracking-wide bg-primary/10 text-primary border-primary/20"
+                    >
+                      {document.category}
+                    </Badge>
+                  </div>
                 )}
               </div>
+
+            </div>
 
               {/* Score */}
               {showScore && document.score && (
@@ -241,12 +211,12 @@ function DocumentItem({
               {/* Highlights */}
               {showHighlights && (document.search_matches || document.matches) && (document.search_matches || document.matches).length > 0 && (
                 <div className="mb-2">
-                  <p className="text-xs text-muted-foreground mb-1">Relevant content:</p>
+                  <p className="text-xs text-muted-foreground mb-1">Contenido relevante:</p>
                   <div className="space-y-1">
                     {(document.search_matches || document.matches).slice(0, 2).map((match: any, idx: number) => (
                       <div
                         key={idx}
-                        className="text-xs bg-yellow-50 dark:bg-yellow-900/20 p-1 rounded border-l-2 border-yellow-200 dark:border-yellow-700 line-clamp-2 [&>mark]:bg-yellow-200 [&>mark]:text-yellow-900 [&>mark]:px-0.5 [&>mark]:rounded-sm dark:[&>mark]:bg-yellow-900/40 dark:[&>mark]:text-yellow-100"
+                        className="text-xs bg-muted/80 text-muted-foreground border border-border p-2 rounded-md shadow-sm dark:bg-slate-900/50 dark:text-slate-100 dark:border-slate-800 line-clamp-2 [&>mark]:bg-primary/20 [&>mark]:text-primary [&>mark]:px-0.5 [&>mark]:rounded-sm"
                         dangerouslySetInnerHTML={{ __html: match.text || match }}
                       />
                     ))}
@@ -262,11 +232,15 @@ function DocumentItem({
               {/* Metadata and Actions */}
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>Size: {formatFileSize(document.file_size)}</span>
+                  <span>Tamaño: {formatFileSize(document.file_size)}</span>
                   <span>•</span>
-                  <span>Uploaded: {new Date(document.created_at).toLocaleDateString()}</span>
-                  <span>•</span>
-                  <span>{document.category || 'Sin Categoría'}</span>
+                  <span>Subido: {new Date(document.created_at).toLocaleDateString()}</span>
+                  {document.created_by?.full_name && (
+                    <>
+                      <span>•</span>
+                      <span>Por {document.created_by.full_name}</span>
+                    </>
+                  )}
                 </div>
 
                 {/* Actions */}
@@ -279,7 +253,7 @@ function DocumentItem({
                       e.stopPropagation()
                       onDocumentClick?.(document)
                     }}
-                    title="Full Preview"
+                    title="Ver documento"
                     className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                   >
                     <IconEye className="h-3.5 w-3.5" />
@@ -288,7 +262,7 @@ function DocumentItem({
                     size="sm"
                     variant="ghost"
                     onClick={(e) => handleAction('download', e)}
-                    title="Download"
+                    title="Descargar"
                     className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                   >
                     <IconDownload className="h-3.5 w-3.5" />
@@ -297,7 +271,7 @@ function DocumentItem({
                     size="sm"
                     variant="ghost"
                     onClick={(e) => handleAction('share', e)}
-                    title="Share"
+                    title="Compartir"
                     className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                   >
                     <IconShare2 className="h-3.5 w-3.5" />
@@ -319,19 +293,25 @@ function DocumentItem({
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDocumentClick?.(document) }}>
                         <IconEye className="mr-2 h-4 w-4" />
-                        View Details
+                        Ver documento
                       </DropdownMenuItem>
+                      {onAskEmma && (
+                        <DropdownMenuItem onClick={(e) => handleAction('askEmma', e)}>
+                          <IconMessageCircle className="mr-2 h-4 w-4" />
+                          Ask Emma
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
                         <IconDownload className="mr-2 h-4 w-4" />
-                        Download
+                        Descargar
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
                         <IconSignature className="mr-2 h-4 w-4" />
-                        Request Signature
+                        Solicitar firma
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
                         <IconShare2 className="mr-2 h-4 w-4" />
-                        Share
+                        Compartir
                       </DropdownMenuItem>
                       {onDelete && (
                         <>
@@ -341,7 +321,7 @@ function DocumentItem({
                             className="text-red-600 focus:text-red-600"
                           >
                             <IconTrash className="mr-2 h-4 w-4" />
-                            Delete
+                            Eliminar
                           </DropdownMenuItem>
                         </>
                       )}
@@ -369,8 +349,8 @@ function DocumentItem({
 
   // Simple view (original design)
   return (
-    <Card className="hover:shadow-lg transition-shadow cursor-pointer group">
-      <CardContent className="p-4" onClick={handleClick}>
+    <Card className="hover:shadow-lg transition-shadow cursor-default group">
+      <CardContent className="p-4">
         <div className="flex items-start gap-3">
           {/* File Icon */}
           <div className="flex-shrink-0">
@@ -381,7 +361,11 @@ function DocumentItem({
           <div className="flex-grow min-w-0">
             <div className="flex items-start justify-between gap-2 mb-1">
               <div className="min-w-0 flex-1">
-                <h3 className="text-base font-medium truncate" title={document.title || document.filename}>
+                <h3
+                  className="text-base font-medium truncate cursor-pointer hover:text-primary hover:underline"
+                  title={document.title || document.filename}
+                  onClick={() => onDocumentClick?.(document)}
+                >
                   {document.title || document.filename}
                 </h3>
                 {document.description && (
@@ -389,27 +373,18 @@ function DocumentItem({
                     {document.description}
                   </p>
                 )}
+                {document.category && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] uppercase tracking-wide bg-primary/10 text-primary border-primary/20"
+                    >
+                      {document.category}
+                    </Badge>
+                  </div>
+                )}
               </div>
 
-              {/* Status Badge */}
-              {document.indexed && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Badge
-                        className={getStatusColor(document.indexed)}
-                        variant="secondary"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {getStatusLabel(document.indexed)}
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Processing status: {getStatusLabel(document.indexed)}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
             </div>
 
             {/* Score */}
@@ -423,19 +398,19 @@ function DocumentItem({
             )}
 
             {/* Highlights */}
-            {showHighlights && (document.search_matches || document.matches) && (document.search_matches || document.matches).length > 0 && (
-              <div className="mb-2">
-                <p className="text-xs text-muted-foreground mb-1">Relevant content:</p>
-                <div className="space-y-1">
-                  {(document.search_matches || document.matches).slice(0, 2).map((match: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className="text-xs bg-yellow-50 dark:bg-yellow-900/20 p-1 rounded border-l-2 border-yellow-200 dark:border-yellow-700 line-clamp-2 [&>mark]:bg-yellow-200 [&>mark]:text-yellow-900 [&>mark]:px-0.5 [&>mark]:rounded-sm dark:[&>mark]:bg-yellow-900/40 dark:[&>mark]:text-yellow-100"
-                      dangerouslySetInnerHTML={{ __html: match.text || match }}
-                    />
-                  ))}
-                  {(document.search_matches || document.matches).length > 2 && (
-                    <p className="text-xs text-muted-foreground">
+              {showHighlights && (document.search_matches || document.matches) && (document.search_matches || document.matches).length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs text-muted-foreground mb-1">Contenido relevante:</p>
+                  <div className="space-y-1">
+                    {(document.search_matches || document.matches).slice(0, 2).map((match: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="text-xs bg-muted/80 text-muted-foreground p-2 rounded-md border border-border shadow-sm dark:bg-slate-900/50 dark:text-slate-100 dark:border-slate-800 line-clamp-2 [&>mark]:bg-primary/20 [&>mark]:text-primary [&>mark]:px-0.5 [&>mark]:rounded-sm"
+                        dangerouslySetInnerHTML={{ __html: match.text || match }}
+                      />
+                    ))}
+                    {(document.search_matches || document.matches).length > 2 && (
+                      <p className="text-xs text-muted-foreground">
                       +{(document.search_matches || document.matches).length - 2} more matches
                     </p>
                   )}
@@ -471,7 +446,7 @@ function DocumentItem({
                   size="icon"
                   className="h-6 w-6"
                   onClick={(e) => handleAction('download', e)}
-                  title="Download"
+                  title="Descargar"
                 >
                   <IconDownload className="h-3 w-3" />
                 </Button>
@@ -488,28 +463,34 @@ function DocumentItem({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {onAskEmma && (
+                      <DropdownMenuItem onClick={(e) => handleAction('askEmma', e)}>
+                        <IconMessageCircle className="h-4 w-4 mr-2" />
+                        Ask Emma
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
                       <IconDownload className="h-4 w-4 mr-2" />
-                      Download
+                      Descargar
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
                       <IconShare2 className="h-4 w-4 mr-2" />
-                      Share
+                      Compartir
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
                       <IconSignature className="h-4 w-4 mr-2" />
-                      Request Signature
+                      Solicitar firma
                     </DropdownMenuItem>
                     {onDelete && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          onClick={(e) => handleAction('delete', e)}
-                          className="text-red-600 focus:text-red-600"
-                        >
-                          <IconTrash className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
+                            onClick={(e) => handleAction('delete', e)}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <IconTrash className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
                       </>
                     )}
                   </DropdownMenuContent>
@@ -535,6 +516,7 @@ export function DocumentList({
   onDelete,
   onShare,
   onSignature,
+  onAskEmma,
   emptyMessage = "No documents found"
 }: DocumentListProps) {
   if (loading) {
@@ -559,7 +541,7 @@ export function DocumentList({
 
   return (
     <div className={viewMode === 'grid'
-      ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+      ? "grid grid-cols-1 gap-4"
       : "space-y-3"
     }>
       {documents.map((document, index) => (
@@ -574,6 +556,7 @@ export function DocumentList({
           onDelete={onDelete}
           onShare={onShare}
           onSignature={onSignature}
+          onAskEmma={onAskEmma}
         />
       ))}
     </div>

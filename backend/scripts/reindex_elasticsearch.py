@@ -23,7 +23,7 @@ from app.db.models import Document, Tenant
 from app.schemas.enums import IndexingStatus
 from app.services.document_service import DocumentService
 from app.services.elasticsearch_client import elasticsearch_client
-from app.services.llm_service import LLMService
+from app.services.langextract_client import langextract_client
 
 logging.basicConfig(level=logging.INFO)
 # Silence verbose SQLAlchemy engine/pool logs during batch runs
@@ -103,13 +103,22 @@ async def _reindex_single_document(
         document.document_metadata = current_metadata
         db.flush()
 
-        # Extract entities to keep parity with ingestion flow
+        # Extract entities via LangExtract to keep parity with ingestion flow
         try:
-            llm_service = LLMService()
-            entities = await llm_service.extract_entities(text_content)
-            document.extracted_entities = entities or []
-            if entities:
-                logger.info("🧠 Documento %s: extraídas %s entidades", document.id, len(entities))
+            entities_result = await langextract_client.extract_entities(
+                text=text_content,
+                document_type=document.category or "general",
+                filename=document.filename,
+            )
+            if entities_result.get("success"):
+                document.extracted_entities = entities_result.get("extractions", [])
+                logger.info(
+                    "🧠 Documento %s: extraídas %s entidades",
+                    document.id,
+                    len(document.extracted_entities or []),
+                )
+            else:
+                document.extracted_entities = []
         except Exception as entity_exc:  # pylint: disable=broad-except
             logger.warning("⚠️ Falló extracción de entidades para %s: %s", document.id, entity_exc)
             document.extracted_entities = []

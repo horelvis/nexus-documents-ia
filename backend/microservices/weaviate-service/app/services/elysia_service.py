@@ -1,5 +1,6 @@
 """Elysia service implementation following official documentation"""
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -24,19 +25,57 @@ class ElysiaService:
         # Store session info
         self.sessions = {}
         self.feedback_storage = []
-        # Ollama configuration
+        # LLM configuration
+        self.provider = settings.elysia_model_provider.lower()
         self.ollama_url = settings.ollama_base_url
-        self.model_name = "gpt-oss:20b"
+        self.openai_base_url = settings.openai_base_url
+        self.openai_api_key = settings.openai_api_key
+        self.google_api_key = settings.google_api_key
+        self.gemini_model = settings.gemini_model
+
+        # Select model based on provider
+        if self.provider == "openai":
+            self.model_name = settings.openai_model
+        elif self.provider == "gemini":
+            self.model_name = self.gemini_model
+        else:
+            self.model_name = settings.elysia_model_name
+
+        self._initialized = False
         
     async def initialize(self):
         """Initialize Elysia following official documentation"""
+        if self._initialized:
+            return
         try:
             from elysia import configure, Settings, Tree, preprocess, tool
             import elysia
-            import os
             
             # Step 1: Configure Elysia for LOCAL Weaviate (current version 0.1.0.dev6)
-            logger.info(f"🔧 Configuring Elysia v{elysia.__version__} with Ollama: {self.ollama_url}")
+            if self.provider == "openai":
+                logger.info(
+                    f"🔧 Configuring Elysia v{elysia.__version__} with OpenAI model {self.model_name}"
+                )
+                if not self.openai_api_key:
+                    raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+                os.environ.setdefault("OPENAI_API_KEY", self.openai_api_key)
+                model_provider = "openai"
+                api_base = self.openai_base_url
+            elif self.provider == "gemini":
+                logger.info(
+                    f"🔧 Configuring Elysia v{elysia.__version__} with Gemini model {self.model_name}"
+                )
+                if not self.google_api_key:
+                    raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=gemini")
+                os.environ.setdefault("GOOGLE_API_KEY", self.google_api_key)
+                model_provider = "gemini"
+                api_base = None  # Gemini uses its own endpoint
+            else:
+                logger.info(
+                    f"🔧 Configuring Elysia v{elysia.__version__} with Ollama: {self.ollama_url}"
+                )
+                model_provider = "ollama"
+                api_base = self.ollama_url
             
             # Configure environment for PR #26 local Weaviate support
             os.environ['WEAVIATE_URL'] = 'http://weaviate:8080'
@@ -47,24 +86,40 @@ class ElysiaService:
             
             # Create settings object configured for local Weaviate
             self.settings = Settings()
-            
-            # Configure Elysia with PR #26 local Weaviate support
-            self.settings.configure(
-                # LLM Configuration - Use local Ollama
-                base_model="gpt-oss:20b",
-                base_provider="ollama",
-                complex_model="gpt-oss:20b", 
-                complex_provider="ollama",
-                model_api_base=self.ollama_url,
-                
-                # Local Weaviate Configuration (PR #26)
-                weaviate_url="http://weaviate:8080",
-                weaviate_api_key="",  # Empty string for local
-                
-                # Note: WCD still required in current version
-                # Future: PR #26 will add local_weaviate=True support
-            )
-            logger.info("✅ Elysia configured with Ollama gpt-oss:20b")
+
+            # IMPORTANT: Set API key for provider BEFORE configuring
+            # Ollama doesn't require a real key but Elysia needs one registered
+            if model_provider == "ollama":
+                self.settings.set_api_key('ollama', 'ollama')
+                logger.info("🔑 Ollama API key registered")
+            elif model_provider == "openai" and self.openai_api_key:
+                self.settings.set_api_key('openai', self.openai_api_key)
+                logger.info("🔑 OpenAI API key registered")
+            elif model_provider == "gemini" and self.google_api_key:
+                self.settings.set_api_key('gemini', self.google_api_key)
+                logger.info("🔑 Gemini API key registered")
+
+            # Configure Elysia with UPPERCASE parameter names (required by Elysia API)
+            config_params = {
+                # LLM Configuration - provider aware (UPPERCASE names required)
+                "BASE_MODEL": self.model_name,
+                "BASE_PROVIDER": model_provider,
+                "COMPLEX_MODEL": self.model_name,
+                "COMPLEX_PROVIDER": model_provider,
+                # Local Weaviate Configuration
+                "WEAVIATE_IS_LOCAL": True,
+                # Disable reasoning for simpler tool selection
+                "BASE_USE_REASONING": False,
+                "COMPLEX_USE_REASONING": False,
+            }
+
+            # Add API base URL only for providers that need it (not Gemini)
+            if api_base:
+                config_params["MODEL_API_BASE"] = api_base
+
+            self.settings.configure(**config_params)
+            logger.info(f"✅ Elysia configured with provider {model_provider} model {self.model_name}")
+            logger.info(f"   BASE_MODEL={self.settings.BASE_MODEL}, BASE_PROVIDER={self.settings.BASE_PROVIDER}")
             
             # Step 2: Initialize Tree with LOCAL settings (no WCD)
             logger.info("🌲 Initializing Elysia Tree with LOCAL Weaviate configuration")
@@ -77,12 +132,15 @@ class ElysiaService:
             
             # Step 4: Preprocess Weaviate collections (if available)
             await self._preprocess_collections()
+            self._initialized = True
             
         except ImportError as e:
             logger.error(f"❌ Elysia not available: {e}")
+            self._initialized = False
             raise
         except Exception as e:
             logger.error(f"❌ Failed to initialize Elysia: {e}")
+            self._initialized = False
             raise
     
     async def _preprocess_collections(self):
@@ -99,22 +157,29 @@ class ElysiaService:
             # Filter only nexus collections (tenant-specific) with safety checks
             tenant_collections = [c for c in available_collections if c and isinstance(c, str) and c.lower().startswith('nexus')]
             logger.info(f"🔍 Found {len(tenant_collections)} nexus collections: {tenant_collections}")
+
+            local_mode = os.getenv("ELYSIA_LOCAL_WEAVIATE", "true").lower() == "true"
+            wcd_configured = bool(os.getenv("WCD_URL") and os.getenv("WCD_API_KEY"))
+            skip_preprocess = local_mode and not wcd_configured
+            if skip_preprocess:
+                logger.info("⚙️ Running in local Weaviate mode without WCD credentials; skipping preprocessing and relying on live queries.")
             
-            for collection_name in tenant_collections:
-                try:
-                    logger.info(f"🔄 Preprocessing collection: {collection_name}")
-                    
-                    # Run in thread pool to avoid uvloop conflicts
-                    def preprocess_collection():
-                        return preprocess(collection_name)
-                    
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(preprocess_collection)
-                        future.result(timeout=30)  # 30 second timeout
-                    
-                    logger.info(f"✅ Preprocessed collection: {collection_name}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to preprocess {collection_name}: {e}")
+            if not skip_preprocess:
+                for collection_name in tenant_collections:
+                    try:
+                        logger.info(f"🔄 Preprocessing collection: {collection_name}")
+                        
+                        # Run in thread pool to avoid uvloop conflicts
+                        def preprocess_collection():
+                            return preprocess(collection_name)
+                        
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(preprocess_collection)
+                            future.result(timeout=30)  # 30 second timeout
+                        
+                        logger.info(f"✅ Preprocessed collection: {collection_name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to preprocess {collection_name}: {e}")
                     
             # Note: Collections are automatically discovered by Elysia when it connects to Weaviate
             # The Tree will use all available collections for RAG operations
@@ -255,100 +320,180 @@ class ElysiaService:
                 except Exception as e:
                     return f"Weather lookup error for '{location}': {str(e)}"
             
-            # Document Comparison Tool
+            # Document Comparison Tool - accepts flexible parameters
             @tool
-            async def compare_documents(document_name_1: str, document_name_2: str, comparison_type: str = "content") -> str:
-                """Compare two documents to find similarities, differences, and key insights"""
+            async def compare_documents(documents: str = "", document_name_1: str = "", document_name_2: str = "", comparison_type: str = "content") -> str:
+                """Compare two documents to find similarities, differences, and key insights. Pass document names as 'documents' (comma-separated) or as 'document_name_1' and 'document_name_2'."""
+                try:
+                    # Handle flexible parameter input
+                    doc1 = document_name_1
+                    doc2 = document_name_2
+
+                    # If documents parameter is provided, parse it
+                    if documents and not (doc1 and doc2):
+                        docs_list = [d.strip() for d in documents.replace(" y ", ",").replace(" and ", ",").split(",") if d.strip()]
+                        if len(docs_list) >= 2:
+                            doc1 = docs_list[0]
+                            doc2 = docs_list[1]
+                        elif len(docs_list) == 1:
+                            doc1 = docs_list[0]
+                            doc2 = "documento no especificado"
+
+                    if not doc1 or not doc2:
+                        return "Error: Se necesitan dos documentos para comparar. Por favor especifica los nombres de los documentos."
+
+                    logger.info(f"📊 Comparing documents: {doc1} vs {doc2}")
+
+                    return f"""📊 **Comparación de Documentos**
+
+**Documentos analizados:**
+• {doc1}
+• {doc2}
+
+**Tipo de comparación:** {comparison_type}
+
+Para realizar una comparación detallada, necesito acceder al contenido de ambos documentos. Por favor, asegúrate de que ambos documentos estén indexados en el sistema.
+
+**Acciones disponibles:**
+• Buscar similitudes en el contenido
+• Identificar diferencias clave
+• Comparar estructura y formato
+• Analizar metadatos"""
+
+                except Exception as e:
+                    logger.error(f"Error comparing documents: {e}")
+                    return f"Error en comparación de documentos: {str(e)}"
+
+            # Public Knowledge Search Tool - Search legislation, regulations, jurisprudence
+            @tool
+            async def search_public_knowledge(query: str, category: str = "", jurisdiction: str = "es") -> str:
+                """Search the public legal knowledge base for legislation, regulations, jurisprudence, and legal templates. Use this for legal questions or when user asks about laws, regulations, or legal compliance."""
+                try:
+                    from app.services.public_knowledge_service import public_knowledge_service
+                    from app.schemas.public_knowledge import PublicSearchRequest, PublicDocumentCategory, Jurisdiction
+
+                    logger.info(f"📚 Searching public knowledge: {query}")
+
+                    # Map jurisdiction string to enum
+                    jur_map = {"es": Jurisdiction.SPAIN, "eu": Jurisdiction.EUROPEAN_UNION, "int": Jurisdiction.INTERNATIONAL}
+                    jurisdictions = [jur_map.get(jurisdiction, Jurisdiction.SPAIN)]
+
+                    # Map category string to enum if provided
+                    categories = None
+                    if category:
+                        cat_map = {
+                            "legislation": PublicDocumentCategory.LEGISLATION,
+                            "regulation": PublicDocumentCategory.REGULATION,
+                            "jurisprudence": PublicDocumentCategory.JURISPRUDENCE,
+                            "template": PublicDocumentCategory.TEMPLATE,
+                            "guideline": PublicDocumentCategory.GUIDELINE
+                        }
+                        if category.lower() in cat_map:
+                            categories = [cat_map[category.lower()]]
+
+                    search_request = PublicSearchRequest(
+                        query=query,
+                        limit=5,
+                        categories=categories,
+                        jurisdictions=jurisdictions,
+                        verified_only=False,
+                        search_type="hybrid"
+                    )
+
+                    response = await public_knowledge_service.search(search_request)
+
+                    if not response.results:
+                        return f"No se encontraron documentos legales para: {query}"
+
+                    # Format results
+                    result_parts = []
+                    for i, doc in enumerate(response.results[:3], 1):
+                        result_parts.append(f"{i}. **{doc.title}**")
+                        if doc.legal_reference:
+                            result_parts.append(f"   Referencia: {doc.legal_reference}")
+                        if doc.summary:
+                            result_parts.append(f"   Resumen: {doc.summary[:200]}...")
+                        result_parts.append("")
+
+                    return f"""📚 **Resultados de la base de conocimiento legal**
+Búsqueda: {query}
+Encontrados: {response.total_results} documentos
+
+{chr(10).join(result_parts)}
+
+*Fuente: Base de conocimiento público NexusDocs360*"""
+
+                except Exception as e:
+                    logger.error(f"Error searching public knowledge: {e}")
+                    return f"Error buscando en la base de conocimiento legal: {str(e)}"
+
+            # Get Documents Info Tool - For welcome messages and user context
+            @tool
+            async def get_documents_info(tenant_id: str = "default") -> str:
+                """Get real information about documents available for a user/tenant from Weaviate. Returns document count, types, and recent documents."""
                 try:
                     from app.services.weaviate_service import weaviate_service
-                    from app.schemas.weaviate import SearchRequest
                     from app.core.security import get_tenant_collection_name
-                    
-                    # For now, we'll use a more advanced comparison strategy
-                    await weaviate_service.initialize()
-                    
-                    # This would be enhanced with actual document content retrieval
-                    # For MVP, we return a structured comparison analysis
-                    
-                    comparison_analysis = {
-                        "documents": {
-                            "document_1": document_name_1,
-                            "document_2": document_name_2
-                        },
-                        "comparison_type": comparison_type,
-                        "analysis": "Advanced document comparison functionality"
-                    }
-                    
-                    if comparison_type == "content":
-                        return f"""📊 **Comparación de Contenido**
-                        
-**Documentos analizados:**
-• **{document_name_1}**
-• **{document_name_2}**
+                    import concurrent.futures
 
-**Análisis comparativo:**
-• **Similitudes:** Ambos documentos contienen secciones comunes de estructura legal/empresarial
-• **Diferencias clave:** Diferencias en fechas, partes involucradas y términos específicos
-• **Elementos únicos:** Cada documento tiene cláusulas y condiciones particulares
-• **Recomendación:** Revisar específicamente las secciones que difieren para identificar discrepancias importantes
+                    def fetch_docs_sync():
+                        """Synchronous function to fetch documents from Weaviate"""
+                        # Weaviate client is sync, so we run this in a thread
+                        collection_name = get_tenant_collection_name(tenant_id, "documents")
+                        logger.info(f"📊 Getting documents info for collection: {collection_name}")
 
-**Próximos pasos sugeridos:**
-1. Revisar diferencias en fechas y montos
-2. Validar consistencia en nombres y entidades
-3. Verificar términos y condiciones específicas"""
-                        
-                    elif comparison_type == "structure":
-                        return f"""📋 **Comparación de Estructura**
-                        
-**Documentos analizados:**
-• **{document_name_1}**
-• **{document_name_2}**
+                        # Ensure client is ready (sync check)
+                        if not weaviate_service.client:
+                            return "Error: Weaviate client not initialized"
 
-**Estructura comparativa:**
-• **Secciones comunes:** Encabezado, cuerpo principal, conclusión
-• **Organización:** Ambos siguen estructura estándar del tipo de documento
-• **Formato:** Consistencia en el formato general
-• **Diferencias estructurales:** Variaciones en número de secciones y subsecciones
+                        collection = weaviate_service.client.collections.get(collection_name)
 
-**Recomendación:** La estructura es consistente entre documentos del mismo tipo"""
-                        
-                    elif comparison_type == "metadata":
-                        return f"""📄 **Comparación de Metadatos**
-                        
-**Documentos analizados:**
-• **{document_name_1}**
-• **{document_name_2}**
+                        doc_count = 0
+                        doc_types = {}
+                        recent_docs = []
 
-**Metadatos comparativos:**
-• **Fechas de creación:** Verificar cronología de documentos
-• **Autores/Creadores:** Identificar responsables de cada documento
-• **Versiones:** Comprobar si son versiones del mismo documento base
-• **Tamaño/Extensión:** Comparar extensión y complejidad
-• **Tipo de contenido:** Validar que sean del mismo tipo documental
+                        for item in collection.iterator(include_vector=False):
+                            doc_count += 1
+                            props = item.properties
 
-**Próximos pasos:**
-1. Verificar secuencia temporal
-2. Confirmar autoría y aprobaciones
-3. Identificar relaciones entre documentos"""
-                    
-                    else:
-                        return f"""🔍 **Comparación General**
-                        
-**Documentos analizados:**
-• **{document_name_1}** 
-• **{document_name_2}**
+                            file_type = props.get('file_type', 'desconocido')
+                            doc_types[file_type] = doc_types.get(file_type, 0) + 1
 
-**Análisis integral:**
-• **Contenido:** Similitudes y diferencias en el texto principal
-• **Estructura:** Organización y formato de los documentos  
-• **Contexto:** Relación y propósito de ambos documentos
-• **Relevancia:** Importancia relativa de las diferencias encontradas
+                            if len(recent_docs) < 5:
+                                recent_docs.append({
+                                    'title': props.get('title') or props.get('filename') or 'Sin título',
+                                    'type': file_type
+                                })
 
-**Recomendación:** Documentos relacionados con diferencias específicas que requieren revisión detallada"""
-                        
+                        logger.info(f"📊 Found {doc_count} documents, types: {doc_types}")
+                        return (doc_count, doc_types, recent_docs)
+
+                    # Run sync code in thread pool
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(fetch_docs_sync)
+                        result = future.result(timeout=30)
+
+                    if isinstance(result, str):
+                        return result  # Error message
+
+                    doc_count, doc_types, recent_docs = result
+
+                    if doc_count == 0:
+                        return f"El usuario no tiene documentos cargados en el sistema. Tenant: {tenant_id}"
+
+                    types_list = [f"{count} {dtype}" for dtype, count in sorted(doc_types.items(), key=lambda x: -x[1])]
+                    docs_list = [f"{d['title']} ({d['type']})" for d in recent_docs]
+
+                    return f"""Información real de documentos del usuario:
+- Total de documentos: {doc_count}
+- Tipos de documentos: {', '.join(types_list)}
+- Documentos disponibles: {', '.join(docs_list)}
+- Tenant ID: {tenant_id}"""
+
                 except Exception as e:
-                    return f"Error en comparación de documentos '{document_name_1}' vs '{document_name_2}': {str(e)}"
-            
+                    logger.error(f"Error getting documents info from Weaviate: {e}")
+                    return f"Error obteniendo información de documentos: {str(e)}"
+
             # Register tools with the tree
             if self.tree:
                 self.tree.add_tool(analyze_contract_risks)
@@ -360,10 +505,12 @@ class ElysiaService:
                 self.tree.add_tool(search_web)
                 self.tree.add_tool(get_weather_info)
                 self.tree.add_tool(compare_documents)
-            
+                self.tree.add_tool(search_public_knowledge)
+                self.tree.add_tool(get_documents_info)
+
             self.tools_registered = True
             logger.info("✅ Custom tools registered in Elysia Tree")
-            logger.info("📋 Available tools: contract analysis, financial analysis, compliance, signatures, summaries, document comparison, web search, weather")
+            logger.info("📋 Available tools: contract analysis, financial analysis, compliance, signatures, summaries, document comparison, web search, weather, public knowledge, get_documents_info")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to register custom tools: {e}")
@@ -392,21 +539,32 @@ class ElysiaService:
                     os.environ['ELYSIA_TRACE_DECISIONS'] = 'true'
                 
                 result = self.tree(query)
-                
+
+                # Elysia Tree returns a tuple (answer_text, references_list)
+                # Extract the answer text properly
+                if isinstance(result, tuple):
+                    answer_text = result[0] if len(result) > 0 else str(result)
+                    references = result[1] if len(result) > 1 else []
+                else:
+                    answer_text = str(result)
+                    references = []
+
                 # Try to extract decision trace if available
                 if hasattr(result, '_decision_trace'):
                     return {
-                        'answer': str(result),
+                        'answer': answer_text,
                         'decision_trace': result._decision_trace,
                         'reasoning_steps': getattr(result, '_reasoning_steps', []),
-                        'tools_selected': getattr(result, '_tools_used', [])
+                        'tools_selected': getattr(result, '_tools_used', []),
+                        'references': references
                     }
                 else:
                     return {
-                        'answer': str(result),
+                        'answer': answer_text,
                         'decision_trace': [],
                         'reasoning_steps': [],
-                        'tools_selected': []
+                        'tools_selected': [],
+                        'references': references
                     }
             
             # Run in thread pool to avoid uvloop conflicts
@@ -431,9 +589,118 @@ class ElysiaService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Elysia Tree execution failed: {type(e).__name__}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"❌ Elysia Tree execution failed: {type(e).__name__}: {error_msg}")
             raise
-    
+
+    def _get_available_tools(self) -> list:
+        """Get list of available tool names"""
+        return [
+            'text_response',
+            'analyze_contract_risks',
+            'analyze_financial_documents',
+            'check_compliance_requirements',
+            'extract_signature_requirements',
+            'create_executive_summary',
+            'ingest_document',
+            'search_web',
+            'get_weather_info',
+            'compare_documents',
+            'search_public_knowledge',
+            'get_documents_info'
+        ]
+
+    def _generate_contextual_suggestions(self, query: str, tools_used: list, has_documents: bool) -> list:
+        """Generate contextual suggestions based on query, tools used, and user context"""
+        from app.schemas.elysia import Suggestion
+
+        suggestions = []
+
+        query_lower = query.lower()
+
+        # Document-related suggestions
+        if has_documents:
+            if 'contrato' in query_lower or 'contract' in query_lower:
+                suggestions.append(Suggestion(
+                    text="Analizar riesgos del contrato",
+                    action="analyze_contract_risks",
+                    icon="shield-alert"
+                ))
+                suggestions.append(Suggestion(
+                    text="Extraer requisitos de firma",
+                    action="extract_signature_requirements",
+                    icon="pen-tool"
+                ))
+            elif 'factura' in query_lower or 'financ' in query_lower or 'invoice' in query_lower:
+                suggestions.append(Suggestion(
+                    text="Analizar documentos financieros",
+                    action="analyze_financial_documents",
+                    icon="calculator"
+                ))
+            elif 'cumplimiento' in query_lower or 'compliance' in query_lower or 'gdpr' in query_lower:
+                suggestions.append(Suggestion(
+                    text="Verificar cumplimiento normativo",
+                    action="check_compliance_requirements",
+                    icon="check-circle"
+                ))
+
+            # Always suggest summary if we have documents
+            suggestions.append(Suggestion(
+                text="Crear resumen ejecutivo",
+                action="create_executive_summary",
+                icon="file-text"
+            ))
+        else:
+            # No documents - suggest uploading
+            suggestions.append(Suggestion(
+                text="Subir un documento para analizar",
+                action="ingest_document",
+                icon="upload"
+            ))
+
+        # General suggestions based on context
+        if 'compar' in query_lower:
+            suggestions.append(Suggestion(
+                text="Comparar documentos",
+                action="compare_documents",
+                icon="git-compare"
+            ))
+
+        if 'busca' in query_lower or 'search' in query_lower or 'encuentra' in query_lower:
+            suggestions.append(Suggestion(
+                text="Buscar en mis documentos",
+                action="search_documents",
+                icon="search"
+            ))
+
+        # Web search for external info
+        if 'actualidad' in query_lower or 'noticia' in query_lower or 'hoy' in query_lower:
+            suggestions.append(Suggestion(
+                text="Buscar información en la web",
+                action="search_web",
+                icon="globe"
+            ))
+
+        # Legal/regulatory suggestions
+        legal_keywords = ['ley', 'normativa', 'rgpd', 'lopd', 'gdpr', 'regulación', 'legal', 'jurisprudencia', 'sentencia', 'boe']
+        if any(kw in query_lower for kw in legal_keywords):
+            suggestions.append(Suggestion(
+                text="Buscar en base de conocimiento legal",
+                action="search_public_knowledge",
+                icon="scale"
+            ))
+
+        # Default suggestions if none were added
+        if len(suggestions) == 0:
+            suggestions = [
+                Suggestion(text="Buscar en mis documentos", action="search_documents", icon="search"),
+                Suggestion(text="Ver información de documentos", action="get_documents_info", icon="info"),
+                Suggestion(text="¿Qué puedes hacer?", action="help", icon="help-circle"),
+            ]
+
+        # Limit to 4 suggestions
+        return suggestions[:4]
+
     async def execute_query(self, query: ElysiaQuery) -> ElysiaResponse:
         """Execute Elysia query using hybrid Weaviate + Elysia approach"""
         start_time = datetime.now()
@@ -450,36 +717,86 @@ class ElysiaService:
             tools_used = []
             
             try:
-                # Step 1: Search for relevant documents in Weaviate
+                # Step 1: Get document context
                 from app.services.weaviate_service import weaviate_service
                 from app.schemas.weaviate import SearchRequest
                 from app.core.security import get_tenant_collection_name
-                
+
                 await weaviate_service.initialize()
                 collection_name = get_tenant_collection_name(query.tenant_id, "documents")
-                
-                search_req = SearchRequest(
-                    query=query.query,
-                    tenant_id=query.tenant_id,
-                    limit=3,  # Get top 3 relevant documents
-                    search_type='keyword',
-                    min_similarity=0.5
-                )
-                
-                weaviate_result = await weaviate_service.search_documents(collection_name, search_req)
-                
-                if weaviate_result.results:
-                    # Combine content from relevant documents
-                    docs_content = []
-                    for i, doc in enumerate(weaviate_result.results[:3], 1):
-                        docs_content.append(f"DOCUMENTO {i}: {doc.title}\n{doc.content[:1000]}...")
-                        tools_used.append(f"weaviate_search:{doc.title}:{doc.id}")
-                    
-                    context_content = "\n\n".join(docs_content)
-                    logger.info(f"✅ Found {len(weaviate_result.results)} relevant documents in Weaviate")
+
+                # Check if a specific document ID was provided in context
+                doc_context = query.context or {}
+                specific_doc_id = doc_context.get('document_id')
+                focus_document = doc_context.get('focus_document', False)
+
+                if specific_doc_id and focus_document:
+                    # Fetch specific document by ID
+                    logger.info(f"📄 Fetching specific document: {specific_doc_id}")
+                    try:
+                        doc_result = await weaviate_service.get_document_by_id(collection_name, specific_doc_id)
+                        if doc_result:
+                            # Set content limit based on provider capabilities
+                            # Gemini: 1M+ tokens, OpenAI: 128K tokens, Ollama: varies by model
+                            content_limits = {
+                                "gemini": 500000,   # ~500K chars for Gemini's large context
+                                "openai": 100000,   # ~100K chars for GPT-4
+                                "ollama": 30000     # ~30K chars for local models
+                            }
+                            max_content = content_limits.get(self.provider, 30000)
+
+                            full_content = doc_result.get('content', '')
+                            content = full_content[:max_content]
+                            title = doc_result.get('title', 'Documento')
+
+                            # Include metadata if available
+                            file_type = doc_result.get('file_type', 'unknown')
+                            chunk_count = doc_result.get('chunk_count', 1)
+
+                            context_content = f"""DOCUMENTO COMPLETO PARA ANÁLISIS
+========================================
+Título: {title}
+Tipo: {file_type}
+Tamaño original: {len(full_content)} caracteres
+Caracteres incluidos: {len(content)}
+========================================
+
+CONTENIDO:
+{content}"""
+
+                            tools_used.append(f"document_focus:{title}:{specific_doc_id}")
+                            logger.info(f"✅ Loaded document '{title}': {len(content)}/{len(full_content)} chars (limit: {max_content})")
+
+                            if len(full_content) > max_content:
+                                logger.warning(f"⚠️ Document truncated: {len(full_content)} -> {max_content} chars")
+                        else:
+                            logger.warning(f"⚠️ Document {specific_doc_id} not found")
+                    except Exception as doc_err:
+                        logger.warning(f"⚠️ Failed to fetch document {specific_doc_id}: {doc_err}")
                 else:
-                    logger.info("ℹ️ No documents found in Weaviate, using Elysia without context")
-                    
+                    # Search for relevant documents in Weaviate
+                    search_req = SearchRequest(
+                        query=query.query,
+                        tenant_id=query.tenant_id,
+                        limit=3,  # Get top 3 relevant documents
+                        search_type='keyword',
+                        min_similarity=0.5
+                    )
+
+                    weaviate_result = await weaviate_service.search_documents(collection_name, search_req)
+
+                    if weaviate_result.results:
+                        # Combine content from relevant documents
+                        docs_content = []
+                        for i, doc in enumerate(weaviate_result.results[:3], 1):
+                            docs_content.append(f"DOCUMENTO {i}: {doc.title}\n{doc.content[:1000]}...")
+                            tools_used.append(f"weaviate_search:{doc.title}:{doc.id}")
+
+                        context_content = "\n\n".join(docs_content)
+                        logger.info(f"✅ Found {len(weaviate_result.results)} relevant documents in Weaviate")
+                    else:
+                        logger.info("ℹ️ No documents found in Weaviate, using Elysia without context")
+
             except Exception as e:
                 logger.warning(f"⚠️ Weaviate search failed: {e}, using Elysia without context")
             
@@ -529,6 +846,10 @@ class ElysiaService:
                     "documents_context": len(weaviate_result.results) if 'weaviate_result' in locals() and weaviate_result.results else 0
                 }
             
+            # Generate contextual suggestions
+            has_documents = 'weaviate_result' in locals() and weaviate_result.results and len(weaviate_result.results) > 0
+            suggestions = self._generate_contextual_suggestions(query.query, tools_used, has_documents)
+
             return ElysiaResponse(
                 query=query.query,
                 answer=result,
@@ -541,14 +862,24 @@ class ElysiaService:
                 confidence_score=0.9 if context_content else 0.7,
                 execution_time_ms=execution_time,
                 iterations=1,
-                learning_applied=query.enable_learning
+                learning_applied=query.enable_learning,
+                suggestions=suggestions,
+                available_tools=self._get_available_tools()
             )
             
         except Exception as e:
             logger.error(f"❌ Elysia query execution failed: {e}")
-            
+
             execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
-            
+
+            # Provide helpful suggestions even on error
+            from app.schemas.elysia import Suggestion
+            error_suggestions = [
+                Suggestion(text="Intentar de nuevo", action="retry", icon="refresh-cw"),
+                Suggestion(text="Buscar en documentos", action="search_documents", icon="search"),
+                Suggestion(text="Contactar soporte", action="help", icon="help-circle"),
+            ]
+
             return ElysiaResponse(
                 query=query.query,
                 answer=f"Error executing query: {str(e)}",
@@ -561,7 +892,9 @@ class ElysiaService:
                 confidence_score=0.0,
                 execution_time_ms=execution_time,
                 iterations=1,
-                learning_applied=False
+                learning_applied=False,
+                suggestions=error_suggestions,
+                available_tools=self._get_available_tools()
             )
     
     async def list_tools(self) -> List[Dict[str, Any]]:
@@ -599,7 +932,8 @@ class ElysiaService:
             "weaviate_cloud_disabled": True,
             "use_local_weaviate": True,
             "active_sessions": len(self.sessions),
-            "ollama_url": self.ollama_url,
+            "llm_provider": self.provider,
+            "llm_endpoint": self.openai_base_url if self.provider == "openai" else self.ollama_url,
             "model_name": self.model_name
         }
     

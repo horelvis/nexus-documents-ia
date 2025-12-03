@@ -14,7 +14,6 @@ import asyncio
 
 from app.db.models import Document, SignatureFieldPlacement, DocumentTypeClassification, SignaturePlacementPattern
 from app.core.config import settings
-from app.services.signature_ai_client import signature_ai_client
 # Local ML modules (simplified versions for pattern storage)
 from app.services.ml.pattern_learner import PatternLearner
 
@@ -23,13 +22,21 @@ logger = logging.getLogger(__name__)
 
 class SignatureAIService:
     """
-    AI Service for intelligent signature placement and document assistance
+    AI Service for intelligent signature placement and document assistance.
+    Uses CAG service for AI operations.
     """
-    
+
     def __init__(self, tenant_id: UUID):
         self.tenant_id = tenant_id
         self.pattern_learner = PatternLearner()
-        self.ai_client = signature_ai_client
+        self._cag_client = None
+
+    async def _get_cag_client(self):
+        """Lazy load CAG client"""
+        if self._cag_client is None:
+            from app.services.cag_client import cag_client
+            self._cag_client = cag_client
+        return self._cag_client
         
     async def analyze_document(
         self, 
@@ -70,24 +77,26 @@ class SignatureAIService:
             }
         """
         try:
-            # Step 1: Analyze document using LangChain service
+            # Step 1: Analyze document using CAG service
             text_content = document_content.decode('utf-8', errors='ignore')
-            analysis_result = await self.ai_client.analyze_document_content(
-                text_content,
-                metadata
+            cag = await self._get_cag_client()
+
+            # Use CAG to analyze document type
+            analysis_result = await cag.analyze_document(
+                document_content=text_content[:50000],  # Limit content size
+                document_id=str(document_id),
+                tenant_id=str(self.tenant_id),
+                analysis_type="signature_placement"
             )
-            
+
             doc_type_result = {
                 "document_type": analysis_result.get("document_type", "unknown"),
                 "confidence": analysis_result.get("confidence", 0.0)
             }
-            
-            # Step 2: Detect POIs using LangChain service
-            zones = await self.ai_client.detect_signature_zones(
-                text_content,
-                doc_type_result["document_type"]
-            )
-            
+
+            # Step 2: Detect signature zones using pattern matching (CAG doesn't have specific zone detection)
+            zones = self._detect_signature_zones_simple(text_content, doc_type_result["document_type"])
+
             poi_results = {"zones": zones}
             
             # Step 3: Get learned patterns for this document type
@@ -385,6 +394,37 @@ class SignatureAIService:
         else:
             return "defaults"
     
+    def _detect_signature_zones_simple(self, content: str, document_type: str) -> List[Dict[str, Any]]:
+        """Simple pattern-based signature zone detection"""
+        import re
+        zones = []
+
+        # Common signature patterns
+        patterns = [
+            r"firma[:\s]*_{2,}",
+            r"signature[:\s]*_{2,}",
+            r"firmado por[:\s]",
+            r"signed by[:\s]",
+            r"________________________",
+            r"\.{10,}",
+        ]
+
+        lines = content.split('\n')
+        for page_num, line in enumerate(lines):
+            line_lower = line.lower()
+            for pattern in patterns:
+                if re.search(pattern, line_lower):
+                    zones.append({
+                        "type": "signature_line",
+                        "bbox": [100, 500 + len(zones) * 100, 300, 550 + len(zones) * 100],
+                        "page": 1,  # Simplified - assume first page
+                        "text_nearby": line.strip()[:50],
+                        "confidence": 0.7
+                    })
+                    break
+
+        return zones[:5]  # Limit to 5 zones
+
     def _get_default_suggestions(self, document_type: str) -> List[Dict[str, Any]]:
         """Get default suggestions based on document type"""
         defaults = {

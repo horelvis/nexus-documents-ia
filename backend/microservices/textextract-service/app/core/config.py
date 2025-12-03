@@ -11,7 +11,10 @@ class Settings(BaseSettings):
 
     service_name: str = "textextract-service"
     service_version: str = "1.0.0"
-    service_port: int = 8012
+    service_port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("TEXT_EXTRACTION_SERVICE_PORT", "SERVICE_PORT"),
+    )
 
     MICROSERVICES_API_KEY: str = Field(
         validation_alias=AliasChoices("MICROSERVICES_API_KEY")

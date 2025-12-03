@@ -1,56 +1,57 @@
 # Arquitectura Docker
 
+> Desde esta iteración solo la API (y las UIs públicas) exponen puertos al host. El resto de microservicios escucha en su puerto interno dentro de `backend-network` y se comunica por DNS (`http://servicio:puerto`).
+
 ```mermaid
 graph TB
-    subgraph "🐳 Docker Network"
-        subgraph "Frontend Services"
-            NextJS[🖥️ nextjs-app<br/>Port: 3000]
-            Admin[⚙️ admin-panel<br/>Port: 3001]
-        end
-
-        subgraph "Backend Services"
-            API[🚀 api<br/>Port: 8000]
-            Emma[🤖 emma-ai<br/>Port: 8007]
-            LangChain[🔗 langchain-service<br/>Port: 8001]
-            Langroid[🎯 langroid-service<br/>Port: 8002]
-            Storage[☁️ storage-service<br/>Port: 8003]
-            Ollama[🦙 ollama-service<br/>Port: 8004]
-            CAG[📊 cag-service<br/>Port: 8005]
-              LangExtract[🏷️ langextract-service<br/>Port: 8006]
-              Elasticsearch[🔍 elasticsearch-service<br/>Port: 8008]
-        end
-
-        subgraph "Infrastructure"
-            Postgres[(📊 postgres<br/>Port: 5432)]
-            Weaviate[(🔍 weaviate<br/>Port: 8080)]
-            Redis[(⚡ redis<br/>Port: 6379)]
-            Nginx[🔀 nginx<br/>Port: 80/443]
-        end
+    subgraph "Frontend"
+        NextJS[🖥️ Next.js App<br/>Host Port: 3000]
     end
 
-    NextJS --> Nginx
-    Admin --> Nginx
-    Nginx --> API
+    subgraph "Backend Services"
+        API[🚀 api<br/>Host Port: 8000]
+        WeaviateSvc[🤖 weaviate-service + Elysia<br/>Internal: 8000]
+        LangExtractSvc[🏷️ langextract-service<br/>Internal: 8000]
+        TextExtractSvc[📑 textextract-service<br/>Internal: 8000]
+        TemplateSvc[🧩 template-editor-service<br/>Internal: 8000]
+        TemporalSvc[🔄 temporalio-service<br/>Internal: 8000]
+        StorageSvc[☁️ storage-service<br/>Internal: 8000]
+        ElasticSvc[🔎 elasticsearch-service<br/>Internal: 8000]
+        GotenbergSvc[📄 gotenberg<br/>Internal: 3000]
+    end
 
-      API --> Emma
-      API --> LangChain
-      API --> Langroid
-      API --> Storage
-      API --> Ollama
-      API --> CAG
-      API --> LangExtract
-      API --> Elasticsearch
+    subgraph "Infrastructure"
+        Postgres[(📊 postgres<br/>Internal: 5432)]
+        Redis[(⚡ redis<br/>Internal: 6379)]
+        WeaviateCore[(🔍 weaviate core<br/>Internal: 8080)]
+        ElasticsearchCore[(🧭 elasticsearch core<br/>Internal: 9200)]
+        Ollama[(🦙 genai-ollama<br/>Internal: 11434)]
+    end
 
-    Emma --> Weaviate
-    LangChain --> Weaviate
+    NextJS --> API
+    API --> WeaviateSvc
+    API --> LangExtractSvc
+    API --> TextExtractSvc
+    API --> TemplateSvc
+    API --> TemporalSvc
+    API --> StorageSvc
+    API --> ElasticSvc
+    API --> GotenbergSvc
+
+    WeaviateSvc --> WeaviateCore
+    LangExtractSvc --> Ollama
+    TextExtractSvc --> GotenbergSvc
+    TemporalSvc --> WeaviateSvc
+    StorageSvc --> Postgres
     API --> Postgres
     API --> Redis
+    ElasticSvc --> ElasticsearchCore
 
     classDef frontend fill:#e1f5fe,stroke:#01579b
     classDef backend fill:#f3e5f5,stroke:#4a148c
     classDef infra fill:#efebe9,stroke:#3e2723
 
-    class NextJS,Admin frontend
-    class API,Emma,LangChain,Langroid,Storage,Ollama,CAG,LangExtract,Elasticsearch backend
-    class Postgres,Weaviate,Redis,Nginx infra
+    class NextJS frontend
+    class API,WeaviateSvc,LangExtractSvc,TextExtractSvc,TemplateSvc,TemporalSvc,StorageSvc,ElasticSvc,GotenbergSvc backend
+    class Postgres,Redis,WeaviateCore,ElasticsearchCore,Ollama infra
 ```

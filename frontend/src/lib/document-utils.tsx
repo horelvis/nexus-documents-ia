@@ -1,7 +1,8 @@
-import { 
-  IconFile, 
-  IconFileText, 
+import {
+  IconFile,
+  IconFileText,
   IconFileTypePdf,
+  IconFileTypeDocx,
   IconPhoto,
   IconVideo,
   IconMusic
@@ -40,9 +41,14 @@ export function getFileIcon(
   }
   
   // Word documents - Blue color for text documents
-  if (type.includes('word') || type.includes('officedocument') || 
-      extension.includes('doc') || extension === 'docx') {
-    return <IconFileText className={`${className} text-blue-600 dark:text-blue-400`} />
+  if (type.includes('word') || type.includes('officedocument.wordprocessing') ||
+      extension === 'doc' || extension === 'docx') {
+    return <IconFileTypeDocx className={`${className} text-blue-600 dark:text-blue-400`} />
+  }
+
+  // OpenDocument Text (ODT) - Cyan color for open formats
+  if (type.includes('opendocument.text') || extension === 'odt') {
+    return <IconFileTypeDocx className={`${className} text-cyan-600 dark:text-cyan-400`} />
   }
   
   // Excel/Spreadsheets - Green color for spreadsheets
@@ -50,11 +56,21 @@ export function getFileIcon(
       extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
     return <IconFileText className={`${className} text-green-600 dark:text-green-400`} />
   }
-  
+
+  // OpenDocument Spreadsheet (ODS) - Teal color for open formats
+  if (type.includes('opendocument.spreadsheet') || extension === 'ods') {
+    return <IconFileText className={`${className} text-teal-600 dark:text-teal-400`} />
+  }
+
   // PowerPoint - Orange color for presentations
   if (type.includes('presentation') || type.includes('powerpoint') ||
       extension === 'pptx' || extension === 'ppt') {
     return <IconFileText className={`${className} text-orange-600 dark:text-orange-400`} />
+  }
+
+  // OpenDocument Presentation (ODP) - Amber color for open formats
+  if (type.includes('opendocument.presentation') || extension === 'odp') {
+    return <IconFileText className={`${className} text-amber-600 dark:text-amber-400`} />
   }
   
   // Images - Purple color for visual files

@@ -310,6 +310,7 @@
   "chatPage": {
     "assistantName": "Emma Asistente",
     "assistantSubtitle": "Inteligencia documental impulsada por IA",
+    "emmaResponding": "Emma procesando respuesta...",
     "mode": {
       "chat": "Chat",
       "settings": "Configuración"
@@ -626,6 +627,23 @@
       }
     }
   },
+  "virtualAssistant": {
+    "title": "Emma",
+    "subtitle": "Tu asistente inteligente",
+    "typing": "Escribiendo...",
+    "conversationCleared": "Conversación limpiada. ¿En qué puedo ayudarte?",
+    "newConversation": "Nueva conversación",
+    "clearChat": "Limpiar chat",
+    "settings": "Configuración",
+    "help": "Ayuda",
+    "inputPlaceholder": "Escribe tu mensaje... (Shift+Enter para nueva línea)",
+    "sendHint": "Enter para enviar • Shift+Enter para nueva línea",
+    "uploadDocument": "Subir documento",
+    "errorServiceUnavailable": "El servicio de asistente no está disponible. Error: {error}",
+    "errorGeneric": "Error: {error}",
+    "errorProcessing": "No pude procesar tu solicitud.",
+    "welcomeDefault": "¡Hola! Soy Emma, tu asistente inteligente. ¿En qué puedo ayudarte hoy?"
+  },
   "sidebar": {
     "dashboard": "Panel de Control",
     "documents": {
@@ -657,6 +675,7 @@
       "teams": "Gestión de Equipos",
       "settings": "Configuración del Tenant",
       "providers": "Proveedores de Firma",
+      "publicKnowledge": "Base de Conocimiento Legal",
       "billing": "Facturación",
       "templates": "Plantillas de Documentos"
     },
@@ -667,5 +686,101 @@
       "sign": "Firmar Documento"
     },
     "nexusDocument": "Nexus Document"
+  },
+  "documentPreview": {
+    "backToSearch": "Volver a búsqueda",
+    "backToDocuments": "Volver a documentos",
+    "share": "Compartir",
+    "regenerate": "Regenerar",
+    "deleteConfirm": {
+      "title": "Eliminar documento",
+      "description": "¿Estás seguro de que deseas eliminar este documento? Esta acción no se puede deshacer."
+    },
+    "documentInfo": {
+      "title": "Información del documento",
+      "type": "Tipo",
+      "size": "Tamaño",
+      "status": "Estado",
+      "category": "Categoría",
+      "tags": "Etiquetas"
+    },
+    "extractedEntities": {
+      "title": "Entidades extraídas",
+      "extracting": "Extrayendo entidades...",
+      "noEntities": "No se encontraron entidades"
+    }
+  },
+  "publicKnowledgePage": {
+    "title": "Base de Conocimiento Legal Público",
+    "subtitle": "Accede a legislación, regulaciones, jurisprudencia y plantillas legales compartidas entre todos los tenants",
+    "infoNotice": "Esta base de conocimiento contiene documentos legales públicos verificados que están disponibles para todos los usuarios del sistema.",
+    "stats": {
+      "title": "Estadísticas de la Base de Conocimiento",
+      "description": "Resumen de documentos disponibles en la base pública",
+      "totalDocs": "Total de Documentos",
+      "verifiedDocs": "Documentos Verificados",
+      "categories": "Categorías",
+      "jurisdictions": "Jurisdicciones"
+    },
+    "categorySelection": {
+      "title": "Categorías Habilitadas",
+      "description": "Selecciona las categorías de documentos que Emma utilizará para responder consultas legales"
+    },
+    "search": {
+      "title": "Buscar en la Base de Conocimiento",
+      "description": "Busca legislación, regulaciones, jurisprudencia y otros documentos legales",
+      "placeholder": "Ej: protección de datos, RGPD, derechos laborales..."
+    },
+    "results": {
+      "title": "Resultados encontrados: {count}",
+      "searchTime": "Tiempo de búsqueda: {ms}ms",
+      "noResults": "No se encontraron documentos que coincidan con tu búsqueda"
+    },
+    "table": {
+      "title": "Título",
+      "category": "Categoría",
+      "jurisdiction": "Jurisdicción",
+      "reference": "Referencia Legal",
+      "verified": "Verificado",
+      "score": "Relevancia"
+    },
+    "categories": {
+      "legislation": "Legislación",
+      "regulation": "Regulación",
+      "jurisprudence": "Jurisprudencia",
+      "template": "Plantilla",
+      "guideline": "Guía",
+      "reference": "Referencia",
+      "form": "Formulario",
+      "treaty": "Tratado"
+    },
+    "jurisdictions": {
+      "es": "España",
+      "eu": "Unión Europea",
+      "int": "Internacional",
+      "regional": "Regional"
+    },
+    "categoryInfo": {
+      "legislation": {
+        "title": "Legislación",
+        "description": "Leyes, códigos y normativa oficial de fuentes como BOE y EUR-Lex"
+      },
+      "regulation": {
+        "title": "Regulación",
+        "description": "Reglamentos, órdenes ministeriales y normativa de desarrollo"
+      },
+      "jurisprudence": {
+        "title": "Jurisprudencia",
+        "description": "Sentencias del Tribunal Supremo, TJUE y tribunales relevantes"
+      },
+      "treaty": {
+        "title": "Tratados",
+        "description": "Tratados internacionales, convenios y acuerdos multilaterales"
+      }
+    },
+    "notifications": {
+      "loadFailed": "Error al cargar estadísticas",
+      "searchFailed": "Error en la búsqueda"
+    }
   }
 }

@@ -26,13 +26,13 @@ def mock_db_session():
 def document_service_instance(mock_db_session, test_tenant): # Added test_tenant for tenant_id
     """Provides a DocumentService instance with mocked dependencies."""
     # Mock dependencies of DocumentService if they are called by the methods under test
-    # For _validate_file and _create_document_record, storage_service, embedding_service, llm_service
+    # For _validate_file and _create_document_record, storage_service, embedding_service
     # are not directly called.
     service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(uuid4()))
     # If these services were used, you would mock them:
     # service.storage_service = MagicMock()
     # service.embedding_service = MagicMock()
-    # service.llm_service = MagicMock()
+    # Additional services can be mocked here if needed
     return service
 
 # --- Tests for _validate_file ---
@@ -333,11 +333,10 @@ def test_add_and_remove_tag(db: Session, test_documents, test_tenant):
     # Assert: Tag absence
     assert tag_name_to_manage not in doc_after_remove["tags"], f"Tag '{tag_name_to_manage}' should not be in document tags after removal"
 
-def test_generate_summary(db: Session, test_documents, test_tenant, mock_llm_service):
+def test_generate_summary(db: Session, test_documents, test_tenant):
     """Test generating a summary for a document."""
     # Arrange
     document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
-    document_service.llm_service = mock_llm_service # Inject mock
     doc_id_str = str(test_documents[0].id)
     
     # Act
@@ -345,7 +344,7 @@ def test_generate_summary(db: Session, test_documents, test_tenant, mock_llm_ser
     
     # Assert
     assert "summary" in result, "Generate summary response should contain 'summary' key"
-    assert "mock summary" in result["summary"].lower(), f"Expected 'mock summary' in summary, got '{result['summary']}'"
+    assert result["summary"], "Summary should not be empty"
 
 def test_get_signed_download_url(db: Session, test_documents, test_tenant, mock_storage_service):
     """Test obtaining a signed URL for document download."""

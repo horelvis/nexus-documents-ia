@@ -1,7 +1,6 @@
 """
 Configuration for LangExtract Service
 """
-import os
 from typing import Optional
 
 from pydantic import AliasChoices, Field
@@ -16,20 +15,42 @@ class Settings(BaseSettings):
     service_version: str = "1.0.0"
     debug: bool = True
     
-    # Ollama configuration (default provider)
-    ollama_host: str = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-    ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+    # Ollama endpoint configuration
+    ollama_host: str = Field(
+        "http://ollama:11434",
+        validation_alias=AliasChoices("OLLAMA_HOST", "OLLAMA_BASE_URL")
+    )
     
     # Optional: Gemini configuration
-    gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GEMINI_API_KEY")
+    )
     
     # Optional: OpenAI configuration
-    openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
-    openai_model: str = "gpt-4o-mini"
+    openai_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY")
+    )
+
+    # Generic LLM configuration shared across providers (REQUIRED)
+    llm_model: str = Field(
+        validation_alias=AliasChoices("LLM_MODEL", "DEFAULT_LLM_MODEL")
+    )  # Required - no default, will error if not set
+    llm_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_API_KEY")
+    )
+    llm_api_base: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_API_BASE", "LLM_BASE_URL")
+    )
     
     # LangExtract configuration
-    default_provider: str = "ollama"  # ollama, gemini, openai
+    default_provider: str = Field(
+        "ollama",
+        validation_alias=AliasChoices("default_provider", "LLM_PROVIDER")
+    )  # ollama, gemini, openai, anthropic
     extraction_passes: int = 2  # Number of extraction passes for better recall
     max_char_buffer: int = 10000  # Max characters per chunk
     parallel_workers: int = 4  # Parallel processing workers
@@ -41,6 +62,10 @@ class Settings(BaseSettings):
     
     # Document type configurations
     confidence_threshold: float = 0.7  # Minimum confidence for extractions
+    
+    # OpenAI specific configurations
+    openai_max_tokens: int = 4000  # Max tokens for OpenAI models
+    openai_temperature: float = 0.3  # Temperature for OpenAI models
 
 
     class Config:

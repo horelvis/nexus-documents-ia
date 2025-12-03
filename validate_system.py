@@ -49,7 +49,7 @@ def main():
         # Microservicios
         ("Storage Service", "localhost", 8003, "http", "http://localhost:8003/health"),
         ("Weaviate Service", "localhost", 8007, "http", "http://localhost:8007/health"),
-        ("CAG Service", "localhost", 8008, "http", "http://localhost:8008/health"),
+        ("CAG API (via Weaviate)", "localhost", 8007, "http", "http://localhost:8007/api/v1/cag/health"),
         ("LangExtract Service", "localhost", 8009, "http", "http://localhost:8009/health"),
         ("Signature Service", "localhost", 8006, "http", "http://localhost:8006/health"),
 

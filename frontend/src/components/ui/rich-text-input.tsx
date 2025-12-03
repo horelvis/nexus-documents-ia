@@ -41,8 +41,6 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
     onKeyDown,
     ...props 
   }, ref) => {
-    console.log("RichTextInput rendered with value:", value)
-    
     const [isEditing, setIsEditing] = useState(false)
     const [inputValue, setInputValue] = useState("")
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)

@@ -52,7 +52,6 @@ import { useApiClient } from "@/lib/api-client"
 import { Document as ApiDocument } from "@/lib/types"
 import {
   EditDocumentDialog,
-  DocumentViewerDialog,
   DeleteDocumentDialog,
   DocumentsDataTable
 } from "@/components/documents"
@@ -181,7 +180,6 @@ export default function DocumentsPage() {
   }
 
   // Dialog states
-  const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -360,7 +358,7 @@ export default function DocumentsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage, t])
+  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage])
 
   // Reload when dependencies change
   useEffect(() => {
@@ -424,8 +422,7 @@ export default function DocumentsPage() {
 
   // Document operations
   const handleViewDocument = (document: ApiDocument) => {
-    setSelectedDocument(document)
-    setViewDialogOpen(true)
+    router.push(`/${tenantId}/documents/${document.id}/preview`)
   }
 
   const handleEditDocument = (document: ApiDocument) => {
@@ -436,10 +433,6 @@ export default function DocumentsPage() {
   const handleDeleteDocument = (document: ApiDocument) => {
     setSelectedDocument(document)
     setDeleteDialogOpen(true)
-  }
-
-  const handlePreviewDocument = (document: ApiDocument) => {
-    router.push(`/${tenantId}/documents/${document.id}/preview`)
   }
 
   const handleShareDocument = (document: ApiDocument) => {
@@ -554,6 +547,12 @@ export default function DocumentsPage() {
 
   const handleFullPagePreview = (document: ApiDocument) => {
     router.push(`/${tenantId}/documents/${document.id}/preview`)
+  }
+
+  const handleAskEmma = (document: ApiDocument) => {
+    // Navigate to chat with document context
+    const documentName = encodeURIComponent(document.title || document.filename)
+    router.push(`/${tenantId}/chat?documentId=${document.id}&documentName=${documentName}`)
   }
 
   const handleDownloadDocument = async (document: ApiDocument) => {
@@ -676,30 +675,6 @@ export default function DocumentsPage() {
         message: t('documentsPage.notifications.deleteFailed.message', { error: error instanceof Error ? error.message : 'Unknown error' })
       })
       throw error
-    }
-  }
-
-  const handleGetDocumentContent = async (id: string) => {
-    try {
-      const response = await documentService.getDocumentContent(id)
-      if (response.error) {
-        return { error: response.error }
-      }
-      return { content: response.data?.content }
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Failed to load content' }
-    }
-  }
-
-  const handleGetDocumentSummary = async (id: string) => {
-    try {
-      const response = await documentService.getDocumentSummary(id)
-      if (response.error) {
-        return { error: response.error }
-      }
-      return { summary: response.data?.summary }
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Failed to load summary' }
     }
   }
 
@@ -837,6 +812,7 @@ export default function DocumentsPage() {
               onDelete={handleDeleteDocument}
               onShare={handleShareDocument}
               onSignature={handleRequestSignature}
+              onAskEmma={handleAskEmma}
             />
           )}
 
@@ -848,10 +824,11 @@ export default function DocumentsPage() {
               onEditDocument={handleEditDocument}
               onDeleteDocument={handleDeleteDocument}
               onDownloadDocument={handleDownloadDocument}
-              onPreviewDocument={handlePreviewDocument}
+              onPreviewDocument={handleViewDocument}
               onFullPagePreview={handleFullPagePreview}
               onShareDocument={handleShareDocument}
               onRequestSignature={handleRequestSignature}
+              onAskEmma={handleAskEmma}
               canConvertToTemplate={isTenantAdmin}
               onConvertToTemplate={handleConvertToTemplate}
               convertLoadingId={convertingDocumentId}
@@ -964,15 +941,6 @@ export default function DocumentsPage() {
           )}
 
           {/* Document Dialogs */}
-          <DocumentViewerDialog
-            document={selectedDocument}
-            open={viewDialogOpen}
-            onOpenChange={setViewDialogOpen}
-            onGetContent={handleGetDocumentContent}
-            onGetSummary={handleGetDocumentSummary}
-            onDownload={handleDownloadDocument}
-          />
-
           <EditDocumentDialog
             document={selectedDocument}
             open={editDialogOpen}

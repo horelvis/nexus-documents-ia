@@ -148,6 +148,187 @@ async def elysia_feedback(
         logger.error(f"❌ Elysia feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================================================
+# PUBLIC KNOWLEDGE BASE ENDPOINTS
+# ============================================================================
+
+@router.get("/public-knowledge/health")
+async def public_knowledge_health():
+    """Check public knowledge base health"""
+    try:
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/health",
+                headers={"Authorization": f"Bearer {microservice_key}"},
+                timeout=15.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "status": "unhealthy",
+                    "error": f"HTTP {response.status_code}: {response.text}"
+                }
+
+    except Exception as e:
+        logger.error(f"Public knowledge health check failed: {e}")
+        return {"status": "unhealthy", "error": str(e)}
+
+
+@router.get("/public-knowledge/stats")
+async def public_knowledge_stats():
+    """Get public knowledge base statistics"""
+    try:
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/stats",
+                headers={"Authorization": f"Bearer {microservice_key}"},
+                timeout=30.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Stats error: {response.text}"
+                )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Service timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public knowledge stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/public-knowledge/categories")
+async def public_knowledge_categories():
+    """Get available categories"""
+    try:
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/categories",
+                headers={"Authorization": f"Bearer {microservice_key}"},
+                timeout=15.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Categories error: {response.text}"
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public knowledge categories error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/public-knowledge/jurisdictions")
+async def public_knowledge_jurisdictions():
+    """Get available jurisdictions"""
+    try:
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/jurisdictions",
+                headers={"Authorization": f"Bearer {microservice_key}"},
+                timeout=15.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Jurisdictions error: {response.text}"
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public knowledge jurisdictions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/public-knowledge/search")
+async def public_knowledge_search(request: Request):
+    """Search public knowledge base"""
+    try:
+        body = await request.json()
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/search",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {microservice_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=60.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Search error: {response.text}"
+                )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Search timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public knowledge search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/public-knowledge/documents/{doc_id}")
+async def public_knowledge_get_document(doc_id: str):
+    """Get a specific document from public knowledge base"""
+    try:
+        microservice_key = settings.microservices_api_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/public-knowledge/documents/{doc_id}",
+                headers={"Authorization": f"Bearer {microservice_key}"},
+                timeout=30.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Document not found")
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Get document error: {response.text}"
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public knowledge get document error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def weaviate_service_health():
     """Overall Weaviate service health including Elysia"""

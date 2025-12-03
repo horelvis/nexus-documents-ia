@@ -15,9 +15,9 @@ from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService  # Added VectorService import
-from app.services.llm_service import LLMService
 from app.services.text_extraction_client import TextExtractionClient
 from app.services.elasticsearch_client import elasticsearch_client  # Added Elasticsearch Client
+from app.services.langextract_client import langextract_client
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ class DocumentService:
         self.embedding_service = EmbeddingService(self.tenant_id)
         self.vector_service = VectorService(self.tenant_id, self.user_id)  # Pass user_id to VectorService
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
-        self.llm_service = LLMService()
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
         """
@@ -215,13 +214,22 @@ class DocumentService:
         current_metadata["text_extraction"] = extraction_metadata
         db_document.document_metadata = current_metadata
 
-        # Extract entities using existing LLM service
+        # Extract entities using LangExtract microservice
         try:
-            llm_service = LLMService()
-            entities = await llm_service.extract_entities(document_text)
-            db_document.extracted_entities = entities or []
-            if entities:
-                logger.info("Extracted %s entities from document %s", len(entities), db_document.id)
+            entities_result = await langextract_client.extract_entities(
+                text=document_text,
+                document_type=db_document.category or "general",
+                filename=db_document.filename,
+            )
+            if entities_result.get("success"):
+                db_document.extracted_entities = entities_result.get("extractions", [])
+                logger.info(
+                    "Extracted %s entities from document %s",
+                    len(db_document.extracted_entities or []),
+                    db_document.id,
+                )
+            else:
+                db_document.extracted_entities = []
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Failed to extract entities from document %s: %s", db_document.id, exc)
             db_document.extracted_entities = []
@@ -546,8 +554,7 @@ class DocumentService:
             if len(text) > max_chars:
                 text = text[:max_chars] + "..."
             
-            # Generar resumen usando el servicio LLM
-            summary = self.llm_service.summarize_text(text)
+            summary = self._create_simple_summary(text, document.filename or document.id)
             
             return {"summary": summary}
             
@@ -646,6 +653,15 @@ class DocumentService:
             db.rollback()
             logger.exception(f"Error removing tag from document {doc_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while removing the tag.")
+
+    def _create_simple_summary(self, text: str, filename: str) -> str:
+        """Fallback summary generator when Elysia is unavailable in sync contexts."""
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        preview = " ".join(lines[:3]) if lines else text
+        preview = preview[:220] if preview else ""
+        if not preview:
+            preview = "Resumen no disponible."
+        return f"{filename}: {preview}"
         # finally: # Removed
             # db.close() # Removed
     
@@ -828,8 +844,7 @@ class DocumentService:
             if len(text) > max_chars:
                 text = text[:max_chars] + "..."
             
-            # Generar resumen usando el servicio LLM
-            summary = self.llm_service.summarize_text(text)
+            summary = self._create_simple_summary(text, document.filename or document.id)
             
             return {"summary": summary}
             

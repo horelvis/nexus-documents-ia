@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -11,10 +11,10 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { 
-  IconLoader2, 
-  IconFile, 
-  IconFileText, 
+import {
+  IconLoader2,
+  IconFile,
+  IconFileText,
   IconFileTypePdf,
   IconDownload,
   IconEye,
@@ -25,6 +25,7 @@ import {
 } from "@tabler/icons-react"
 import { Document } from "@/lib/types"
 import { getFileIcon, formatFileSize, getStatusColor } from "@/lib/document-utils"
+import { useDocumentService } from "@/lib/services/document.service"
 import dynamic from "next/dynamic"
 
 const PDFViewer = dynamic(() => import("@/components/documents/pdf-viewer"), {
@@ -41,14 +42,15 @@ interface DocumentViewerDialogProps {
   onDownload: (document: Document) => Promise<void> | void
 }
 
-export function DocumentViewerDialog({ 
-  document, 
-  open, 
-  onOpenChange, 
+export function DocumentViewerDialog({
+  document,
+  open,
+  onOpenChange,
   onGetContent,
   onGetSummary,
-  onDownload 
+  onDownload
 }: DocumentViewerDialogProps) {
+  const documentService = useDocumentService()
   const [activeTab, setActiveTab] = useState<'info' | 'preview' | 'content' | 'summary'>('info')
   const [content, setContent] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
@@ -56,6 +58,11 @@ export function DocumentViewerDialog({
   const [loadingSummary, setLoadingSummary] = useState(false)
   const [contentError, setContentError] = useState<string | null>(null)
   const [summaryError, setSummaryError] = useState<string | null>(null)
+
+  // PDF preview state (using blob URL pattern like analysis page)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [loadingPdf, setLoadingPdf] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   // Reset state when document changes
   useEffect(() => {
@@ -65,16 +72,90 @@ export function DocumentViewerDialog({
       setSummary(null)
       setContentError(null)
       setSummaryError(null)
+      // Reset PDF state
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl)
+      }
+      setPdfUrl(null)
+      setPdfError(null)
     }
   }, [document])
 
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl)
+      }
+    }
+  }, [pdfUrl])
+
+
+  // Load PDF as blob (same pattern as analysis page - avoids CORS)
+  const handleLoadPdf = useCallback(async () => {
+    console.log('[DocumentViewerDialog] handleLoadPdf called', {
+      hasDocument: !!document,
+      documentId: document?.id,
+      fileType: document?.file_type,
+      mimeType: document?.mime_type,
+      hasPdfUrl: !!pdfUrl,
+      loadingPdf
+    })
+
+    if (!document || pdfUrl || loadingPdf) {
+      console.log('[DocumentViewerDialog] Skipping load - conditions not met')
+      return
+    }
+
+    setLoadingPdf(true)
+    setPdfError(null)
+
+    try {
+      let result
+
+      const isPdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
+      console.log('[DocumentViewerDialog] isPdf:', isPdf)
+
+      if (isPdf) {
+        console.log('[DocumentViewerDialog] Downloading original PDF...')
+        result = await documentService.downloadDocument(document.id)
+      } else {
+        console.log('[DocumentViewerDialog] Downloading converted PDF...')
+        result = await documentService.downloadConvertedDocument(document.id)
+      }
+
+      console.log('[DocumentViewerDialog] Download result:', {
+        hasBlob: 'blob' in result,
+        blobSize: 'blob' in result ? result.blob?.size : null,
+        blobType: 'blob' in result ? result.blob?.type : null,
+        error: 'error' in result ? result.error : null
+      })
+
+      if ('blob' in result && result.blob) {
+        const localUrl = URL.createObjectURL(result.blob)
+        console.log('[DocumentViewerDialog] Created blob URL:', localUrl)
+        setPdfUrl(localUrl)
+      } else if ('error' in result) {
+        console.error('[DocumentViewerDialog] Download error:', result.error)
+        setPdfError(result.error || 'Error al cargar el PDF')
+      } else {
+        console.error('[DocumentViewerDialog] Unexpected result - no blob and no error')
+        setPdfError('Respuesta inesperada del servidor')
+      }
+    } catch (err) {
+      console.error('[DocumentViewerDialog] Exception loading PDF:', err)
+      setPdfError('Error inesperado al cargar el PDF')
+    } finally {
+      setLoadingPdf(false)
+    }
+  }, [document, pdfUrl, loadingPdf, documentService])
 
   const handleLoadContent = async () => {
     if (!document || content) return
 
     setLoadingContent(true)
     setContentError(null)
-    
+
     try {
       const result = await onGetContent(document.id)
       if (result.error) {
@@ -110,9 +191,16 @@ export function DocumentViewerDialog({
   }
 
   const handleTabChange = (tab: 'info' | 'preview' | 'content' | 'summary') => {
+    console.log('[DocumentViewerDialog] Tab changed to:', tab, {
+      pdfUrl: !!pdfUrl,
+      loadingPdf
+    })
     setActiveTab(tab)
-    
-    if (tab === 'content' && !content && !loadingContent) {
+
+    if (tab === 'preview' && !pdfUrl && !loadingPdf) {
+      console.log('[DocumentViewerDialog] Triggering PDF load')
+      handleLoadPdf()
+    } else if (tab === 'content' && !content && !loadingContent) {
       handleLoadContent()
     } else if (tab === 'summary' && !summary && !loadingSummary) {
       handleLoadSummary()
@@ -121,17 +209,8 @@ export function DocumentViewerDialog({
 
   if (!document) return null
 
-  let previewUrl = ''
-  if (document) {
-    if (document.mime_type === 'application/pdf' || document.file_type?.toLowerCase() === 'pdf') {
-      previewUrl = `/${document.tenant_id}/api/documents/${document.id}/pdf`
-    } else if (document.mime_type?.includes('opendocument') || document.file_type?.toLowerCase() === 'odt') {
-      previewUrl = `/${document.tenant_id}/api/documents/${document.id}/converted-pdf`
-    }
-  }
-
   const isPreviewable = document && (
-    document.mime_type === 'application/pdf' || 
+    document.mime_type === 'application/pdf' ||
     document.file_type?.toLowerCase() === 'pdf' ||
     document.file_type?.toLowerCase() === 'odt' ||
     document.mime_type?.includes('opendocument')
@@ -298,11 +377,37 @@ export function DocumentViewerDialog({
               {/* Preview Tab */}
               {activeTab === 'preview' && isPreviewable && (
                 <div className="h-full min-h-[400px]">
-                   <PDFViewer 
-                     url={previewUrl} 
-                     fileName={document.filename}
-                     height="400px"
-                   />
+                  {console.log('[DocumentViewerDialog] Rendering preview tab:', { loadingPdf, pdfError, pdfUrl: !!pdfUrl })}
+
+                  {loadingPdf && (
+                    <div className="flex items-center justify-center py-8">
+                      <IconLoader2 className="h-6 w-6 animate-spin mr-2" />
+                      <span>Cargando PDF...</span>
+                    </div>
+                  )}
+
+                  {pdfError && (
+                    <div className="text-center py-8">
+                      <p className="text-red-600 mb-4">{pdfError}</p>
+                      <Button onClick={handleLoadPdf} variant="outline" size="sm">
+                        Reintentar
+                      </Button>
+                    </div>
+                  )}
+
+                  {pdfUrl && !loadingPdf && (
+                    <PDFViewer
+                      url={pdfUrl}
+                      fileName={document.filename}
+                      height="400px"
+                    />
+                  )}
+
+                  {!loadingPdf && !pdfError && !pdfUrl && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No hay PDF cargado. Estado inconsistente.
+                    </div>
+                  )}
                 </div>
               )}
 

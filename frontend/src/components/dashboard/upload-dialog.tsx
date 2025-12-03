@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+
 import { 
   Dialog, 
   DialogContent, 
@@ -67,6 +68,8 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
       category: '',
       tags: '',
       description: '',
+      cliente: '',
+      periodo: '',
       files: [],
     },
   })
@@ -140,6 +143,8 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
               category: values.category,
               tags: values.tags,
               description: values.description,
+              cliente: values.cliente,
+              periodo: values.periodo,
             },
             (progress: number) => {
               // Update progress for this specific file
@@ -466,7 +471,7 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
                       <FormItem>
                         <FormLabel className="text-sm font-medium">Description (Optional)</FormLabel>
                         <FormControl>
-                          <Input 
+                          <Input
                             {...field}
                             placeholder="Brief description"
                           />
@@ -475,6 +480,51 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
                       </FormItem>
                     )}
                   />
+                </CardContent>
+              </Card>
+
+              {/* Labor Metadata */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Labor Document Metadata</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      disabled={isUploading}
+                      control={form.control}
+                      name="cliente"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm font-medium">Cliente</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="Nombre del cliente (opcional - se intentará detectar automáticamente)"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      disabled={isUploading}
+                      control={form.control}
+                      name="periodo"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm font-medium">Periodo</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="e.g., 2024-Q1, enero-2024 (opcional)"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                 </CardContent>
               </Card>
 

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, text
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.config import settings
 from app.db.models import Document
@@ -20,6 +21,77 @@ logger = logging.getLogger(__name__)
 class AgentRouterService:
     """Service for intelligent document routing and agent assignment"""
     
+    ROUTING_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS document_routing_analysis (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            tenant_id UUID NOT NULL REFERENCES tenants(id),
+            document_type VARCHAR(100) NOT NULL,
+            document_subtype VARCHAR(100),
+            confidence_score FLOAT NOT NULL DEFAULT 0.0,
+            language VARCHAR(10),
+            is_signable BOOLEAN DEFAULT FALSE,
+            requires_approval BOOLEAN DEFAULT FALSE,
+            is_confidential BOOLEAN DEFAULT FALSE,
+            has_financial_data BOOLEAN DEFAULT FALSE,
+            has_personal_data BOOLEAN DEFAULT FALSE,
+            has_legal_clauses BOOLEAN DEFAULT FALSE,
+            assigned_agents JSONB DEFAULT '[]'::jsonb,
+            routing_strategy VARCHAR(50) DEFAULT 'parallel',
+            priority_level VARCHAR(20) DEFAULT 'normal',
+            extracted_entities JSONB DEFAULT '{}'::jsonb,
+            key_dates JSONB DEFAULT '[]'::jsonb,
+            monetary_amounts JSONB DEFAULT '[]'::jsonb,
+            parties_involved JSONB DEFAULT '[]'::jsonb,
+            routing_status VARCHAR(50) DEFAULT 'pending',
+            agents_completed JSONB DEFAULT '[]'::jsonb,
+            agents_in_progress JSONB DEFAULT '[]'::jsonb,
+            agents_failed JSONB DEFAULT '[]'::jsonb,
+            analyzed_at TIMESTAMPTZ DEFAULT NOW(),
+            routing_started_at TIMESTAMPTZ,
+            routing_completed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """
+
+    ROUTING_INDEX_SQL = [
+        "CREATE INDEX IF NOT EXISTS idx_routing_document_id ON document_routing_analysis(document_id)",
+        "CREATE INDEX IF NOT EXISTS idx_routing_tenant_id ON document_routing_analysis(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_routing_status ON document_routing_analysis(routing_status)",
+        "CREATE INDEX IF NOT EXISTS idx_routing_document_type ON document_routing_analysis(document_type)",
+        "CREATE INDEX IF NOT EXISTS idx_routing_priority ON document_routing_analysis(priority_level)"
+    ]
+
+    ASSIGNMENT_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS document_agent_assignments (
+            id UUID PRIMARY KEY,
+            routing_analysis_id UUID NOT NULL REFERENCES document_routing_analysis(id) ON DELETE CASCADE,
+            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            agent_type VARCHAR(100) NOT NULL,
+            agent_name VARCHAR(255) NOT NULL,
+            assignment_reason TEXT,
+            execution_order INTEGER DEFAULT 0,
+            dependencies JSONB DEFAULT '[]'::jsonb,
+            status VARCHAR(50) DEFAULT 'pending',
+            started_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ,
+            result JSONB DEFAULT '{}'::jsonb,
+            error_message TEXT,
+            retry_count INTEGER DEFAULT 0,
+            max_retries INTEGER DEFAULT 3,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """
+
+    ASSIGNMENT_INDEX_SQL = [
+        "CREATE INDEX IF NOT EXISTS idx_agent_assignment_routing ON document_agent_assignments(routing_analysis_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_assignment_document ON document_agent_assignments(document_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_assignment_status ON document_agent_assignments(status)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_assignment_type ON document_agent_assignments(agent_type)"
+    ]
+
     # Document type to agents mapping
     AGENT_MAPPING = {
         "contract": {
@@ -73,7 +145,8 @@ class AgentRouterService:
             "priority": "low"
         }
     }
-    
+    _routing_tables_ready: bool = False
+
     def __init__(self, tenant_id: str, user_id: str):
         self.tenant_id = tenant_id
         self.user_id = user_id
@@ -90,6 +163,7 @@ class AgentRouterService:
         Analyze document and determine routing strategy
         """
         try:
+            await self._ensure_routing_tables(db)
             logger.info(f"Starting document routing analysis for {document_id}")
             
             # Step 1: Analyze document with CAG
@@ -153,6 +227,38 @@ class AgentRouterService:
                 "error": str(e),
                 "document_id": document_id
             }
+    
+    async def _ensure_routing_tables(self, db: AsyncSession):
+        """Ensure routing support tables exist (self-healing for fresh databases)."""
+        if AgentRouterService._routing_tables_ready:
+            return
+        try:
+            await db.execute(text("SELECT 1 FROM document_routing_analysis LIMIT 1"))
+            await db.execute(text("SELECT 1 FROM document_agent_assignments LIMIT 1"))
+            AgentRouterService._routing_tables_ready = True
+        except ProgrammingError as exc:
+            if "document_routing_analysis" in str(exc) or "document_agent_assignments" in str(exc):
+                logger.warning(
+                    "Routing analysis tables not found. Bootstrapping schema automatically..."
+                )
+                await db.rollback()
+                await self._bootstrap_routing_tables(db)
+                AgentRouterService._routing_tables_ready = True
+            else:
+                raise
+
+    async def _bootstrap_routing_tables(self, db: AsyncSession):
+        """Create routing tables and indexes when migrations haven't run yet."""
+        statements = (
+            [self.ROUTING_TABLE_SQL]
+            + self.ROUTING_INDEX_SQL
+            + [self.ASSIGNMENT_TABLE_SQL]
+            + self.ASSIGNMENT_INDEX_SQL
+        )
+        for stmt in statements:
+            await db.execute(text(stmt))
+        await db.commit()
+        logger.info("✅ Routing analysis tables created automatically.")
     
     async def _analyze_with_cag(self, content: str, filename: str, document_id: str = None) -> Dict[str, Any]:
         """Analyze document using CAG service"""

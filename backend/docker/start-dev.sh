@@ -5,9 +5,28 @@
 
 set -e
 
+REMOVE_ORPHANS=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --clean-orphans)
+            REMOVE_ORPHANS=true
+            shift
+            ;;
+        *)
+            echo "Uso: $0 [--clean-orphans]"
+            exit 1
+            ;;
+    esac
+done
+
 echo "🚀 Starting Nexus Document Backend in DEVELOPMENT mode..."
 echo "📁 This mode mounts your source code as volumes for live reloading"
 echo ""
+if $REMOVE_ORPHANS; then
+    echo "🧹 Orphan containers will be removed during stop/start."
+    echo ""
+fi
 
 # Check if .env file exists in backend root
 if [ ! -f ".env" ]; then
@@ -19,7 +38,11 @@ fi
 
 # Stop any existing containers
 echo "🛑 Stopping any existing containers..."
-docker compose down
+if $REMOVE_ORPHANS; then
+    docker compose down --remove-orphans
+else
+    docker compose down
+fi
 
 # Check if images need to be built (only if Dockerfile or requirements.txt changed)
 echo "🔍 Checking if images need to be rebuilt..."
@@ -38,11 +61,15 @@ fi
 
 # Start services
 echo "🎯 Starting services in development mode..."
-docker compose up -d 
+if $REMOVE_ORPHANS; then
+    docker compose up -d --remove-orphans
+else
+    docker compose up -d
+fi
 
-# Start the unified worker (using both compose files together)
-echo "👷 Starting unified background worker..."
-docker compose -f docker-compose.yml -f docker-compose.worker.yml up -d unified-worker
+# Start the background worker microservice
+echo "👷 Ensuring background-worker service is running..."
+docker compose up -d background-worker
 
 # Wait a bit for Ollama to be ready
 echo "⏳ Waiting for Ollama service to be ready..."
@@ -80,14 +107,12 @@ echo ""
 echo "🗄️  Infrastructure:"
 echo "   • PostgreSQL:        localhost:5432"
 echo "   • Redis:             localhost:6379"
-echo "   • Qdrant:            localhost:6333"
 echo ""
 echo "📊 View logs with:"
 echo "   docker compose logs -f [service-name]"
-echo "   docker compose -f docker-compose.worker.yml logs -f unified-worker"
+echo "   docker compose logs -f background-worker"
 echo ""
 echo "🛑 Stop services with:"
-echo "   docker compose down"
-echo "   docker compose -f docker-compose.worker.yml down"
+echo "   docker compose down [--remove-orphans]"
 echo ""
 echo "💡 Code changes will automatically reload services!"
