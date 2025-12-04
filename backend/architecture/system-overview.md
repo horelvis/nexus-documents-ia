@@ -35,12 +35,11 @@ graph TB
         NotificationSvc[📧 Notification Service<br/>Email + Webhooks]
     end
 
-    %% Microservicios de IA y Workflows
-    subgraph "🧠 AI + Workflow Services"
+    %% Microservicios de IA
+    subgraph "🧠 AI Services"
         WeaviateSvc[🤖 Weaviate + Elysia Service<br/>Internal: 8000]
         LangExtractSvc[🏷️ LangExtract Service<br/>Internal: 8000]
         TextExtractSvc[📑 TextExtract Service<br/>Internal: 8000]
-        TemporalSvc[🔄 Temporalio Service<br/>Internal: 8000]
         TemplateSvc[🧩 Template Editor Service<br/>Internal: 8000]
         ElasticSvc[🔎 Elasticsearch Service<br/>Internal: 8000]
         GotenbergSvc[📄 Gotenberg Service<br/>Internal: 3000]
@@ -93,7 +92,6 @@ graph TB
     SearchSvc --> WeaviateSvc
     SearchSvc --> ElasticSvc
     AgentSvc --> WeaviateSvc
-    WeaviateSvc --> TemporalSvc
     TemplateSvc --> StorageSvc
     LangExtractSvc --> OllamaSvc
     WeaviateSvc --> OllamaSvc
@@ -105,7 +103,6 @@ graph TB
     TeamSvc --> PostgreSQL
 
     WeaviateSvc --> Weaviate
-    TemporalSvc --> Weaviate
     LangExtractSvc --> Weaviate
     SearchSvc --> Weaviate
 
@@ -135,7 +132,7 @@ graph TB
     class NextJS,Mobile,AdminUI frontend
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
-    class WeaviateSvc,LangExtractSvc,TextExtractSvc,TemporalSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaSvc microservice
+    class WeaviateSvc,LangExtractSvc,TextExtractSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaSvc microservice
     class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```

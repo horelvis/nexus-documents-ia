@@ -122,9 +122,9 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 │     DATA LAYER          │  │      MICROSERVICES          │  │ EXTERNAL SERVICES│
 ├──────────┬──────────────┤  ├───────────┬────────────────┤  ├─────────┬────────┤
 │PostgreSQL│Redis Cache    │  │CAG Svc    │LangExtract Svc │  │Google   │Stripe  │
-│Weaviate  │Session Store  │  │TextExtract│Temporalio Svc  │  │Cloud    │Payment │
+│Weaviate  │Session Store  │  │TextExtract│Template Editor │  │Cloud    │Payment │
 ├──────────┼──────────────┤  ├───────────┼────────────────┤  │Storage  │API     │
-│Qdrant    │Alembic       │  │WeaviateSvc│Template Editor │  ├─────────┼────────┤
+│Elastic   │Alembic       │  │WeaviateSvc│Elasticsearch   │  ├─────────┼────────┤
 │Vector DB │Migrations    │  │Storage Svc│Elasticsearch   │  │Clerk    │Email   │
 │          │              │  ├───────────┼────────────────┤  │Auth     │Alerts  │
 │          │              │  │Gotenberg  │Ollama Host     │  └─────────┴────────┘
@@ -135,11 +135,10 @@ MICROSERVICES ARCHITECTURE:
 ║ • Weaviate Service + CAG (8007): Vector proxy y agentes contextuales ║
 ║ • LangExtract Service (8009): Extracción automática de entidades     ║
 ║ • TextExtract Service (8000): Extracción determinística/OCR          ║
-║ • Weaviate Service (8007): Proxy vectorial multi-tenant             ║
-║ • Temporalio Service (8010): Workflows durables + Process Library    ║
 ║ • Template Editor Service (8011): Gestión de plantillas colaborativa ║
 ║ • Storage Service (8003): Operaciones GCS y signed URLs              ║
 ║ • Elasticsearch Service (8005): Búsqueda híbrida y analytics         ║
+║ • Background Worker (8100): Previews, emails y procesamiento async   ║
 ║ • Main API (8000): Lógica de negocio, auth y orquestación            ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
@@ -178,7 +177,8 @@ User Request → Clerk Auth → Tenant Resolution → Data Isolation → Respons
 ### Data Storage
 - **PostgreSQL**: Primary relational database
 - **Redis**: Caching and session management
-- **Qdrant**: Vector database for embeddings
+- **Weaviate**: Vector database for semantic search
+- **Elasticsearch**: Hybrid search and analytics
 - **Google Cloud Storage**: Document storage
 
 ### AI/ML Stack
@@ -248,8 +248,8 @@ nexus-document-backend/
 │   │   ├── weaviate-service/            # Vector proxy + integrated CAG/agents
 │   │   ├── elasticsearch-service/       # Hybrid keyword/vector bridge
 │   │   ├── storage-service/             # Async storage + signed URLs
-│   │   ├── template-editor-service/     # Workflow template editor APIs
-│   │   ├── temporalio-service/          # Durable workflow orchestrator
+│   │   ├── template-editor-service/     # Template editor APIs
+│   │   ├── background-worker/           # Async task processing
 │   │   └── shared/                      # Shared utilities
 │   │
 │   ├── docker/                  # Docker configuration
@@ -328,7 +328,8 @@ nexus-document-backend/
    This will start:
    - PostgreSQL database
    - Redis cache
-   - Qdrant vector database
+   - Weaviate vector database
+   - Elasticsearch for hybrid search
    - All microservices with hot reload
    - Main API on http://localhost:8000
 
@@ -343,7 +344,6 @@ nexus-document-backend/
    - Main API: http://localhost:8000
    - CAG API (vía Weaviate): http://localhost:8007/api/v1/cag
    - LangExtract Service: http://localhost:8009
-   - Temporalio Service: http://localhost:8010
 
 ### Manual Setup (Without Docker)
 
@@ -362,7 +362,8 @@ nexus-document-backend/
 3. **Set up services locally**
    - Install and run PostgreSQL
    - Install and run Redis
-   - Install and run Qdrant
+   - Install and run Weaviate
+   - Install and run Elasticsearch
 
 4. **Run database migrations safely**
    ```bash
@@ -474,8 +475,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@localhost/nexus_docs
 REDIS_URL=redis://localhost:6379
 
 # Vector Database
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
+WEAVIATE_URL=http://localhost:8080
 
 # Google Cloud Storage
 GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/service-account.json
@@ -486,11 +486,9 @@ MICROSERVICE_API_KEY=your-unified-api-key
 CAG_SERVICE_URL=http://weaviate-service:8000
 LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
 TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
-```
 STORAGE_SERVICE_URL=http://storage-service:8000
 WEAVIATE_SERVICE_URL=http://weaviate-service:8000
 ELASTICSEARCH_SERVICE_URL=http://elasticsearch-service:8000
-TEMPORALIO_SERVICE_URL=http://temporalio-service:8000
 TEMPLATE_EDITOR_SERVICE_URL=http://template-editor-service:8000
 
 # External Services
@@ -599,22 +597,17 @@ API rate limits by subscription tier:
 - **Fallback**: entrega resultados cuando no hay embeddings o se requiere BM25 puro.
 - **Endpoints**: `POST /search`, `POST /reindex`, `GET /health`.
 
-### 7. Temporalio Service (`http://temporalio-service:8000`)
-- **Orquestación durable** para workflows (contract renewal, onboarding, etc.).
-- **Signals & Queries**: controla ejecuciones en vivo y expone visibilidad agregada.
-- **Endpoints**: `POST /workflows/start`, `GET /workflows/status/{id}`, `POST /workflows/cancel`.
-
-### 8. Template Editor Service (`http://template-editor-service:8000`)
+### 7. Template Editor Service (`http://template-editor-service:8000`)
 - **Process Library**: administra plantillas, formularios dinámicos e inputs validados.
 - **Colaboración**: controla versiones, permisos y publicación por tenant.
 - **Endpoints**: `GET /templates`, `POST /templates`, `PATCH /templates/{id}`.
 
-### 9. Gotenberg Service (`http://gotenberg:3000`, solo interno)
+### 8. Gotenberg Service (`http://gotenberg:3000`, solo interno)
 - **Conversión de documentos** (HTML/Office → PDF), generación de thumbnails y snapshots para el visor.
 - **Pipeline legal + preview**: Storage lo invoca tras cada upload para producir versiones firmables y el preview incrustado en la UI.
 - **Endpoints**: `POST /convert/html`, `POST /convert/office`, `POST /merge`.
 
-### 10. Ollama Host (`http://genai-ollama:11434`, solo interno)
+### 9. Ollama Host (`http://genai-ollama:11434`, solo interno)
 - **LLM local** para inferencias privadas (Llama 3.x, GPT-OSS, Mistral).
 - **Streaming** y soporte para modelos embebidos utilizados por CAG/LangExtract.
 - **Endpoints**: `/api/generate`, `/api/embeddings`, `/api/tags`.

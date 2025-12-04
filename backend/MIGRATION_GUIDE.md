@@ -1,8 +1,12 @@
 # 🚀 Guía de Migración: Qdrant/CrewAI → Weaviate/Elysia
 
+> **✅ MIGRACIÓN COMPLETADA (Diciembre 2024)**
+> La migración a Weaviate + Elysia está completa. Qdrant y CrewAI han sido eliminados del sistema.
+> Este documento se conserva como referencia histórica del proceso de migración.
+
 ## 📋 Resumen de la Migración
 
-Esta guía describe el proceso de migración gradual desde el sistema legacy **Qdrant + CrewAI** hacia el nuevo sistema avanzado **Weaviate + Elysia** en NexusDocs360.
+Esta guía documenta el proceso de migración desde el sistema legacy **Qdrant + CrewAI** hacia el nuevo sistema **Weaviate + Elysia** en NexusDocs360.
 
 > **¿Por qué Elysia?**  
 > Elysia es la nueva base de datos AI-native de Weaviate. Combina vectores, embeddings multimodales, documentos crudos, metadata estructurada, RAG engine e indexación grafo+vector en una única capa. Eso significa que Emma AI y el resto de microservicios no deben duplicar lógica de selección de modelos ni reconstruir pipelines cada vez: configuramos `LLM_PROVIDER`, `LLM_MODEL`/`OPENAI_MODEL` y Elysia se encarga de orquestar la consulta con el modelo adecuado (Ollama local u OpenAI) y las herramientas necesarias.

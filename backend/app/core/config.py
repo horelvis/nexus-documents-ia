@@ -161,9 +161,7 @@ class Settings(BaseSettings):
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
-    
-    # Temporalio Service
-    TEMPORALIO_SERVICE_URL: str = os.getenv("TEMPORALIO_SERVICE_URL", "http://temporalio-service:8000")
+
     TEMPLATE_EDITOR_SERVICE_URL: str = os.getenv(
         "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
     )

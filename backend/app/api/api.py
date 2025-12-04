@@ -3,8 +3,8 @@
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
-    simple_auth, assistant, migration, weaviate, lgpd, temporalio_integration, workflow_executions,
-    internal_template_edit_sessions, internal_google_drive_tokens, google_drive, engine_templates,
+    simple_auth, assistant, migration, weaviate, lgpd,
+    internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
 )
 from fastapi import APIRouter
 
@@ -31,8 +31,6 @@ api_router.include_router(document_insights.router, prefix="/document-insights",
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(assistant.router, tags=["assistant"])
 api_router.include_router(google_drive.router)
-api_router.include_router(engine_templates.router, prefix="/engine-templates", tags=["engine-templates"])
-api_router.include_router(engine_templates.router, prefix="/workflow-templates", tags=["workflow-templates"])
 
 # AI Agents and Digital Signature routes
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
@@ -52,9 +50,6 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"]
 # Weaviate microservice gateway (includes Elysia)
 api_router.include_router(weaviate.router, prefix="/weaviate", tags=["weaviate"])
 
-# Temporal workflows gateway
-api_router.include_router(workflow_executions.router, tags=["workflow-executions"])
-api_router.include_router(temporalio_integration.router, tags=["temporalio"])
 internal_router = APIRouter(prefix="/internal", tags=["internal"])
 internal_router.include_router(
     internal_template_edit_sessions.router,

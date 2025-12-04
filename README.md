@@ -67,24 +67,6 @@ La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL` y
 6. **Búsqueda por Entidades**: Encuentra documentos por personas, organizaciones o importes
 7. **Recomendaciones Proactivas**: Sugiere acciones basadas en patrones
 
-## 🧩 Biblioteca de Plantillas + Workflows Durables
-
-### Plantillas Inteligentes Reutilizables
-- **Process Library por tenant**: En la ruta `/{tenantId}/workflows` encontrarás plantillas curadas como Renovación de Contratos u Onboarding con formularios dinámicos y validación en vivo.
-- **Catálogo híbrido**: El Core sirve `/api/v1/engine-templates` (DB multi-tenant); si falla, el sistema usa el catálogo AI (`backend/app/data/ai_workflow_catalog.py`) para mantener operativa la librería.
-- **Schemas ricos**: Cada plantilla define pasos, campos condicionales, tags, complejidad y duración estimada, por lo que el frontend se configura automáticamente sin código adicional.
-- **Payloads normalizados**: `build_workflow_payload()` agrega defaults y transforma inputs antes de enviar la ejecución a Temporalio, reduciendo errores por datos incompletos.
-
-### Workflows impulsados por Temporalio
-- **Motor durable**: Temporalio Server (7233) + Web UI (8233) + microservicio `temporalio-service` (8010) orquestan Emma/Ollama con reintentos automáticos, señales y queries en caliente.
-- **Workflows listos**: `ContractRenewalWorkflow` y `EmployeeOnboardingWorkflow` ya están disponibles con seguimiento en tiempo real y opciones de cancelar/consultar desde la UI o API.
-- **Monitorización integrada**: Dashboard y pestaña Monitor refrescan los estados cada 30 s/10 s; los endpoints `/temporalio/workflow/{id}/status`, `/temporalio/workflows` y `/workflow-executions` exponen la misma telemetría para automatizaciones.
-- **Setup rápido**: `cd backend/docker && ./start-dev.sh` levanta API + Temporalio; health checks en `http://localhost:8010/health` y Web UI en `http://localhost:8233/`.
-
-### Documentación relacionada
-- [TEMPORALIO_INTEGRATION.md](TEMPORALIO_INTEGRATION.md): Arquitectura, endpoints, fases del rollout y mejores prácticas de operación.
-- [WORKFLOW_UI_TEST_PLAN.md](WORKFLOW_UI_TEST_PLAN.md): Pasos detallados para validar plantillas y workflows desde la UI y las APIs de visibilidad.
-
 ## 🏗️ Arquitectura del Sistema
 
 NexusDocs360 está construido con una arquitectura de microservicios moderna y orientada a IA, diseñada para máxima escalabilidad, seguridad y rendimiento.
@@ -136,15 +118,14 @@ graph TB
     end
 
     %% Microservicios de IA
-    subgraph "🧠 AI & Workflow Services"
-        LangExtractSvc[🏷️ LangExtract Service<br/>Entity Extraction<br/>Port: 8000 (internal)]
-        TextExtractSvc[📑 TextExtract Service<br/>Deterministic Parsing<br/>Port: 8000 (internal)]
-        WeaviateSvc[🔍 Weaviate Service + CAG<br/>Vector Proxy + Agents<br/>Port: 8000 (internal)]
-        TemporalioSvc[🔄 Temporalio Service<br/>Durable Workflows<br/>Port: 8000 (internal)]
-        TemplateSvc[🧩 Template Editor Service<br/>Process Library<br/>Port: 8000 (internal)]
-        ElasticSvc[🔎 Elasticsearch Service<br/>Hybrid Search<br/>Port: 8000 (internal)]
-        GotenbergSvc[📄 Gotenberg Service<br/>Document Conversion<br/>Internal Port: 3000]
-        OllamaHost[🦙 Ollama Host<br/>Local LLMs<br/>Port: 11434 (internal)]
+    subgraph "🧠 AI Services"
+        LangExtractSvc[🏷️ LangExtract Service<br/>Entity Extraction<br/>Internal 8000]
+        TextExtractSvc[📑 TextExtract Service<br/>Deterministic Parsing<br/>Internal 8000]
+        WeaviateSvc[🔍 Weaviate Service + CAG<br/>Vector Proxy + Agents<br/>Internal 8000]
+        TemplateSvc[🧩 Template Editor Service<br/>Process Library<br/>Internal 8000]
+        ElasticSvc[🔎 Elasticsearch Service<br/>Hybrid Search<br/>Internal 8000]
+        GotenbergSvc[📄 Gotenberg Service<br/>Document Conversion<br/>Internal 3000]
+        OllamaHost[🦙 Ollama Host<br/>Local LLMs<br/>Internal 11434]
     end
 
     %% Capa de Datos
@@ -192,9 +173,6 @@ graph TB
     SearchSvc --> WeaviateSvc
     SearchSvc --> ElasticSvc
     AgentSvc --> WeaviateSvc
-    AgentSvc --> TemporalioSvc
-    TemplateSvc --> TemporalioSvc
-    TemporalioSvc --> WeaviateSvc
     DocumentSvc --> GotenbergSvc
 
     LangExtractSvc --> OllamaHost
@@ -220,8 +198,8 @@ graph TB
     SignatureSvc --> SignatureProviders
     NotificationSvc --> EmailSvc
 
-    EmmaAI --> WebSearch
-    EmmaAI --> WeatherAPI
+    WeaviateSvc --> WebSearch
+    WeaviateSvc --> WeatherAPI
 
     FastAPI --> Stripe
 
@@ -236,7 +214,7 @@ graph TB
     class NextJS,Mobile,AdminUI frontend
     class Nginx,Clerk,FastAPI api
     class DocumentSvc,SearchSvc,AgentSvc,SignatureSvc,StorageSvc,AuthSvc,TeamSvc,NotificationSvc service
-    class LangExtractSvc,TextExtractSvc,WeaviateSvc,TemporalioSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaHost microservice
+    class LangExtractSvc,TextExtractSvc,WeaviateSvc,TemplateSvc,ElasticSvc,GotenbergSvc,OllamaHost microservice
     class PostgreSQL,Weaviate,Redis,Elasticsearch database
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
@@ -273,7 +251,6 @@ graph TB
 - **Weaviate Service + CAG** (`http://weaviate-service:8000`): Proxy vectorial multi-tenant con agentes y análisis contextual
 - **LangExtract Service** (`http://langextract-service:8000`): Extracción automática de entidades sobre cada upload
 - **TextExtract Service** (`http://textextract-service:8000`): Parsing determinístico/OCR para documentos complejos
-- **Temporalio Service** (`http://temporalio-service:8000`): Ejecución de workflows durables conectados al Process Library
 - **Template Editor Service** (`http://template-editor-service:8000`): Gestión colaborativa de plantillas y formularios AI
 - **Elasticsearch Service** (`http://elasticsearch-service:8000`): Búsqueda híbrida (keyword + vector) y analytics
 - **Gotenberg Service** (`http://gotenberg:3000`, interno solamente): Conversión y generación de PDFs a partir de HTML/Office
@@ -464,10 +441,8 @@ flowchart TD
 | **Weaviate Service + CAG** | `8007` | FastAPI | `/` | Proxy vectorial + agentes y análisis |
 | **Storage Service** | `8003` | FastAPI | `/` | Operaciones GCS y signed URLs |
 | **Elasticsearch Service** | `8005` | FastAPI | `/` | Búsqueda híbrida + filtros |
-| **Temporalio Service** | `8010` | FastAPI | `/` | Workflows durables y signals |
 | **Template Editor Service** | `8011` | FastAPI | `/` | Gestión de plantillas y formularios |
 | **Background Worker** | `8100 (solo red interna)` | FastAPI + Celery | `/health` | Previews, emails y reintentos de indexación |
-| **Temporalio Web UI** | `8233` | Temporal UI | `/` | Monitoreo de workflows |
 | **Frontend** | `3000` | Next.js | `/` | Interfaz principal |
 | **Gotenberg** | `3000 (solo red interna)` | Gotenberg 8 | `/` | Conversión de documentos a PDF |
 | **Ollama Host** | `11434` | Ollama | `/api/generate` | Modelos LLM locales |
@@ -501,7 +476,6 @@ graph TB
             Storage[☁️ storage-service<br/>8003]
             WeaviateSvc[🔍 weaviate-service + CAG<br/>8007]
             ElasticSvc[🔎 elasticsearch-service<br/>8005]
-            TemporalSvc[🔄 temporalio-service<br/>8010]
             TemplateSvc[🧩 template-editor-service<br/>8011]
             BackgroundWorker[⚙️ background-worker<br/>8100]
         end
@@ -511,8 +485,6 @@ graph TB
             Redis[(⚡ redis<br/>6379)]
             Weaviate[(🔍 weaviate core<br/>8080)]
             Elasticsearch[(🧠 elasticsearch<br/>9200)]
-            TemporalServer[(⏱️ temporalio-server<br/>7233)]
-            TemporalUI[(🖥️ temporalio-ui<br/>8233)]
             Gotenberg[(📄 gotenberg<br/>3000 interno)]
             Ollama[(🦙 genai-ollama<br/>11434)]
         end
@@ -521,27 +493,21 @@ graph TB
     NextJS --> API
     API --> BackgroundWorker
 
-    API --> CAG
     API --> LangExtract
     API --> TextExtract
     API --> Storage
     API --> WeaviateSvc
     API --> ElasticSvc
-    API --> TemporalSvc
     API --> TemplateSvc
 
-    CAG --> WeaviateSvc
     LangExtract --> WeaviateSvc
-    CAG --> Ollama
     LangExtract --> Ollama
+    WeaviateSvc --> Ollama
     TextExtract --> Gotenberg
 
     WeaviateSvc --> Weaviate
     ElasticSvc --> Elasticsearch
     Storage --> Gotenberg
-    TemporalSvc --> TemporalServer
-    TemporalSvc --> TemporalUI
-    TemplateSvc --> TemporalSvc
 
     API --> Postgres
     API --> Redis
@@ -551,8 +517,8 @@ graph TB
     classDef infra fill:#efebe9,stroke:#3e2723
 
     class NextJS frontend
-    class API,CAG,LangExtract,TextExtract,Storage,WeaviateSvc,ElasticSvc,TemporalSvc,TemplateSvc backend
-    class Postgres,Redis,Weaviate,Elasticsearch,TemporalServer,TemporalUI,Gotenberg,Ollama infra
+    class API,LangExtract,TextExtract,Storage,WeaviateSvc,ElasticSvc,TemplateSvc,BackgroundWorker backend
+    class Postgres,Redis,Weaviate,Elasticsearch,Gotenberg,Ollama infra
 ```
 
 ## 🚀 Inicio Rápido
@@ -655,8 +621,6 @@ Consulta [DEPLOYMENT.md](DEPLOYMENT.md) para guía completa de despliegue.
 - **[LANGEXTRACT_INTEGRATION.md](LANGEXTRACT_INTEGRATION.md)**: Guía completa de extracción automática de entidades
 - **[EMMA_ARCHITECTURE.md](EMMA_ARCHITECTURE.md)**: Arquitectura técnica de Emma AI y Chain of Thought
 - **[CLAUDE.md](CLAUDE.md)**: Guía para desarrollo con Claude Code
-- **[TEMPORALIO_INTEGRATION.md](TEMPORALIO_INTEGRATION.md)**: Integración de Temporalio (workflows durables)
-- **[WORKFLOW_UI_TEST_PLAN.md](WORKFLOW_UI_TEST_PLAN.md)**: Guía paso a paso para probar workflows desde la UI
 
 ## 🔐 Seguridad
 

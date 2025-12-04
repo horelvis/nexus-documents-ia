@@ -14,7 +14,6 @@ graph TB
         LangExtractSvc[🏷️ langextract-service<br/>Internal: 8000]
         TextExtractSvc[📑 textextract-service<br/>Internal: 8000]
         TemplateSvc[🧩 template-editor-service<br/>Internal: 8000]
-        TemporalSvc[🔄 temporalio-service<br/>Internal: 8000]
         StorageSvc[☁️ storage-service<br/>Internal: 8000]
         ElasticSvc[🔎 elasticsearch-service<br/>Internal: 8000]
         GotenbergSvc[📄 gotenberg<br/>Internal: 3000]
@@ -33,7 +32,6 @@ graph TB
     API --> LangExtractSvc
     API --> TextExtractSvc
     API --> TemplateSvc
-    API --> TemporalSvc
     API --> StorageSvc
     API --> ElasticSvc
     API --> GotenbergSvc
@@ -41,7 +39,6 @@ graph TB
     WeaviateSvc --> WeaviateCore
     LangExtractSvc --> Ollama
     TextExtractSvc --> GotenbergSvc
-    TemporalSvc --> WeaviateSvc
     StorageSvc --> Postgres
     API --> Postgres
     API --> Redis
@@ -52,6 +49,6 @@ graph TB
     classDef infra fill:#efebe9,stroke:#3e2723
 
     class NextJS frontend
-    class API,WeaviateSvc,LangExtractSvc,TextExtractSvc,TemplateSvc,TemporalSvc,StorageSvc,ElasticSvc,GotenbergSvc backend
+    class API,WeaviateSvc,LangExtractSvc,TextExtractSvc,TemplateSvc,StorageSvc,ElasticSvc,GotenbergSvc backend
     class Postgres,Redis,WeaviateCore,ElasticsearchCore,Ollama infra
 ```

@@ -80,8 +80,6 @@ pytest-mock>=3.10.0
 # Logging
 python-json-logger>=2.0.0
 
-# Metrics
+# Metrics and System Monitoring
 prometheus-client>=0.20.0
-
-# Metrics
-prometheus-client>=0.20.0
+psutil>=5.9.0
