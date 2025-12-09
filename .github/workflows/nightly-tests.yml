@@ -1,9 +1,6 @@
 name: Nightly Tests
 
 on:
-  schedule:
-    # Ejecutar todas las noches a las 1 AM UTC
-    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       full_test_suite:
