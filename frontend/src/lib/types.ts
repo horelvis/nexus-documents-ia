@@ -9,9 +9,6 @@ export const UploadDocumentSchema = z.object({
   category: z.string().optional(),
   tags: z.string().optional(),
   description: z.string().optional(),
-  // Metadatos para documentos laborales (tipo_documento auto-detectado)
-  cliente: z.string().optional(),
-  periodo: z.string().optional(),
   files: z.array(z.instanceof(File)).min(1, 'At least one file is required'),
 })
 
@@ -199,6 +196,45 @@ export interface BackendUser {
   selected_plan?: string
 }
 
+/**
+ * Subscription information from Stripe (returned by POST /auth/login)
+ */
+export interface SubscriptionInfo {
+  plan: string                        // trial, basic, pro, enterprise
+  status: string                      // active, trialing, past_due, canceled
+  can_use_agents: boolean
+  can_use_advanced_features: boolean
+  limits: Record<string, number>      // { documents: 500, storage_mb: 10240 }
+  needs_upgrade: boolean              // True if trial expired without paid plan
+  trial_days_remaining: number | null
+  current_period_end: string | null
+  subscription_id: string | null
+  cancel_at_period_end: boolean
+}
+
+/**
+ * User permissions based on subscription and roles (returned by POST /auth/login)
+ */
+export interface UserPermissions {
+  is_admin: boolean
+  is_team_member: boolean
+  can_upload_documents: boolean
+  can_use_agents: boolean
+  can_invite_members: boolean
+  can_access_api: boolean
+  can_export: boolean
+}
+
+/**
+ * Response from POST /auth/login
+ */
+export interface LoginResponse {
+  user: BackendUser
+  subscription: SubscriptionInfo
+  permissions: UserPermissions
+  tenant_id: string
+}
+
 export interface OnboardingStatus {
   needsOnboarding: boolean
   isNewUser: boolean
@@ -218,6 +254,10 @@ export interface UserContextType {
   userLoading: boolean
   userError: string | null
 
+  // Subscription & Permissions (from POST /auth/login)
+  subscription: SubscriptionInfo | null
+  permissions: UserPermissions | null
+
   // Onboarding
   onboarding: OnboardingStatus
 
@@ -226,6 +266,7 @@ export interface UserContextType {
   resetOnboarding: () => Promise<boolean>
   checkOnboardingStatus: () => Promise<void>
   refetchUser: () => Promise<void>
+  handleLogout: () => Promise<void>
 
   // Subscription helpers
   hasValidTrial: () => boolean
@@ -403,4 +444,184 @@ export interface DocumentPreviewInfo {
   preview_info?: DocumentPreviewResponse
   message?: string
   error?: string
+}
+
+// ========================================
+// Document ACL Types
+// ========================================
+
+/**
+ * Types of grantees for document ACL
+ */
+export type GranteeType = 'user' | 'role' | 'everyone'
+
+/**
+ * Permission types for document ACL
+ */
+export type Permission = 'view' | 'edit' | 'delete' | 'share'
+
+/**
+ * ACL action types for audit log
+ */
+export type ACLAction = 'granted' | 'revoked' | 'modified' | 'expired'
+
+/**
+ * Source of ACL grant
+ */
+export type ACLSource = 'manual' | 'share_link' | 'inherited' | 'migration'
+
+/**
+ * Permission set for granting/displaying permissions
+ */
+export interface PermissionSet {
+  can_view: boolean
+  can_edit: boolean
+  can_delete: boolean
+  can_share: boolean
+}
+
+/**
+ * Document ACL entry
+ */
+export interface DocumentACL {
+  id: string
+  document_id: string
+  tenant_id: string
+  grantee_type: GranteeType
+  grantee_id?: string
+  can_view: boolean
+  can_edit: boolean
+  can_delete: boolean
+  can_share: boolean
+  granted_by: string
+  granted_at: string
+  expires_at?: string
+  source: ACLSource
+  created_at: string
+  updated_at?: string
+  // Resolved names (from API response)
+  grantee_name?: string
+  granter_name?: string
+  is_expired: boolean
+}
+
+/**
+ * List of ACLs for a document
+ */
+export interface DocumentACLListResponse {
+  document_id: string
+  document_title: string
+  owner_id: string
+  owner_name?: string
+  acls: DocumentACL[]
+  total: number
+}
+
+/**
+ * Effective permissions for current user on a document
+ */
+export interface EffectivePermissions {
+  can_view: boolean
+  can_edit: boolean
+  can_delete: boolean
+  can_share: boolean
+  is_owner: boolean
+  is_admin: boolean
+  from_user_acl: boolean
+  from_role_acl: boolean
+  from_everyone_acl: boolean
+  applicable_acl_ids: string[]
+}
+
+/**
+ * Request to grant permissions
+ */
+export interface GrantPermissionRequest {
+  grantee_type: GranteeType
+  grantee_id?: string
+  permissions: PermissionSet
+  expires_at?: string
+  source?: ACLSource
+}
+
+/**
+ * Request to revoke permissions
+ */
+export interface RevokePermissionRequest {
+  grantee_type: GranteeType
+  grantee_id?: string
+}
+
+/**
+ * Check permission response
+ */
+export interface CheckPermissionResponse {
+  document_id: string
+  user_id: string
+  permission: Permission
+  allowed: boolean
+  reason: string
+}
+
+/**
+ * ACL Audit log entry
+ */
+export interface DocumentACLAudit {
+  id: string
+  document_id: string
+  tenant_id: string
+  acl_id?: string
+  action: ACLAction
+  grantee_type: GranteeType
+  grantee_id?: string
+  permissions_before?: PermissionSet
+  permissions_after?: PermissionSet
+  performed_by: string
+  source?: string
+  ip_address?: string
+  user_agent?: string
+  created_at: string
+  // Resolved names
+  grantee_name?: string
+  performer_name?: string
+  document_title?: string
+}
+
+/**
+ * Audit log list response
+ */
+export interface DocumentACLAuditListResponse {
+  document_id?: string
+  tenant_id: string
+  audits: DocumentACLAudit[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/**
+ * Bulk ACL update request
+ */
+export interface BulkACLUpdateRequest {
+  document_ids: string[]
+  grant_permissions?: GrantPermissionRequest[]
+  revoke_permissions?: RevokePermissionRequest[]
+}
+
+/**
+ * Bulk ACL update response
+ */
+export interface BulkACLUpdateResponse {
+  success_count: number
+  failure_count: number
+  failures: Array<{ document_id: string; error: string }>
+}
+
+/**
+ * Document with ACL information (extended Document type)
+ */
+export interface DocumentWithACL extends Document {
+  current_user_permissions?: EffectivePermissions
+  visibility?: 'private' | 'shared' | 'public'
+  acl_count?: number
 }

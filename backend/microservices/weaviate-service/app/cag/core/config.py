@@ -21,10 +21,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MICROSERVICES_API_KEY")
     )
     
-    # LLM configuration
-    llm_provider: str = os.getenv("LLM_PROVIDER", "ollama").lower()
+    # LLM configuration - vLLM is the primary provider
+    llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
+    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    llm_model: str = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")  # Default model
+    # Legacy Ollama config (DEPRECATED)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
-    llm_model: str = os.getenv("LLM_MODEL", "llama3.2:latest")  # Default model
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_embedding_model: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")

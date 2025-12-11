@@ -12,6 +12,7 @@ celery_app = Celery(
         "worker_app.tasks.preview_tasks",
         "worker_app.tasks.email_tasks",
         "worker_app.tasks.indexing_tasks",
+        "worker_app.tasks.channel_tasks",
     ],
 )
 
@@ -21,6 +22,7 @@ celery_app.conf.update(
         "preview.*": {"queue": "preview"},
         "email.*": {"queue": "email"},
         "indexing.*": {"queue": "indexing"},
+        "channels.*": {"queue": "channels"},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
@@ -41,6 +43,10 @@ celery_app.conf.update(
         "auto-retry-failed-indexing": {
             "task": "indexing.auto_retry_failed_indexing",
             "schedule": crontab(minute="0,30"),
+        },
+        "channels-scheduled-sync": {
+            "task": "channels.sync_scheduled",
+            "schedule": crontab(minute="*/15"),  # Every 15 minutes
         },
     },
 )

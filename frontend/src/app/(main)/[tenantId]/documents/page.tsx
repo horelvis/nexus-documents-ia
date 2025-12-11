@@ -27,7 +27,9 @@ import {
   IconBrain,
   IconRefresh,
   IconAlertTriangle,
-  IconX
+  IconX,
+  IconRobot,
+  IconCheck
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -55,8 +57,10 @@ import type { Entity as SearchEntity } from "@/lib/services/entity.service"
 import {
   EditDocumentDialog,
   DeleteDocumentDialog,
+  DeleteMultipleDocumentsDialog,
   DocumentsDataTable
 } from "@/components/documents"
+// AgentProcessDialog removed - using automatic mode now
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 import { useTranslation } from "@/lib/i18n/hooks"
@@ -196,13 +200,33 @@ export default function DocumentsPage() {
     }
   }
 
+  const handleEntitySelectForSearch = (entity: SearchEntity) => {
+    setSelectedEntities(prev => {
+      if (prev.some(e => e.id === entity.id)) {
+        return prev
+      }
+      return [...prev, entity]
+    })
+  }
+
+  const handleRemoveSearchEntity = (entityId: string) => {
+    setSelectedEntities(prev => prev.filter(entity => entity.id !== entityId))
+  }
+
   // Dialog states
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteMultipleDialogOpen, setDeleteMultipleDialogOpen] = useState(false)
+  const [documentsToDelete, setDocumentsToDelete] = useState<ApiDocument[]>([])
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null)
 
-  const { openUploadDialog, closeUploadDialog } = useUpload()
+  // Agent processing states
+  // agentDialogOpen removed - using automatic mode now
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
+  const [isProcessingWithAgent, setIsProcessingWithAgent] = useState(false)
+
+  const { openUploadDialog } = useUpload()
   const { emitDocumentEvent } = useDocumentEvents()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
@@ -572,6 +596,85 @@ export default function DocumentsPage() {
     router.push(`/${tenantId}/chat?documentId=${document.id}&documentName=${documentName}`)
   }
 
+  // Document selection handlers
+  const handleToggleDocumentSelection = useCallback((documentId: string) => {
+    setSelectedDocumentIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(documentId)) {
+        newSet.delete(documentId)
+      } else {
+        newSet.add(documentId)
+      }
+      return newSet
+    })
+  }, [])
+
+  const handleSelectAllDocuments = useCallback(() => {
+    if (selectedDocumentIds.size === filteredDocuments.length) {
+      setSelectedDocumentIds(new Set())
+    } else {
+      setSelectedDocumentIds(new Set(filteredDocuments.map(d => d.id)))
+    }
+  }, [filteredDocuments, selectedDocumentIds.size])
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedDocumentIds(new Set())
+  }, [])
+
+  // Process documents with selected agent
+  const handleProcessWithAgent = useCallback(async (agentId: string, documentIds: string[]) => {
+    setIsProcessingWithAgent(true)
+
+    try {
+      // If single document, go to individual analysis page
+      if (documentIds.length === 1) {
+        const docId = documentIds[0]
+        const doc = filteredDocuments.find(d => d.id === docId)
+        const docName = doc?.title || doc?.filename || 'documento'
+
+        addNotification({
+          type: 'info',
+          title: 'Iniciando análisis',
+          message: `Analizando "${docName}"...`
+        })
+
+        // Navigate to individual document analysis page
+        router.push(`/${tenantId}/documents/${docId}/analysis`)
+      } else {
+        // Multiple documents - go to batch analysis page
+        addNotification({
+          type: 'info',
+          title: 'Iniciando análisis',
+          message: `Emma analizará ${documentIds.length} documentos con el agente "${agentId === 'auto' ? 'Auto' : agentId}"...`
+        })
+
+        const queryParams = new URLSearchParams({
+          documentIds: documentIds.join(','),
+          agent: agentId
+        })
+        router.push(`/${tenantId}/analysis?${queryParams.toString()}`)
+      }
+
+      // Clear selection after navigation
+      setSelectedDocumentIds(new Set())
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Error al procesar',
+        message: error instanceof Error ? error.message : 'No se pudieron procesar los documentos'
+      })
+    } finally {
+      setIsProcessingWithAgent(false)
+    }
+  }, [addNotification, router, tenantId, filteredDocuments])
+
+  // Get selected document names for the dialog
+  const selectedDocumentNames = useMemo(() => {
+    return Array.from(selectedDocumentIds)
+      .map(id => filteredDocuments.find(d => d.id === id)?.title || filteredDocuments.find(d => d.id === id)?.filename)
+      .filter(Boolean) as string[]
+  }, [selectedDocumentIds, filteredDocuments])
+
   const handleDownloadDocument = async (document: ApiDocument) => {
     try {
       addNotification({
@@ -712,6 +815,88 @@ export default function DocumentsPage() {
           </Button>
         </div>
 
+        {/* Selection Toolbar */}
+        {selectedDocumentIds.size > 0 && (
+          <Card className="mb-4 border-primary/50 bg-primary/5">
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearSelection}
+                    className="h-8 w-8 p-0"
+                  >
+                    <IconX className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm font-medium">
+                    {selectedDocumentIds.size} {selectedDocumentIds.size === 1 ? 'documento seleccionado' : 'documentos seleccionados'}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSelectAllDocuments}
+                    className="text-xs"
+                  >
+                    {selectedDocumentIds.size === filteredDocuments.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => {
+                      // Download all selected documents
+                      Array.from(selectedDocumentIds).forEach(id => {
+                        const doc = filteredDocuments.find(d => d.id === id)
+                        if (doc) handleDownloadDocument(doc)
+                      })
+                    }}
+                  >
+                    <IconDownload className="h-4 w-4" />
+                    Descargar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 text-destructive hover:text-destructive"
+                    onClick={() => {
+                      // Get all selected documents for batch deletion
+                      const docsToDelete = filteredDocuments.filter(d => selectedDocumentIds.has(d.id))
+                      if (docsToDelete.length === 1) {
+                        // Single document: use simple dialog
+                        setSelectedDocument(docsToDelete[0])
+                        setDeleteDialogOpen(true)
+                      } else if (docsToDelete.length > 1) {
+                        // Multiple documents: use batch dialog
+                        setDocumentsToDelete(docsToDelete)
+                        setDeleteMultipleDialogOpen(true)
+                      }
+                    }}
+                  >
+                    <IconTrash className="h-4 w-4" />
+                    Eliminar ({selectedDocumentIds.size})
+                  </Button>
+                  <Button
+                    onClick={() => handleProcessWithAgent('auto', Array.from(selectedDocumentIds))}
+                    size="sm"
+                    className="gap-2"
+                    disabled={isProcessingWithAgent}
+                  >
+                    {isProcessingWithAgent ? (
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <IconRobot className="h-4 w-4" />
+                    )}
+                    {t('documents.agentAnalysis')}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
 
         {/* Main content */}
         <div className="mb-6">
@@ -720,29 +905,34 @@ export default function DocumentsPage() {
             <CardContent className="p-6">
               <div className="flex flex-col gap-4">
                 {/* Search Bar Row */}
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                  <div className="flex-1 relative">
-                    <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
-                    <RichTextInput
-                      placeholder={t('documentsPage.searchPlaceholder')}
-                      value={localSearchQuery}
-                      onChange={setLocalSearchQuery}
-                      onKeyDown={handleKeyDown}
-                      className="pl-10 border bg-background shadow-sm"
-                      documentId="general"
-                      autoInsertEntityTag={false}
-                      onEntitySelect={(entity) => {
-                        handleEntitySelectForSearch(entity)
-                      }}
-                    />
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 z-10 pointer-events-none" />
+                      <RichTextInput
+                        placeholder={t('documentsPage.searchPlaceholder')}
+                        value={localSearchQuery}
+                        onChange={setLocalSearchQuery}
+                        onKeyDown={handleKeyDown}
+                        className="pl-10 border bg-background shadow-sm"
+                        documentId="general"
+                        autoInsertEntityTag={false}
+                        onEntitySelect={(entity) => {
+                          handleEntitySelectForSearch(entity)
+                        }}
+                      />
+                    </div>
                     {selectedEntities.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {selectedEntities.map(entity => (
-                          <Badge key={entity.id} variant="secondary" className="flex items-center gap-1">
-                            <span>{entity.name}</span>
+                          <Badge
+                            key={entity.id}
+                            className="flex items-center gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 px-2.5 py-1"
+                          >
+                            <span className="font-medium">{entity.name}</span>
                             <button
                               type="button"
-                              className="hover:text-destructive"
+                              className="hover:bg-primary-foreground/20 rounded-full p-0.5 transition-colors"
                               onClick={() => handleRemoveSearchEntity(entity.id)}
                             >
                               <IconX className="h-3 w-3" />
@@ -753,7 +943,7 @@ export default function DocumentsPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap sm:pt-0">
                     <Button onClick={handleSearchConfirm} variant="outline" className="flex-shrink-0">
                       {t('documentsPage.searchButton')}
                     </Button>
@@ -844,8 +1034,13 @@ export default function DocumentsPage() {
               onDownload={handleDownloadDocument}
               onDelete={handleDeleteDocument}
               onShare={handleShareDocument}
+              onEdit={handleEditDocument}
               onSignature={handleRequestSignature}
               onAskEmma={handleAskEmma}
+              selectable={true}
+              selectedIds={selectedDocumentIds}
+              onToggleSelection={handleToggleDocumentSelection}
+              showPermissionBadges={true}
             />
           )}
 
@@ -988,12 +1183,27 @@ export default function DocumentsPage() {
             onConfirm={handleConfirmDelete}
           />
 
+          <DeleteMultipleDocumentsDialog
+            documents={documentsToDelete}
+            open={deleteMultipleDialogOpen}
+            onOpenChange={setDeleteMultipleDialogOpen}
+            onConfirm={handleConfirmDelete}
+            onComplete={() => {
+              // Clear selection and reload documents after batch delete
+              setSelectedDocumentIds(new Set())
+              setDocumentsToDelete([])
+              loadDocuments()
+            }}
+          />
 
           <ShareDocumentDialog
             document={selectedDocument}
             open={shareDialogOpen}
             onOpenChange={setShareDialogOpen}
+            onPermissionsChanged={loadDocuments}
           />
+
+          {/* AgentProcessDialog removed - now using automatic mode */}
 
         </div> {/* End main content */}
 
@@ -1001,15 +1211,3 @@ export default function DocumentsPage() {
     </div>
   )
 }
-  const handleEntitySelectForSearch = (entity: SearchEntity) => {
-    setSelectedEntities(prev => {
-      if (prev.some(e => e.id === entity.id)) {
-        return prev
-      }
-      return [...prev, entity]
-    })
-  }
-
-  const handleRemoveSearchEntity = (entityId: string) => {
-    setSelectedEntities(prev => prev.filter(entity => entity.id !== entityId))
-  }

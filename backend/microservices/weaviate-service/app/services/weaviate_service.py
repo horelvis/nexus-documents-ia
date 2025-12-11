@@ -1,10 +1,11 @@
-"""Weaviate service implementation"""
+"""Weaviate service implementation with Sentence Transformers embeddings"""
 import weaviate
 import logging
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uuid
+from functools import lru_cache
 
 from app.core.config import settings
 from app.core.security import get_tenant_collection_name
@@ -15,6 +16,103 @@ from app.schemas.weaviate import (
 from weaviate.exceptions import UnexpectedStatusCodeException
 
 logger = logging.getLogger(__name__)
+
+
+# Singleton for embedding model (avoid reloading on each request)
+_embedding_model = None
+_embedding_model_lock = asyncio.Lock()
+_tei_client = None
+
+
+async def get_tei_embedding(texts: list[str]) -> list[list[float]]:
+    """Generate embeddings using TEI (Text Embeddings Inference) server"""
+    global _tei_client
+    import httpx
+
+    if _tei_client is None:
+        _tei_client = httpx.AsyncClient(timeout=30.0)
+
+    try:
+        response = await _tei_client.post(
+            f"{settings.tei_url}/embed",
+            json={"inputs": texts}
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"❌ TEI error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"❌ TEI request failed: {e}")
+        return None
+
+
+async def get_embedding_model():
+    """Get or initialize the embedding model based on provider (TEI or Sentence Transformers)"""
+    global _embedding_model
+
+    # For TEI, we don't need a local model
+    if settings.embedding_provider == "tei":
+        return "tei"
+
+    if _embedding_model is not None:
+        return _embedding_model
+
+    async with _embedding_model_lock:
+        # Double-check after acquiring lock
+        if _embedding_model is not None:
+            return _embedding_model
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+
+            # Determine device
+            device = settings.embedding_device
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            elif device == "cuda" and not torch.cuda.is_available():
+                logger.warning("⚠️ CUDA requested but not available, falling back to CPU")
+                device = "cpu"
+
+            # Load model
+            model_name = settings.embedding_model
+            logger.info(f"🔄 Loading embedding model: {model_name} on {device}")
+
+            _embedding_model = SentenceTransformer(model_name, device=device)
+
+            # Verify dimensions match config
+            test_embedding = _embedding_model.encode("test", convert_to_numpy=True)
+            actual_dims = len(test_embedding)
+
+            if actual_dims != settings.embedding_dimensions:
+                logger.warning(
+                    f"⚠️ Embedding dimensions mismatch: config={settings.embedding_dimensions}, "
+                    f"actual={actual_dims}. Using actual dimensions."
+                )
+
+            logger.info(f"✅ Loaded embedding model: {model_name} ({actual_dims} dims) on {device}")
+            return _embedding_model
+
+        except Exception as e:
+            logger.error(f"❌ Failed to load embedding model: {e}")
+            return None
+
+
+async def generate_embedding(text: str) -> list[float] | None:
+    """Generate embedding for a single text using configured provider"""
+    if settings.embedding_provider == "tei":
+        embeddings = await get_tei_embedding([text])
+        return embeddings[0] if embeddings else None
+    else:
+        model = await get_embedding_model()
+        if model is None or model == "tei":
+            return None
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: model.encode(text, convert_to_numpy=True).tolist()
+        )
 
 
 class WeaviateService:
@@ -64,9 +162,135 @@ class WeaviateService:
             return combined
 
         return weaviate.classes.query.Filter.by_property(key).equal(value)
-        
+
+    def _build_channel_access_filter(self, user_id: str) -> Any:
+        """
+        Build a filter for channel-based document access control.
+
+        Users can see documents that are:
+        1. Regular uploads (no channel) - channel_id is empty
+        2. From tenant-wide channels - channel_visibility = "tenant"
+        3. From their own personal channels - channel_visibility = "personal" AND owner_user_id = user_id
+
+        This filter is combined with the tenant_id filter for complete isolation.
+        """
+        Filter = weaviate.classes.query.Filter
+
+        # Regular uploads (channel_id is empty or null)
+        regular_upload = Filter.by_property("channel_id").equal("")
+
+        # Tenant-wide channel documents
+        tenant_channel = Filter.by_property("channel_visibility").equal("tenant")
+
+        # Personal channel documents owned by the current user
+        personal_channel = (
+            Filter.by_property("channel_visibility").equal("personal") &
+            Filter.by_property("owner_user_id").equal(user_id)
+        )
+
+        # Combine: regular uploads OR tenant channels OR personal channels
+        return regular_upload | tenant_channel | personal_channel
+
+    def _build_document_access_filter(
+        self,
+        user_id: str,
+        user_role_ids: Optional[List[str]] = None
+    ) -> Any:
+        """
+        Build a filter for document-level ACL access control.
+
+        Users can see documents that match ANY of these conditions:
+        1. acl_everyone=True (legacy behavior, default for existing docs)
+        2. user_id is in acl_user_ids array
+        3. Any of user's roles is in acl_role_ids array
+        4. User is the owner (owner_user_id matches)
+
+        This filter is combined with tenant_id and channel filters for complete isolation.
+
+        Args:
+            user_id: Current user's UUID as string
+            user_role_ids: List of role UUIDs the user belongs to
+
+        Returns:
+            Weaviate filter expression
+        """
+        Filter = weaviate.classes.query.Filter
+
+        # Condition 1: Accessible to everyone in tenant (backwards compatible default)
+        everyone_access = Filter.by_property("acl_everyone").equal(True)
+
+        # Condition 2: User has explicit access
+        user_access = Filter.by_property("acl_user_ids").contains_any([user_id])
+
+        # Condition 3: User is the document owner
+        owner_access = Filter.by_property("owner_user_id").equal(user_id)
+
+        # Start with: everyone OR user_explicit OR owner
+        acl_filter = everyone_access | user_access | owner_access
+
+        # Condition 4: User's roles have access (if roles provided)
+        if user_role_ids and len(user_role_ids) > 0:
+            role_access = Filter.by_property("acl_role_ids").contains_any(user_role_ids)
+            acl_filter = acl_filter | role_access
+
+        return acl_filter
+
+    def _build_combined_access_filter(
+        self,
+        user_id: str,
+        user_role_ids: Optional[List[str]] = None
+    ) -> Any:
+        """
+        Build a combined filter for both channel AND document-level ACL.
+
+        Access logic for different document types:
+
+        1. Channel documents (Gmail, Drive, etc.):
+           - Use channel_visibility rules (tenant/personal)
+           - Personal channels: only owner has access
+           - Tenant channels: all tenant users have access
+
+        2. Regular uploads (no channel):
+           - Use document-level ACL (acl_everyone, acl_user_ids, acl_role_ids)
+           - Owner always has access
+           - Legacy docs without ACL properties get access via owner_user_id match
+
+        For backwards compatibility with legacy channel documents that don't have
+        ACL properties (acl_everyone=null), we use OR between channel access and
+        ACL access. This ensures:
+        - Channel docs with proper channel_visibility work (even without ACL props)
+        - Regular docs with ACL props work
+        - Legacy docs work via owner_user_id match
+
+        Args:
+            user_id: Current user's UUID as string
+            user_role_ids: List of role UUIDs the user belongs to
+
+        Returns:
+            Combined Weaviate filter expression
+        """
+        Filter = weaviate.classes.query.Filter
+
+        # Get both filters
+        channel_filter = self._build_channel_access_filter(user_id)
+        acl_filter = self._build_document_access_filter(user_id, user_role_ids)
+
+        # For channel documents: channel access is sufficient
+        # (they may not have ACL properties set)
+        # Channel doc = channel_id is not empty
+        is_channel_doc = Filter.by_property("channel_id").not_equal("")
+        channel_doc_access = is_channel_doc & channel_filter
+
+        # For regular uploads: ACL filter is sufficient
+        # Regular doc = channel_id is empty
+        is_regular_doc = Filter.by_property("channel_id").equal("")
+        regular_doc_access = is_regular_doc & acl_filter
+
+        # Combined: (channel doc with channel access) OR (regular doc with ACL access)
+        return channel_doc_access | regular_doc_access
+
     async def initialize(self):
-        """Initialize Weaviate client and embeddings"""
+        """Initialize Weaviate client and Sentence Transformers embeddings"""
         if self._initialized and self.client:
             return
         try:
@@ -79,43 +303,44 @@ class WeaviateService:
             else:
                 host = url_without_protocol
                 port = 8080
-            
+
             # Always connect to local Weaviate (no WCD)
             self.client = weaviate.connect_to_local(
                 host=host,
                 port=port
             )
-            
+
             # Test connection
             if self.client.is_ready():
                 logger.info(f"✅ Connected to Weaviate at {settings.weaviate_url}")
             else:
                 raise Exception("Weaviate not ready")
-                
-            # Initialize embedding model using Ollama
-            try:
-                import httpx
-                # Test Ollama connection and embedding model
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{settings.ollama_base_url}/api/embeddings",
-                        json={
-                            "model": settings.embedding_model,
-                            "prompt": "test"
-                        }
-                    )
-                    if response.status_code == 200:
-                        self.embedding_model = "ollama"
-                        logger.info(f"✅ Loaded embedding model from Ollama: {settings.embedding_model}")
+
+            # Initialize embedding model based on provider
+            if settings.embedding_provider == "tei":
+                # Test TEI connection
+                try:
+                    test_embedding = await generate_embedding("test connection")
+                    if test_embedding:
+                        self.embedding_model = "tei"
+                        logger.info(f"✅ Using TEI embeddings: {settings.embedding_model} ({len(test_embedding)} dims)")
                     else:
-                        logger.warning(f"⚠️ Ollama embedding model not available: {settings.embedding_model}")
+                        logger.warning("⚠️ TEI not responding, falling back to BM25 only")
                         self.embedding_model = None
-            except Exception as e:
-                logger.warning(f"⚠️ Could not connect to Ollama for embeddings: {e}")
-                self.embedding_model = None
-            
+                except Exception as e:
+                    logger.warning(f"⚠️ TEI connection failed: {e}, falling back to BM25 only")
+                    self.embedding_model = None
+            else:
+                model = await get_embedding_model()
+                if model is not None:
+                    self.embedding_model = "sentence-transformers"
+                    logger.info(f"✅ Using Sentence Transformers: {settings.embedding_model}")
+                else:
+                    logger.warning("⚠️ Embedding model not available, falling back to BM25 only")
+                    self.embedding_model = None
+
             self._initialized = True
-                
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize Weaviate: {e}")
             self._initialized = False
@@ -193,7 +418,7 @@ class WeaviateService:
                         description="Document title"
                     ),
                     weaviate.classes.config.Property(
-                        name="content", 
+                        name="content",
                         data_type=weaviate.classes.config.DataType.TEXT,
                         description="Document content"
                     ),
@@ -226,7 +451,112 @@ class WeaviateService:
                         name="updated_at",
                         data_type=weaviate.classes.config.DataType.DATE,
                         description="Last update timestamp"
-                    )
+                    ),
+                    # ========== Position properties for PDF annotation ==========
+                    weaviate.classes.config.Property(
+                        name="page_start",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Start page number (1-indexed)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="page_end",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="End page number (1-indexed)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="char_start",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Character start position in full text"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="char_end",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Character end position in full text"
+                    ),
+                    # Bbox start coordinates (x0, y0, x1, y1)
+                    weaviate.classes.config.Property(
+                        name="bbox_start_x0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Start bbox x0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_start_y0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Start bbox y0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_start_x1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Start bbox x1 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_start_y1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Start bbox y1 coordinate"
+                    ),
+                    # Bbox end coordinates (x0, y0, x1, y1)
+                    weaviate.classes.config.Property(
+                        name="bbox_end_x0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="End bbox x0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_end_y0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="End bbox y0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_end_x1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="End bbox x1 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_end_y1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="End bbox y1 coordinate"
+                    ),
+                    # ========== Channel properties for RAG access control ==========
+                    weaviate.classes.config.Property(
+                        name="channel_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Information channel ID (empty for regular uploads)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="channel_visibility",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Channel visibility: personal, tenant, or empty for regular docs"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="owner_user_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="User ID who owns this document (for personal channels)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="source_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Document source: upload, gmail, google_drive, external_db"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="external_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="External system identifier for channel documents"
+                    ),
+                    # ========== ACL properties for document-level access control ==========
+                    weaviate.classes.config.Property(
+                        name="acl_user_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="User IDs with view access (from ACL system)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_role_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Role IDs with view access (from ACL system)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_everyone",
+                        data_type=weaviate.classes.config.DataType.BOOL,
+                        description="True if accessible to all tenant users (backwards compatible default)"
+                    ),
                 ]
                 # Default vector configuration will be used automatically
             )
@@ -275,51 +605,61 @@ class WeaviateService:
                 "document_type": document.document_type,
                 "tags": document.tags,
                 "created_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                "updated_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                "updated_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                # Channel properties (defaults for regular uploads)
+                "channel_id": getattr(document, 'channel_id', '') or '',
+                "channel_visibility": getattr(document, 'channel_visibility', '') or '',
+                "owner_user_id": getattr(document, 'owner_user_id', '') or '',
+                "source_type": getattr(document, 'source_type', 'upload') or 'upload',
+                "external_id": getattr(document, 'external_id', '') or '',
+                # ACL properties (defaults for backwards compatibility - everyone can view)
+                "acl_user_ids": getattr(document, 'acl_user_ids', []) or [],
+                "acl_role_ids": getattr(document, 'acl_role_ids', []) or [],
+                "acl_everyone": getattr(document, 'acl_everyone', True),  # Default True for backwards compat
             }
             
             # Get collection and add document using v4 API
             collection = self.client.collections.get(collection_name)
             
-            # Generate embedding via Ollama if available
+            # Generate embedding using configured provider (TEI or Sentence Transformers)
+            embedding_vector = None
             if self.embedding_model:
                 try:
-                    import httpx
-                    async with httpx.AsyncClient() as http_client:
-                        response = await http_client.post(
-                            f"{settings.ollama_base_url}/api/embeddings",
-                            json={
-                                "model": settings.embedding_model,
-                                "prompt": f"{document.title} {document.content}"
-                            },
-                            timeout=30.0
-                        )
-                        if response.status_code == 200:
-                            embedding_data = response.json()
-                            embedding_vector = embedding_data.get("embedding", [])
-                            if embedding_vector:
-                                logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
-                            else:
-                                logger.warning("⚠️ Empty embedding vector returned from Ollama")
-                        else:
-                            logger.warning(f"⚠️ Ollama embeddings failed: {response.status_code}")
+                    text_to_embed = f"{document.title} {document.content}"
+                    embedding_vector = await generate_embedding(text_to_embed)
+                    if embedding_vector:
+                        logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not generate embedding via Ollama: {e}")
+                    logger.warning(f"⚠️ Could not generate embedding: {e}")
             
             # Insert document; if it exists already, replace it
             try:
-                result = collection.data.insert(
-                    properties=doc_data,
-                    uuid=doc_id
-                )
+                if embedding_vector:
+                    result = collection.data.insert(
+                        properties=doc_data,
+                        uuid=doc_id,
+                        vector=embedding_vector
+                    )
+                else:
+                    result = collection.data.insert(
+                        properties=doc_data,
+                        uuid=doc_id
+                    )
                 logger.info(f"✅ Inserted document {doc_id} to {collection_name}")
             except UnexpectedStatusCodeException as exc:
                 if exc.status_code == 422 and "already exists" in str(exc):
                     logger.info(f"♻️ Document {doc_id} already exists in {collection_name}, replacing")
-                    result = collection.data.replace(
-                        properties=doc_data,
-                        uuid=doc_id
-                    )
+                    if embedding_vector:
+                        result = collection.data.replace(
+                            properties=doc_data,
+                            uuid=doc_id,
+                            vector=embedding_vector
+                        )
+                    else:
+                        result = collection.data.replace(
+                            properties=doc_data,
+                            uuid=doc_id
+                        )
                     logger.info(f"✅ Replaced document {doc_id} in {collection_name}")
                 else:
                     raise
@@ -347,20 +687,91 @@ class WeaviateService:
         except Exception as e:
             logger.error(f"❌ Failed to add document to {collection_name}: {e}")
             raise
-    
+
+    async def delete_document(self, collection_name: str, document_id: str) -> bool:
+        """
+        Delete a document from Weaviate collection by its document_id property.
+
+        Note: document_id is the PostgreSQL UUID stored as a property, not the Weaviate UUID.
+        We need to find the Weaviate object by its document_id property and then delete it.
+
+        Args:
+            collection_name: Name of the Weaviate collection
+            document_id: The PostgreSQL document UUID (stored in document_id property)
+
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            await self.initialize()
+
+            if not self.client.collections.exists(collection_name):
+                logger.warning(f"⚠️ Collection {collection_name} does not exist, nothing to delete")
+                return True  # Consider it success if collection doesn't exist
+
+            collection = self.client.collections.get(collection_name)
+
+            # Find the object by document_id property
+            Filter = weaviate.classes.query.Filter
+            doc_filter = Filter.by_property("document_id").equal(document_id)
+
+            # Query to find the object
+            result = collection.query.fetch_objects(
+                filters=doc_filter,
+                limit=1,
+                return_properties=["document_id"]
+            )
+
+            if not result.objects:
+                logger.warning(f"⚠️ Document {document_id} not found in {collection_name}")
+                return True  # Consider it success if document doesn't exist
+
+            # Get the Weaviate UUID and delete
+            weaviate_uuid = result.objects[0].uuid
+            collection.data.delete_by_id(weaviate_uuid)
+
+            logger.info(f"✅ Deleted document {document_id} (weaviate_uuid: {weaviate_uuid}) from {collection_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to delete document {document_id} from {collection_name}: {e}")
+            return False
+
     async def search_documents(self, collection_name: str, search_request: SearchRequest) -> SearchResponse:
         """Search documents in Weaviate"""
         try:
             start_time = datetime.now()
-            
+
+            # Ensure client is initialized
+            await self.initialize()
+
             # Get collection for search using v4 API
             collection = self.client.collections.get(collection_name)
             
             # Build filters for tenant isolation using v4 API
             tenant_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(search_request.tenant_id)
-            
+
+            # Apply combined access control (channel + document ACL) if user_id is provided
+            # This ensures users only see documents that pass BOTH:
+            # 1. Channel access control:
+            #    - Regular uploads (no channel)
+            #    - Tenant-wide channel documents
+            #    - Their own personal channel documents
+            # 2. Document-level ACL:
+            #    - acl_everyone=True (default for legacy docs)
+            #    - User is in acl_user_ids
+            #    - User's role is in acl_role_ids
+            #    - User is the document owner
+            if search_request.user_id:
+                access_filter = self._build_combined_access_filter(
+                    user_id=search_request.user_id,
+                    user_role_ids=search_request.user_role_ids
+                )
+                combined_filters = tenant_filter & access_filter
+            else:
+                combined_filters = tenant_filter
+
             # Add additional filters if provided
-            combined_filters = tenant_filter
             if search_request.filters:
                 for key, value in search_request.filters.items():
                     additional_filter = self._build_property_filter(key, value)
@@ -369,23 +780,11 @@ class WeaviateService:
             
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":
-                # Generate embedding for query using Ollama
+                # Generate embedding for query using configured provider
                 query_embedding = None
                 if self.embedding_model:
                     try:
-                        import httpx
-                        async with httpx.AsyncClient() as http_client:
-                            response_embed = await http_client.post(
-                                f"{settings.ollama_base_url}/api/embeddings",
-                                json={
-                                    "model": settings.embedding_model,
-                                    "prompt": search_request.query
-                                },
-                                timeout=30.0
-                            )
-                            if response_embed.status_code == 200:
-                                embedding_data = response_embed.json()
-                                query_embedding = embedding_data.get("embedding", [])
+                        query_embedding = await generate_embedding(search_request.query)
                     except Exception as e:
                         logger.warning(f"⚠️ Could not generate query embedding: {e}")
                 
@@ -418,19 +817,7 @@ class WeaviateService:
                 query_embedding = None
                 if self.embedding_model:
                     try:
-                        import httpx
-                        async with httpx.AsyncClient() as http_client:
-                            response_embed = await http_client.post(
-                                f"{settings.ollama_base_url}/api/embeddings",
-                                json={
-                                    "model": settings.embedding_model,
-                                    "prompt": search_request.query
-                                },
-                                timeout=30.0
-                            )
-                            if response_embed.status_code == 200:
-                                embedding_data = response_embed.json()
-                                query_embedding = embedding_data.get("embedding", [])
+                        query_embedding = await generate_embedding(search_request.query)
                     except Exception as e:
                         logger.warning(f"⚠️ Could not generate query embedding for hybrid: {e}")
                 
@@ -542,6 +929,263 @@ class WeaviateService:
             logger.error(f"❌ Failed to get document {document_id}: {e}")
             return None
 
+    async def get_document_by_id_across_collections(
+        self,
+        tenant_id: str,
+        document_id: str,
+        user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a document by ID, searching across all tenant collections in parallel.
+
+        This method searches in:
+        - Main document collection (uploaded files)
+        - All channel collections (Gmail, Google Drive, etc.)
+
+        SECURITY: When user_id is provided, applies channel access control:
+        - Regular uploads (no channel) are always accessible
+        - Tenant-wide channels (visibility="tenant") are accessible to all tenant users
+        - Personal channels (visibility="personal") are only accessible to the owner
+
+        OPTIMIZATION: Searches all collections in parallel using asyncio.gather
+        instead of iterating sequentially.
+
+        Args:
+            tenant_id: Tenant identifier
+            document_id: Document ID to find
+            user_id: User ID for channel access control (required for personal channels)
+
+        Returns:
+            Document dict if found and accessible, None otherwise
+        """
+        try:
+            await self.initialize()
+            import weaviate.classes.query as wq
+
+            # Get all collections for this tenant
+            collections = await self.get_tenant_collections(tenant_id)
+
+            if not collections:
+                logger.warning(f"⚠️ No collections found for tenant {tenant_id}")
+                return None
+
+            logger.debug(f"Searching for document {document_id} across {len(collections)} collections in parallel (user_id={user_id[:8] if user_id else 'None'}...)")
+
+            # Helper function to search in a single collection
+            async def search_in_collection(collection_name: str) -> Optional[Dict[str, Any]]:
+                try:
+                    if not self.client.collections.exists(collection_name):
+                        return None
+
+                    collection = self.client.collections.get(collection_name)
+
+                    # Build filter: document_id + access control (channel + ACL)
+                    doc_filter = wq.Filter.by_property("document_id").equal(document_id)
+
+                    # Apply combined access control (channel + document ACL) if user_id is provided
+                    # This ensures consistency with search_documents() which also uses
+                    # _build_combined_access_filter for access control
+                    if user_id:
+                        access_filter = self._build_combined_access_filter(user_id)
+                        combined_filter = doc_filter & access_filter
+                    else:
+                        combined_filter = doc_filter
+
+                    response = collection.query.fetch_objects(
+                        filters=combined_filter,
+                        limit=1
+                    )
+
+                    if response.objects and len(response.objects) > 0:
+                        item = response.objects[0]
+                        return {
+                            "id": item.properties.get("document_id", str(item.uuid) if item.uuid else ""),
+                            "title": item.properties.get("title", ""),
+                            "content": item.properties.get("content", ""),
+                            "metadata": item.properties.get("metadata", {}),
+                            "tenant_id": item.properties.get("tenant_id", ""),
+                            "document_type": item.properties.get("document_type", ""),
+                            "tags": item.properties.get("tags", []),
+                            "channel_visibility": item.properties.get("channel_visibility", ""),
+                            "owner_user_id": item.properties.get("owner_user_id", ""),
+                            "_source_collection": collection_name,
+                            "_is_channel": "_channel_" in collection_name.lower()
+                        }
+                    return None
+                except Exception as e:
+                    logger.debug(f"Error searching in {collection_name}: {e}")
+                    return None
+
+            # Search all collections in parallel
+            results = await asyncio.gather(*[search_in_collection(coll) for coll in collections])
+
+            # Return first non-None result
+            for result in results:
+                if result:
+                    logger.info(f"✅ Found document {document_id} in collection {result['_source_collection']}")
+                    return result
+
+            logger.warning(f"⚠️ Document {document_id} not found or not accessible for user in tenant {tenant_id}")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get document {document_id} across collections: {e}")
+            return None
+
+    async def get_document_by_title(self, collection_name: str, title: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific document by its title (filename)"""
+        try:
+            await self.initialize()
+
+            if not self.client.collections.exists(collection_name):
+                logger.warning(f"⚠️ Collection {collection_name} does not exist")
+                return None
+
+            collection = self.client.collections.get(collection_name)
+
+            # Search for document by title property with tenant isolation
+            import weaviate.classes.query as wq
+            response = collection.query.fetch_objects(
+                filters=(
+                    wq.Filter.by_property("title").like(f"*{title}*") &
+                    wq.Filter.by_property("tenant_id").equal(tenant_id)
+                ),
+                limit=1
+            )
+
+            if response.objects and len(response.objects) > 0:
+                item = response.objects[0]
+                logger.info(f"✅ Found document by title: {item.properties.get('title')}")
+                return {
+                    "id": item.properties.get("document_id", str(item.uuid) if item.uuid else ""),
+                    "title": item.properties.get("title", ""),
+                    "content": item.properties.get("content", ""),
+                    "metadata": item.properties.get("metadata", {}),
+                    "tenant_id": item.properties.get("tenant_id", ""),
+                    "document_type": item.properties.get("document_type", ""),
+                    "tags": item.properties.get("tags", [])
+                }
+
+            logger.warning(f"⚠️ Document with title '{title}' not found for tenant {tenant_id}")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get document by title '{title}': {e}")
+            return None
+
+    async def update_document_acl(
+        self,
+        collection_name: str,
+        document_id: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool
+    ) -> bool:
+        """
+        Update ACL properties of a document in Weaviate.
+
+        This method is called by the DocumentACLService when ACLs are
+        modified in PostgreSQL. It synchronizes the ACL state to Weaviate
+        for efficient filtering during vector searches.
+
+        Args:
+            collection_name: Weaviate collection name
+            document_id: PostgreSQL document ID
+            acl_user_ids: List of user UUIDs with view access
+            acl_role_ids: List of role UUIDs with view access
+            acl_everyone: True if all tenant users can view
+
+        Returns:
+            True if update succeeded
+        """
+        try:
+            await self.initialize()
+            import weaviate.classes.query as wq
+
+            if not self.client.collections.exists(collection_name):
+                logger.warning(f"⚠️ Collection {collection_name} does not exist")
+                return False
+
+            collection = self.client.collections.get(collection_name)
+
+            # Find the document by document_id property
+            response = collection.query.fetch_objects(
+                filters=wq.Filter.by_property("document_id").equal(document_id),
+                limit=1,
+                include_vector=False
+            )
+
+            if not response.objects or len(response.objects) == 0:
+                logger.warning(f"⚠️ Document {document_id} not found in {collection_name}")
+                return False
+
+            weaviate_uuid = response.objects[0].uuid
+
+            # Update only the ACL properties
+            collection.data.update(
+                uuid=weaviate_uuid,
+                properties={
+                    "acl_user_ids": acl_user_ids,
+                    "acl_role_ids": acl_role_ids,
+                    "acl_everyone": acl_everyone,
+                    "updated_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                }
+            )
+
+            logger.info(f"✅ Updated ACL for document {document_id}: users={len(acl_user_ids)}, roles={len(acl_role_ids)}, everyone={acl_everyone}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to update document ACL {document_id}: {e}")
+            return False
+
+    async def update_document_acl_across_collections(
+        self,
+        tenant_id: str,
+        document_id: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool
+    ) -> bool:
+        """
+        Update ACL properties across all tenant collections.
+
+        Since a document might exist in multiple collections (e.g., main
+        collection and channel collection), this method updates all copies.
+
+        Args:
+            tenant_id: Tenant identifier
+            document_id: PostgreSQL document ID
+            acl_user_ids: List of user UUIDs with view access
+            acl_role_ids: List of role UUIDs with view access
+            acl_everyone: True if all tenant users can view
+
+        Returns:
+            True if at least one update succeeded
+        """
+        try:
+            collections = await self.get_tenant_collections(tenant_id)
+            if not collections:
+                return False
+
+            any_success = False
+            for collection_name in collections:
+                success = await self.update_document_acl(
+                    collection_name=collection_name,
+                    document_id=document_id,
+                    acl_user_ids=acl_user_ids,
+                    acl_role_ids=acl_role_ids,
+                    acl_everyone=acl_everyone
+                )
+                if success:
+                    any_success = True
+
+            return any_success
+
+        except Exception as e:
+            logger.error(f"❌ Failed to update ACL across collections: {e}")
+            return False
+
     async def get_collection_info(self, collection_name: str) -> CollectionInfo:
         """Get information about a collection"""
         try:
@@ -581,7 +1225,176 @@ class WeaviateService:
         except Exception as e:
             logger.error(f"❌ Failed to list collections: {e}")
             raise
-    
+
+    async def get_tenant_collections(self, tenant_id: str) -> List[str]:
+        """
+        Get all collections belonging to a specific tenant.
+
+        This finds ALL collections that match the tenant's UUID pattern,
+        handling multiple naming conventions:
+        - nexus_{tenant_id}_documents (main document collection)
+        - nexus_{tenant_id}_channel_{channel_id} (channel-specific collections)
+        - Nexus_{tenant_id}__documents (legacy format with double underscore)
+
+        Args:
+            tenant_id: The tenant UUID (with or without dashes)
+
+        Returns:
+            List of collection names belonging to the tenant
+        """
+        try:
+            all_collections = await self.list_collections()
+
+            # Normalize tenant_id to underscore format for matching
+            tenant_normalized = tenant_id.lower().replace("-", "_")
+
+            # Find all collections containing this tenant ID
+            tenant_collections = []
+            for coll in all_collections:
+                coll_lower = coll.lower()
+                if tenant_normalized in coll_lower:
+                    tenant_collections.append(coll)
+
+            logger.debug(f"Found {len(tenant_collections)} collections for tenant {tenant_id}: {tenant_collections}")
+            return tenant_collections
+        except Exception as e:
+            logger.error(f"❌ Failed to get tenant collections for {tenant_id}: {e}")
+            raise
+
+    async def get_channel_collections(self, tenant_id: str, source_type: Optional[str] = None) -> List[str]:
+        """
+        Get channel-specific collections for a tenant.
+
+        Channel collections use the format: nexus_{tenant_id}_channel_{channel_id}
+        This method filters tenant collections to return only channel collections.
+
+        Args:
+            tenant_id: The tenant UUID
+            source_type: Optional filter by source type (gmail, google_drive, etc.)
+                        If provided, will check documents in each collection
+
+        Returns:
+            List of channel collection names
+        """
+        import re
+
+        try:
+            all_tenant_collections = await self.get_tenant_collections(tenant_id)
+
+            # Filter to only channel collections (contain "_channel_")
+            channel_collections = [
+                coll for coll in all_tenant_collections
+                if "_channel_" in coll.lower()
+            ]
+
+            logger.debug(f"Found {len(channel_collections)} channel collections for tenant {tenant_id}")
+            return channel_collections
+        except Exception as e:
+            logger.error(f"❌ Failed to get channel collections for {tenant_id}: {e}")
+            raise
+
+    async def search_across_collections(
+        self,
+        collections: List[str],
+        query: str,
+        tenant_id: str,
+        limit: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+        search_type: str = "hybrid"
+    ) -> List[Dict[str, Any]]:
+        """
+        Search across multiple collections and aggregate results.
+
+        Args:
+            collections: List of collection names to search
+            query: Search query
+            tenant_id: Tenant ID for access control
+            limit: Max results per collection
+            filters: Optional filters (applied only if collection has the property)
+            search_type: Type of search (hybrid, semantic, keyword)
+
+        Returns:
+            Combined list of results from all collections, sorted by score
+        """
+        all_results = []
+
+        for collection_name in collections:
+            try:
+                # Get collection
+                collection = self.client.collections.get(collection_name)
+
+                # Check which properties exist in this collection
+                props = collection.config.get().properties
+                prop_names = [p.name for p in props]
+
+                # Build base filter for tenant isolation
+                where_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id)
+
+                # Only apply additional filters if the property exists
+                if filters:
+                    for key, value in filters.items():
+                        base_prop = key.split(".")[0]
+                        if base_prop in prop_names:
+                            prop_filter = weaviate.classes.query.Filter.by_property(base_prop).equal(value)
+                            where_filter = where_filter & prop_filter
+
+                # Generate embedding for vector search
+                embedding_vector = None
+                if search_type in ["hybrid", "vector"]:
+                    try:
+                        embedding_vector = await generate_embedding(query)
+                    except Exception as e:
+                        logger.warning(f"Could not generate embedding for query: {e}")
+
+                # Execute search based on type
+                if search_type == "hybrid" and embedding_vector:
+                    response = collection.query.hybrid(
+                        query=query,
+                        vector=embedding_vector,
+                        filters=where_filter,
+                        limit=limit,
+                        return_metadata=weaviate.classes.query.MetadataQuery(score=True)
+                    )
+                elif search_type == "vector" and embedding_vector:
+                    response = collection.query.near_vector(
+                        near_vector=embedding_vector,
+                        filters=where_filter,
+                        limit=limit,
+                        return_metadata=weaviate.classes.query.MetadataQuery(distance=True)
+                    )
+                else:
+                    # Keyword search fallback
+                    response = collection.query.bm25(
+                        query=query,
+                        filters=where_filter,
+                        limit=limit,
+                        return_metadata=weaviate.classes.query.MetadataQuery(score=True)
+                    )
+
+                # Process results
+                for obj in response.objects:
+                    props_dict = obj.properties
+                    score = getattr(obj.metadata, "score", None) or getattr(obj.metadata, "distance", 0)
+                    result = {
+                        "id": str(obj.uuid),
+                        "title": props_dict.get("title", ""),
+                        "content": props_dict.get("content", ""),
+                        "metadata": props_dict.get("metadata", {}),
+                        "document_type": props_dict.get("document_type", ""),
+                        "tenant_id": props_dict.get("tenant_id", ""),
+                        "score": float(score) if score else 0.0,
+                        "_source_collection": collection_name
+                    }
+                    all_results.append(result)
+
+            except Exception as e:
+                logger.warning(f"Error searching collection {collection_name}: {e}")
+                continue
+
+        # Sort by score (descending) and limit total results
+        all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return all_results[:limit * 2]
+
     async def delete_collection(self, collection_name: str) -> bool:
         """Delete a collection"""
         try:
@@ -618,25 +1431,26 @@ class WeaviateService:
                     "updated_at": datetime.now().isoformat()
                 }
                 
-                # Generate embeddings via Ollama if available
+                # Generate embeddings using configured provider (TEI or Sentence Transformers)
+                embedding_vector = None
                 if self.embedding_model:
-                    import httpx
-                    async with httpx.AsyncClient() as http_client:
-                        response = await http_client.post(
-                            f"{settings.ollama_base_url}/api/embeddings",
-                            json={
-                                "model": settings.embedding_model,
-                                "prompt": f"{document.title} {document.content}"
-                            }
-                        )
-                        if response.status_code == 200:
-                            embedding_data = response.json()
-                            doc_data["vector"] = embedding_data.get("embedding", [])
+                    try:
+                        text_to_embed = f"{document.title} {document.content}"
+                        embedding_vector = await generate_embedding(text_to_embed)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not generate batch embedding: {e}")
                 
-                batch_objects.append(weaviate.classes.data.DataObject(
-                    properties=doc_data,
-                    uuid=doc_id
-                ))
+                if embedding_vector:
+                    batch_objects.append(weaviate.classes.data.DataObject(
+                        properties=doc_data,
+                        uuid=doc_id,
+                        vector=embedding_vector
+                    ))
+                else:
+                    batch_objects.append(weaviate.classes.data.DataObject(
+                        properties=doc_data,
+                        uuid=doc_id
+                    ))
                 results.append(doc_id)
             
             # Execute batch insert using v4 API
@@ -713,22 +1527,191 @@ class WeaviateService:
         except Exception as e:
             logger.error(f"❌ Vector query failed: {e}")
             raise
-    
+
+    async def hybrid_search(
+        self,
+        query: str,
+        collection_name: str,
+        tenant_id: str,
+        limit: int = 10,
+        alpha: float = 0.7,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[DocumentResponse]:
+        """
+        Convenience method for hybrid search.
+
+        Combines vector (semantic) and keyword (BM25) search.
+
+        Args:
+            query: Search query text
+            collection_name: Name of the collection to search
+            tenant_id: Tenant ID for isolation
+            limit: Maximum results to return
+            alpha: Balance between vector (1.0) and keyword (0.0) search
+            filters: Optional additional filters
+
+        Returns:
+            List of DocumentResponse objects
+        """
+        search_request = SearchRequest(
+            query=query,
+            limit=limit,
+            tenant_id=tenant_id,
+            search_type="hybrid",
+            filters=filters,
+        )
+
+        response = await self.search_documents(collection_name, search_request)
+        return response.results
+
+    async def vector_search(
+        self,
+        query: str,
+        collection_name: str,
+        tenant_id: str,
+        limit: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[DocumentResponse]:
+        """
+        Convenience method for vector (semantic) search.
+
+        Args:
+            query: Search query text
+            collection_name: Name of the collection to search
+            tenant_id: Tenant ID for isolation
+            limit: Maximum results to return
+            filters: Optional additional filters
+
+        Returns:
+            List of DocumentResponse objects
+        """
+        search_request = SearchRequest(
+            query=query,
+            limit=limit,
+            tenant_id=tenant_id,
+            search_type="vector",
+            filters=filters,
+        )
+
+        response = await self.search_documents(collection_name, search_request)
+        return response.results
+
+    async def keyword_search(
+        self,
+        query: str,
+        collection_name: str,
+        tenant_id: str,
+        limit: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[DocumentResponse]:
+        """
+        Convenience method for keyword (BM25) search.
+
+        Args:
+            query: Search query text
+            collection_name: Name of the collection to search
+            tenant_id: Tenant ID for isolation
+            limit: Maximum results to return
+            filters: Optional additional filters
+
+        Returns:
+            List of DocumentResponse objects
+        """
+        search_request = SearchRequest(
+            query=query,
+            limit=limit,
+            tenant_id=tenant_id,
+            search_type="keyword",
+            filters=filters,
+        )
+
+        response = await self.search_documents(collection_name, search_request)
+        return response.results
+
+    async def filter_search(
+        self,
+        collection_name: str,
+        tenant_id: str,
+        filters: Dict[str, Any],
+        limit: int = 10,
+    ) -> List[DocumentResponse]:
+        """
+        Search documents using only filters (no query text).
+
+        Args:
+            collection_name: Name of the collection to search
+            tenant_id: Tenant ID for isolation
+            filters: Filters to apply (document_type, tags, etc.)
+            limit: Maximum results to return
+
+        Returns:
+            List of DocumentResponse objects
+        """
+        # Use empty query with keyword search type when only filtering
+        search_request = SearchRequest(
+            query="*",  # Match all
+            limit=limit,
+            tenant_id=tenant_id,
+            search_type="keyword",
+            filters=filters,
+        )
+
+        response = await self.search_documents(collection_name, search_request)
+        return response.results
+
+    async def search(
+        self,
+        search_request: SearchRequest,
+        collection_name: str = None,
+    ) -> SearchResponse:
+        """
+        Generic search wrapper for SearchRequest.
+
+        Args:
+            search_request: Search request with all parameters
+            collection_name: Collection name (can derive from tenant_id if not provided)
+
+        Returns:
+            SearchResponse with results
+        """
+        if collection_name is None:
+            collection_name = get_tenant_collection_name(search_request.tenant_id)
+
+        return await self.search_documents(collection_name, search_request)
+
     async def health_check(self) -> Dict[str, Any]:
         """Check Weaviate service health"""
         try:
             if not self.client:
                 return {"status": "unhealthy", "error": "Client not initialized"}
-            
+
             is_ready = self.client.is_ready()
             is_live = self.client.is_live()
-            
+
+            # Check embedding model status
+            embedding_info = None
+            if self.embedding_model:
+                if settings.embedding_provider == "tei":
+                    embedding_info = {
+                        "provider": "tei",
+                        "model": settings.embedding_model,
+                        "dimensions": settings.embedding_dimensions,
+                        "url": settings.tei_url
+                    }
+                else:
+                    embedding_info = {
+                        "provider": "sentence-transformers",
+                        "model": settings.embedding_model,
+                        "dimensions": settings.embedding_dimensions,
+                        "device": settings.embedding_device
+                    }
+
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",
                 "ready": is_ready,
                 "live": is_live,
                 "url": settings.weaviate_url,
-                "embedding_model": settings.embedding_model if self.embedding_model else None
+                "embeddings": embedding_info
             }
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}

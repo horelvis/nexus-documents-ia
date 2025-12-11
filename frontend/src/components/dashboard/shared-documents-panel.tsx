@@ -7,9 +7,28 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { IconShare2, IconMail, IconLink, IconUsers } from "@tabler/icons-react"
 import Link from "next/link"
-import { formatDistanceToNow } from "date-fns"
-import { es, enUS } from "date-fns/locale"
 import { useSharedDocumentsService, type ShareStatistics } from "@/lib/services/shared-documents.service"
+
+// Native relative time formatting (no external locale dependencies)
+function formatRelativeTime(date: Date, locale: string): string {
+  const now = new Date()
+  const diffMs = date.getTime() - now.getTime()
+  const diffSecs = Math.round(diffMs / 1000)
+  const diffMins = Math.round(diffSecs / 60)
+  const diffHours = Math.round(diffMins / 60)
+  const diffDays = Math.round(diffHours / 24)
+
+  const rtf = new Intl.RelativeTimeFormat(locale === 'es' ? 'es' : 'en', { numeric: 'auto' })
+
+  if (Math.abs(diffDays) >= 1) {
+    return rtf.format(diffDays, 'day')
+  } else if (Math.abs(diffHours) >= 1) {
+    return rtf.format(diffHours, 'hour')
+  } else if (Math.abs(diffMins) >= 1) {
+    return rtf.format(diffMins, 'minute')
+  }
+  return rtf.format(diffSecs, 'second')
+}
 import { useTranslation } from "@/lib/i18n/hooks"
 
 interface SharedDocumentsPanelProps {
@@ -94,8 +113,7 @@ export function SharedDocumentsPanel({ tenantId }: SharedDocumentsPanelProps) {
             <div className="space-y-2">
               {shareStats.recent_shares.slice(0, 3).map((share) => {
                 const isExpired = share.expires_at && new Date(share.expires_at) < new Date()
-                const locale = language === 'es' ? es : enUS
-                const expiresIn = share.expires_at ? formatDistanceToNow(new Date(share.expires_at), { addSuffix: true, locale }) : null
+                const expiresIn = share.expires_at ? formatRelativeTime(new Date(share.expires_at), language) : null
 
                 return (
                   <div key={share.id} className="flex items-start justify-between gap-2">

@@ -200,14 +200,12 @@ class WeaviateReindexer:
                 tags = [tag.name for tag in document.tags if hasattr(tag, "name")]
 
             doc_data = {
+                "id": str(document.id),  # PostgreSQL document ID - must be 'id' for schema
                 "title": document.title or document.filename or "Untitled",
                 "content": content,
-                "document_id": str(document.id),
                 "tenant_id": str(document.tenant_id),
                 "document_type": document.category or "general",
                 "tags": tags,
-                "created_at": created_at,
-                "updated_at": updated_at
             }
 
             async with httpx.AsyncClient(timeout=30.0) as client:

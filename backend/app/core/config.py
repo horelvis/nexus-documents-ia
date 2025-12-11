@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     # LANGGRAPH_SERVICE_URL: str = "http://langgraph-service:8007"  # DEPRECATED
     
     # NEW: Weaviate Service with Elysia integration (DEFAULT VECTOR ENGINE)
-    WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
+    WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
     USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
 
     # Text extraction microservice
@@ -173,6 +173,11 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = "nomic-embed-text"
+
+    # Google Gemini (for Emma Voice Mode)
+    GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+    GEMINI_VOICE_MODEL: str = os.getenv("GEMINI_VOICE_MODEL", "gemini-2.5-flash-native-audio-preview-09-2025")
+    GEMINI_VOICE_ENABLED: bool = os.getenv("GEMINI_VOICE_ENABLED", "true").lower() == "true"
     
     # Gotenberg Service (direct container)
     GOTENBERG_BASE_URL: str = "http://gotenberg:3000"
@@ -209,6 +214,7 @@ class Settings(BaseSettings):
     
     # Microservices URLs
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
+    CAMUNDA_SERVICE_URL: str = os.getenv("CAMUNDA_SERVICE_URL", "http://camunda-service:8000")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")
@@ -235,8 +241,43 @@ class Settings(BaseSettings):
         "GOOGLE_OAUTH_ERROR_REDIRECT_URL",
         "http://localhost:3000/integrations/google-drive/error"
     )
-    GOOGLE_DRIVE_ENCRYPTION_KEY: Optional[str] = os.getenv("GOOGLE_DRIVE_ENCRYPTION_KEY")
-    
+    # Credentials Encryption Key (Fernet - 32 bytes base64 URL-safe)
+    # Used for: OAuth tokens, database credentials, API keys
+    # Generate with: python -c "import secrets,base64;print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+    CREDENTIALS_ENCRYPTION_KEY: Optional[str] = os.getenv(
+        "CREDENTIALS_ENCRYPTION_KEY",
+        os.getenv("GOOGLE_DRIVE_ENCRYPTION_KEY")  # Legacy fallback
+    )
+
+    # Legacy alias (deprecated - use CREDENTIALS_ENCRYPTION_KEY)
+    @property
+    def GOOGLE_DRIVE_ENCRYPTION_KEY(self) -> Optional[str]:
+        return self.CREDENTIALS_ENCRYPTION_KEY
+
+    # Information Channels Configuration
+    # IMPORTANT: Do NOT include gmail.metadata alongside gmail.readonly - it causes scope conflicts
+    # gmail.readonly already includes metadata access
+    GMAIL_OAUTH_SCOPES: str = os.getenv(
+        "GMAIL_OAUTH_SCOPES",
+        "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/gmail.readonly"
+    )
+    CHANNEL_OAUTH_REDIRECT_URI: str = os.getenv(
+        "CHANNEL_OAUTH_REDIRECT_URI",
+        "http://localhost:8000/api/v1/channels/oauth/callback"
+    )
+    CHANNEL_OAUTH_SUCCESS_REDIRECT_URL: str = os.getenv(
+        "CHANNEL_OAUTH_SUCCESS_REDIRECT_URL",
+        "http://localhost:3000/channels/setup/success"
+    )
+    CHANNEL_OAUTH_ERROR_REDIRECT_URL: str = os.getenv(
+        "CHANNEL_OAUTH_ERROR_REDIRECT_URL",
+        "http://localhost:3000/channels/setup/error"
+    )
+
+    @property
+    def gmail_oauth_scopes_list(self) -> list[str]:
+        return [scope.strip() for scope in self.GMAIL_OAUTH_SCOPES.split() if scope.strip()]
+
     @property
     def google_oauth_scopes_list(self) -> list[str]:
         return [scope.strip() for scope in self.GOOGLE_OAUTH_SCOPES.split() if scope.strip()]

@@ -148,7 +148,7 @@ async def process_query_stream(
             query = sanitize_user_input(request.query)
             
             # Send initial progress
-            yield f"data: {json.dumps({'type': 'progress', 'content': 'Inicializando motor Elysia...', 'progress': 10})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'content': 'Inicializando RAG Pipeline...', 'progress': 10})}\n\n"
             
             # Process with CAG (we'll need to add streaming support to the service)
             async for event in cag_service.process_query_stream(
@@ -190,7 +190,7 @@ async def analyze_document_stream(
             document_content = sanitize_user_input(request.document_content, max_length=50000)
             
             # Send initial progress
-            yield f"data: {json.dumps({'type': 'progress', 'content': 'Elysia analizando documento...', 'progress': 5})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'content': 'Analizando documento...', 'progress': 5})}\n\n"
             
             # Process with CAG
             async for event in cag_service.analyze_document_stream(

@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 def _get_fernet() -> Fernet:
-    key = getattr(settings, "GOOGLE_DRIVE_ENCRYPTION_KEY", None)
+    """Get Fernet instance using shared CREDENTIALS_ENCRYPTION_KEY."""
+    key = getattr(settings, "CREDENTIALS_ENCRYPTION_KEY", None)
     if not key:
-        raise ValueError("GOOGLE_DRIVE_ENCRYPTION_KEY must be configured")
+        raise ValueError("CREDENTIALS_ENCRYPTION_KEY must be configured")
     decoded = base64.urlsafe_b64decode(key.encode("utf-8"))
     if len(decoded) != 32:
-        raise ValueError("GOOGLE_DRIVE_ENCRYPTION_KEY must decode to 32 bytes")
+        raise ValueError("CREDENTIALS_ENCRYPTION_KEY must decode to 32 bytes")
     return Fernet(key.encode("utf-8"))
 
 

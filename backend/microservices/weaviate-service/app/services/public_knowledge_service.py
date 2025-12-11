@@ -64,11 +64,13 @@ class PublicKnowledgeService:
             raise
 
     async def _ensure_collection_exists(self):
-        """Create the public knowledge collection if it doesn't exist"""
+        """Create the public knowledge collection if it doesn't exist, or update schema if needed"""
         try:
             existing = self.client.collections.list_all()
             if PUBLIC_KNOWLEDGE_COLLECTION in existing:
                 logger.info(f"Collection {PUBLIC_KNOWLEDGE_COLLECTION} already exists")
+                # Ensure all required properties exist
+                await self._ensure_schema_properties()
                 return
 
             logger.info(f"Creating collection {PUBLIC_KNOWLEDGE_COLLECTION}")
@@ -189,20 +191,72 @@ class PublicKnowledgeService:
             logger.error(f"Failed to create public knowledge collection: {e}")
             raise
 
+    async def _ensure_schema_properties(self):
+        """Add missing properties to existing PublicKnowledge collection"""
+        required_properties = {
+            "title": (wc.DataType.TEXT, "Document title"),
+            "content": (wc.DataType.TEXT, "Full document content"),
+            "summary": (wc.DataType.TEXT, "Document summary"),
+            "category": (wc.DataType.TEXT, "Document category"),
+            "subcategory": (wc.DataType.TEXT, "Specific subcategory"),
+            "jurisdiction": (wc.DataType.TEXT, "Legal jurisdiction"),
+            "legal_reference": (wc.DataType.TEXT, "Official legal reference"),
+            "publication_date": (wc.DataType.DATE, "Official publication date"),
+            "effective_date": (wc.DataType.DATE, "Effective date"),
+            "expiration_date": (wc.DataType.DATE, "Expiration date"),
+            "keywords": (wc.DataType.TEXT_ARRAY, "Search keywords"),
+            "topics": (wc.DataType.TEXT_ARRAY, "Related topics"),
+            "related_documents": (wc.DataType.TEXT_ARRAY, "IDs of related documents"),
+            "source_url": (wc.DataType.TEXT, "Original source URL"),
+            "source_name": (wc.DataType.TEXT, "Source name"),
+            "source": (wc.DataType.TEXT, "Source identifier"),
+            "url": (wc.DataType.TEXT, "Document URL"),
+            "document_type": (wc.DataType.TEXT, "Document type"),
+            "language": (wc.DataType.TEXT, "Document language"),
+            "relevance_score": (wc.DataType.NUMBER, "Relevance score"),
+            "verified": (wc.DataType.BOOL, "Verification status"),
+            "is_current_version": (wc.DataType.BOOL, "Whether this is the current version"),
+            "version": (wc.DataType.TEXT, "Document version"),
+            "created_at": (wc.DataType.DATE, "Creation timestamp"),
+            "updated_at": (wc.DataType.DATE, "Update timestamp"),
+        }
+
+        try:
+            collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+            config = collection.config.get()
+            existing_props = {p.name for p in config.properties}
+
+            for prop_name, (data_type, description) in required_properties.items():
+                if prop_name not in existing_props:
+                    logger.info(f"Adding missing property '{prop_name}' to {PUBLIC_KNOWLEDGE_COLLECTION}")
+                    collection.config.add_property(
+                        wc.Property(
+                            name=prop_name,
+                            data_type=data_type,
+                            description=description
+                        )
+                    )
+
+        except Exception as e:
+            logger.warning(f"Failed to ensure schema properties: {e}")
+
     async def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding using Ollama"""
+        """Generate embedding using TEI (Text Embeddings Inference)"""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{settings.ollama_base_url}/api/embeddings",
+                    f"{settings.tei_url}/embed",
                     json={
-                        "model": settings.embedding_model,
-                        "prompt": text
+                        "inputs": text,
+                        "truncate": True
                     },
                     timeout=30.0
                 )
                 if response.status_code == 200:
-                    return response.json().get("embedding", [])
+                    embeddings = response.json()
+                    # TEI returns array of embeddings, get first one
+                    if embeddings and len(embeddings) > 0:
+                        return embeddings[0]
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
         return None
@@ -231,6 +285,15 @@ class PublicKnowledgeService:
                 "source_name": document.source_name or "",
                 "verified": document.verified,
                 "version": document.version,
+                # Versioning metadata
+                "version_number": document.version_number,
+                "is_current_version": document.is_current_version,
+                "modification_type": document.modification_type,
+                "legal_status": document.legal_status,
+                # Identifiers
+                "boe_id": document.boe_id or "",
+                "eli_uri": document.eli_uri or "",
+                # Timestamps
                 "created_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
                 "updated_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             }
@@ -332,6 +395,19 @@ class PublicKnowledgeService:
                 verified_filter = wq.Filter.by_property("verified").equal(True)
                 filters = filters & verified_filter if filters else verified_filter
 
+            # Filter by current version only (default behavior)
+            if request.current_version_only:
+                current_version_filter = wq.Filter.by_property("is_current_version").equal(True)
+                filters = filters & current_version_filter if filters else current_version_filter
+
+            # Filter by legal status
+            if request.legal_status:
+                status_filter = None
+                for status in request.legal_status:
+                    f = wq.Filter.by_property("legal_status").equal(status)
+                    status_filter = f if status_filter is None else status_filter | f
+                filters = filters & status_filter if filters else status_filter
+
             # Execute search
             if request.search_type == "vector":
                 embedding = await self._generate_embedding(request.query)
@@ -417,6 +493,19 @@ class PublicKnowledgeService:
                     except:
                         pass
 
+                # Parse consolidation date
+                consolidation_date = None
+                if props.get("consolidation_date"):
+                    try:
+                        consolidation_date = datetime.fromisoformat(str(props["consolidation_date"]).replace('Z', '+00:00'))
+                    except:
+                        pass
+
+                # Handle None values from Weaviate that should have defaults
+                verified_val = props.get("verified")
+                is_current_val = props.get("is_current_version")
+                version_num_val = props.get("version_number")
+
                 results.append(PublicDocumentResponse(
                     id=str(item.uuid) if item.uuid else "",
                     title=props.get("title", ""),
@@ -429,13 +518,31 @@ class PublicKnowledgeService:
                     publication_date=pub_date,
                     effective_date=eff_date,
                     expiration_date=exp_date,
-                    keywords=props.get("keywords", []),
-                    topics=props.get("topics", []),
-                    related_documents=props.get("related_documents", []),
+                    keywords=props.get("keywords") or [],
+                    topics=props.get("topics") or [],
+                    related_documents=props.get("related_documents") or [],
                     source_url=props.get("source_url"),
                     source_name=props.get("source_name"),
-                    verified=props.get("verified", False),
-                    version=props.get("version", "1.0"),
+                    verified=verified_val if verified_val is not None else False,
+                    version=props.get("version") or "1.0",
+                    # Versioning metadata
+                    version_number=version_num_val if version_num_val is not None else 1,
+                    is_current_version=is_current_val if is_current_val is not None else True,
+                    consolidation_date=consolidation_date,
+                    superseded_by=props.get("superseded_by"),
+                    supersedes=props.get("supersedes"),
+                    # Modification tracking
+                    modification_type=props.get("modification_type") or "original",
+                    modifying_laws=props.get("modifying_laws") or [],
+                    modified_articles=props.get("modified_articles") or [],
+                    # Legal status
+                    legal_status=props.get("legal_status") or "vigente",
+                    derogated_by=props.get("derogated_by"),
+                    partial_derogations=props.get("partial_derogations") or [],
+                    # Identifiers
+                    boe_id=props.get("boe_id"),
+                    eli_uri=props.get("eli_uri"),
+                    # Timestamps
                     created_at=created,
                     updated_at=updated,
                     similarity_score=similarity
@@ -690,6 +797,152 @@ class PublicKnowledgeService:
             "failed_count": len(failed_ids),
             "failed_ids": failed_ids
         }
+
+
+    async def get_version_history(self, legal_reference: str) -> List[PublicDocumentResponse]:
+        """Get all versions of a law by its legal reference (e.g., BOE-A-2018-16673)"""
+        await self.initialize()
+
+        try:
+            collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+
+            # Filter by legal_reference or boe_id
+            filter_ref = (
+                wq.Filter.by_property("legal_reference").equal(legal_reference) |
+                wq.Filter.by_property("boe_id").equal(legal_reference)
+            )
+
+            response = collection.query.fetch_objects(
+                filters=filter_ref,
+                limit=50  # Unlikely to have more than 50 versions
+            )
+
+            results = []
+            for item in response.objects:
+                props = item.properties
+
+                # Parse dates
+                pub_date = None
+                consolidation_date = None
+                created = datetime.now()
+                updated = datetime.now()
+
+                if props.get("publication_date"):
+                    try:
+                        pub_date = datetime.fromisoformat(str(props["publication_date"]).replace('Z', '+00:00'))
+                    except:
+                        pass
+                if props.get("consolidation_date"):
+                    try:
+                        consolidation_date = datetime.fromisoformat(str(props["consolidation_date"]).replace('Z', '+00:00'))
+                    except:
+                        pass
+                if props.get("created_at"):
+                    try:
+                        created = datetime.fromisoformat(str(props["created_at"]).replace('Z', '+00:00'))
+                    except:
+                        pass
+                if props.get("updated_at"):
+                    try:
+                        updated = datetime.fromisoformat(str(props["updated_at"]).replace('Z', '+00:00'))
+                    except:
+                        pass
+
+                results.append(PublicDocumentResponse(
+                    id=str(item.uuid) if item.uuid else "",
+                    title=props.get("title", ""),
+                    content=props.get("content", ""),
+                    summary=props.get("summary"),
+                    category=props.get("category", ""),
+                    subcategory=props.get("subcategory"),
+                    jurisdiction=props.get("jurisdiction", ""),
+                    legal_reference=props.get("legal_reference"),
+                    publication_date=pub_date,
+                    effective_date=None,
+                    expiration_date=None,
+                    keywords=props.get("keywords", []),
+                    topics=props.get("topics", []),
+                    related_documents=props.get("related_documents", []),
+                    source_url=props.get("source_url"),
+                    source_name=props.get("source_name"),
+                    verified=props.get("verified", False),
+                    version=props.get("version", "1.0"),
+                    version_number=props.get("version_number", 1),
+                    is_current_version=props.get("is_current_version", True),
+                    consolidation_date=consolidation_date,
+                    superseded_by=props.get("superseded_by"),
+                    supersedes=props.get("supersedes"),
+                    modification_type=props.get("modification_type") or "original",
+                    modifying_laws=props.get("modifying_laws") or [],
+                    modified_articles=props.get("modified_articles") or [],
+                    legal_status=props.get("legal_status") or "vigente",
+                    derogated_by=props.get("derogated_by"),
+                    partial_derogations=props.get("partial_derogations") or [],
+                    boe_id=props.get("boe_id"),
+                    eli_uri=props.get("eli_uri"),
+                    created_at=created,
+                    updated_at=updated
+                ))
+
+            # Sort by version_number descending (most recent first)
+            results.sort(key=lambda x: x.version_number, reverse=True)
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to get version history for {legal_reference}: {e}")
+            return []
+
+    async def add_new_version(
+        self,
+        legal_reference: str,
+        document: PublicDocumentCreate,
+        modified_articles: List[str] = None,
+        modification_type: str = "modificacion"
+    ) -> PublicDocumentResponse:
+        """
+        Add a new version of an existing law.
+        Marks the previous version as superseded.
+        """
+        await self.initialize()
+
+        try:
+            # Get current version
+            history = await self.get_version_history(legal_reference)
+            current_version = next((v for v in history if v.is_current_version), None)
+
+            new_version_number = 1
+            if current_version:
+                new_version_number = current_version.version_number + 1
+
+                # Mark old version as superseded
+                collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+                collection.data.update(
+                    uuid=current_version.id,
+                    properties={
+                        "is_current_version": False,
+                        "superseded_by": document.id or str(uuid.uuid4())
+                    }
+                )
+                logger.info(f"Marked version {current_version.version_number} as superseded")
+
+            # Create new version
+            document.version_number = new_version_number
+            document.is_current_version = True
+            document.modification_type = modification_type
+            if modified_articles:
+                document.modified_articles = modified_articles
+            if current_version:
+                document.supersedes = current_version.id
+
+            result = await self.add_document(document)
+
+            logger.info(f"Added version {new_version_number} of {legal_reference}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to add new version for {legal_reference}: {e}")
+            raise
 
 
 # Global service instance

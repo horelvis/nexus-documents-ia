@@ -1,20 +1,15 @@
 """
-Service responsible for extracting text using the unstructured library.
+Service responsible for extracting text using Apache Tika.
 """
 from __future__ import annotations
 
-import io
 import os
-import tempfile
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
+import httpx
 from langdetect import detect, LangDetectException
 from loguru import logger
-from unstructured.partition.auto import partition
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.docx import partition_docx
-from unstructured.partition.text import partition_text
 
 from app.core.config import settings
 
@@ -27,7 +22,7 @@ class ExtractionResult:
     language: Optional[str]
     metadata: Dict[str, Optional[str]]
     num_characters: int
-    num_elements: int
+    content_type: Optional[str]
 
 
 class TextExtractionError(Exception):
@@ -35,10 +30,12 @@ class TextExtractionError(Exception):
 
 
 class TextExtractionService:
-    """Wrapper around unstructured partitioners."""
+    """Text extraction service using Apache Tika."""
 
     def __init__(self) -> None:
         self.allowed_extensions = {ext.lower() for ext in settings.allowed_extensions}
+        self.tika_url = settings.tika_url
+        self.timeout = settings.tika_timeout
 
     def _detect_language(self, text: str) -> Optional[str]:
         if not settings.enable_language_detection:
@@ -51,38 +48,37 @@ class TextExtractionService:
         except LangDetectException:
             return None
 
-    def _partition(
-        self,
-        file_path: str,
-        file_extension: str,
-        strategy: str,
-    ) -> List:
-        """
-        Partition a document into unstructured elements.
-        """
-        file_extension = file_extension.lower()
-
-        if file_extension == ".pdf":
-            strategy = strategy if strategy in {"hi_res", "fast"} else settings.default_strategy
-            return partition_pdf(filename=file_path, strategy=strategy)
-
-        if file_extension in {".docx", ".doc"}:
-            return partition_docx(filename=file_path)
-
-        if file_extension in {".txt", ".md"}:
-            return partition_text(filename=file_path)
-
-        # Fallback to auto partition
-        return partition(filename=file_path)
+    def _get_content_type(self, filename: str) -> str:
+        """Get MIME type based on file extension."""
+        ext = os.path.splitext(filename or "")[1].lower()
+        mime_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+            ".csv": "text/csv",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+            ".html": "text/html",
+            ".odt": "application/vnd.oasis.opendocument.text",
+            ".rtf": "application/rtf",
+            ".epub": "application/epub+zip",
+            ".xml": "application/xml",
+            ".json": "application/json",
+        }
+        return mime_types.get(ext, "application/octet-stream")
 
     def extract(
         self,
         file_bytes: bytes,
         filename: str,
-        strategy: str = "auto",
+        strategy: str = "auto",  # ignored, kept for API compatibility
     ) -> ExtractionResult:
         """
-        Extract text from the provided document bytes.
+        Extract text from the provided document bytes using Apache Tika.
         """
         if not file_bytes:
             raise TextExtractionError("The provided file is empty.")
@@ -96,40 +92,68 @@ class TextExtractionService:
         if len(file_bytes) > settings.max_file_size_mb * 1024 * 1024:
             raise TextExtractionError("File size exceeds the configured limit.")
 
-        # Persist to a temporary file because unstructured expects a path
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext or ".bin") as tmp_file:
-            tmp_file.write(file_bytes)
-            tmp_file.flush()
-            tmp_path = tmp_file.name
+        content_type = self._get_content_type(filename)
 
         try:
-            elements = self._partition(tmp_path, ext or "", strategy)
-            texts = [element.text.strip() for element in elements if getattr(element, "text", None)]
-            combined_text = "\n\n".join(filter(None, texts)).strip()
+            # Call Apache Tika for text extraction
+            with httpx.Client(timeout=self.timeout) as client:
+                # Extract text
+                text_response = client.put(
+                    f"{self.tika_url}/tika",
+                    content=file_bytes,
+                    headers={
+                        "Content-Type": content_type,
+                        "Accept": "text/plain",
+                    },
+                )
+                text_response.raise_for_status()
+                extracted_text = text_response.text.strip()
 
-            language = self._detect_language(combined_text) if combined_text else None
+                # Extract metadata
+                metadata_response = client.put(
+                    f"{self.tika_url}/meta",
+                    content=file_bytes,
+                    headers={
+                        "Content-Type": content_type,
+                        "Accept": "application/json",
+                    },
+                )
+                metadata = {}
+                if metadata_response.status_code == 200:
+                    try:
+                        metadata = metadata_response.json()
+                    except Exception:
+                        pass
 
-            metadata = {
-                "file_extension": ext or "",
-                "strategy": strategy,
-            }
+            language = self._detect_language(extracted_text) if extracted_text else None
 
-            return ExtractionResult(
-                text=combined_text,
-                language=language,
-                metadata=metadata,
-                num_characters=len(combined_text),
-                num_elements=len(texts),
+            logger.info(
+                f"Extracted {len(extracted_text)} characters from {filename} using Tika"
             )
 
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Failed to extract text from %s", filename)
+            return ExtractionResult(
+                text=extracted_text,
+                language=language,
+                metadata={
+                    "file_extension": ext or "",
+                    "tika_content_type": metadata.get("Content-Type", content_type),
+                    "tika_creator": metadata.get("dc:creator") or metadata.get("Author"),
+                    "tika_title": metadata.get("dc:title") or metadata.get("title"),
+                    "tika_created": metadata.get("dcterms:created") or metadata.get("Creation-Date"),
+                },
+                num_characters=len(extracted_text),
+                content_type=content_type,
+            )
+
+        except httpx.TimeoutException as exc:
+            logger.error(f"Tika timeout extracting {filename}: {exc}")
+            raise TextExtractionError(f"Tika timeout: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Tika HTTP error extracting {filename}: {exc}")
+            raise TextExtractionError(f"Tika error: {exc.response.status_code}") from exc
+        except Exception as exc:
+            logger.exception(f"Failed to extract text from {filename}")
             raise TextExtractionError(str(exc)) from exc
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except FileNotFoundError:
-                pass
 
 
 # Shared service instance

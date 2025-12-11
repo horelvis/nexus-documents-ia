@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, ReactNode, useRef } from "react"
 import { useBackendUser } from "./user-context"
-import { useElysiaService } from "@/lib/services/elysia.service"
+import { useEmmaService } from "@/lib/services/emma.service"
 
 interface Message {
   id: string
@@ -49,7 +49,7 @@ const VirtualAssistantContext = createContext<VirtualAssistantContextType | unde
 
 export function VirtualAssistantProvider({ children }: { children: ReactNode }) {
   const { backendUser } = useBackendUser()
-  const { sendMessage: elysiaSendMessage } = useElysiaService()
+  const { sendMessage: emmaSendMessage } = useEmmaService()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -84,7 +84,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
 
     try {
       // Use Elysia to generate welcome message
-      const result = await elysiaSendMessage(
+      const result = await emmaSendMessage(
         "Genera un mensaje de bienvenida personalizado. Menciona cuántos documentos tiene el usuario si los hay.",
         currentConversation.id,
         backendUser.tenant_id,
@@ -131,7 +131,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     } finally {
       setIsLoading(false)
     }
-  }, [currentConversation, backendUser?.tenant_id, elysiaSendMessage])
+  }, [currentConversation, backendUser?.tenant_id, emmaSendMessage])
 
   const sendMessage = useCallback(async (content: string, _useStreaming: boolean = false) => {
     if (!currentConversation || !backendUser?.tenant_id) return
@@ -158,7 +158,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       })
 
       // Use Elysia service (same as main chat page)
-      const result = await elysiaSendMessage(
+      const result = await emmaSendMessage(
         content,
         currentConversation.id,
         backendUser.tenant_id,
@@ -229,7 +229,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       setIsStreaming(false)
       abortControllerRef.current = null
     }
-  }, [currentConversation, backendUser?.tenant_id, elysiaSendMessage])
+  }, [currentConversation, backendUser?.tenant_id, emmaSendMessage])
 
   const stopStreaming = useCallback(() => {
     if (abortControllerRef.current) {

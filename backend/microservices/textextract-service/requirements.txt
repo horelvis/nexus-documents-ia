@@ -4,7 +4,5 @@ python-multipart==0.0.9
 loguru==0.7.2
 pydantic==2.9.1
 pydantic-settings==2.6.1
-unstructured[pdf,docx,pptx,xlsx,odt]==0.15.0
-pdfminer.six==20221105
+httpx==0.27.0
 langdetect==1.0.9
-nltk==3.9.1

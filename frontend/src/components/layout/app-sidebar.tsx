@@ -24,6 +24,7 @@ import {
   IconRobot,
   IconFileText,
   IconScale,
+  IconPlugConnected,
 } from "@tabler/icons-react"
 
 import { NavDocuments } from "@/components/navigation/nav-documents"
@@ -141,6 +142,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         url: "/analytics",
         icon: IconChartBar,
         color: "orange",
+      },
+      {
+        title: t('sidebar.channels.title'),
+        url: "/channels",
+        icon: IconPlugConnected,
+        color: "teal",
       },
     ],
     quickActions: [

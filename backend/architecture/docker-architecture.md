@@ -10,7 +10,7 @@ graph TB
 
     subgraph "Backend Services"
         API[🚀 api<br/>Host Port: 8000]
-        WeaviateSvc[🤖 weaviate-service + Elysia<br/>Internal: 8000]
+        WeaviateSvc[🤖 weaviate-service + AutoGen<br/>Internal: 8000]
         LangExtractSvc[🏷️ langextract-service<br/>Internal: 8000]
         TextExtractSvc[📑 textextract-service<br/>Internal: 8000]
         TemplateSvc[🧩 template-editor-service<br/>Internal: 8000]

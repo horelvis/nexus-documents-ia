@@ -6,7 +6,8 @@ const baseUrl =
 export const API_CONFIG = {
   BASE_URL: baseUrl,
   API_V1: '/api/v1',
-  TIMEOUT: 30000, // 30 seconds
+  TIMEOUT: 30000, // 30 seconds (default)
+  EMMA_TIMEOUT: 180000, // 3 minutes for Emma AI (PlanningFlow with multiple agents)
   
   // Microservice URLs (different ports)
   WEAVIATE_SERVICE_URL: process.env.NEXT_PUBLIC_WEAVIATE_SERVICE_URL || 'http://192.168.1.58:8007',
@@ -55,9 +56,11 @@ export const API_CONFIG = {
     ASSISTANT_CONVERSATION: (id: string) => `/assistant/conversation/${id}`,
     ASSISTANT_WELCOME: '/assistant/welcome',
     
-    // Elysia (New GAP Architecture)
-    ELYSIA_QUERY: '/elysia/query',
-    ELYSIA_TOOLS: '/elysia/tools',
+    // Emma AI (AutoGen Multi-Agent)
+    EMMA_QUERY: '/weaviate/emma/query',
+    EMMA_TOOLS: '/weaviate/emma/tools',
+    EMMA_HEALTH: '/weaviate/emma/health',
+    EMMA_FEEDBACK: '/weaviate/emma/feedback',
   }
 } as const
 

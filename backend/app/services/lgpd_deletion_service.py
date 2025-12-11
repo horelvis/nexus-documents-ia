@@ -91,13 +91,13 @@ class LGPDDeletionService:
             
             # 4. Execute complete data deletion
             if delete_tenant:
-                deletion_summary = await self._execute_tenant_deletion(db, user)
+                deletion_summary = await self._execute_tenant_deletion(db, user, deletion_record.id)
+                # Note: Audit record is deleted with tenant, no finalization needed
             else:
                 deletion_summary = await self._execute_complete_deletion(db, user)
-            
-            # 5. Update deletion audit with results
-            await self._finalize_deletion_audit(db, deletion_record.id, deletion_summary)
-            
+                # 5. Update deletion audit with results (only for user deletion, not tenant)
+                await self._finalize_deletion_audit(db, deletion_record.id, deletion_summary)
+
             logger.info(f"✅ LGPD DELETION COMPLETED - User {user_id}")
             
             return {
@@ -254,7 +254,7 @@ class LGPDDeletionService:
         
         return deleted_count
 
-    async def _execute_tenant_deletion(self, db: AsyncSession, user: User) -> Dict[str, Any]:
+    async def _execute_tenant_deletion(self, db: AsyncSession, user: User, deletion_record_id: Optional[UUID] = None) -> Dict[str, Any]:
         """
         Delete the entire tenant and all associated users/data.
         Only triggered when a tenant owner/admin explicitly requests it.
@@ -313,7 +313,17 @@ class LGPDDeletionService:
             aggregate_summary["deleted_records"][aggregate_key] = (
                 aggregate_summary["deleted_records"].get(aggregate_key, 0) + numeric_value
             )
-        
+
+        # Finalize the current deletion audit record before deleting all audits
+        if deletion_record_id:
+            await self._finalize_deletion_audit(db, deletion_record_id, aggregate_summary)
+
+        # Delete LGPD deletion audits for this tenant (must be deleted before tenant)
+        lgpd_audits_result = await db.execute(
+            delete(LGPDDeletionAudit).where(LGPDDeletionAudit.tenant_id == tenant.id)
+        )
+        aggregate_summary["deleted_records"]["lgpd_deletion_audits"] = lgpd_audits_result.rowcount or 0
+
         await db.delete(tenant)
         await db.commit()
         aggregate_summary["tenant_deleted"] = True

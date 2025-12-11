@@ -11,7 +11,7 @@ import { WorkflowDashboard } from "@/components/workflows/WorkflowDashboard";
 import { WorkflowForm } from "@/components/workflows/WorkflowForm";
 import { WorkflowTemplates } from "@/components/workflows/WorkflowTemplates";
 import { WorkflowMonitor } from "@/components/workflows/WorkflowMonitor";
-import { useWorkflows } from "@/hooks/useWorkflows";
+import { useWorkflows } from "@/hooks/use-workflows";
 import { useTranslation } from "@/lib/i18n/hooks";
 
 export default function WorkflowsPage() {

@@ -245,27 +245,60 @@ async def get_recent_entities(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Get recently interacted entities for quick selection
+    Get recently interacted entities for quick selection.
+    Returns users from the same tenant who have recent document views.
     """
     entities = []
-    
-    # Get users from recent document views
-    recent_users_query = select(User).join(DocumentView).where(
-        User.tenant_id == UUID(tenant_id)
-    ).order_by(DocumentView.viewed_at.desc()).distinct().limit(limit)
-    
-    result = await db.execute(recent_users_query)
-    recent_users = result.scalars().all()
-    
-    for user in recent_users:
-        entities.append({
-            "id": str(user.id),
-            "name": user.full_name or user.email,
-            "email": user.email,
-            "type": "user",
-            "role": user.role if hasattr(user, 'role') else None
-        })
-    
+    tenant_uuid = UUID(tenant_id)
+
+    try:
+        # Get users from recent document views with explicit join condition
+        recent_users_query = (
+            select(User)
+            .join(DocumentView, DocumentView.user_id == User.id)
+            .where(User.tenant_id == tenant_uuid)
+            .order_by(desc(DocumentView.viewed_at))
+            .distinct()
+            .limit(limit)
+        )
+
+        result = await db.execute(recent_users_query)
+        recent_users = result.scalars().all()
+
+        for user in recent_users:
+            entities.append({
+                "id": str(user.id),
+                "name": user.full_name or user.email,
+                "email": user.email,
+                "type": "user",
+                "role": user.role if hasattr(user, 'role') else None
+            })
+
+        # If no recent users found, return users from the tenant
+        if not entities:
+            fallback_query = (
+                select(User)
+                .where(User.tenant_id == tenant_uuid)
+                .order_by(desc(User.created_at))
+                .limit(limit)
+            )
+            result = await db.execute(fallback_query)
+            fallback_users = result.scalars().all()
+
+            for user in fallback_users:
+                entities.append({
+                    "id": str(user.id),
+                    "name": user.full_name or user.email,
+                    "email": user.email,
+                    "type": "user",
+                    "role": user.role if hasattr(user, 'role') else None
+                })
+
+    except Exception as e:
+        logging.error(f"Error fetching recent entities: {e}")
+        # Return empty list on error instead of raising
+        pass
+
     return EntitySearchResponse(
         entities=entities,
         total=len(entities)

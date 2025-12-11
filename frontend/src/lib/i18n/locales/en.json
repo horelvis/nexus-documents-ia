@@ -209,7 +209,23 @@
     "noDocuments": "No documents found",
     "uploadHint": "Drag and drop files here or click to browse",
     "supportedFormats": "Supported formats: PDF, DOC, DOCX, TXT",
-    "maxFileSize": "Max file size: 50MB"
+    "maxFileSize": "Max file size: 50MB",
+    "agentAnalysis": "Agent Analysis",
+    "agentAnalysisDialog": "Agent Analysis"
+  },
+  "analysisPage": {
+    "backToDocuments": "Back to documents",
+    "analyzing": "Analyzing",
+    "analysisPlan": "Analysis Plan",
+    "completed": "completed",
+    "retryAnalysis": "Retry analysis",
+    "reanalyze": "Re-analyze",
+    "risks": "risks",
+    "recommendations": "recommendations",
+    "annotationsInPages": "annotations in {pages} pages",
+    "generatingPlan": "Generating analysis plan...",
+    "lastStepsBeforeError": "Last steps before error:",
+    "error": "Error"
   },
   "errors": {
     "genericError": "Something went wrong",
@@ -221,6 +237,44 @@
     "uploadError": "Failed to upload file",
     "fileTooLarge": "File is too large",
     "unsupportedFormat": "Unsupported file format"
+  },
+  "emma": {
+    "errors": {
+      "network": {
+        "title": "Connection error",
+        "message": "Could not connect to the server. Check your internet connection and try again."
+      },
+      "timeout": {
+        "title": "Request timed out",
+        "message": "The query took too long to process. Try a more specific question."
+      },
+      "server": {
+        "title": "Server error",
+        "message": "There was a problem processing your request. Our team has been notified."
+      },
+      "auth": {
+        "title": "Session expired",
+        "message": "Your session has expired. Please log in again."
+      },
+      "serviceUnavailable": {
+        "title": "Service unavailable",
+        "message": "Emma is temporarily unavailable. Please try again in a few minutes."
+      },
+      "unknown": {
+        "title": "Unexpected error",
+        "message": "An unexpected error occurred. Please try again."
+      },
+      "retry": "Retry",
+      "tryAgain": "Try again"
+    },
+    "thinking": {
+      "phrase1": "Analyzing your query...",
+      "phrase2": "Searching through your documents...",
+      "phrase3": "Thinking of the best response...",
+      "phrase4": "Preparing the analysis...",
+      "phrase5": "Looking up relevant information...",
+      "phrase6": "Just a moment, processing..."
+    }
   },
   "billingPage": {
     "title": "Billing & Subscription",
@@ -263,7 +317,7 @@
     }
   },
   "chatPage": {
-    "assistantName": "Emma Assistant",
+    "assistantName": "Emma Business Agent",
     "assistantSubtitle": "AI-powered document intelligence",
     "emmaResponding": "Emma generating response...",
     "mode": {
@@ -624,6 +678,10 @@
       "history": "Signature History"
     },
     "analytics": "Analytics",
+    "channels": {
+      "title": "Info Channels",
+      "description": "External data sources for RAG"
+    },
     "storage": "Storage",
     "help": "Help",
     "admin": {
@@ -663,6 +721,167 @@
       "title": "Extracted Entities",
       "extracting": "Extracting entities...",
       "noEntities": "No entities found"
+    }
+  },
+  "tenantSettings": {
+    "title": "Tenant Settings",
+    "subtitle": "Manage storage, indexing, and administrative options for your organization.",
+    "restrictedAccess": {
+      "title": "Restricted Access",
+      "description": "This section is only available to administrators."
+    },
+    "info": {
+      "title": "Organization Information",
+      "description": "Basic details about your tenant",
+      "name": "Organization Name",
+      "createdAt": "Created At",
+      "totalUsers": "Total Users",
+      "totalDocuments": "Total Documents",
+      "notAvailable": "Not available"
+    },
+    "storage": {
+      "title": "Storage Usage",
+      "description": "Current storage consumption",
+      "usage": "{used} of {limit} used"
+    },
+    "searchIndex": {
+      "title": "Search Index",
+      "description": "Manage document indexing for search functionality",
+      "totalDocuments": "Total Documents",
+      "indexed": "Indexed",
+      "pending": "Pending",
+      "status": "Status: ",
+      "statusReady": "Ready",
+      "statusProcessing": "Processing",
+      "statusUnknown": "Unknown",
+      "reindexing": "Reindexing...",
+      "reindexPending": "Reindex Pending Documents",
+      "fullReindex": "Full Reindex"
+    },
+    "maintenance": {
+      "title": "Maintenance",
+      "description": "Run maintenance tasks to optimize system performance",
+      "tasksTitle": "Maintenance tasks include:",
+      "task1": "Clean up orphaned files",
+      "task2": "Optimize database indexes",
+      "task3": "Remove temporary data",
+      "task4": "Validate document integrity",
+      "runButton": "Run Maintenance"
+    },
+    "backups": {
+      "title": "Backups",
+      "description": "Create and manage backups of your data",
+      "createButton": "Create Backup (Coming Soon)"
+    },
+    "dangerZone": {
+      "title": "Danger Zone",
+      "description": "Irreversible and destructive actions",
+      "deleteAll": {
+        "title": "Delete All Documents",
+        "description": "Permanently delete all documents from your organization. This cannot be undone.",
+        "button": "Delete All Documents"
+      },
+      "clearIndex": {
+        "title": "Clear Search Index",
+        "description": "Remove all documents from the search index. Documents will need to be reindexed.",
+        "button": "Clear Index"
+      },
+      "suppressionRight": {
+        "title": "Right to Erasure (GDPR)",
+        "description": "Request complete deletion of user data in compliance with GDPR regulations.",
+        "details": "This will permanently delete all personal data associated with the selected user."
+      }
+    },
+    "reindexDialog": {
+      "title": "Full Reindex",
+      "description": "Rebuild the entire search index for all documents",
+      "attention": "Attention",
+      "attentionText": "This will reindex <strong>{count} documents</strong>. The process may take several minutes depending on the number of documents.",
+      "explanation": "During reindexing, search functionality may be temporarily limited.",
+      "processing": "Processing documents...",
+      "progress": "Progress",
+      "progressText": "{processed} of {total} documents processed",
+      "completeTitle": "Reindex Complete",
+      "completeText": "All documents have been successfully reindexed.",
+      "errorTitle": "Reindex Failed",
+      "cancelButton": "Cancel",
+      "startButton": "Start Reindex",
+      "closeButton": "Close",
+      "retryButton": "Retry",
+      "waitButton": "Please wait..."
+    },
+    "deleteDialog": {
+      "title": "Delete All Documents",
+      "description": "This action will permanently delete all documents from your organization.",
+      "confirmText": "Type <strong>DELETE ALL DOCUMENTS</strong> to confirm this action:",
+      "placeholder": "DELETE ALL DOCUMENTS",
+      "cancelButton": "Cancel",
+      "deleteButton": "Delete All",
+      "deletingButton": "Deleting..."
+    },
+    "notifications": {
+      "loadError": {
+        "title": "Load Error",
+        "message": "Failed to load tenant information"
+      },
+      "reindexComplete": {
+        "title": "Reindex Complete",
+        "message": "{count} documents reindexed successfully"
+      },
+      "reindexError": {
+        "title": "Reindex Failed",
+        "message": "An error occurred during reindexing"
+      },
+      "reindexStarted": {
+        "title": "Reindex Started",
+        "message": "Full reindex process has started"
+      },
+      "deleteSuccess": {
+        "title": "Documents Deleted",
+        "message": "{count} documents deleted successfully"
+      },
+      "deleteError": {
+        "title": "Delete Failed",
+        "message": "Failed to delete documents"
+      },
+      "clearIndexConfirm": "Are you sure you want to clear the search index? This will remove all indexed documents.",
+      "clearIndexSuccess": {
+        "title": "Index Cleared",
+        "message": "Search index has been cleared successfully"
+      },
+      "clearIndexError": {
+        "title": "Clear Index Failed",
+        "message": "Failed to clear search index"
+      },
+      "maintenanceSuccess": {
+        "title": "Maintenance Complete",
+        "message": "{count} operations performed in {duration} seconds"
+      },
+      "maintenanceError": {
+        "title": "Maintenance Failed",
+        "message": "An error occurred during maintenance"
+      }
+    }
+  },
+  "userNotFound": {
+    "title": "User Account Not Found",
+    "description": "Your authentication is valid but your user profile was not found. This usually happens when:",
+    "reasons": {
+      "incomplete": "Your account registration was not completed",
+      "deleted": "Your account was deleted or deactivated",
+      "sync": "There's a synchronization issue between systems"
+    },
+    "email": "Email",
+    "buttons": {
+      "tryAgain": "Try Again",
+      "contactSupport": "Contact Support",
+      "reRegister": "Register Again",
+      "signOutHome": "Sign Out & Go Home"
+    },
+    "footer": "If this problem persists, please contact our support team.",
+    "supportEmail": {
+      "subject": "User Account Issue",
+      "body": "Hi Support Team,\n\nI'm experiencing an issue with my account. I can sign in but my user profile is not found in the system.\n\n- User Email: {email}\n- Clerk User ID: {clerkId}\n- Time: {time}\n\nPlease help me resolve this issue.\n\nThank you!"
     }
   },
   "publicKnowledgePage": {
@@ -737,5 +956,162 @@
       "loadFailed": "Failed to load statistics",
       "searchFailed": "Search failed"
     }
+  },
+  "channels": {
+    "title": "Information Channels",
+    "subtitle": "Connect external data sources to feed the RAG system",
+    "createChannel": "Create Channel",
+    "noChannels": {
+      "title": "No channels configured",
+      "description": "Connect Gmail, Google Drive or other sources to automatically index documents"
+    },
+    "types": {
+      "gmail": "Gmail",
+      "google_drive": "Google Drive",
+      "external_db": "Database"
+    },
+    "visibility": {
+      "personal": "Personal",
+      "tenant": "Shared",
+      "personalDescription": "Only you can see these documents",
+      "tenantDescription": "All team members can see these documents"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "disabled": "Disabled"
+    },
+    "syncStatus": {
+      "success": "Synced",
+      "partial": "Partial",
+      "failed": "Failed",
+      "running": "Syncing"
+    },
+    "card": {
+      "documents": "Documents",
+      "lastSync": "Last Sync",
+      "never": "Never",
+      "details": "Details",
+      "actions": "Actions",
+      "syncNow": "Sync Now",
+      "delete": "Delete",
+      "authRequired": "Authorization required"
+    },
+    "detail": {
+      "overview": "Overview",
+      "history": "History",
+      "settings": "Settings",
+      "status": "Status",
+      "syncInterval": "Sync Interval",
+      "minutes": "{count}m",
+      "lastStatus": "Last Status",
+      "nextSync": "Next Sync",
+      "lastSyncError": "Last sync error:",
+      "enableAutoSync": "Enable Automatic Sync",
+      "enableAutoSyncDescription": "Automatically sync on schedule",
+      "created": "Created",
+      "channelId": "Channel ID",
+      "configuration": "Configuration",
+      "authWarning": "Authorization required",
+      "authWarningDescription": "Click \"Authorize\" to connect your Google account",
+      "authorize": "Authorize",
+      "redirecting": "Redirecting..."
+    },
+    "history": {
+      "noHistory": "No sync history yet",
+      "found": "Found",
+      "new": "New",
+      "updated": "Updated",
+      "failed": "Failed"
+    },
+    "create": {
+      "title": "Create Information Channel",
+      "description": "Connect a data source to automatically index documents",
+      "step1": "Channel Type",
+      "step2": "Configuration",
+      "step3": "Confirm",
+      "selectType": "Select a channel type",
+      "channelName": "Channel Name",
+      "channelNamePlaceholder": "My Gmail channel",
+      "selectVisibility": "Select Visibility",
+      "syncIntervalLabel": "Sync Interval (minutes)",
+      "creating": "Creating...",
+      "createButton": "Create Channel",
+      "gmailDescription": "Sync emails and attachments from your Gmail account",
+      "driveDescription": "Sync documents from a Google Drive folder",
+      "dbDescription": "Connect to an external database (coming soon)"
+    },
+    "gmail": {
+      "title": "Gmail Configuration",
+      "labels": "Labels to Sync",
+      "labelsPlaceholder": "INBOX, SENT, custom-label",
+      "labelsHelp": "Separate labels with commas. Use INBOX for the inbox.",
+      "includeAttachments": "Include Attachments",
+      "includeAttachmentsDescription": "Process and index attached files (PDF, DOCX, etc.)",
+      "processedTypes": "Processed attachment types: PDF, DOCX, DOC, TXT, ODT"
+    },
+    "drive": {
+      "title": "Google Drive Configuration",
+      "folderId": "Folder ID",
+      "folderIdPlaceholder": "1a2b3c4d5e6f7g8h9i0j",
+      "folderIdHelp": "Copy the ID from the Google Drive folder URL",
+      "recursive": "Sync Subfolders",
+      "recursiveDescription": "Include documents from all subfolders"
+    },
+    "toast": {
+      "createSuccess": {
+        "title": "Channel Created",
+        "description": "Channel created successfully. Authorize the connection to start syncing."
+      },
+      "createError": {
+        "title": "Creation Failed",
+        "description": "Failed to create channel"
+      },
+      "syncStarted": {
+        "title": "Sync Started",
+        "description": "Synchronization has started in the background"
+      },
+      "syncError": {
+        "title": "Sync Error",
+        "description": "Failed to start synchronization"
+      },
+      "deleteSuccess": {
+        "title": "Channel Deleted",
+        "description": "Channel and its documents have been deleted"
+      },
+      "deleteError": {
+        "title": "Delete Failed",
+        "description": "Failed to delete channel"
+      },
+      "updateSuccess": {
+        "title": "Channel Updated",
+        "description": "Changes saved successfully"
+      },
+      "updateError": {
+        "title": "Update Failed",
+        "description": "Failed to save changes"
+      },
+      "authError": {
+        "title": "Authorization Error",
+        "description": "Failed to start authorization process"
+      },
+      "channelEnabled": {
+        "title": "Channel Enabled",
+        "description": "Automatic syncing has been resumed"
+      },
+      "channelDisabled": {
+        "title": "Channel Disabled",
+        "description": "Automatic syncing has been paused"
+      }
+    },
+    "delete": {
+      "title": "Delete Channel",
+      "description": "Are you sure you want to delete this channel? All documents indexed from this channel will also be deleted.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    },
+    "loading": "Loading channels...",
+    "error": "Failed to load channels",
+    "retry": "Retry"
   }
 }

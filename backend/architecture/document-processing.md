@@ -8,7 +8,7 @@ sequenceDiagram
     participant D as 📄 Document Service
     participant LE as 🏷️ LangExtract Service
     participant CAG as 📊 CAG Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant E as 🤖 Emma AI (AutoGen)
     participant O as 🦙 Ollama Service
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL

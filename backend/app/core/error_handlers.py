@@ -21,7 +21,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     if settings.DEBUG:
         logger.error(f"🔍 Request method: {request.method}")
         logger.error(f"🔍 Request headers: {dict(request.headers)}")
-        logger.error(f"🔍 Request body: {await request.body() if hasattr(request, 'body') else 'N/A'}")
+        # Try to read body, but it may already be consumed for multipart/form-data requests
+        try:
+            content_type = request.headers.get("content-type", "")
+            if "multipart/form-data" in content_type:
+                logger.error(f"🔍 Request body: [multipart/form-data - stream already consumed]")
+            else:
+                body = await request.body()
+                logger.error(f"🔍 Request body: {body[:1000] if body else 'N/A'}")
+        except RuntimeError as e:
+            if "Stream consumed" in str(e):
+                logger.error(f"🔍 Request body: [stream already consumed - likely file upload]")
+            else:
+                logger.error(f"🔍 Request body: [error reading body: {e}]")
 
     return JSONResponse(
         status_code=422,

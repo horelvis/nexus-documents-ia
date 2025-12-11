@@ -6,7 +6,7 @@ sequenceDiagram
     participant F as 🖥️ Frontend
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant E as 🤖 Emma AI (AutoGen)
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS

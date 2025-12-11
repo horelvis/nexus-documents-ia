@@ -1,53 +1,48 @@
-"""CAG Service facade built directly on top of Elysia + Weaviate."""
+"""
+CAG Service - Now powered by 5-Layer RAG Pipeline
+
+This service facade exposes legacy /api/v1/cag endpoints while delegating
+all logic to the new RAG Pipeline (replacing Elysia).
+
+The CAG (Context-Augmented Generation) API is maintained for backwards
+compatibility with existing frontend integrations.
+"""
 from typing import Dict, Any, Optional, List, AsyncGenerator
 from loguru import logger
 import httpx
 
-from ...services.elysia_service import elysia_service
+from ...services.rag import RAGPipeline
+from ...services.rag.rag_pipeline import rag_pipeline
 from ...services.weaviate_service import weaviate_service
-from ...schemas.elysia import ElysiaQuery, QueryType
 from ..core.config import settings
 
 
 class CAGService:
-    """Expose legacy /api/v1/cag endpoints while delegating all logic to Elysia."""
+    """
+    CAG Service facade - bridges legacy API to new RAG Pipeline.
+
+    The 7-layer RAG Pipeline provides:
+    - Layer 1: Query Intelligence (expansion, intent classification)
+    - Layer 2: Multi-Stage Retrieval (vector + reranking + fusion)
+    - Layer 3: Context Assembly (token management)
+    - Layer 4: Validated Generation (citations, fact-checking)
+    """
 
     def __init__(self):
         self._initialized = False
+        self._pipeline: RAGPipeline = rag_pipeline
 
     async def initialize(self):
+        """Initialize the service"""
         await self._ensure_initialized()
 
     async def _ensure_initialized(self):
+        """Ensure all components are initialized"""
         if not self._initialized:
             await weaviate_service.initialize()
-            await elysia_service.initialize()
+            await self._pipeline.initialize()
             self._initialized = True
-            logger.info("✅ CAGService bridged to Elysia + Weaviate")
-
-    def _map_response(self, response) -> Dict[str, Any]:
-        debug_data = response.data if isinstance(response.data, dict) else {}
-        context_chunks = debug_data.get("documents_context", 0)
-        gaps_identified = debug_data.get("gaps_identified", 0)
-        metadata: Dict[str, Any] = {
-            "decision_path": response.decision_path,
-            "tools_used": response.tools_used,
-        }
-        if debug_data:
-            metadata["debug"] = debug_data
-        if response.visualization:
-            metadata["visualization"] = response.visualization
-
-        return {
-            "success": True,
-            "answer": response.answer,
-            "quality_score": response.confidence_score,
-            "iterations": response.iterations,
-            "gaps_identified": gaps_identified,
-            "context_chunks_used": context_chunks,
-            "execution_time": response.execution_time_ms / 1000,
-            "metadata": metadata,
-        }
+            logger.info("✅ CAGService initialized with 7-layer RAG Pipeline")
 
     async def process_query(
         self,
@@ -59,27 +54,42 @@ class CAGService:
         temperature: Optional[float] = None,
         max_iterations: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """
+        Process a query using the RAG Pipeline.
+
+        Args:
+            query: User's question
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            context: Additional context (conversation_id, etc.)
+            model: LLM model override (not used in new pipeline)
+            temperature: Generation temperature (not used - fixed at 0.3)
+            max_iterations: Not used in new pipeline
+
+        Returns:
+            Dict with answer, quality_score, metadata, etc.
+        """
         await self._ensure_initialized()
 
-        session_id = None
+        # Extract conversation context if present
         merged_context = context or {}
-        if isinstance(merged_context, dict):
-            session_id = merged_context.get("conversation_id")
 
-        elysia_query = ElysiaQuery(
+        # Process through RAG Pipeline
+        response = await self._pipeline.process_query(
             query=query,
             tenant_id=tenant_id,
-            session_id=session_id,
+            user_id=user_id,
             context=merged_context,
-            query_type=QueryType.SEARCH,
-            max_iterations=max_iterations or 3,
+            top_k=10,
+            validate_claims=True,
         )
 
-        response = await elysia_service.execute_query(elysia_query)
-        mapped = self._map_response(response)
-        mapped["query"] = query
-        mapped["metadata"]["user_id"] = user_id
-        return mapped
+        # Convert to CAG response format
+        result = response.to_cag_response()
+        result["query"] = query
+        result["metadata"]["user_id"] = user_id
+
+        return result
 
     async def process_query_stream(
         self,
@@ -88,10 +98,22 @@ class CAGService:
         user_id: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Process a query with streaming progress.
+
+        Yields progress events and final result.
+        """
         await self._ensure_initialized()
-        yield {"type": "progress", "content": "Inicializando Elysia...", "progress": 10}
-        result = await self.process_query(query, tenant_id, user_id, context)
-        yield {"type": "result", "content": result}
+
+        yield {"type": "progress", "content": "Inicializando RAG Pipeline...", "progress": 5}
+
+        async for event in self._pipeline.process_query_stream(
+            query=query,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            context=context,
+        ):
+            yield event
 
     async def analyze_document(
         self,
@@ -101,38 +123,29 @@ class CAGService:
         user_id: str,
         analysis_type: str = "comprehensive",
     ) -> Dict[str, Any]:
+        """
+        Analyze a document using the RAG Pipeline.
+
+        Args:
+            document_content: Full document text
+            document_id: Document identifier
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            analysis_type: Type of analysis (comprehensive, risks, summary, etc.)
+
+        Returns:
+            Dict with analysis results
+        """
         await self._ensure_initialized()
-        prompt = (
-            f"Analiza el documento ({analysis_type}) y devuelve hallazgos clave, riesgos y recomendaciones.\n"
-            f"Documento:\n{document_content}"
-        )
-        context = {
-            "document_id": document_id,
-            "analysis_type": analysis_type,
-            "document_length": len(document_content),
-        }
-        elysia_query = ElysiaQuery(
-            query=prompt,
+
+        result = await self._pipeline.analyze_document(
+            document_content=document_content,
+            document_id=document_id,
             tenant_id=tenant_id,
-            session_id=document_id,
-            context=context,
-            query_type=QueryType.ANALYZE,
-            max_iterations=4,
+            analysis_type=analysis_type,
         )
-        response = await elysia_service.execute_query(elysia_query)
-        mapped = self._map_response(response)
-        return {
-            "success": True,
-            "document_id": document_id,
-            "document_type": response.data.get("document_type") if isinstance(response.data, dict) else None,
-            "confidence": mapped["quality_score"],
-            "analysis_type": analysis_type,
-            "analysis": mapped["answer"],
-            "answer": mapped["answer"],
-            "quality_score": mapped["quality_score"],
-            "execution_time": mapped["execution_time"],
-            "metadata": mapped["metadata"],
-        }
+
+        return result
 
     async def analyze_document_stream(
         self,
@@ -142,8 +155,18 @@ class CAGService:
         user_id: str,
         analysis_type: str = "comprehensive",
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Analyze a document with streaming progress.
+
+        Yields progress events and final result.
+        """
         await self._ensure_initialized()
-        yield {"type": "progress", "content": "Analizando documento con Elysia...", "progress": 10}
+
+        yield {"type": "progress", "content": "Preparando análisis...", "progress": 10}
+
+        # Document analysis doesn't stream internally, so we wrap it
+        yield {"type": "progress", "content": "Analizando documento...", "progress": 30}
+
         result = await self.analyze_document(
             document_content=document_content,
             document_id=document_id,
@@ -151,6 +174,8 @@ class CAGService:
             user_id=user_id,
             analysis_type=analysis_type,
         )
+
+        yield {"type": "progress", "content": "Finalizando...", "progress": 90}
         yield {"type": "result", "content": result}
 
     async def chat(
@@ -160,6 +185,18 @@ class CAGService:
         user_id: str,
         chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
+        """
+        Chat endpoint - delegates to process_query.
+
+        Args:
+            message: User's message
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            chat_history: Previous messages in conversation
+
+        Returns:
+            Dict with response
+        """
         context = {"message_history": chat_history or []}
         return await self.process_query(message, tenant_id, user_id, context)
 
@@ -168,46 +205,56 @@ class CAGService:
         texts: List[str],
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """
+        Generate embeddings for texts using Ollama.
+
+        Args:
+            texts: List of texts to embed
+            tenant_id: Optional tenant identifier
+
+        Returns:
+            Dict with embeddings
+        """
         await self._ensure_initialized()
+
         provider = settings.llm_provider
-        target_model = (
-            settings.openai_embedding_model if provider == "openai" else settings.embedding_model
-        )
+        target_model = settings.embedding_model
+
         if not target_model:
             raise ValueError("Embedding model is not configured")
-        if provider == "openai" and not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for OpenAI embeddings")
 
         embeddings: List[List[float]] = []
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             for text in texts:
                 try:
-                    if provider == "openai":
+                    if provider == "openai" and settings.openai_api_key:
                         response = await client.post(
                             f"{settings.openai_base_url.rstrip('/')}/embeddings",
-                            json={"model": target_model, "input": text},
+                            json={"model": settings.openai_embedding_model, "input": text},
                             headers={
                                 "Authorization": f"Bearer {settings.openai_api_key}",
                                 "Content-Type": "application/json",
                             },
                         )
-                    else:
-                        response = await client.post(
-                            f"{settings.ollama_base_url}/api/embeddings",
-                            json={"model": target_model, "prompt": text},
-                        )
-                    if response.status_code == 200:
-                        data = response.json()
-                        if provider == "openai":
+                        if response.status_code == 200:
+                            data = response.json()
                             rows = data.get("data") or []
                             embeddings.append(rows[0].get("embedding", []) if rows else [])
                         else:
-                            embeddings.append(data.get("embedding", []))
+                            embeddings.append([])
                     else:
-                        logger.warning(
-                            f"⚠️ Embedding request failed ({provider}): {response.status_code}"
+                        # Use TEI (Text Embeddings Inference) as the default embeddings provider
+                        response = await client.post(
+                            f"{settings.tei_url}/embed",
+                            json={"inputs": text, "truncate": True},
                         )
-                        embeddings.append([])
+                        if response.status_code == 200:
+                            data = response.json()
+                            # TEI returns list of embeddings, get the first one
+                            embeddings.append(data[0] if data and len(data) > 0 else [])
+                        else:
+                            embeddings.append([])
                 except Exception as exc:
                     logger.warning(f"⚠️ Could not generate embedding: {exc}")
                     embeddings.append([])
@@ -221,28 +268,44 @@ class CAGService:
         }
 
     async def get_available_agents_info(self, tenant_id: str = "default") -> Dict[str, Any]:
+        """
+        Get available 'agents' info (pipeline stages for backwards compatibility).
+
+        Args:
+            tenant_id: Tenant identifier
+
+        Returns:
+            Dict with pipeline stage info
+        """
         await self._ensure_initialized()
-        tools = await elysia_service.list_tools()
+
+        tools = await self._pipeline.list_tools()
+
         return {
-            "service": "elysia",
+            "service": "rag-pipeline-7layer",
             "tenant_id": tenant_id,
             "total": len(tools),
             "agents": tools,
         }
 
     async def health_check(self) -> Dict[str, Any]:
+        """
+        Check service health.
+
+        Returns:
+            Dict with health status
+        """
         await self._ensure_initialized()
-        elysia_health = await elysia_service.health_check()
+
+        pipeline_health = await self._pipeline.health_check()
+
         return {
-            "status": "healthy" if elysia_health.get("status") == "healthy" else "initializing",
-            "service": "elysia",
-            "checks": {
-                "elysia_tree": elysia_health.get("tree_initialized", False),
-                "tools_registered": elysia_health.get("tools_registered", False),
-                "collections_preprocessed": elysia_health.get("collections_preprocessed", False),
-            },
-            "agents_count": elysia_health.get("active_sessions", 0),
+            "status": pipeline_health.get("status", "unknown"),
+            "service": "rag-pipeline-7layer",
+            "checks": pipeline_health.get("components", {}),
+            "config": pipeline_health.get("config", {}),
         }
 
 
+# Global instance
 cag_service = CAGService()

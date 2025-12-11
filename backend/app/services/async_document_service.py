@@ -223,7 +223,7 @@ class AsyncDocumentService:
         return file_ext, contents, file_size
     
     async def get_documents(
-        self, 
+        self,
         db: AsyncSession,
         page: int = 1,
         per_page: int = 10,
@@ -231,20 +231,37 @@ class AsyncDocumentService:
         tags: Optional[List[str]] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
-        category: Optional[str] = None
+        category: Optional[str] = None,
+        document_ids: Optional[List] = None,  # ACL: Filter by accessible document IDs
     ) -> Dict[str, Any]:
-        """Get paginated list of documents with filters using hybrid search when applicable"""
+        """Get paginated list of documents with filters using hybrid search when applicable.
+
+        Args:
+            document_ids: If provided, only return documents in this list (used for ACL filtering).
+                         If None, returns all documents in tenant (legacy behavior for admins).
+        """
         try:
+            # ACL: If document_ids is provided and empty, return no results
+            if document_ids is not None and len(document_ids) == 0:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "page": page,
+                    "per_page": per_page,
+                    "total_pages": 0,
+                    "search_engine": "acl_filtered"
+                }
+
             # If we have a search term, REQUIRE Elasticsearch to work
             if search and search.strip():
                 if not self.elasticsearch_service:
                     raise HTTPException(
-                        status_code=503, 
+                        status_code=503,
                         detail="Search functionality unavailable: Elasticsearch service not initialized"
                     )
-                
+
                 logger.info(f"🔍 Using Elasticsearch hybrid search for query: '{search}' (NO FALLBACK)")
-                
+
                 # Prepare filters for Elasticsearch
                 es_filters = {}
                 if category:
@@ -255,6 +272,9 @@ class AsyncDocumentService:
                     es_filters["date_from"] = date_from
                 if date_to:
                     es_filters["date_to"] = date_to
+                # ACL: Add document_ids filter for Elasticsearch
+                if document_ids is not None:
+                    es_filters["document_ids"] = [str(doc_id) for doc_id in document_ids]
                 
                 # Perform hybrid search via microservice - LET IT FAIL if broken
                 es_results = await elasticsearch_client.hybrid_search(
@@ -342,15 +362,21 @@ class AsyncDocumentService:
             
             # Fallback to SQL search or when no search term provided
             logger.info("Using SQL-based document search")
-            
-            # Base query
+
+            # Base query with ACL filter
+            base_filters = [Document.tenant_id == self.tenant_id]
+
+            # ACL: Filter by accessible document IDs
+            if document_ids is not None:
+                base_filters.append(Document.id.in_(document_ids))
+
             query = select(Document).filter(
-                Document.tenant_id == self.tenant_id
+                *base_filters
             ).options(
                 selectinload(Document.tags),
                 selectinload(Document.creator)
             )
-            
+
             # Apply filters
             if search:
                 query = query.filter(

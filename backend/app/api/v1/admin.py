@@ -12,8 +12,7 @@ from app.api.async_dependencies import get_current_active_superuser_async
 from app.db.async_database import get_async_db
 from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView
 from sqlalchemy import text
-from app.schemas.user import UserCreate, UserUpdate, UserResponse
-from app.services.async_auth_service import AsyncAuthService
+from app.schemas.user import UserUpdate, UserResponse
 from app.services.async_document_service import AsyncDocumentService
 
 logger = logging.getLogger(__name__)
@@ -43,46 +42,8 @@ async def list_users(
     return users
 
 
-@router.post("/users", response_model=UserResponse)
-async def create_user(
-    user_in: UserCreate,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
-):
-    """
-    Crea un nuevo usuario (solo administradores).
-    """
-    # Verificar si el email ya existe
-    stmt = select(User).filter(User.email == user_in.email)
-    result = await db.execute(stmt)
-    db_user = result.scalar_one_or_none()
-    if db_user:
-        raise HTTPException(
-            status_code=400,
-            detail="El email ya está registrado"
-        )
-    
-    # Verificar que el tenant exista
-    stmt = select(Tenant).filter(Tenant.id == user_in.tenant_id)
-    result = await db.execute(stmt)
-    tenant = result.scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(
-            status_code=404,
-            detail="Tenant no encontrado"
-        )
-    
-    # Crear usuario
-    user = await AsyncAuthService.create_user(
-        db=db,
-        email=user_in.email,
-        password=user_in.password,
-        full_name=user_in.full_name,
-        is_superuser=user_in.is_superuser,
-        tenant_id=str(user_in.tenant_id)
-    )
-    
-    return user
+# NOTE: POST /admin/users removed - users are created via Clerk + JIT provisioning
+# Admin can only view, update, and deactivate users
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
@@ -141,16 +102,11 @@ async def update_user(
                 detail="Tenant no encontrado"
             )
     
-    # Actualizar campos
-    update_data = user_in.dict(exclude_unset=True, exclude={"password"})
+    # Actualizar campos (password excluded - managed by Clerk)
+    update_data = user_in.model_dump(exclude_unset=True, exclude={"password"})
     for key, value in update_data.items():
         setattr(user, key, value)
-    
-    # Actualizar contraseña si se proporciona
-    if user_in.password:
-        from app.core.security import get_password_hash
-        user.hashed_password = get_password_hash(user_in.password)
-    
+
     db.add(user)
     await db.commit()
     await db.refresh(user)

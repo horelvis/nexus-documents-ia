@@ -43,21 +43,16 @@ export async function POST(req: Request) {
   const eventType = evt.type
 
   if (eventType === 'user.created') {
-    const { id, email_addresses, unsafe_metadata } = evt.data
+    const { id, email_addresses, first_name, last_name, unsafe_metadata } = evt.data
     const email = email_addresses[0]?.email_address
-    const plan = unsafe_metadata?.plan as string || 'free'
-    const rawInterval = (unsafe_metadata?.interval as string) || 'month'
-    const lowerInterval = rawInterval.toLowerCase()
-    const interval =
-      lowerInterval === 'yearly'
-        ? 'year'
-        : lowerInterval === 'monthly'
-          ? 'month'
-          : lowerInterval
+    const fullName = [first_name, last_name].filter(Boolean).join(' ') || email?.split('@')[0] || 'User'
+    const plan = unsafe_metadata?.selected_plan as string || unsafe_metadata?.plan as string || 'free'
 
-    // Create user in our database
+    console.log(`[Clerk Webhook] Creating user: ${email} with plan: ${plan}`)
+
+    // Create/sync user in our database using the correct endpoint
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/register`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/sync-user`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -65,22 +60,25 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           clerk_user_id: id,
           email: email,
-          plan: plan,
-          interval: interval,
+          full_name: fullName,
+          stripe_customer_id: null,
+          selected_plan: plan,
         }),
       })
 
       if (!response.ok) {
-        console.error('Failed to create user in database')
+        const errorText = await response.text()
+        console.error(`[Clerk Webhook] Failed to create user: ${response.status} - ${errorText}`)
+      } else {
+        console.log(`[Clerk Webhook] User created successfully: ${email}`)
       }
 
-      // If user selected a paid plan, trigger Stripe checkout
+      // If user selected a paid plan, they'll complete Stripe checkout in frontend
       if (plan !== 'free' && plan !== 'enterprise') {
-        // This will be handled in the frontend after sign-up
-        console.log('User needs to complete Stripe checkout for plan:', plan)
+        console.log(`[Clerk Webhook] User ${email} needs to complete Stripe checkout for plan: ${plan}`)
       }
     } catch (error) {
-      console.error('Error creating user:', error)
+      console.error('[Clerk Webhook] Error creating user:', error)
     }
   }
 

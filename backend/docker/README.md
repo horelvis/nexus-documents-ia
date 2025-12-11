@@ -82,7 +82,7 @@ This directory contains Docker configurations for running the Nexus Document Bac
 |---------|------|-------------|
 | Main API | 8000 | FastAPI main application |
 | Storage Service | 8003 | Google Cloud Storage operations |
-| Weaviate Service | 8007 | Emma AI (Elysia + Weaviate vector DB) |
+| Weaviate Service | 8007 | Emma AI (Agent Framework + vLLM + RAG Pipeline + Weaviate) |
 | Elasticsearch Service | 8008 | Full-text search & document indexing |
 | LangExtract Service | 8010 | Document language extraction |
 | TextExtract Service | 8011 | OCR & text extraction |
@@ -97,10 +97,9 @@ This directory contains Docker configurations for running the Nexus Document Bac
 | Redis | 6379 | Cache, sessions & Celery broker |
 | Weaviate | 8080 | Vector database for semantic search |
 | Elasticsearch | 9200 | Full-text search engine |
-| Ollama Server | 11434 | Local LLM server (qwen3:32b, etc.) |
+| vLLM Server | 8001 | High-throughput GPU inference (Qwen2.5-7B-Instruct) |
+| Ollama Server | 11434 | Legacy local LLM server (fallback) |
 | Gotenberg | 3000 | Document conversion to PDF |
-| Temporal.io Server | 7233 | Workflow orchestration |
-| Temporal.io UI | 8233 | Workflow management dashboard |
 
 ## Environment Setup
 

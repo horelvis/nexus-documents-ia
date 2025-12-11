@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="Definitions_DocumentApproval"
+                  targetNamespace="http://nexusdocs360.com/bpmn"
+                  exporter="NexusDocs360"
+                  exporterVersion="1.0.0">
+
+  <bpmn:process id="document-approval" name="Document Approval Workflow" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent_ApprovalRequested" name="Approval Requested">
+      <bpmn:outgoing>Flow_ToReview</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <!-- User Task: Review Document -->
+    <bpmn:userTask id="Task_ReviewDocument" name="Review Document"
+                   camunda:assignee="${approver_id}">
+      <bpmn:extensionElements>
+        <camunda:formData>
+          <camunda:formField id="approved" label="Approve Document?" type="boolean" />
+          <camunda:formField id="rejection_reason" label="Rejection Reason" type="string" />
+        </camunda:formData>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToReview</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToDecisionGateway</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Exclusive Gateway: Approval Decision -->
+    <bpmn:exclusiveGateway id="Gateway_ApprovalDecision" name="Approved?">
+      <bpmn:incoming>Flow_ToDecisionGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Path: Document Rejected -->
+    <bpmn:serviceTask id="Task_NotifyRejection" name="Notify Rejection"
+                      camunda:type="external"
+                      camunda:topic="send-notification">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="notification_type">document_rejected</camunda:inputParameter>
+          <camunda:inputParameter name="recipients">${requester_email}</camunda:inputParameter>
+          <camunda:inputParameter name="template_data">
+            {
+              "document_id": "${document_id}",
+              "rejection_reason": "${rejection_reason}",
+              "rejected_by": "${approver_id}"
+            }
+          </camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Rejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToRejectedEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_Rejected" name="Document Rejected">
+      <bpmn:incoming>Flow_ToRejectedEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Exclusive Gateway: Signature Required? -->
+    <bpmn:exclusiveGateway id="Gateway_SignatureRequired" name="Signature Required?">
+      <bpmn:incoming>Flow_Approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_NoSignature</bpmn:outgoing>
+      <bpmn:outgoing>Flow_WithSignature</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Path: No Signature Required -->
+    <bpmn:serviceTask id="Task_NotifyApprovalNoSign" name="Notify Approval"
+                      camunda:type="external"
+                      camunda:topic="send-notification">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="notification_type">document_approved</camunda:inputParameter>
+          <camunda:inputParameter name="recipients">${requester_email}</camunda:inputParameter>
+          <camunda:inputParameter name="template_data">
+            {
+              "document_id": "${document_id}",
+              "approved_by": "${approver_id}"
+            }
+          </camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_NoSignature</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToApprovedEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_ApprovedNoSign" name="Document Approved">
+      <bpmn:incoming>Flow_ToApprovedEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Path: With Signature -->
+    <bpmn:serviceTask id="Task_SendSignatureRequest" name="Send Signature Request"
+                      camunda:type="external"
+                      camunda:topic="send-signature-request">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="document_id">${document_id}</camunda:inputParameter>
+          <camunda:inputParameter name="tenant_id">${tenant_id}</camunda:inputParameter>
+          <camunda:inputParameter name="signers">${signers}</camunda:inputParameter>
+          <camunda:inputParameter name="requester_id">${requester_id}</camunda:inputParameter>
+          <camunda:inputParameter name="message">${message}</camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_WithSignature</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToWaitSignature</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Intermediate Catch Event: Wait for Signature -->
+    <bpmn:intermediateCatchEvent id="Event_WaitSignature" name="Wait for Signature">
+      <bpmn:incoming>Flow_ToWaitSignature</bpmn:incoming>
+      <bpmn:incoming>Flow_RetryCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCheckStatus</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDefinition_WaitSignature">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT5M</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+
+    <!-- Service Task: Check Signature Status -->
+    <bpmn:serviceTask id="Task_CheckSignatureStatus" name="Check Signature Status"
+                      camunda:type="external"
+                      camunda:topic="check-approval-status">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="tenant_id">${tenant_id}</camunda:inputParameter>
+          <camunda:inputParameter name="signature_request_id">${signature_request_id}</camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToCheckStatus</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToStatusGateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Exclusive Gateway: Signature Status -->
+    <bpmn:exclusiveGateway id="Gateway_SignatureStatus" name="Signature Complete?">
+      <bpmn:incoming>Flow_ToStatusGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_SignatureComplete</bpmn:outgoing>
+      <bpmn:outgoing>Flow_SignaturePending</bpmn:outgoing>
+      <bpmn:outgoing>Flow_SignatureFailed</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Path: Signature Still Pending - Loop back -->
+    <bpmn:sequenceFlow id="Flow_RetryCheck" name="Still Pending"
+                       sourceRef="Gateway_SignatureStatus"
+                       targetRef="Event_WaitSignature">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">
+        ${approval_completed == false}
+      </bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <!-- Path: Signature Failed -->
+    <bpmn:serviceTask id="Task_NotifySignatureFailed" name="Notify Signature Failed"
+                      camunda:type="external"
+                      camunda:topic="send-notification">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="notification_type">signature_failed</camunda:inputParameter>
+          <camunda:inputParameter name="recipients">${requester_email}</camunda:inputParameter>
+          <camunda:inputParameter name="template_data">
+            {
+              "document_id": "${document_id}",
+              "signature_status": "${approval_status}"
+            }
+          </camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_SignatureFailed</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToFailedEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_SignatureFailed" name="Signature Failed">
+      <bpmn:incoming>Flow_ToFailedEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Path: Signature Complete -->
+    <bpmn:serviceTask id="Task_StoreSignedDocument" name="Store Signed Document"
+                      camunda:type="external"
+                      camunda:topic="store-signed-document">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="tenant_id">${tenant_id}</camunda:inputParameter>
+          <camunda:inputParameter name="signature_request_id">${signature_request_id}</camunda:inputParameter>
+          <camunda:inputParameter name="document_id">${document_id}</camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_SignatureComplete</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToNotifyComplete</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Service Task: Notify Completion -->
+    <bpmn:serviceTask id="Task_NotifySignatureComplete" name="Notify Signature Complete"
+                      camunda:type="external"
+                      camunda:topic="send-notification">
+      <bpmn:extensionElements>
+        <camunda:inputOutput>
+          <camunda:inputParameter name="notification_type">signature_completed</camunda:inputParameter>
+          <camunda:inputParameter name="recipients">${requester_email}</camunda:inputParameter>
+          <camunda:inputParameter name="template_data">
+            {
+              "document_id": "${document_id}",
+              "signed_document_id": "${signed_document_id}"
+            }
+          </camunda:inputParameter>
+        </camunda:inputOutput>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToNotifyComplete</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCompleteEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_SignatureComplete" name="Workflow Complete">
+      <bpmn:incoming>Flow_ToCompleteEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="Flow_ToReview" sourceRef="StartEvent_ApprovalRequested" targetRef="Task_ReviewDocument" />
+    <bpmn:sequenceFlow id="Flow_ToDecisionGateway" sourceRef="Task_ReviewDocument" targetRef="Gateway_ApprovalDecision" />
+
+    <bpmn:sequenceFlow id="Flow_Approved" name="Yes" sourceRef="Gateway_ApprovalDecision" targetRef="Gateway_SignatureRequired">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approved == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Rejected" name="No" sourceRef="Gateway_ApprovalDecision" targetRef="Task_NotifyRejection">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approved == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_ToRejectedEnd" sourceRef="Task_NotifyRejection" targetRef="EndEvent_Rejected" />
+
+    <bpmn:sequenceFlow id="Flow_NoSignature" name="No" sourceRef="Gateway_SignatureRequired" targetRef="Task_NotifyApprovalNoSign">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${require_signature == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_WithSignature" name="Yes" sourceRef="Gateway_SignatureRequired" targetRef="Task_SendSignatureRequest">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${require_signature == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_ToApprovedEnd" sourceRef="Task_NotifyApprovalNoSign" targetRef="EndEvent_ApprovedNoSign" />
+
+    <bpmn:sequenceFlow id="Flow_ToWaitSignature" sourceRef="Task_SendSignatureRequest" targetRef="Event_WaitSignature" />
+    <bpmn:sequenceFlow id="Flow_ToCheckStatus" sourceRef="Event_WaitSignature" targetRef="Task_CheckSignatureStatus" />
+    <bpmn:sequenceFlow id="Flow_ToStatusGateway" sourceRef="Task_CheckSignatureStatus" targetRef="Gateway_SignatureStatus" />
+
+    <bpmn:sequenceFlow id="Flow_SignatureComplete" name="Complete" sourceRef="Gateway_SignatureStatus" targetRef="Task_StoreSignedDocument">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approval_completed == true &amp;&amp; approval_success == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_SignaturePending" name="Pending" sourceRef="Gateway_SignatureStatus" targetRef="Event_WaitSignature">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approval_completed == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_SignatureFailed" name="Failed" sourceRef="Gateway_SignatureStatus" targetRef="Task_NotifySignatureFailed">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approval_completed == true &amp;&amp; approval_success == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_ToFailedEnd" sourceRef="Task_NotifySignatureFailed" targetRef="EndEvent_SignatureFailed" />
+    <bpmn:sequenceFlow id="Flow_ToNotifyComplete" sourceRef="Task_StoreSignedDocument" targetRef="Task_NotifySignatureComplete" />
+    <bpmn:sequenceFlow id="Flow_ToCompleteEnd" sourceRef="Task_NotifySignatureComplete" targetRef="EndEvent_SignatureComplete" />
+
+  </bpmn:process>
+
+</bpmn:definitions>

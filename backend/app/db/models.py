@@ -349,6 +349,7 @@ class Document(Base):
     metrics = relationship("DocumentMetrics", back_populates="document", uselist=False, cascade="all, delete-orphan")
     views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
     shares = relationship("DocumentShare", back_populates="document", cascade="all, delete-orphan")
+    analyses = relationship("DocumentAnalysis", back_populates="document", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_documents_tenant_created', 'tenant_id', 'created_at'),
@@ -918,38 +919,434 @@ class SignaturePlacementPattern(Base):
     tenant = relationship("Tenant")
 
 
+# =====================================
+# SISTEMA DE ANÁLISIS DE DOCUMENTOS (EMMA AI)
+# =====================================
+
+class DocumentAnalysis(Base):
+    """
+    Persisted document analysis results from Emma AI.
+
+    Stores completed analyses with their results, annotations,
+    and PDF paths for later retrieval. Enables background processing
+    queue and historical analysis access.
+    """
+    __tablename__ = "document_analyses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Analysis state
+    status = Column(String(30), nullable=False, default="pending", index=True)  # pending, processing, completed, failed
+    progress = Column(Integer, nullable=False, default=0)  # 0-100
+    current_step = Column(String(200), nullable=True)  # Current step description
+    error_message = Column(Text, nullable=True)
+
+    # Analysis configuration
+    analysis_type = Column(String(50), nullable=False, default="legal")  # legal, contract, compliance, general
+    detected_document_type = Column(String(100), nullable=True)  # Detected type from content
+    detected_document_type_display = Column(String(200), nullable=True)  # Human-readable type
+    detection_confidence = Column(Float, nullable=True)  # 0.0 - 1.0
+
+    # Plan information
+    plan_id = Column(String(100), nullable=True)  # Internal plan identifier
+    plan_title = Column(String(500), nullable=True)
+    total_steps = Column(Integer, nullable=True, default=0)
+    steps_completed = Column(Integer, nullable=True, default=0)
+
+    # Results - stored as JSONB for flexibility
+    summary = Column(Text, nullable=True)  # Executive summary
+    risks = Column(JSONB, nullable=True, default=[])  # List of identified risks
+    recommendations = Column(JSONB, nullable=True, default=[])  # List of recommendations
+    findings = Column(JSONB, nullable=True, default=[])  # Detailed findings per agent
+    annotations = Column(JSONB, nullable=True, default=[])  # PDF annotations with positions
+    execution_log = Column(JSONB, nullable=True, default=[])  # Step-by-step execution log
+
+    # Output files
+    annotated_pdf_path = Column(String(1000), nullable=True)  # GCS path to annotated PDF
+    annotated_pdf_url = Column(String(2000), nullable=True)  # Signed URL (temporary)
+
+    # Metrics
+    confidence_score = Column(Float, nullable=True)  # Overall confidence 0.0 - 1.0
+    execution_time_ms = Column(Integer, nullable=True)  # Total execution time
+
+    # Timestamps
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    document = relationship("Document", back_populates="analyses")
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+
+    __table_args__ = (
+        Index('idx_document_analyses_tenant_status', 'tenant_id', 'status'),
+        Index('idx_document_analyses_document', 'document_id'),
+        Index('idx_document_analyses_created', 'created_at'),
+        Index('idx_document_analyses_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+    def mark_started(self):
+        """Mark analysis as started"""
+        self.status = "processing"
+        self.started_at = datetime.now(timezone.utc)
+        self.progress = 0
+
+    def mark_completed(self, execution_time_ms: int = None):
+        """Mark analysis as completed"""
+        self.status = "completed"
+        self.completed_at = datetime.now(timezone.utc)
+        self.progress = 100
+        if execution_time_ms:
+            self.execution_time_ms = execution_time_ms
+        elif self.started_at:
+            delta = self.completed_at - self.started_at
+            self.execution_time_ms = int(delta.total_seconds() * 1000)
+
+    def mark_failed(self, error_message: str):
+        """Mark analysis as failed"""
+        self.status = "failed"
+        self.error_message = error_message
+        self.completed_at = datetime.now(timezone.utc)
+
+    def update_progress(self, progress: int, current_step: str = None):
+        """Update analysis progress"""
+        self.progress = min(max(progress, 0), 100)
+        if current_step:
+            self.current_step = current_step
+
+
+# =====================================
+# INFORMATION CHANNELS (RAG Data Sources)
+# =====================================
+
+class InformationChannel(Base):
+    """
+    External data source channels for RAG pipeline.
+
+    Supports Gmail, Google Drive, and external databases as data sources.
+    Each channel can be personal (only visible to creator) or tenant-wide
+    (visible to all tenant users in RAG queries).
+    """
+    __tablename__ = "information_channels"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Channel identification
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    channel_type = Column(String(50), nullable=False, index=True)  # gmail, google_drive, external_db
+
+    # Visibility control - determines who can see documents in RAG queries
+    visibility = Column(String(20), nullable=False, default="personal")  # personal, tenant
+
+    # Type-specific configuration (non-sensitive)
+    # Gmail: {"labels": ["INBOX"], "max_age_days": 90, "include_attachments": true}
+    # Google Drive: {"folder_id": "xxx", "folder_name": "...", "include_subfolders": true}
+    # External DB: {"db_type": "postgresql", "host": "xxx", "port": 5432, "database": "xxx", "query": "SELECT..."}
+    configuration = Column(JSONB, nullable=False, default={})
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_sync_status = Column(String(50), nullable=True)  # success, partial, failed
+    last_sync_error = Column(Text, nullable=True)
+    documents_indexed = Column(Integer, default=0, nullable=False)
+
+    # Sync schedule (0 = manual only)
+    sync_interval_minutes = Column(Integer, default=60, nullable=False)
+    next_sync_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+    credential = relationship("ChannelCredential", back_populates="channel", uselist=False, cascade="all, delete-orphan")
+    documents = relationship("ChannelDocument", back_populates="channel", cascade="all, delete-orphan")
+    sync_logs = relationship("ChannelSyncLog", back_populates="channel", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_channels_tenant_type', 'tenant_id', 'channel_type'),
+        Index('idx_channels_creator_visibility', 'created_by', 'visibility'),
+        Index('idx_channels_next_sync', 'next_sync_at', 'is_active'),
+        Index('idx_channels_tenant_active', 'tenant_id', 'is_active'),
+    )
+
+
+class ChannelCredential(Base):
+    """
+    Encrypted credentials for channel authentication.
+
+    Uses Fernet symmetric encryption (same pattern as GoogleDriveToken).
+    Supports OAuth tokens (Gmail, Drive) and database credentials.
+    """
+    __tablename__ = "channel_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("information_channels.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    # Encrypted credentials blob (Fernet encryption with CHANNEL_ENCRYPTION_KEY)
+    credentials_encrypted = Column(LargeBinary, nullable=False)
+
+    # OAuth-specific fields (for Gmail/Drive)
+    oauth_provider = Column(String(50), nullable=True)  # google
+    oauth_user_id = Column(String(255), nullable=True)
+    oauth_email = Column(String(255), nullable=True)
+    oauth_scopes = Column(JSONB, nullable=True)
+    token_expiry = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    channel = relationship("InformationChannel", back_populates="credential")
+
+
+class ChannelDocument(Base):
+    """
+    Tracks documents indexed from information channels.
+
+    Maps external IDs (Gmail message ID, Drive file ID, DB row hash) to
+    Weaviate document IDs. Stores content hash for incremental sync
+    (only re-index if content changed).
+    """
+    __tablename__ = "channel_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("information_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # External source reference
+    external_id = Column(String(500), nullable=False)  # Gmail message ID, Drive file ID, DB row hash
+    external_url = Column(String(2000), nullable=True)  # Link to original (if available)
+
+    # Content hash for change detection (SHA-256)
+    content_hash = Column(String(64), nullable=False)
+
+    # Indexed document reference
+    weaviate_id = Column(String(100), nullable=True)  # Weaviate object UUID
+
+    # Metadata snapshot
+    title = Column(String(500), nullable=True)
+    source_metadata = Column(JSONB, nullable=True)  # Type-specific metadata
+
+    # Processing status
+    status = Column(String(30), nullable=False, default="pending", index=True)  # pending, indexed, failed, deleted
+    error_message = Column(Text, nullable=True)
+
+    # Source timestamps
+    source_created_at = Column(DateTime(timezone=True), nullable=True)
+    source_modified_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Indexing timestamps
+    first_indexed_at = Column(DateTime(timezone=True), nullable=True)
+    last_indexed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    channel = relationship("InformationChannel", back_populates="documents")
+
+    __table_args__ = (
+        UniqueConstraint('channel_id', 'external_id', name='uq_channel_document_external'),
+        Index('idx_channel_docs_status', 'channel_id', 'status'),
+        Index('idx_channel_docs_hash', 'content_hash'),
+        Index('idx_channel_docs_weaviate', 'weaviate_id'),
+    )
+
+
+class ChannelSyncLog(Base):
+    """
+    Audit log for channel synchronization operations.
+
+    Tracks each sync execution with timing, results, and errors.
+    Used for monitoring, debugging, and displaying sync history in UI.
+    """
+    __tablename__ = "channel_sync_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("information_channels.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Sync execution
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(30), nullable=False, index=True)  # running, success, partial, failed
+    trigger_type = Column(String(20), nullable=False)  # manual, scheduled, webhook
+
+    # Results
+    items_found = Column(Integer, default=0, nullable=False)
+    items_new = Column(Integer, default=0, nullable=False)
+    items_updated = Column(Integer, default=0, nullable=False)
+    items_deleted = Column(Integer, default=0, nullable=False)
+    items_failed = Column(Integer, default=0, nullable=False)
+
+    # Error details
+    error_message = Column(Text, nullable=True)
+    error_details = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    channel = relationship("InformationChannel", back_populates="sync_logs")
+
+    __table_args__ = (
+        Index('idx_sync_logs_channel_started', 'channel_id', 'started_at'),
+        Index('idx_sync_logs_status', 'status'),
+    )
+
+
 class LGPDDeletionAudit(Base):
     """LGPD User Deletion Audit Trail for compliance"""
     __tablename__ = "lgpd_deletion_audits"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # Don't FK since user will be deleted
     user_email = Column(String(255), nullable=False)  # Keep for audit
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    
+
     reason = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default="pending")  # pending, in_progress, completed, failed
-    
+
     started_at = Column(DateTime(timezone=True), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    
+
     # Deletion results
     deletion_summary = Column(JSONB, nullable=True)
     total_records_deleted = Column(Integer, nullable=True, default=0)
     anonymized_records = Column(Integer, nullable=True, default=0)
-    
+
     # LGPD compliance fields
     lgpd_article = Column(String(50), nullable=False, default="Article 18")
     deletion_method = Column(String(100), nullable=False, default="complete_data_destruction")
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+
     # Relationships
     requested_by_user = relationship("User")
     tenant = relationship("Tenant")
-    
+
     __table_args__ = (
         Index('idx_lgpd_deletions_tenant_status', 'tenant_id', 'status'),
         Index('idx_lgpd_deletions_user_date', 'user_id', 'created_at'),
+    )
+
+
+# =====================================
+# DOCUMENT ACCESS CONTROL (ACL)
+# =====================================
+
+class DocumentACL(Base):
+    """
+    Document-level Access Control List entry.
+
+    Each ACL entry grants permissions to a specific grantee (user, role, or everyone)
+    for a specific document. Permissions are granular: view, edit, delete, share.
+
+    Access hierarchy:
+    1. Document owner always has full access
+    2. Tenant admin always has full access
+    3. Explicit user ACL
+    4. Role-based ACL (any matching role grants access)
+    5. 'everyone' ACL (all tenant users)
+    6. Default: deny
+    """
+    __tablename__ = "document_acls"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Grantee: user, role, or everyone
+    grantee_type = Column(String(20), nullable=False)  # 'user', 'role', 'everyone'
+    grantee_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # NULL when grantee_type='everyone'
+
+    # Granular permissions
+    can_view = Column(Boolean, default=True, nullable=False)
+    can_edit = Column(Boolean, default=False, nullable=False)
+    can_delete = Column(Boolean, default=False, nullable=False)
+    can_share = Column(Boolean, default=False, nullable=False)
+
+    # Metadata
+    granted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    source = Column(String(50), default='manual', nullable=False)  # manual, share_link, inherited, migration
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    document = relationship("Document", backref="acls")
+    tenant = relationship("Tenant")
+    granter = relationship("User", foreign_keys=[granted_by])
+    # Note: grantee relationship depends on grantee_type - use service layer to resolve
+
+    __table_args__ = (
+        UniqueConstraint('document_id', 'grantee_type', 'grantee_id', name='uq_document_acl_grantee'),
+        Index('idx_document_acls_tenant_grantee', 'tenant_id', 'grantee_type'),
+        Index('idx_document_acls_document_view', 'document_id', 'can_view'),
+    )
+
+    def is_expired(self) -> bool:
+        """Check if this ACL entry has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+    def to_permissions_dict(self) -> dict:
+        """Return permissions as a dictionary."""
+        return {
+            "can_view": self.can_view,
+            "can_edit": self.can_edit,
+            "can_delete": self.can_delete,
+            "can_share": self.can_share,
+        }
+
+
+class DocumentACLAudit(Base):
+    """
+    Audit trail for document ACL changes.
+
+    Records all ACL operations (granted, revoked, modified, expired) with
+    before/after state for compliance and debugging. No foreign keys to
+    allow audit retention even after document/user deletion.
+    """
+    __tablename__ = "document_acl_audits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # No FK - document may be deleted
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # No FK - for audit retention
+    acl_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to the ACL entry (may be deleted)
+
+    # Action details
+    action = Column(String(20), nullable=False, index=True)  # granted, revoked, modified, expired
+    grantee_type = Column(String(20), nullable=False)
+    grantee_id = Column(UUID(as_uuid=True), nullable=True)
+
+    # Permission state
+    permissions_before = Column(JSONB, nullable=True)
+    permissions_after = Column(JSONB, nullable=True)
+
+    # Actor
+    performed_by = Column(UUID(as_uuid=True), nullable=True)  # NULL for system actions like expiration
+    source = Column(String(50), nullable=True)  # Where the action originated
+
+    # Context
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index('idx_acl_audits_tenant_created', 'tenant_id', 'created_at'),
+        Index('idx_acl_audits_document_action', 'document_id', 'action'),
     )

@@ -25,6 +25,23 @@ class Jurisdiction(str, Enum):
     REGIONAL = "regional"  # Comunidades autónomas, etc.
 
 
+class LegalStatus(str, Enum):
+    """Legal status of a document"""
+    VIGENTE = "vigente"
+    DEROGADA = "derogada"
+    PARCIALMENTE_DEROGADA = "parcialmente_derogada"
+    PENDIENTE = "pendiente"  # Pendiente de entrada en vigor
+
+
+class ModificationType(str, Enum):
+    """Type of modification for versioned documents"""
+    ORIGINAL = "original"  # Texto original publicado
+    MODIFICACION = "modificacion"  # Modificación de artículos
+    CORRECCION = "correccion"  # Corrección de errores
+    DEROGACION_PARCIAL = "derogacion_parcial"  # Derogación de artículos
+    REFUNDIDO = "refundido"  # Texto refundido
+
+
 class PublicDocumentCreate(BaseModel):
     """Schema for creating public knowledge documents"""
     id: Optional[str] = None
@@ -55,6 +72,27 @@ class PublicDocumentCreate(BaseModel):
     # Quality metadata
     verified: bool = Field(default=False, description="Whether document has been verified")
     version: str = Field(default="1.0", description="Document version")
+
+    # Versioning metadata
+    version_number: int = Field(default=1, description="Numeric version (1, 2, 3...)")
+    is_current_version: bool = Field(default=True, description="Whether this is the current/active version")
+    consolidation_date: Optional[datetime] = Field(None, description="Date of last text consolidation")
+    superseded_by: Optional[str] = Field(None, description="ID of the version that supersedes this one")
+    supersedes: Optional[str] = Field(None, description="ID of the version this one supersedes")
+
+    # Modification tracking
+    modification_type: str = Field(default="original", description="Type: original, modificacion, correccion, derogacion_parcial, refundido")
+    modifying_laws: List[str] = Field(default_factory=list, description="Laws that have modified this document")
+    modified_articles: List[str] = Field(default_factory=list, description="Articles modified in this version")
+
+    # Legal status
+    legal_status: str = Field(default="vigente", description="Status: vigente, derogada, parcialmente_derogada, pendiente")
+    derogated_by: Optional[str] = Field(None, description="Reference of the law that derogates this one")
+    partial_derogations: List[str] = Field(default_factory=list, description="List of derogated articles/sections")
+
+    # Identifiers
+    boe_id: Optional[str] = Field(None, description="BOE identifier (e.g., BOE-A-2018-16673)")
+    eli_uri: Optional[str] = Field(None, description="European Legislation Identifier URI")
 
     class Config:
         json_schema_extra = {
@@ -109,6 +147,27 @@ class PublicDocumentResponse(BaseModel):
     verified: bool = False
     version: str = "1.0"
 
+    # Versioning metadata
+    version_number: int = 1
+    is_current_version: bool = True
+    consolidation_date: Optional[datetime] = None
+    superseded_by: Optional[str] = None
+    supersedes: Optional[str] = None
+
+    # Modification tracking
+    modification_type: str = "original"
+    modifying_laws: List[str] = []
+    modified_articles: List[str] = []
+
+    # Legal status
+    legal_status: str = "vigente"
+    derogated_by: Optional[str] = None
+    partial_derogations: List[str] = []
+
+    # Identifiers
+    boe_id: Optional[str] = None
+    eli_uri: Optional[str] = None
+
     # Timestamps
     created_at: datetime
     updated_at: datetime
@@ -135,6 +194,11 @@ class PublicSearchRequest(BaseModel):
     search_type: str = Field(default="hybrid", pattern="^(vector|keyword|hybrid)$")
     include_expired: bool = Field(default=False, description="Include expired documents")
 
+    # Version filtering
+    current_version_only: bool = Field(default=True, description="Only return current/active versions")
+    legal_status: Optional[List[str]] = Field(None, description="Filter by legal status: vigente, derogada, etc.")
+    as_of_date: Optional[datetime] = Field(None, description="Get version that was effective at this date")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -144,7 +208,9 @@ class PublicSearchRequest(BaseModel):
                 "jurisdictions": ["es", "eu"],
                 "topics": ["proteccion_datos", "laboral"],
                 "verified_only": True,
-                "search_type": "hybrid"
+                "search_type": "hybrid",
+                "current_version_only": True,
+                "legal_status": ["vigente"]
             }
         }
 

@@ -5,6 +5,7 @@ import { Input, InputProps } from "@/components/ui/input"
 import { Textarea, TextareaProps } from "@/components/ui/textarea"
 import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
 import { createEntityTag, findEntityAtPosition } from "@/components/ui/entity-renderer"
+import { getCharacterCoordinates } from "@/lib/caret-utils"
 
 interface Entity {
   id: string
@@ -40,66 +41,74 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
+    const [cursorPosition, setCursorPosition] = useState<{ top: number; left: number } | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
-    
+
     // Use forwarded ref or internal ref
     const actualRef = ref || inputRef
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = e.target.value
-      const cursorPosition = e.target.selectionStart || 0
-      
+      const cursorPos = e.target.selectionStart || 0
+
       onChange(newValue)
-      
+
       // Check for mention trigger only if cursor is after a @
-      const triggerIndex = newValue.lastIndexOf(mentionTrigger, cursorPosition - 1)
-      
+      const triggerIndex = newValue.lastIndexOf(mentionTrigger, cursorPos - 1)
+
       // Only process if @ is found and cursor is after it
-      if (triggerIndex !== -1 && cursorPosition > triggerIndex) {
+      if (triggerIndex !== -1 && cursorPos > triggerIndex) {
         // Check if this is a valid mention (not inside a word)
         const beforeTrigger = triggerIndex === 0 ? '' : newValue[triggerIndex - 1]
         const isValidMention = triggerIndex === 0 || /\s/.test(beforeTrigger)
-        
+
         if (isValidMention) {
-          const query = newValue.substring(triggerIndex + 1, cursorPosition)
-          
-          // Only open if query doesn't contain spaces and has at least 1 character
-          if (!query.includes(' ') && !query.includes('\n') && query.length > 0) {
+          const query = newValue.substring(triggerIndex + 1, cursorPos)
+
+          // Open dropdown immediately when @ is typed (allow empty query)
+          if (!query.includes(' ') && !query.includes('\n')) {
             setEntitySearchQuery(query)
             setMentionStart(triggerIndex)
+
+            // Calculate cursor position for dropdown placement
+            const coords = getCharacterCoordinates(e.target, triggerIndex)
+            setCursorPosition(coords)
+
             setEntitySearchOpen(true)
             return
           }
         }
       }
-      
+
       // Close search if no valid mention found or cursor moved away from @
       if (entitySearchOpen) {
         setEntitySearchOpen(false)
         setEntitySearchQuery('')
         setMentionStart(-1)
+        setCursorPosition(null)
       }
     }
 
     const handleEntitySelect = (entity: Entity) => {
       if (mentionStart === -1) return
-      
+
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
       const newValue = autoInsertEntityTag
         ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
         : beforeMention + afterMention
-      
+
       onChange(newValue)
       setEntitySearchOpen(false)
       setEntitySearchQuery('')
       setMentionStart(-1)
-      
+      setCursorPosition(null)
+
       // Call custom entity select handler if provided
       if (onEntitySelect) {
         onEntitySelect(entity)
       }
-      
+
       // Focus back to input
       if (actualRef && 'current' in actualRef && actualRef.current) {
         actualRef.current.focus()
@@ -111,8 +120,9 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
         setEntitySearchOpen(false)
         setEntitySearchQuery('')
         setMentionStart(-1)
+        setCursorPosition(null)
         e.preventDefault()
-        
+
         // Return focus to input after closing dropdown
         setTimeout(() => {
           if (actualRef && 'current' in actualRef && actualRef.current) {
@@ -172,7 +182,8 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
               setEntitySearchOpen(false)
               setEntitySearchQuery('')
               setMentionStart(-1)
-              
+              setCursorPosition(null)
+
               // Return focus to input when closed from dropdown
               setTimeout(() => {
                 if (actualRef && 'current' in actualRef && actualRef.current) {
@@ -183,6 +194,7 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
             searchQuery={entitySearchQuery}
             anchorRef={actualRef && 'current' in actualRef ? actualRef.current : null}
             documentId={documentId}
+            cursorPosition={cursorPosition}
           />
         )}
       </div>
@@ -197,66 +209,74 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
+    const [cursorPosition, setCursorPosition] = useState<{ top: number; left: number } | null>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    
+
     // Use forwarded ref or internal ref
     const actualRef = ref || textareaRef
 
     const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newValue = e.target.value
-      const cursorPosition = e.target.selectionStart || 0
-      
+      const cursorPos = e.target.selectionStart || 0
+
       onChange(newValue)
-      
+
       // Check for mention trigger only if cursor is after a @
-      const triggerIndex = newValue.lastIndexOf(mentionTrigger, cursorPosition - 1)
-      
+      const triggerIndex = newValue.lastIndexOf(mentionTrigger, cursorPos - 1)
+
       // Only process if @ is found and cursor is after it
-      if (triggerIndex !== -1 && cursorPosition > triggerIndex) {
+      if (triggerIndex !== -1 && cursorPos > triggerIndex) {
         // Check if this is a valid mention (not inside a word)
         const beforeTrigger = triggerIndex === 0 ? '' : newValue[triggerIndex - 1]
         const isValidMention = triggerIndex === 0 || /\s/.test(beforeTrigger)
-        
+
         if (isValidMention) {
-          const query = newValue.substring(triggerIndex + 1, cursorPosition)
-          
-          // Only open if query doesn't contain spaces and has at least 1 character
-          if (!query.includes(' ') && !query.includes('\n') && query.length > 0) {
+          const query = newValue.substring(triggerIndex + 1, cursorPos)
+
+          // Open dropdown immediately when @ is typed (allow empty query)
+          if (!query.includes(' ') && !query.includes('\n')) {
             setEntitySearchQuery(query)
             setMentionStart(triggerIndex)
+
+            // Calculate cursor position for dropdown placement
+            const coords = getCharacterCoordinates(e.target, triggerIndex)
+            setCursorPosition(coords)
+
             setEntitySearchOpen(true)
             return
           }
         }
       }
-      
+
       // Close search if no valid mention found
       if (entitySearchOpen) {
         setEntitySearchOpen(false)
         setEntitySearchQuery('')
         setMentionStart(-1)
+        setCursorPosition(null)
       }
     }
 
     const handleEntitySelect = (entity: Entity) => {
       if (mentionStart === -1) return
-      
+
       const beforeMention = value.substring(0, mentionStart)
       const afterMention = value.substring(mentionStart + entitySearchQuery.length + 1)
       const newValue = autoInsertEntityTag
         ? beforeMention + createEntityTag({ type: entity.type, id: entity.id, name: entity.name }) + afterMention
         : beforeMention + afterMention
-      
+
       onChange(newValue)
       setEntitySearchOpen(false)
       setEntitySearchQuery('')
       setMentionStart(-1)
-      
+      setCursorPosition(null)
+
       // Call custom entity select handler if provided
       if (onEntitySelect) {
         onEntitySelect(entity)
       }
-      
+
       // Focus back to textarea
       if (actualRef && 'current' in actualRef && actualRef.current) {
         actualRef.current.focus()
@@ -268,8 +288,9 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
         setEntitySearchOpen(false)
         setEntitySearchQuery('')
         setMentionStart(-1)
+        setCursorPosition(null)
         e.preventDefault()
-        
+
         // Return focus to textarea after closing dropdown
         setTimeout(() => {
           if (actualRef && 'current' in actualRef && actualRef.current) {
@@ -331,7 +352,8 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
               setEntitySearchOpen(false)
               setEntitySearchQuery('')
               setMentionStart(-1)
-              
+              setCursorPosition(null)
+
               // Return focus to input when closed from dropdown
               setTimeout(() => {
                 if (actualRef && 'current' in actualRef && actualRef.current) {
@@ -342,6 +364,7 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
             searchQuery={entitySearchQuery}
             anchorRef={actualRef && 'current' in actualRef ? actualRef.current : null}
             documentId={documentId}
+            cursorPosition={cursorPosition}
           />
         )}
       </div>

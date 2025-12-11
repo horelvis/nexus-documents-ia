@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { 
   IconDatabase, 
   IconRefresh, 
@@ -33,7 +33,7 @@ import { UserDeletionDialog } from "@/components/lgpd/user-deletion-dialog"
 import { useTranslation } from "@/lib/i18n/hooks"
 
 export default function TenantSettingsPage() {
-  const { backendUser: user } = useBackendUser()
+  const { backendUser: user, userLoading } = useBackendUser()
   const { addNotification } = useNotifications()
   const tenantService = useTenantService()
   const { t, language } = useTranslation()
@@ -63,7 +63,8 @@ export default function TenantSettingsPage() {
       )
   )
 
-  const loadTenantData = useCallback(async () => {
+  // Simple data loading function
+  const loadTenantData = async () => {
     setIsLoading(true)
     try {
       const [infoResponse, statsResponse, indexResponse] = await Promise.all([
@@ -76,30 +77,29 @@ export default function TenantSettingsPage() {
       if (!statsResponse.error) setTenantStats(statsResponse.data)
       if (!indexResponse.error) setReindexStatus(indexResponse.data)
     } catch (error) {
-      console.error(error)
-      addNotification({
-        type: 'error',
-        title: t('tenantSettings.notifications.loadError.title'),
-        message: t('tenantSettings.notifications.loadError.message')
-      })
+      console.error('Failed to load tenant data:', error)
     } finally {
       setIsLoading(false)
     }
-  }, [addNotification, tenantService, t])
+  }
 
+  // Load data on mount when user is admin
   useEffect(() => {
-    if (!user) {
-      return
-    }
+    // Wait for user context to finish loading
+    if (userLoading) return
 
-    if (!isAdmin) {
+    // User loaded but not admin or no user
+    if (!user || !isAdmin) {
       setIsLoading(false)
       return
     }
 
+    // User is admin, load data
     loadTenantData()
-  }, [isAdmin, loadTenantData, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLoading, user, isAdmin])
 
+  // Polling for reindex status
   useEffect(() => {
     let intervalId: NodeJS.Timeout
 
@@ -109,7 +109,7 @@ export default function TenantSettingsPage() {
           const statusResponse = await tenantService.getReindexStatus()
           if (!statusResponse.error && statusResponse.data) {
             const status = statusResponse.data
-            
+
             const total = status.total_documents || 1
             const indexed = status.indexed_documents || 0
             const percentage = Math.min(Math.round((indexed / total) * 100), 100)
@@ -119,7 +119,7 @@ export default function TenantSettingsPage() {
               total: total,
               percentage: percentage
             })
-            
+
             setReindexStatus(status)
 
             if (reindexPhase === 'progress' && percentage === 100 && status.missing_documents === 0) {
@@ -138,7 +138,8 @@ export default function TenantSettingsPage() {
     return () => {
       if (intervalId) clearInterval(intervalId)
     }
-  }, [reindexDialogOpen, reindexPhase, tenantService])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reindexDialogOpen, reindexPhase])
 
   const handleReindexMissing = async () => {
     setIsReindexing(true)
@@ -291,7 +292,7 @@ export default function TenantSettingsPage() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading || userLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <IconLoader2 className="h-8 w-8 animate-spin" />
@@ -299,7 +300,7 @@ export default function TenantSettingsPage() {
     )
   }
 
-  if (!isAdmin) {
+  if (!user || !isAdmin) {
     return (
       <div className="space-y-4 p-4 md:p-6">
         <Alert>
@@ -468,9 +469,10 @@ export default function TenantSettingsPage() {
             <div className="rounded-lg bg-muted p-4">
               <h4 className="mb-2 font-medium">{t('tenantSettings.maintenance.tasksTitle')}</h4>
               <ul className="space-y-1 text-sm text-muted-foreground">
-                {t('tenantSettings.maintenance.tasks', { returnObjects: true }).map((task: string, index: number) => (
-                  <li key={index}>• {task}</li>
-                ))}
+                <li>• {t('tenantSettings.maintenance.task1')}</li>
+                <li>• {t('tenantSettings.maintenance.task2')}</li>
+                <li>• {t('tenantSettings.maintenance.task3')}</li>
+                <li>• {t('tenantSettings.maintenance.task4')}</li>
               </ul>
             </div>
 

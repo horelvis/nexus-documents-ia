@@ -37,7 +37,7 @@ graph TB
 
     %% Microservicios de IA
     subgraph "🧠 AI Services"
-        WeaviateSvc[🤖 Weaviate + Elysia Service<br/>Internal: 8000]
+        WeaviateSvc[🤖 Weaviate + AutoGen Service<br/>Internal: 8000]
         LangExtractSvc[🏷️ LangExtract Service<br/>Internal: 8000]
         TextExtractSvc[📑 TextExtract Service<br/>Internal: 8000]
         TemplateSvc[🧩 Template Editor Service<br/>Internal: 8000]
@@ -137,13 +137,25 @@ graph TB
     class GCS,Stripe,SignatureProviders,EmailSvc,WebSearch,WeatherAPI external
 ```
 
-## Rol de Elysia en la Arquitectura
+## Rol de AutoGen en la Arquitectura
 
-El bloque `Weaviate + Elysia Service` del diagrama representa la **AI-native database** de Weaviate (Elysia). Esta capa sustituye al antiguo combo “vector DB + motor RAG” y ofrece un stack unificado que incluye:
+El bloque `Weaviate + AutoGen Service` del diagrama representa la capa de inteligencia artificial del sistema. Esta capa integra:
 
-- **Vectores + embeddings multimodales** (texto, imagen, audio)
-- **Documentos crudos y metadata relacional**
-- **Motor RAG con indexación híbrida grafo/vector**
-- **Seleccionador de herramientas y orquestación de workflows IA**
+- **Microsoft AutoGen 0.4.8+**: Framework de orquestación multi-agente
+- **RAG Pipeline de 7 capas**: Búsqueda híbrida, reranking y generación validada
+- **Weaviate Vector Database**: Almacenamiento de embeddings y búsqueda semántica
+- **5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
 
-Elysia se encarga también de gestionar el modelo LLM que se utilizará (Ollama local u OpenAI) leyendo la configuración global (`LLM_PROVIDER`, `LLM_MODEL`, `OPENAI_MODEL`). De esta forma, los servicios de negocio y el API principal solo necesitan “hablar” con `weaviate-service` y no deben duplicar lógica para elegir modelos, gestionar embeddings o buscar documentos.
+### Patrones de Orquestación
+- **Sequential (RoundRobinGroupChat)**: Pipeline ordenado Search → Analyze → Summarize
+- **GroupChat (SelectorGroupChat)**: LLM selecciona dinámicamente el agente apropiado
+- **Swarm (Handoffs)**: Delegación explícita entre agentes con triage
+
+### Multi-Provider LLM
+El servicio gestiona múltiples proveedores de LLM mediante la configuración:
+- `LLM_PROVIDER=ollama` - Modelos locales (llama3.2, qwen2.5, mistral)
+- `LLM_PROVIDER=openai` - GPT-4o, GPT-4o-mini
+- `LLM_PROVIDER=anthropic` - Claude 3.5 Sonnet, Claude 3 Opus
+- `LLM_PROVIDER=google` - Gemini 1.5 Flash, Gemini 1.5 Pro
+
+De esta forma, los servicios de negocio y el API principal solo necesitan "hablar" con `weaviate-service` y no deben duplicar lógica para elegir modelos, gestionar embeddings o buscar documentos.

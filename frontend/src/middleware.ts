@@ -8,6 +8,8 @@ const isPublicRoute = createRouteMatcher([
   '/auth/sign-up(.*)',
   '/auth/sign-out(.*)',
   '/auth/redirect',
+  '/user-not-found',
+  '/tenant-not-found',
   '/shared/(.*)',  // Public share links
   '/integrations/(.*)'
 ])
@@ -87,6 +89,10 @@ export default clerkMiddleware(async (auth, req) => {
               console.log('[Middleware] No valid subscription, redirecting to plans')
               return NextResponse.redirect(new URL(`/${tenantId}/plans`, req.url))
             }
+          } else if (userResponse.status === 404) {
+            // User exists in Clerk but not registered in backend - redirect to user-not-found
+            console.log('[Middleware] User in Clerk but not in backend, redirecting to user-not-found')
+            return NextResponse.redirect(new URL('/user-not-found', req.url))
           }
         } catch (fetchError) {
           // If backend is unreachable, allow access (don't break the app)

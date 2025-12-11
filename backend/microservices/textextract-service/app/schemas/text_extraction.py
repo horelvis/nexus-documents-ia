@@ -1,18 +1,9 @@
 """
 Pydantic schemas for text extraction endpoints.
 """
-from enum import Enum
 from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
-
-
-class ExtractionStrategy(str, Enum):
-    """Available extraction strategies."""
-
-    auto = "auto"
-    fast = "fast"
-    hi_res = "hi_res"
 
 
 class ExtractionResponse(BaseModel):
@@ -22,6 +13,7 @@ class ExtractionResponse(BaseModel):
     text: str
     characters: int = Field(..., description="Number of characters in the extracted text")
     language: Optional[str] = Field(None, description="Detected language code (ISO 639-1)")
+    content_type: Optional[str] = Field(None, description="MIME type of the document")
     metadata: Dict[str, Optional[str]] = Field(default_factory=dict)
 
 
@@ -31,4 +23,4 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
-    strategies: Dict[str, str]
+    backend: str = Field(default="apache-tika", description="Text extraction backend")

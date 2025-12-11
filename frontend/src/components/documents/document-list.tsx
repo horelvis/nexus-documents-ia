@@ -12,6 +12,12 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   IconFile,
   IconFileText,
   IconFileTypePdf,
@@ -28,9 +34,17 @@ import {
   IconDotsVertical,
   IconAlertTriangle,
   IconWeight,
-  IconMessageCircle
+  IconMessageCircle,
+  IconCheck,
+  IconLock,
+  IconUsers,
+  IconWorld,
+  IconShieldCheck,
+  IconUserCheck
 } from "@tabler/icons-react"
+import { Checkbox } from "@/components/ui/checkbox"
 import { formatDistanceToNow } from "date-fns"
+import { EffectivePermissions } from "@/lib/types"
 
 interface DocumentListProps {
   documents: any[]
@@ -43,9 +57,16 @@ interface DocumentListProps {
   onDownload?: (document: any) => void
   onDelete?: (document: any) => void
   onShare?: (document: any) => void
+  onEdit?: (document: any) => void
   onSignature?: (document: any) => void
   onAskEmma?: (document: any) => void
   emptyMessage?: string
+  // Selection props
+  selectable?: boolean
+  selectedIds?: Set<string>
+  onToggleSelection?: (documentId: string) => void
+  // ACL permissions - if provided, actions are filtered based on permissions
+  showPermissionBadges?: boolean
 }
 
 interface DocumentItemProps {
@@ -57,8 +78,15 @@ interface DocumentItemProps {
   onDownload?: (document: any) => void
   onDelete?: (document: any) => void
   onShare?: (document: any) => void
+  onEdit?: (document: any) => void
   onSignature?: (document: any) => void
   onAskEmma?: (document: any) => void
+  // Selection props
+  selectable?: boolean
+  isSelected?: boolean
+  onToggleSelection?: () => void
+  // ACL permissions
+  showPermissionBadges?: boolean
 }
 
 // Helper functions
@@ -123,6 +151,65 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
+// Get effective permissions from document (if available)
+const getDocumentPermissions = (document: any): EffectivePermissions | null => {
+  return document.current_user_permissions || null
+}
+
+// Determine visibility badge based on ACL info
+const getVisibilityInfo = (document: any): { type: 'private' | 'shared' | 'public'; label: string; icon: React.ReactNode } => {
+  const permissions = getDocumentPermissions(document)
+
+  // If we have explicit visibility
+  if (document.visibility) {
+    switch (document.visibility) {
+      case 'public':
+        return { type: 'public', label: 'Público', icon: <IconWorld className="h-3 w-3" /> }
+      case 'shared':
+        return { type: 'shared', label: 'Compartido', icon: <IconUsers className="h-3 w-3" /> }
+      default:
+        return { type: 'private', label: 'Privado', icon: <IconLock className="h-3 w-3" /> }
+    }
+  }
+
+  // Infer from permissions
+  if (permissions) {
+    if (permissions.from_everyone_acl) {
+      return { type: 'public', label: 'Público', icon: <IconWorld className="h-3 w-3" /> }
+    }
+    if (permissions.from_user_acl || permissions.from_role_acl) {
+      return { type: 'shared', label: 'Compartido', icon: <IconUsers className="h-3 w-3" /> }
+    }
+    if (permissions.is_owner) {
+      return { type: 'private', label: 'Propietario', icon: <IconUserCheck className="h-3 w-3" /> }
+    }
+  }
+
+  // Default (no ACL info available - assume public for backwards compatibility)
+  return { type: 'public', label: 'Público', icon: <IconWorld className="h-3 w-3" /> }
+}
+
+// Check if user can perform action based on permissions
+const canPerformAction = (document: any, action: 'view' | 'edit' | 'delete' | 'share'): boolean => {
+  const permissions = getDocumentPermissions(document)
+
+  // If no permissions info, allow all (backwards compatibility)
+  if (!permissions) return true
+
+  switch (action) {
+    case 'view':
+      return permissions.can_view
+    case 'edit':
+      return permissions.can_edit
+    case 'delete':
+      return permissions.can_delete
+    case 'share':
+      return permissions.can_share
+    default:
+      return false
+  }
+}
+
 function DocumentItem({
   document,
   showScore,
@@ -132,37 +219,142 @@ function DocumentItem({
   onDownload,
   onDelete,
   onShare,
+  onEdit,
   onSignature,
-  onAskEmma
+  onAskEmma,
+  selectable = false,
+  isSelected = false,
+  onToggleSelection,
+  showPermissionBadges = false
 }: DocumentItemProps) {
+  // Get permissions and visibility info
+  const permissions = getDocumentPermissions(document)
+  const visibilityInfo = getVisibilityInfo(document)
+
+  // Check permissions for each action
+  const canView = canPerformAction(document, 'view')
+  const canEdit = canPerformAction(document, 'edit')
+  const canDelete = canPerformAction(document, 'delete')
+  const canShare = canPerformAction(document, 'share')
+
   const handleAction = (action: string, e: React.MouseEvent) => {
     e.stopPropagation()
 
     switch (action) {
       case 'download':
-        onDownload?.(document)
+        if (canView) onDownload?.(document)
         break
       case 'delete':
-        onDelete?.(document)
+        if (canDelete) onDelete?.(document)
         break
       case 'share':
-        onShare?.(document)
+        if (canShare) onShare?.(document)
+        break
+      case 'edit':
+        if (canEdit) onEdit?.(document)
         break
       case 'signature':
-        onSignature?.(document)
+        if (canEdit) onSignature?.(document)
         break
       case 'askEmma':
-        onAskEmma?.(document)
+        if (canView) onAskEmma?.(document)
         break
     }
+  }
+
+  // Visibility badge component
+  const VisibilityBadge = () => {
+    if (!showPermissionBadges) return null
+
+    const badgeColors = {
+      private: 'bg-gray-100 text-gray-700 border-gray-300',
+      shared: 'bg-blue-100 text-blue-700 border-blue-300',
+      public: 'bg-green-100 text-green-700 border-green-300'
+    }
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge
+              variant="outline"
+              className={`text-[10px] px-1.5 py-0 h-5 gap-1 ${badgeColors[visibilityInfo.type]}`}
+            >
+              {visibilityInfo.icon}
+              {visibilityInfo.label}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="text-xs">
+              {visibilityInfo.type === 'private' && 'Solo tú puedes ver este documento'}
+              {visibilityInfo.type === 'shared' && 'Compartido con usuarios específicos'}
+              {visibilityInfo.type === 'public' && 'Visible para todos en el tenant'}
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  // Permission indicator for owner/admin
+  const PermissionIndicator = () => {
+    if (!showPermissionBadges || !permissions) return null
+
+    if (permissions.is_owner) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1 bg-amber-100 text-amber-700 border-amber-300">
+                <IconShieldCheck className="h-3 w-3" />
+                Propietario
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs">Tienes control total sobre este documento</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
+
+    if (permissions.is_admin) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1 bg-purple-100 text-purple-700 border-purple-300">
+                <IconShieldCheck className="h-3 w-3" />
+                Admin
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs">Acceso administrativo completo</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
+
+    return null
   }
 
   if (useDetailedView) {
     // Detailed view matching Document Library design
     return (
-      <Card className="hover:shadow-lg transition-shadow cursor-default group">
+      <Card className={`hover:shadow-lg transition-shadow cursor-default group ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
         <CardContent className="p-4">
           <div className="flex items-start gap-3">
+            {/* Selection Checkbox */}
+            {selectable && (
+              <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => onToggleSelection?.()}
+                  className="h-5 w-5"
+                />
+              </div>
+            )}
             {/* File Icon */}
             <div className="flex-shrink-0">
               {getFileIcon(document.file_type, document.mime_type, document.filename)}
@@ -184,16 +376,19 @@ function DocumentItem({
                     {document.description}
                   </p>
                 )}
-                {document.category && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                {/* Category and Permission badges */}
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {document.category && (
                     <Badge
                       variant="secondary"
                       className="text-[10px] uppercase tracking-wide bg-primary/10 text-primary border-primary/20"
                     >
                       {document.category}
                     </Badge>
-                  </div>
-                )}
+                  )}
+                  <VisibilityBadge />
+                  <PermissionIndicator />
+                </div>
               </div>
 
             </div>
@@ -245,37 +440,43 @@ function DocumentItem({
 
                 {/* Actions */}
                 <div className="flex gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                  {/* 3 Main Actions */}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDocumentClick?.(document)
-                    }}
-                    title="Ver documento"
-                    className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                  >
-                    <IconEye className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={(e) => handleAction('download', e)}
-                    title="Descargar"
-                    className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                  >
-                    <IconDownload className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={(e) => handleAction('share', e)}
-                    title="Compartir"
-                    className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
-                  >
-                    <IconShare2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {/* 3 Main Actions - conditioned by permissions */}
+                  {canView && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDocumentClick?.(document)
+                      }}
+                      title="Ver documento"
+                      className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
+                    >
+                      <IconEye className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  {canView && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => handleAction('download', e)}
+                      title="Descargar"
+                      className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
+                    >
+                      <IconDownload className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  {canShare && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => handleAction('share', e)}
+                      title="Compartir"
+                      className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
+                    >
+                      <IconShare2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
 
                   {/* More Actions Dropdown */}
                   <DropdownMenu>
@@ -284,36 +485,50 @@ function DocumentItem({
                         size="sm"
                         variant="ghost"
                         onClick={(e) => e.stopPropagation()}
-                        title="More actions"
+                        title="Más acciones"
                         className="h-7 w-7 p-0 opacity-80 group-hover:opacity-100"
                       >
                         <IconDotsVertical className="h-3.5 w-3.5" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDocumentClick?.(document) }}>
-                        <IconEye className="mr-2 h-4 w-4" />
-                        Ver documento
-                      </DropdownMenuItem>
-                      {onAskEmma && (
+                      {canView && (
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDocumentClick?.(document) }}>
+                          <IconEye className="mr-2 h-4 w-4" />
+                          Ver documento
+                        </DropdownMenuItem>
+                      )}
+                      {canView && onAskEmma && (
                         <DropdownMenuItem onClick={(e) => handleAction('askEmma', e)}>
                           <IconMessageCircle className="mr-2 h-4 w-4" />
                           Ask Emma
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
-                        <IconDownload className="mr-2 h-4 w-4" />
-                        Descargar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
-                        <IconSignature className="mr-2 h-4 w-4" />
-                        Solicitar firma
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
-                        <IconShare2 className="mr-2 h-4 w-4" />
-                        Compartir
-                      </DropdownMenuItem>
-                      {onDelete && (
+                      {canView && (
+                        <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
+                          <IconDownload className="mr-2 h-4 w-4" />
+                          Descargar
+                        </DropdownMenuItem>
+                      )}
+                      {canEdit && onEdit && (
+                        <DropdownMenuItem onClick={(e) => handleAction('edit', e)}>
+                          <IconEdit className="mr-2 h-4 w-4" />
+                          Editar
+                        </DropdownMenuItem>
+                      )}
+                      {canEdit && (
+                        <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
+                          <IconSignature className="mr-2 h-4 w-4" />
+                          Solicitar firma
+                        </DropdownMenuItem>
+                      )}
+                      {canShare && (
+                        <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
+                          <IconShare2 className="mr-2 h-4 w-4" />
+                          Compartir
+                        </DropdownMenuItem>
+                      )}
+                      {canDelete && onDelete && (
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -349,9 +564,19 @@ function DocumentItem({
 
   // Simple view (original design)
   return (
-    <Card className="hover:shadow-lg transition-shadow cursor-default group">
+    <Card className={`hover:shadow-lg transition-shadow cursor-default group ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
+          {/* Selection Checkbox */}
+          {selectable && (
+            <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={() => onToggleSelection?.()}
+                className="h-5 w-5"
+              />
+            </div>
+          )}
           {/* File Icon */}
           <div className="flex-shrink-0">
             {getFileIcon(document.file_type, document.mime_type, document.filename)}
@@ -373,16 +598,19 @@ function DocumentItem({
                     {document.description}
                   </p>
                 )}
-                {document.category && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                {/* Category and Permission badges */}
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {document.category && (
                     <Badge
                       variant="secondary"
                       className="text-[10px] uppercase tracking-wide bg-primary/10 text-primary border-primary/20"
                     >
                       {document.category}
                     </Badge>
-                  </div>
-                )}
+                  )}
+                  <VisibilityBadge />
+                  <PermissionIndicator />
+                </div>
               </div>
 
             </div>
@@ -439,17 +667,19 @@ function DocumentItem({
                 )}
               </div>
 
-              {/* Actions */}
+              {/* Actions - conditioned by permissions */}
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={(e) => handleAction('download', e)}
-                  title="Descargar"
-                >
-                  <IconDownload className="h-3 w-3" />
-                </Button>
+                {canView && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={(e) => handleAction('download', e)}
+                    title="Descargar"
+                  >
+                    <IconDownload className="h-3 w-3" />
+                  </Button>
+                )}
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -463,25 +693,37 @@ function DocumentItem({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {onAskEmma && (
+                    {canView && onAskEmma && (
                       <DropdownMenuItem onClick={(e) => handleAction('askEmma', e)}>
                         <IconMessageCircle className="h-4 w-4 mr-2" />
                         Ask Emma
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
-                      <IconDownload className="h-4 w-4 mr-2" />
-                      Descargar
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
-                      <IconShare2 className="h-4 w-4 mr-2" />
-                      Compartir
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
-                      <IconSignature className="h-4 w-4 mr-2" />
-                      Solicitar firma
-                    </DropdownMenuItem>
-                    {onDelete && (
+                    {canView && (
+                      <DropdownMenuItem onClick={(e) => handleAction('download', e)}>
+                        <IconDownload className="h-4 w-4 mr-2" />
+                        Descargar
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && onEdit && (
+                      <DropdownMenuItem onClick={(e) => handleAction('edit', e)}>
+                        <IconEdit className="h-4 w-4 mr-2" />
+                        Editar
+                      </DropdownMenuItem>
+                    )}
+                    {canShare && (
+                      <DropdownMenuItem onClick={(e) => handleAction('share', e)}>
+                        <IconShare2 className="h-4 w-4 mr-2" />
+                        Compartir
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <DropdownMenuItem onClick={(e) => handleAction('signature', e)}>
+                        <IconSignature className="h-4 w-4 mr-2" />
+                        Solicitar firma
+                      </DropdownMenuItem>
+                    )}
+                    {canDelete && onDelete && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -515,9 +757,14 @@ export function DocumentList({
   onDownload,
   onDelete,
   onShare,
+  onEdit,
   onSignature,
   onAskEmma,
-  emptyMessage = "No documents found"
+  emptyMessage = "No documents found",
+  selectable = false,
+  selectedIds,
+  onToggleSelection,
+  showPermissionBadges = false
 }: DocumentListProps) {
   if (loading) {
     return (
@@ -555,8 +802,13 @@ export function DocumentList({
           onDownload={onDownload}
           onDelete={onDelete}
           onShare={onShare}
+          onEdit={onEdit}
           onSignature={onSignature}
           onAskEmma={onAskEmma}
+          selectable={selectable}
+          isSelected={selectedIds?.has(document.id)}
+          onToggleSelection={() => onToggleSelection?.(document.id)}
+          showPermissionBadges={showPermissionBadges}
         />
       ))}
     </div>

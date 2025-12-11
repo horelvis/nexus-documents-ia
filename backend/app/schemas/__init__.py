@@ -1,5 +1,5 @@
-# Auth
-from .auth import TokenResponse, TokenPayload, UserAuth, PasswordResetRequest, PasswordResetConfirm, LoginRequest
+# Auth (minimal - Clerk handles authentication)
+from .auth import TokenPayload
 
 # Billing - Solo Subscription schemas
 from .billing import (
@@ -34,20 +34,50 @@ from .tenant import (
     TenantBase, TenantCreate, TenantUpdate, TenantResponse, TenantWithUsers, Tenant, TenantSettings
 )
 
-# User
+# User (UserCreate removed - users created via Clerk JIT)
 from .user import (
-    UserBase, UserCreate, UserUpdate, User, UserRead, UserResponse,
+    UserBase, UserUpdate, User, UserRead, UserResponse,
     UserImageBase, UserImageCreate, UserImageUpdate, UserImage
 )
 
+# Analysis Queue (Emma AI)
+from .analysis import (
+    AnalysisStatus, AnalysisType,
+    AnalysisQueueRequest, AnalysisBatchRequest,
+    AnalysisStepInfo, AnalysisFinding, AnalysisAnnotation,
+    AnalysisJobBase, AnalysisJobCreate, AnalysisJobProgress, AnalysisJobResult, AnalysisJobListItem,
+    AnalysisQueueStats, AnalysisQueueResponse,
+    AnalysisStreamEvent, AnalysisProgressEvent, AnalysisStepEvent, AnalysisFindingEvent, AnalysisCompletedEvent
+)
+
+# Information Channels
+from .channel import (
+    ChannelType, ChannelVisibility, ChannelSyncStatus, SyncTriggerType,
+    GmailConfig, GoogleDriveConfig, DatabaseType, ExternalDBConfig,
+    ChannelBase, ChannelCreate, ChannelUpdate, ChannelResponse, ChannelListResponse,
+    GmailChannelCreate, GoogleDriveChannelCreate, ExternalDBChannelCreate,
+    SyncLogResponse, SyncHistoryResponse,
+    ChannelDocumentResponse, ChannelDocumentsResponse,
+    OAuthUrlResponse, OAuthCallbackRequest,
+    SyncTriggerRequest, SyncTriggerResponse,
+    DBCredentialsCreate, TestConnectionResponse,
+)
+
+# Document ACL
+from .document_acl import (
+    GranteeType, ACLAction, ACLSource, Permission,
+    PermissionSet,
+    DocumentACLBase, DocumentACLCreate, DocumentACLUpdate, DocumentACLResponse, DocumentACLListResponse,
+    GrantPermissionRequest, GrantPermissionBatchRequest, RevokePermissionRequest,
+    EffectivePermissions, CheckPermissionRequest, CheckPermissionResponse,
+    DocumentACLAuditBase, DocumentACLAuditResponse, DocumentACLAuditListResponse,
+    BulkACLUpdateRequest, BulkACLUpdateResponse,
+    ShareLinkRequest, ShareLinkResponse,
+)
+
 __all__ = [
-    # Auth
-    "TokenResponse",
-    "LoginRequest",
+    # Auth (minimal - Clerk handles authentication)
     "TokenPayload",
-    "UserAuth",
-    "PasswordResetRequest",
-    "PasswordResetConfirm",
     
     # Billing - Solo Subscriptions
     "SubscriptionBase",
@@ -115,7 +145,6 @@ __all__ = [
     
     # User
     "UserBase",
-    "UserCreate",
     "UserUpdate",
     "User",
     "UserRead",
@@ -124,4 +153,78 @@ __all__ = [
     "UserImageCreate",
     "UserImageUpdate",
     "UserImage",
+
+    # Analysis Queue (Emma AI)
+    "AnalysisStatus",
+    "AnalysisType",
+    "AnalysisQueueRequest",
+    "AnalysisBatchRequest",
+    "AnalysisStepInfo",
+    "AnalysisFinding",
+    "AnalysisAnnotation",
+    "AnalysisJobBase",
+    "AnalysisJobCreate",
+    "AnalysisJobProgress",
+    "AnalysisJobResult",
+    "AnalysisJobListItem",
+    "AnalysisQueueStats",
+    "AnalysisQueueResponse",
+    "AnalysisStreamEvent",
+    "AnalysisProgressEvent",
+    "AnalysisStepEvent",
+    "AnalysisFindingEvent",
+    "AnalysisCompletedEvent",
+
+    # Information Channels
+    "ChannelType",
+    "ChannelVisibility",
+    "ChannelSyncStatus",
+    "SyncTriggerType",
+    "GmailConfig",
+    "GoogleDriveConfig",
+    "DatabaseType",
+    "ExternalDBConfig",
+    "ChannelBase",
+    "ChannelCreate",
+    "ChannelUpdate",
+    "ChannelResponse",
+    "ChannelListResponse",
+    "GmailChannelCreate",
+    "GoogleDriveChannelCreate",
+    "ExternalDBChannelCreate",
+    "SyncLogResponse",
+    "SyncHistoryResponse",
+    "ChannelDocumentResponse",
+    "ChannelDocumentsResponse",
+    "OAuthUrlResponse",
+    "OAuthCallbackRequest",
+    "SyncTriggerRequest",
+    "SyncTriggerResponse",
+    "DBCredentialsCreate",
+    "TestConnectionResponse",
+
+    # Document ACL
+    "GranteeType",
+    "ACLAction",
+    "ACLSource",
+    "Permission",
+    "PermissionSet",
+    "DocumentACLBase",
+    "DocumentACLCreate",
+    "DocumentACLUpdate",
+    "DocumentACLResponse",
+    "DocumentACLListResponse",
+    "GrantPermissionRequest",
+    "GrantPermissionBatchRequest",
+    "RevokePermissionRequest",
+    "EffectivePermissions",
+    "CheckPermissionRequest",
+    "CheckPermissionResponse",
+    "DocumentACLAuditBase",
+    "DocumentACLAuditResponse",
+    "DocumentACLAuditListResponse",
+    "BulkACLUpdateRequest",
+    "BulkACLUpdateResponse",
+    "ShareLinkRequest",
+    "ShareLinkResponse",
 ]

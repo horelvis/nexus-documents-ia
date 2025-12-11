@@ -2,27 +2,28 @@
 
 ## 🚀 Visión General
 
-NexusDocs360 ha evolucionado hacia **Emma AI**, un asistente inteligente powered by Elysia que representa la próxima generación de interacción con documentos. Emma utiliza técnicas avanzadas de IA para proporcionar respuestas contextuales, ejecutar tareas complejas y acceder a información en tiempo real.
+NexusDocs360 ha evolucionado hacia **Emma AI**, un asistente inteligente construido sobre **Microsoft AutoGen 0.4.8+** que representa la próxima generación de interacción con documentos. Emma utiliza técnicas avanzadas de IA multi-agente para proporcionar respuestas contextuales, ejecutar tareas complejas y acceder a información en tiempo real.
 
 ## 🤖 Emma AI: Arquitectura y Capacidades
 
-### Elysia Framework
-Emma está construida sobre **Elysia**, un framework avanzado para sistemas de decisión inteligente que:
-- **🧠 Selecciona herramientas automáticamente** basándose en el contexto
-- **🔄 Ejecuta flujos adaptativos** según la complejidad de la tarea
-- **📊 Proporciona transparencia completa** del proceso de decisión
-- **⚡ Optimiza rendimiento** con tree caching y paralelización
+### AutoGen Multi-Agent Framework
+Emma está construida sobre **Microsoft AutoGen 0.4.8+**, un framework avanzado para orquestación multi-agente que:
+- **🧠 5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
+- **🔄 3 Patrones de Orquestación**: Sequential, GroupChat, Swarm con handoffs
+- **📊 RAG Pipeline de 7 capas**: Búsqueda híbrida, reranking y generación validada
+- **⚡ Multi-Provider LLM**: Ollama, OpenAI, Anthropic (Claude), Google (Gemini)
 
 ### Stack Tecnológico Actualizado
 
-#### Modelos de IA Integrados
-- **gpt-oss:20b**: Modelo principal via Ollama para procesamiento local
-- **llama3.2**: Modelo alternativo para tareas específicas
-- **nomic-embed-text**: Embeddings para búsqueda semántica en Weaviate
-- **Modelos de Vision**: Para procesamiento de PDFs y detección de firmas
+#### Proveedores LLM Soportados
+- **Ollama (local)**: llama3.2, qwen2.5, mistral para procesamiento privado
+- **OpenAI**: GPT-4o, GPT-4o-mini para máxima capacidad
+- **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus para análisis avanzado
+- **Google**: Gemini 1.5 Flash, Gemini 1.5 Pro para versatilidad
 
 #### Frameworks y Servicios
-- **Weaviate**: Base de datos vectorial de nueva generación (reemplaza Qdrant)
+- **AutoGen 0.4.8+**: Framework de Microsoft para orquestación multi-agente
+- **Weaviate**: Base de datos vectorial de nueva generación
 - **Ollama**: Servidor de LLMs locales optimizado
 - **FastAPI**: API principal con arquitectura asíncrona
 - **Docker**: Desarrollo con hot-reload y contenerización
@@ -37,11 +38,11 @@ Emma está construida sobre **Elysia**, un framework avanzado para sistemas de d
 
 ### 1. 🧠 Procesamiento Inteligente de Documentos
 
-#### Sistema de Decisión Elysia
-- **12+ Herramientas Especializadas**: Análisis de contratos, finanzas, compliance, firmas digitales
-- **Selección Automática**: Emma elige la herramienta óptima según el contexto
-- **Flujos Adaptativos**: Combina múltiples herramientas para tareas complejas
-- **Transparencia Total**: Visibilidad completa del proceso de decisión
+#### Sistema Multi-Agente AutoGen
+- **5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
+- **Selección Automática de Workflow**: El orquestador elige el patrón óptimo según la consulta
+- **Flujos Adaptativos**: Sequential, GroupChat o Swarm según la complejidad
+- **Fallback Automático**: Si los agentes fallan, usa RAG Pipeline directamente
 
 #### Análisis Especializado
 - **Detección de Firmas Digitales**: Validación automática de firmas en PDFs

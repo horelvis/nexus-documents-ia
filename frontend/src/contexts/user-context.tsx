@@ -3,14 +3,23 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
 import { useUser, useClerk, useAuth } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
-import useSWR, { useSWRConfig } from 'swr'
 import { useApiClient, apiClient as globalApiClient } from '@/lib/api-client'
-import { fetcher } from '@/lib/fetcher'
 import { ConnectionError } from '@/components/errors/connection-error'
 import { Button } from '@/components/ui/button'
-import { syncUserWithBackend } from '@/lib/sync-user'
+// Authentication flow:
+// - Users must register through SignUp flow (creates user via Clerk webhook)
+// - Login validates existing users and returns subscription info (POST /auth/login)
+// - No JIT provisioning - unregistered users get 401
 
-import type { BackendUser, OnboardingStatus, UserContextType, UserProviderProps } from '@/lib/types'
+import type {
+  BackendUser,
+  OnboardingStatus,
+  UserContextType,
+  UserProviderProps,
+  SubscriptionInfo,
+  UserPermissions,
+  LoginResponse
+} from '@/lib/types'
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
@@ -21,10 +30,9 @@ export function UserProvider({ children }: UserProviderProps) {
   const router = useRouter()
   const pathname = usePathname()
   const apiClient = useApiClient() // This is the local instance
-  const { mutate } = useSWRConfig()
   const [isTokenReady, setIsTokenReady] = useState(false)
   
-  // Configure global API client with token getter for SWR fetcher
+  // Configure global API client with token getter
   useEffect(() => {
     if (isClerkLoaded) {
       globalApiClient.setAuthTokenGetter(async () => {
@@ -41,37 +49,88 @@ export function UserProvider({ children }: UserProviderProps) {
     }
   }, [isClerkLoaded, getToken])
   
-  // Internal state for sync errors that SWR doesn't catch (like failed sync after 404)
+  // Internal state for sync errors
   const [syncError, setSyncError] = useState<string | null>(null)
-  
-  // SWR for fetching backend user
-  const { data: backendUser, error: swrError, isLoading: swrLoading, mutate: reloadUser } = useSWR<BackendUser>(
-    isClerkLoaded && isSignedIn && isTokenReady ? '/auth/me' : null,
-    fetcher,
-    {
-      shouldRetryOnError: false,
-      revalidateOnFocus: true,
-      onError: (err) => {
-        // We'll handle 403/404 specifically in a useEffect
-        console.log('SWR Error:', err)
-      }
-    }
-  )
 
-  // Derived state
-  const userLoading = !isClerkLoaded || (isSignedIn && swrLoading && !backendUser && !swrError)
-  
+  // Track if login has been attempted
+  const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false)
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+
+  // Backend user and auth state (from POST /auth/login)
+  const [backendUser, setBackendUser] = useState<BackendUser | null>(null)
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null)
+  const [permissions, setPermissions] = useState<UserPermissions | null>(null)
+  const [loginError, setLoginError] = useState<Error | null>(null)
+
+  // Perform login when Clerk is ready
+  const performLogin = useCallback(async () => {
+    if (!isTokenReady || isLoggingIn || hasAttemptedLogin) return
+
+    setIsLoggingIn(true)
+    setLoginError(null)
+
+    try {
+      const response = await apiClient.post<LoginResponse>('/auth/login')
+
+      if (response.error) {
+        const error = new Error(response.error) as Error & { status?: number }
+        error.status = response.status
+        throw error
+      }
+
+      if (response.data) {
+        setBackendUser(response.data.user)
+        setSubscription(response.data.subscription)
+        setPermissions(response.data.permissions)
+      }
+    } catch (err: any) {
+      console.error('[UserContext] Login failed:', err)
+      setLoginError(err)
+    } finally {
+      setIsLoggingIn(false)
+      setHasAttemptedLogin(true)
+    }
+  }, [apiClient, isTokenReady, isLoggingIn, hasAttemptedLogin])
+
+  // Trigger login when signed in and token ready
+  useEffect(() => {
+    if (isClerkLoaded && isSignedIn && isTokenReady && !hasAttemptedLogin) {
+      performLogin()
+    }
+  }, [isClerkLoaded, isSignedIn, isTokenReady, hasAttemptedLogin, performLogin])
+
+  // Reset state when user signs out
+  useEffect(() => {
+    if (isClerkLoaded && !isSignedIn) {
+      setBackendUser(null)
+      setSubscription(null)
+      setPermissions(null)
+      setHasAttemptedLogin(false)
+      setLoginError(null)
+    }
+  }, [isClerkLoaded, isSignedIn])
+
+  // Reload user function (for refresh)
+  const reloadUser = useCallback(async () => {
+    setHasAttemptedLogin(false)
+    setLoginError(null)
+    await performLogin()
+  }, [performLogin])
+
+  // Derived state - loading while Clerk loads, during login, or waiting for backendUser
+  const userLoading = !isClerkLoaded || !isTokenReady || (isSignedIn && !backendUser && !loginError && hasAttemptedLogin === false) || isLoggingIn
+
   // Consolidated error state
   const userError = useMemo(() => {
     if (syncError) return syncError
-    if (swrError) {
-      const status = (swrError as any).status
-      // Don't show error for 403/404 as we'll try to sync
-      if (status === 403 || status === 404) return null
-      return swrError.message || 'Unknown error'
+    if (loginError) {
+      const status = (loginError as any).status
+      // Don't show error for 401 (user not registered) as we'll redirect
+      if (status === 401) return null
+      return loginError.message || 'Unknown error'
     }
     return null
-  }, [swrError, syncError])
+  }, [loginError, syncError])
 
   // Onboarding status derivation
   const onboarding = useMemo<OnboardingStatus>(() => {
@@ -137,77 +196,62 @@ export function UserProvider({ children }: UserProviderProps) {
 
   // Auto-sync and Redirect Logic
   useEffect(() => {
-    // Skip if auth flow or pricing
-    if (pathname.startsWith('/auth/') || pathname === '/pricing') return
+    // Skip if auth flow, pricing, or error pages
+    if (pathname.startsWith('/auth/') || pathname === '/pricing' ||
+        pathname === '/tenant-not-found' || pathname === '/user-not-found') return
 
-    // Auto-sync for new users (Direct Flow)
-    // If we have a clerk user but no backend user (and no loading/error), it means the user needs to be synced/created
-    if (isClerkLoaded && isSignedIn && clerkUser && !backendUser && !userLoading && !userError) {
-       const unsafeMetadata = clerkUser.unsafeMetadata as any
-       const selectedPlan = unsafeMetadata?.selected_plan || 'free'
-       
-       console.log('[UserContext] Auto-syncing new user...')
-       syncUserWithBackend(
-          clerkUser.id, 
-          clerkUser.primaryEmailAddress?.emailAddress || '', 
-          clerkUser.fullName || '',
-          selectedPlan
-       ).then(async (syncedUser) => {
-          // Removed auto-completion of onboarding to force plan selection
-          reloadUser()
-       }).catch(err => {
-          console.error('[UserContext] Auto-sync failed', err)
-       })
-    }
-    
-    // Redirect to onboarding is DISABLED for direct flow
-    /*
-    if (backendUser && !backendUser.onboarding_completed && !isOnboardingPath()) {
-       // Check for invalid/default tenant ID
-       const isInvalidTenantId = !backendUser.tenant_id || 
-       backendUser.tenant_id === 'default' || 
-       backendUser.tenant_id === '00000000-0000-0000-0000-000000000000' ||
-       backendUser.tenant_id === 'undefined' ||
-       backendUser.tenant_id === 'null'
-     
-      if (isInvalidTenantId) {
-         setSyncError('INVALID_TENANT')
-      } else {
-         console.log('[UserContext] Redirecting to onboarding')
-         router.push(getOnboardingPath(backendUser))
+    // Check for 401 error from login - user exists in Clerk but not registered in backend
+    if (isClerkLoaded && isSignedIn && clerkUser && loginError) {
+      const status = (loginError as any).status
+      if (status === 401) {
+        console.log('[UserContext] User not registered in backend (401), redirecting to user-not-found')
+        router.push('/user-not-found')
+        return
       }
     }
-    */
-  }, [backendUser, isOnboardingPath, getOnboardingPath, router, isClerkLoaded, isSignedIn, userLoading, userError, clerkUser, apiClient, reloadUser])
+
+    // If user in Clerk but not in backend (no backendUser after login attempt), redirect to user-not-found
+    // Users must register through the proper signup flow first
+    if (isClerkLoaded && isSignedIn && clerkUser && !backendUser && !userLoading && !loginError && hasAttemptedLogin) {
+       console.log('[UserContext] User in Clerk but not in backend (after login attempt), redirecting to user-not-found')
+       router.push('/user-not-found')
+       return
+    }
+  }, [backendUser, router, isClerkLoaded, isSignedIn, userLoading, clerkUser, loginError, pathname, hasAttemptedLogin])
 
 
   // Actions
   const markOnboardingComplete = useCallback(async (onboardingData?: any): Promise<boolean> => {
     try {
-      const response = await apiClient.post('/auth/complete-onboarding', onboardingData)
+      const response = await apiClient.post<BackendUser>('/auth/complete-onboarding', onboardingData)
       if (response.error) throw new Error(response.error)
 
-      // Update SWR cache
-      mutate('/auth/me', response.data, false) 
+      // Update local state
+      if (response.data) {
+        setBackendUser(response.data)
+      }
       return true
     } catch (error) {
       console.error('Error completing onboarding:', error)
       return false
     }
-  }, [apiClient, mutate])
+  }, [apiClient])
 
   const resetOnboarding = useCallback(async (): Promise<boolean> => {
     try {
-      const response = await apiClient.post('/auth/reset-onboarding')
+      const response = await apiClient.post<BackendUser>('/auth/reset-onboarding')
       if (response.error) throw new Error(response.error)
-      
-      mutate('/auth/me', response.data, false)
+
+      // Update local state
+      if (response.data) {
+        setBackendUser(response.data)
+      }
       return true
     } catch (error) {
       console.error('Error resetting onboarding:', error)
       return false
     }
-  }, [apiClient, mutate])
+  }, [apiClient])
 
   // Subscription helpers
   const hasValidTrial = useCallback((): boolean => {
@@ -224,6 +268,31 @@ export function UserProvider({ children }: UserProviderProps) {
     return !hasValidTrial() && !hasPaidSubscription()
   }, [hasValidTrial, hasPaidSubscription])
 
+  // Handle logout - call backend then Clerk signOut
+  const handleLogout = useCallback(async () => {
+    try {
+      // Call backend logout endpoint for logging
+      await apiClient.post('/auth/logout')
+    } catch (err) {
+      console.error('[UserContext] Backend logout failed:', err)
+      // Continue with Clerk signout anyway
+    }
+
+    // Clear local state
+    setBackendUser(null)
+    setSubscription(null)
+    setPermissions(null)
+    setHasAttemptedLogin(false)
+    setLoginError(null)
+    setSyncError(null)
+
+    // Clerk signout
+    await signOut()
+
+    // Redirect to sign-in
+    router.push('/auth/sign-in')
+  }, [apiClient, signOut, router])
+
 
   const contextValue: UserContextType = useMemo(() => ({
     clerkUser,
@@ -232,30 +301,47 @@ export function UserProvider({ children }: UserProviderProps) {
     backendUser: backendUser || null,
     userLoading,
     userError,
+    subscription,
+    permissions,
     onboarding,
     markOnboardingComplete,
     resetOnboarding,
     checkOnboardingStatus: async () => { await reloadUser() }, // Adapter for existing calls
     refetchUser: async () => { await reloadUser() },
+    handleLogout,
     hasValidTrial,
     hasPaidSubscription,
     needsPayment
   }), [
-    clerkUser, isClerkLoaded, isSignedIn, backendUser, userLoading, userError, onboarding,
-    markOnboardingComplete, resetOnboarding, reloadUser, hasValidTrial, hasPaidSubscription, needsPayment
+    clerkUser, isClerkLoaded, isSignedIn, backendUser, userLoading, userError,
+    subscription, permissions, onboarding,
+    markOnboardingComplete, resetOnboarding, reloadUser, handleLogout,
+    hasValidTrial, hasPaidSubscription, needsPayment
   ])
 
   // Handle connection errors specifically for the UI
   const connectionError = useMemo(() => {
-    if (swrError && (swrError.message === 'Failed to fetch' || swrError.name === 'ConnectionError')) {
-       return swrError
+    if (loginError && (loginError.message === 'Failed to fetch' || loginError.name === 'ConnectionError')) {
+       return loginError
     }
     return null
-  }, [swrError])
+  }, [loginError])
 
 
   if (connectionError) {
     return <ConnectionError error={connectionError} onRetry={() => reloadUser()} />
+  }
+
+  // Show loading screen while authenticating
+  if (userLoading && isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="text-muted-foreground text-sm">Authenticating...</p>
+        </div>
+      </div>
+    )
   }
 
   if (userError && isSignedIn) {

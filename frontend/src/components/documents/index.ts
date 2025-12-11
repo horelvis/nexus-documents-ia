@@ -1,6 +1,7 @@
 export { EditDocumentDialog } from './edit-document-dialog'
 export { DocumentViewerDialog } from './document-viewer-dialog'
 export { DeleteDocumentDialog } from './delete-document-dialog'
+export { DeleteMultipleDocumentsDialog } from './delete-multiple-documents-dialog'
 export { DocumentsDataTable } from './documents-data-table'
 export { ShareDocumentDialog } from './share-document-dialog'
 export { SignatureRequestDialog } from './signature-request-dialog'

@@ -3,8 +3,9 @@
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
-    simple_auth, assistant, migration, weaviate, lgpd,
+    assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
+    document_acl,
 )
 from fastapi import APIRouter
 
@@ -17,8 +18,6 @@ logger = logging.getLogger(__name__)
 logger.info("🔧 Including auth router with endpoints...")
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(simple_auth.router, prefix="/simple-auth", tags=["simple-auth"])
-
 logger.info("✅ Auth router included with prefix=/auth")
 api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
@@ -83,6 +82,22 @@ api_router.include_router(migration.router, prefix="/migration", tags=["migratio
 
 # LGPD Compliance - User data deletion for Brazilian LGPD law
 api_router.include_router(lgpd.router, prefix="/lgpd", tags=["lgpd"])
+
+# Workflow Management - Camunda BPM integration
+api_router.include_router(workflows.router, tags=["workflows"])
+
+# Analysis Queue - Emma AI document analysis queue
+api_router.include_router(analysis_queue.router, prefix="/analysis", tags=["analysis-queue"])
+
+# Emma Voice Mode - Gemini Live API integration
+from app.api.v1 import gemini_voice
+api_router.include_router(gemini_voice.router, prefix="/gemini", tags=["gemini-voice"])
+
+# Information Channels - Gmail, Google Drive, External DB for RAG
+api_router.include_router(channels.router, prefix="/channels", tags=["channels"])
+
+# Document ACL - Document-level Access Control Lists
+api_router.include_router(document_acl.router, prefix="/documents", tags=["document-acl"])
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

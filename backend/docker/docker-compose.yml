@@ -65,9 +65,11 @@ services:
       - ../tests:/app/tests:ro
       # Montar credentials para desarrollo (ruta corrected a la carpeta raíz)
       - ../../credentials:/app/credentials:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+      # SSL certificates for HTTPS (enables Voice Mode getUserMedia)
+      - ./certificates:/app/certificates:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app", "--ssl-keyfile", "/app/certificates/localhost-key.pem", "--ssl-certfile", "/app/certificates/localhost.pem"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -130,6 +132,8 @@ services:
       retries: 3
 
   # LangExtract Service - DEVELOPMENT MODE
+  # NOTE: langextract only supports: anthropic, gemini, ollama, openai (NOT vllm)
+  # Use gemini as default since it's fast and has good document understanding
   langextract-service:
     build:
       context: ../microservices/langextract-service
@@ -141,14 +145,14 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
-      - LLM_MODEL=${LLM_MODEL:-qwen2.5:32b}
-      - LLM_API_BASE=${LLM_API_BASE:-http://genai-ollama:11434}
+      # Use separate env vars for langextract to avoid conflict with vllm-based services
+      - LLM_PROVIDER=${LANGEXTRACT_LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LANGEXTRACT_LLM_MODEL:-gemini-2.0-flash}
+      - LLM_API_BASE=${LLM_API_BASE:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OLLAMA_HOST=http://genai-ollama:11434
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/langextract-service/app:/app/app:ro
@@ -159,18 +163,22 @@ services:
       timeout: 10s
       retries: 3
 
-  # Text Extraction Service - DEVELOPMENT MODE
+  # Text Extraction Service - DEVELOPMENT MODE (uses Apache Tika)
   textextract-service:
     build:
       context: ../microservices/textextract-service
       dockerfile: Dockerfile
     # Servicio interno, no se expone fuera de la red Docker
+    depends_on:
+      tika:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TIKA_URL=${TIKA_URL:-http://tika:9998}
     volumes:
       - ../microservices/textextract-service/app:/app/app:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
@@ -180,7 +188,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Weaviate Service - DEVELOPMENT MODE
+  # Weaviate Service - DEVELOPMENT MODE (uses TEI for embeddings)
   weaviate-service:
     build:
       context: ../microservices/weaviate-service
@@ -189,6 +197,8 @@ services:
     depends_on:
       weaviate:
         condition: service_healthy
+      text-embeddings-inference:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -196,17 +206,34 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_URL=http://weaviate:8080
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://genai-ollama:11434}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
-      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
-      - LLM_MODEL=${LLM_MODEL:-qwen2.5:7b}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm:latest}
+      # vLLM Configuration (PRIMARY - high-throughput GPU inference)
+      # Model: Qwen3-14B - 131K context, excellent Spanish + tool calling (Hermes-style)
+      - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-FP8}
+      # LLM Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      # Embedding Configuration (TEI - HuggingFace Text Embeddings Inference)
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-tei}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
+      - TEI_URL=${TEI_URL:-http://text-embeddings-inference:8080}
+      # Agent Framework settings (Microsoft Agent Framework)
+      - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
+      - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
+      # Suppress known deprecation warnings from third-party libraries
+      - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/weaviate-service/app:/app/app:ro
+      # Montar archivos de configuración de prompts (editable sin rebuild)
+      - ../microservices/weaviate-service/config:/app/config:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -287,6 +314,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-ollama-models.sh:/docker-entrypoint-initdb.d/init-ollama-models.sh
+      - ./scripts/init-camunda-schema.sql:/docker-entrypoint-initdb.d/init-camunda-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
       interval: 10s
@@ -349,7 +377,37 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Ollama para modelos de lenguaje local (con GPU)
+  # Text Embeddings Inference (TEI) - Dedicated GPU embedding server
+  # HuggingFace optimized server for fast embeddings
+  # Model: BAAI/bge-m3 (multilingual, 1024 dimensions)
+  # NOTE: Using 'latest' (1.6+) - version 1.5 has a bug with HuggingFace Hub redirects
+  text-embeddings-inference:
+    image: ghcr.io/huggingface/text-embeddings-inference:latest
+    networks:
+      - backend-network
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - MODEL_ID=BAAI/bge-m3
+    volumes:
+      - tei_cache:/data
+    command: ["--model-id", "BAAI/bge-m3", "--port", "8080", "--max-batch-tokens", "16384"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+
+  # Ollama para modelos de lenguaje local (con GPU) - LEGACY
+  # Start with: docker compose --profile legacy up
   genai-ollama:
     image: ollama/ollama:0.13.1
     networks:
@@ -371,6 +429,52 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    profiles:
+      - legacy  # Only start with: docker compose --profile legacy up
+
+  # vLLM para inferencia de alta velocidad (GPU) - PRIMARY LLM SERVER
+  # Requires HF_TOKEN in .env for gated models
+  # Official vLLM image with full tool calling support (vLLM >= 0.9.0)
+  # Model: Qwen3-14B-FP8 - FP8 quantized for memory efficiency (fits RTX 4090 24GB)
+  # Spanish + tool calling (Hermes-style), 32K native context
+  vllm:
+    image: vllm/vllm-openai:latest
+    networks:
+      - backend-network
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+      - NVIDIA_DISABLE_REQUIRE=1
+      - CUDA_VISIBLE_DEVICES=0
+    # Tool calling enabled with --enable-auto-tool-choice
+    # Tool parser: hermes (recommended for Qwen3 function calling)
+    # FP8 quantization: ~50% memory savings, fits 24GB with TEI
+    command:
+      - "--model"
+      - "${VLLM_MODEL:-Qwen/Qwen3-14B-FP8}"
+      - "--max-model-len"
+      - "${VLLM_MAX_MODEL_LEN:-32768}"
+      - "--gpu-memory-utilization"
+      - "0.85"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "hermes"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s  # 14B model takes longer to load
+    restart: unless-stopped
 
   # Gotenberg para conversión de documentos
   gotenberg:
@@ -391,6 +495,72 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Apache Tika para extracción de texto de documentos
+  tika:
+    image: apache/tika:3.1.0.0
+    # Servicio interno, no se expone fuera de la red Docker
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9998' 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Camunda 7 BPM Engine para workflows de aprobación
+  camunda:
+    image: camunda/camunda-bpm-platform:run-7.22.0
+    # Servicio interno, no se expone fuera de la red Docker
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    environment:
+      - DB_DRIVER=org.postgresql.Driver
+      - DB_URL=jdbc:postgresql://db:5432/${POSTGRES_DB:-nexus_db}?currentSchema=camunda
+      - DB_USERNAME=${POSTGRES_USER:-nexus_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-nexus_password}
+      - WAIT_FOR=db:5432
+      - WAIT_FOR_TIMEOUT=120
+    volumes:
+      - camunda_data:/camunda/configuration/resources
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/engine-rest/engine || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # Camunda Service - Python wrapper para workflows BPMN
+  camunda-service:
+    build:
+      context: ../microservices/camunda-service
+      dockerfile: Dockerfile
+    # Servicio interno, no se expone fuera de la red Docker
+    depends_on:
+      camunda:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - CAMUNDA_URL=http://camunda:8080
+    volumes:
+      - ../microservices/camunda-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
 networks:
   backend-network:
     driver: bridge
@@ -401,3 +571,6 @@ volumes:
   weaviate_data:
   elasticsearch_data:
   ollama_data:
+  vllm_cache:  # Cache for HuggingFace models used by vLLM
+  tei_cache:   # Cache for TEI embedding models
+  camunda_data:

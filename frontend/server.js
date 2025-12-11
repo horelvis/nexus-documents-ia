@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
-const port = 3000;
+const hostname = '0.0.0.0'; // Listen on all interfaces
+const port = process.env.PORT || 3000;
 
 // Configure the Next.js app
 const app = next({ dev, hostname, port });
@@ -33,7 +33,8 @@ app.prepare().then(() => {
       console.error(err);
       process.exit(1);
     })
-    .listen(port, () => {
-      console.log(`> Ready on https://${hostname}:${port}`);
+    .listen(port, hostname, () => {
+      console.log(`> Ready on https://localhost:${port}`);
+      console.log(`> Also available at https://nexus-docs360.es:${port}`);
     });
 });

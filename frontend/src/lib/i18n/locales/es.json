@@ -247,7 +247,23 @@
       "CORRUPTED_FILE": "El archivo parece estar dañado",
       "INSUFFICIENT_MEMORY": "No hay suficiente memoria para procesar el archivo",
       "NETWORK_ERROR": "Error de conexión durante el procesamiento"
-    }
+    },
+    "agentAnalysis": "Análisis Agentes",
+    "agentAnalysisDialog": "Análisis Agentes"
+  },
+  "analysisPage": {
+    "backToDocuments": "Volver a documentos",
+    "analyzing": "Analizando",
+    "analysisPlan": "Plan de Análisis",
+    "completed": "completados",
+    "retryAnalysis": "Reintentar análisis",
+    "reanalyze": "Re-analizar",
+    "risks": "riesgos",
+    "recommendations": "recomendaciones",
+    "annotationsInPages": "anotaciones en {pages} páginas",
+    "generatingPlan": "Generando plan de análisis...",
+    "lastStepsBeforeError": "Últimos pasos antes del error:",
+    "error": "Error"
   },
   "errors": {
     "genericError": "Algo salió mal",
@@ -265,6 +281,44 @@
       "description": "Algunos documentos no pudieron ser procesados correctamente",
       "action": "Ver detalles y reintentar",
       "count": "{count} documento(s) con errores"
+    }
+  },
+  "emma": {
+    "errors": {
+      "network": {
+        "title": "Error de conexión",
+        "message": "No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo."
+      },
+      "timeout": {
+        "title": "Tiempo de espera agotado",
+        "message": "La consulta tardó demasiado en procesarse. Intenta con una pregunta más específica."
+      },
+      "server": {
+        "title": "Error del servidor",
+        "message": "Hubo un problema procesando tu solicitud. Nuestro equipo ha sido notificado."
+      },
+      "auth": {
+        "title": "Sesión expirada",
+        "message": "Tu sesión ha expirado. Por favor, vuelve a iniciar sesión."
+      },
+      "serviceUnavailable": {
+        "title": "Servicio no disponible",
+        "message": "Emma está temporalmente fuera de servicio. Por favor, intenta de nuevo en unos minutos."
+      },
+      "unknown": {
+        "title": "Error inesperado",
+        "message": "Ha ocurrido un error inesperado. Por favor, intenta de nuevo."
+      },
+      "retry": "Reintentar",
+      "tryAgain": "Intentar de nuevo"
+    },
+    "thinking": {
+      "phrase1": "Analizando tu consulta...",
+      "phrase2": "Buscando en tus documentos...",
+      "phrase3": "Pensando la mejor respuesta...",
+      "phrase4": "Preparando el análisis...",
+      "phrase5": "Consultando información relevante...",
+      "phrase6": "Un momento, estoy procesando..."
     }
   },
   "billingPage": {
@@ -308,7 +362,7 @@
     }
   },
   "chatPage": {
-    "assistantName": "Emma Asistente",
+    "assistantName": "Emma Agente empresarial",
     "assistantSubtitle": "Inteligencia documental impulsada por IA",
     "emmaResponding": "Emma procesando respuesta...",
     "mode": {
@@ -669,6 +723,10 @@
       "history": "Historial de Firmas"
     },
     "analytics": "Analítica",
+    "channels": {
+      "title": "Canales de Info",
+      "description": "Fuentes de datos externas para RAG"
+    },
     "storage": "Almacenamiento",
     "help": "Ayuda",
     "admin": {
@@ -708,6 +766,167 @@
       "title": "Entidades extraídas",
       "extracting": "Extrayendo entidades...",
       "noEntities": "No se encontraron entidades"
+    }
+  },
+  "tenantSettings": {
+    "title": "Configuración del Tenant",
+    "subtitle": "Gestiona el almacenamiento, indexación y opciones administrativas de tu organización.",
+    "restrictedAccess": {
+      "title": "Acceso Restringido",
+      "description": "Esta sección solo está disponible para administradores."
+    },
+    "info": {
+      "title": "Información de la Organización",
+      "description": "Detalles básicos de tu tenant",
+      "name": "Nombre de la Organización",
+      "createdAt": "Fecha de Creación",
+      "totalUsers": "Total de Usuarios",
+      "totalDocuments": "Total de Documentos",
+      "notAvailable": "No disponible"
+    },
+    "storage": {
+      "title": "Uso de Almacenamiento",
+      "description": "Consumo actual de almacenamiento",
+      "usage": "{used} de {limit} usado"
+    },
+    "searchIndex": {
+      "title": "Índice de Búsqueda",
+      "description": "Gestiona la indexación de documentos para funcionalidad de búsqueda",
+      "totalDocuments": "Total de Documentos",
+      "indexed": "Indexados",
+      "pending": "Pendientes",
+      "status": "Estado: ",
+      "statusReady": "Listo",
+      "statusProcessing": "Procesando",
+      "statusUnknown": "Desconocido",
+      "reindexing": "Reindexando...",
+      "reindexPending": "Reindexar Documentos Pendientes",
+      "fullReindex": "Reindexación Completa"
+    },
+    "maintenance": {
+      "title": "Mantenimiento",
+      "description": "Ejecuta tareas de mantenimiento para optimizar el rendimiento del sistema",
+      "tasksTitle": "Las tareas de mantenimiento incluyen:",
+      "task1": "Limpiar archivos huérfanos",
+      "task2": "Optimizar índices de base de datos",
+      "task3": "Eliminar datos temporales",
+      "task4": "Validar integridad de documentos",
+      "runButton": "Ejecutar Mantenimiento"
+    },
+    "backups": {
+      "title": "Copias de Seguridad",
+      "description": "Crea y gestiona copias de seguridad de tus datos",
+      "createButton": "Crear Copia de Seguridad (Próximamente)"
+    },
+    "dangerZone": {
+      "title": "Zona de Peligro",
+      "description": "Acciones irreversibles y destructivas",
+      "deleteAll": {
+        "title": "Eliminar Todos los Documentos",
+        "description": "Elimina permanentemente todos los documentos de tu organización. Esta acción no se puede deshacer.",
+        "button": "Eliminar Todos los Documentos"
+      },
+      "clearIndex": {
+        "title": "Limpiar Índice de Búsqueda",
+        "description": "Elimina todos los documentos del índice de búsqueda. Los documentos deberán ser reindexados.",
+        "button": "Limpiar Índice"
+      },
+      "suppressionRight": {
+        "title": "Derecho de Supresión (RGPD)",
+        "description": "Solicita la eliminación completa de datos de usuario en cumplimiento con la normativa RGPD.",
+        "details": "Esto eliminará permanentemente todos los datos personales asociados al usuario seleccionado."
+      }
+    },
+    "reindexDialog": {
+      "title": "Reindexación Completa",
+      "description": "Reconstruye el índice de búsqueda completo para todos los documentos",
+      "attention": "Atención",
+      "attentionText": "Esto reindexará <strong>{count} documentos</strong>. El proceso puede tardar varios minutos dependiendo del número de documentos.",
+      "explanation": "Durante la reindexación, la funcionalidad de búsqueda puede estar temporalmente limitada.",
+      "processing": "Procesando documentos...",
+      "progress": "Progreso",
+      "progressText": "{processed} de {total} documentos procesados",
+      "completeTitle": "Reindexación Completada",
+      "completeText": "Todos los documentos han sido reindexados correctamente.",
+      "errorTitle": "Error en Reindexación",
+      "cancelButton": "Cancelar",
+      "startButton": "Iniciar Reindexación",
+      "closeButton": "Cerrar",
+      "retryButton": "Reintentar",
+      "waitButton": "Por favor espera..."
+    },
+    "deleteDialog": {
+      "title": "Eliminar Todos los Documentos",
+      "description": "Esta acción eliminará permanentemente todos los documentos de tu organización.",
+      "confirmText": "Escribe <strong>DELETE ALL DOCUMENTS</strong> para confirmar esta acción:",
+      "placeholder": "DELETE ALL DOCUMENTS",
+      "cancelButton": "Cancelar",
+      "deleteButton": "Eliminar Todo",
+      "deletingButton": "Eliminando..."
+    },
+    "notifications": {
+      "loadError": {
+        "title": "Error de Carga",
+        "message": "No se pudo cargar la información del tenant"
+      },
+      "reindexComplete": {
+        "title": "Reindexación Completada",
+        "message": "{count} documentos reindexados correctamente"
+      },
+      "reindexError": {
+        "title": "Error de Reindexación",
+        "message": "Ocurrió un error durante la reindexación"
+      },
+      "reindexStarted": {
+        "title": "Reindexación Iniciada",
+        "message": "El proceso de reindexación completa ha comenzado"
+      },
+      "deleteSuccess": {
+        "title": "Documentos Eliminados",
+        "message": "{count} documentos eliminados correctamente"
+      },
+      "deleteError": {
+        "title": "Error al Eliminar",
+        "message": "No se pudieron eliminar los documentos"
+      },
+      "clearIndexConfirm": "¿Estás seguro de que deseas limpiar el índice de búsqueda? Esto eliminará todos los documentos indexados.",
+      "clearIndexSuccess": {
+        "title": "Índice Limpiado",
+        "message": "El índice de búsqueda ha sido limpiado correctamente"
+      },
+      "clearIndexError": {
+        "title": "Error al Limpiar Índice",
+        "message": "No se pudo limpiar el índice de búsqueda"
+      },
+      "maintenanceSuccess": {
+        "title": "Mantenimiento Completado",
+        "message": "{count} operaciones realizadas en {duration} segundos"
+      },
+      "maintenanceError": {
+        "title": "Error de Mantenimiento",
+        "message": "Ocurrió un error durante el mantenimiento"
+      }
+    }
+  },
+  "userNotFound": {
+    "title": "Cuenta de Usuario No Encontrada",
+    "description": "Tu autenticación es válida pero no se encontró tu perfil de usuario. Esto suele ocurrir cuando:",
+    "reasons": {
+      "incomplete": "El registro de tu cuenta no se completó",
+      "deleted": "Tu cuenta fue eliminada o desactivada",
+      "sync": "Hay un problema de sincronización entre sistemas"
+    },
+    "email": "Email",
+    "buttons": {
+      "tryAgain": "Intentar de Nuevo",
+      "contactSupport": "Contactar Soporte",
+      "reRegister": "Registrarse de Nuevo",
+      "signOutHome": "Cerrar Sesión e Ir al Inicio"
+    },
+    "footer": "Si el problema persiste, por favor contacta a nuestro equipo de soporte.",
+    "supportEmail": {
+      "subject": "Problema con Cuenta de Usuario",
+      "body": "Hola Equipo de Soporte,\n\nEstoy experimentando un problema con mi cuenta. Puedo iniciar sesión pero mi perfil de usuario no se encuentra en el sistema.\n\n- Email del Usuario: {email}\n- ID de Usuario Clerk: {clerkId}\n- Hora: {time}\n\nPor favor, ayúdenme a resolver este problema.\n\n¡Gracias!"
     }
   },
   "publicKnowledgePage": {
@@ -782,5 +1001,162 @@
       "loadFailed": "Error al cargar estadísticas",
       "searchFailed": "Error en la búsqueda"
     }
+  },
+  "channels": {
+    "title": "Canales de Información",
+    "subtitle": "Conecta fuentes de datos externas para alimentar el sistema RAG",
+    "createChannel": "Crear Canal",
+    "noChannels": {
+      "title": "No hay canales configurados",
+      "description": "Conecta Gmail, Google Drive u otras fuentes para indexar documentos automáticamente"
+    },
+    "types": {
+      "gmail": "Gmail",
+      "google_drive": "Google Drive",
+      "external_db": "Base de Datos"
+    },
+    "visibility": {
+      "personal": "Personal",
+      "tenant": "Compartido",
+      "personalDescription": "Solo tú puedes ver estos documentos",
+      "tenantDescription": "Todos los miembros del equipo pueden ver estos documentos"
+    },
+    "status": {
+      "active": "Activo",
+      "inactive": "Inactivo",
+      "disabled": "Desactivado"
+    },
+    "syncStatus": {
+      "success": "Sincronizado",
+      "partial": "Parcial",
+      "failed": "Fallido",
+      "running": "Sincronizando"
+    },
+    "card": {
+      "documents": "Documentos",
+      "lastSync": "Última Sincronización",
+      "never": "Nunca",
+      "details": "Detalles",
+      "actions": "Acciones",
+      "syncNow": "Sincronizar Ahora",
+      "delete": "Eliminar",
+      "authRequired": "Se requiere autorización"
+    },
+    "detail": {
+      "overview": "Resumen",
+      "history": "Historial",
+      "settings": "Configuración",
+      "status": "Estado",
+      "syncInterval": "Intervalo de Sync",
+      "minutes": "{count}m",
+      "lastStatus": "Último Estado",
+      "nextSync": "Próxima Sincronización",
+      "lastSyncError": "Último error de sincronización:",
+      "enableAutoSync": "Habilitar Sincronización Automática",
+      "enableAutoSyncDescription": "Sincronizar automáticamente según el programa",
+      "created": "Creado",
+      "channelId": "ID de Canal",
+      "configuration": "Configuración",
+      "authWarning": "Se requiere autorización",
+      "authWarningDescription": "Haz clic en \"Autorizar\" para conectar tu cuenta de Google",
+      "authorize": "Autorizar",
+      "redirecting": "Redirigiendo..."
+    },
+    "history": {
+      "noHistory": "Sin historial de sincronización",
+      "found": "Encontrados",
+      "new": "Nuevos",
+      "updated": "Actualizados",
+      "failed": "Fallidos"
+    },
+    "create": {
+      "title": "Crear Canal de Información",
+      "description": "Conecta una fuente de datos para indexar documentos automáticamente",
+      "step1": "Tipo de Canal",
+      "step2": "Configuración",
+      "step3": "Confirmar",
+      "selectType": "Selecciona un tipo de canal",
+      "channelName": "Nombre del Canal",
+      "channelNamePlaceholder": "Mi canal de Gmail",
+      "selectVisibility": "Seleccionar Visibilidad",
+      "syncIntervalLabel": "Intervalo de Sincronización (minutos)",
+      "creating": "Creando...",
+      "createButton": "Crear Canal",
+      "gmailDescription": "Sincroniza emails y adjuntos desde tu cuenta de Gmail",
+      "driveDescription": "Sincroniza documentos desde una carpeta de Google Drive",
+      "dbDescription": "Conecta a una base de datos externa (próximamente)"
+    },
+    "gmail": {
+      "title": "Configuración de Gmail",
+      "labels": "Etiquetas a Sincronizar",
+      "labelsPlaceholder": "INBOX, SENT, etiqueta-personalizada",
+      "labelsHelp": "Separa las etiquetas con comas. Usa INBOX para la bandeja de entrada.",
+      "includeAttachments": "Incluir Adjuntos",
+      "includeAttachmentsDescription": "Procesar e indexar archivos adjuntos (PDF, DOCX, etc.)",
+      "processedTypes": "Tipos de adjuntos procesados: PDF, DOCX, DOC, TXT, ODT"
+    },
+    "drive": {
+      "title": "Configuración de Google Drive",
+      "folderId": "ID de Carpeta",
+      "folderIdPlaceholder": "1a2b3c4d5e6f7g8h9i0j",
+      "folderIdHelp": "Copia el ID de la URL de la carpeta de Google Drive",
+      "recursive": "Sincronizar Subcarpetas",
+      "recursiveDescription": "Incluir documentos de todas las subcarpetas"
+    },
+    "toast": {
+      "createSuccess": {
+        "title": "Canal Creado",
+        "description": "El canal se creó correctamente. Autoriza la conexión para comenzar a sincronizar."
+      },
+      "createError": {
+        "title": "Error al Crear",
+        "description": "No se pudo crear el canal"
+      },
+      "syncStarted": {
+        "title": "Sincronización Iniciada",
+        "description": "La sincronización ha comenzado en segundo plano"
+      },
+      "syncError": {
+        "title": "Error de Sincronización",
+        "description": "No se pudo iniciar la sincronización"
+      },
+      "deleteSuccess": {
+        "title": "Canal Eliminado",
+        "description": "El canal y sus documentos han sido eliminados"
+      },
+      "deleteError": {
+        "title": "Error al Eliminar",
+        "description": "No se pudo eliminar el canal"
+      },
+      "updateSuccess": {
+        "title": "Canal Actualizado",
+        "description": "Los cambios se guardaron correctamente"
+      },
+      "updateError": {
+        "title": "Error al Actualizar",
+        "description": "No se pudieron guardar los cambios"
+      },
+      "authError": {
+        "title": "Error de Autorización",
+        "description": "No se pudo iniciar el proceso de autorización"
+      },
+      "channelEnabled": {
+        "title": "Canal Habilitado",
+        "description": "La sincronización automática ha sido reanudada"
+      },
+      "channelDisabled": {
+        "title": "Canal Deshabilitado",
+        "description": "La sincronización automática ha sido pausada"
+      }
+    },
+    "delete": {
+      "title": "Eliminar Canal",
+      "description": "¿Estás seguro de que deseas eliminar este canal? Todos los documentos indexados desde este canal también serán eliminados.",
+      "confirm": "Eliminar",
+      "cancel": "Cancelar"
+    },
+    "loading": "Cargando canales...",
+    "error": "Error al cargar canales",
+    "retry": "Reintentar"
   }
 }

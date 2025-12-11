@@ -21,6 +21,7 @@ interface EntitySearchMenuProps {
   searchQuery: string
   anchorRef: HTMLElement | null
   documentId: string
+  cursorPosition?: { top: number; left: number } | null
 }
 
 export function EntitySearchMenu({
@@ -29,18 +30,59 @@ export function EntitySearchMenu({
   onClose,
   searchQuery,
   anchorRef,
-  documentId
+  documentId,
+  cursorPosition
 }: EntitySearchMenuProps) {
   const [entities, setEntities] = useState<Entity[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [recentEntities, setRecentEntities] = useState<Entity[]>([])
+  const [loadingRecent, setLoadingRecent] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
   const entityService = useEntityService()
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Load recent entities when opened with empty query
+  useEffect(() => {
+    if (!open) {
+      setRecentEntities([])
+      return
+    }
+
+    // Only load recents if query is empty
+    if (searchQuery === '') {
+      setLoadingRecent(true)
+
+      const loadRecentEntities = async () => {
+        try {
+          const response = await entityService.getRecentEntities(10)
+          if (response.data?.entities) {
+            setRecentEntities(response.data.entities)
+          } else {
+            setRecentEntities([])
+          }
+        } catch (error) {
+          console.error('Failed to load recent entities:', error)
+          setRecentEntities([])
+        } finally {
+          setLoadingRecent(false)
+        }
+      }
+
+      loadRecentEntities()
+    }
+  }, [open, searchQuery === ''])
+
   // Search entities when query changes
   useEffect(() => {
-    if (!open || !searchQuery) {
+    if (!open) {
+      setEntities([])
+      setLoading(false)
+      return
+    }
+
+    // If query is empty, we use recent entities instead
+    if (!searchQuery) {
       setEntities([])
       setLoading(false)
       return
@@ -51,76 +93,70 @@ export function EntitySearchMenu({
       clearTimeout(searchTimeoutRef.current)
     }
 
-    // Only set loading true if we're actually going to search
-    if (searchQuery.length > 0) {
-      setLoading(true)
-      
-      // Debounce the search
-      searchTimeoutRef.current = setTimeout(async () => {
-        try {
-          const timestamp = Date.now()
-          console.log(`[${timestamp}] Starting entity search - Query: '${searchQuery}', DocumentId: ${documentId}`)
-          
-          // Search for entities
-          const response = await entityService.searchEntities({
-            query: searchQuery,
-            documentId: documentId,
-            limit: 10
-          })
-          
-          console.log(`[${timestamp}] Entity search response:`, response)
-          
-          if (response.data?.entities && response.data.entities.length > 0) {
-            // Type cast the entities to ensure type safety
-            const typedEntities = response.data.entities.map(entity => ({
-              ...entity
-            }))
-            setEntities(typedEntities)
-            console.log(`[${timestamp}] Found ${typedEntities.length} entities`)
-          } else {
-            // No results found
-            console.log(`[${timestamp}] No entities found for query '${searchQuery}'`)
-            setEntities([])
-          }
-        } catch (error) {
-          console.error(`Failed to search entities for query '${searchQuery}':`, error)
+    setLoading(true)
+
+    // Debounce the search
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const response = await entityService.searchEntities({
+          query: searchQuery,
+          documentId: documentId,
+          limit: 10
+        })
+
+        if (response.data?.entities && response.data.entities.length > 0) {
+          const typedEntities = response.data.entities.map(entity => ({
+            ...entity
+          }))
+          setEntities(typedEntities)
+        } else {
           setEntities([])
-        } finally {
-          setLoading(false)
         }
-      }, 300)
-    }
-    
+      } catch (error) {
+        console.error(`Failed to search entities for query '${searchQuery}':`, error)
+        setEntities([])
+      } finally {
+        setLoading(false)
+      }
+    }, 300)
+
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current)
       }
     }
-  }, [searchQuery, open, documentId]) // Remove entityService from dependencies
+  }, [searchQuery, open, documentId])
 
-  // Reset selected index when entities change
+  // Determine which entities to display
+  const displayEntities = searchQuery ? entities : recentEntities
+  const isLoadingDisplay = searchQuery ? loading : loadingRecent
+
+  // Reset selected index when display entities change
   useEffect(() => {
     setSelectedIndex(0)
-  }, [entities])
+  }, [entities, recentEntities])
 
   // Handle keyboard navigation
   useEffect(() => {
     if (!open) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (displayEntities.length === 0) return
+
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          setSelectedIndex(prev => (prev + 1) % entities.length)
+          setSelectedIndex(prev => (prev + 1) % displayEntities.length)
           break
         case 'ArrowUp':
           e.preventDefault()
-          setSelectedIndex(prev => (prev - 1 + entities.length) % entities.length)
+          setSelectedIndex(prev => (prev - 1 + displayEntities.length) % displayEntities.length)
           break
+        case 'Tab':
         case 'Enter':
           e.preventDefault()
-          if (entities[selectedIndex]) {
-            onSelect(entities[selectedIndex])
+          if (displayEntities[selectedIndex]) {
+            onSelect(displayEntities[selectedIndex])
             onClose()
           }
           break
@@ -133,34 +169,55 @@ export function EntitySearchMenu({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, entities, selectedIndex, onSelect, onClose])
+  }, [open, displayEntities, selectedIndex, onSelect, onClose])
 
   if (!anchorRef || !open) return null
 
   // Calculate positioning for the dropdown
   const rect = anchorRef.getBoundingClientRect()
   const viewportHeight = window.innerHeight
-  
-  // Calculate available space above and below
-  const spaceBelow = viewportHeight - rect.bottom
-  const spaceAbove = rect.top
-  
+  const viewportWidth = window.innerWidth
+
+  // Determine position based on cursorPosition or fallback to anchor
+  let dropdownTop: number
+  let dropdownLeft: number
+  let dropdownWidth: number
+
+  if (cursorPosition) {
+    // Position near the cursor/@ character
+    dropdownTop = cursorPosition.top
+    dropdownLeft = cursorPosition.left
+    dropdownWidth = 280 // Fixed width for mention dropdown
+  } else {
+    // Fallback: position below the full input
+    dropdownTop = rect.bottom + window.scrollY
+    dropdownLeft = rect.left + window.scrollX
+    dropdownWidth = Math.min(rect.width, 350)
+  }
+
+  // Calculate available space
+  const spaceBelow = viewportHeight - dropdownTop
+  const spaceAbove = dropdownTop
+
   // Estimate dropdown height (max 6 items * ~48px per item + padding)
-  const estimatedDropdownHeight = Math.min(entities.length, 6) * 48 + 60
-  
+  const estimatedDropdownHeight = Math.min(displayEntities.length || 3, 6) * 48 + 60
+
   // Decide if dropdown should open upward or downward
   const shouldOpenUpward = spaceBelow < estimatedDropdownHeight && spaceAbove > spaceBelow
+
+  // Adjust left position if dropdown would overflow viewport
+  const adjustedLeft = Math.min(Math.max(8, dropdownLeft), viewportWidth - dropdownWidth - 8)
 
   return (
     <div
       className="fixed z-50"
       style={{
-        top: shouldOpenUpward 
-          ? rect.top + window.scrollY - estimatedDropdownHeight - 4
-          : rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
-        width: rect.width,
-        maxHeight: shouldOpenUpward 
+        top: shouldOpenUpward
+          ? dropdownTop - estimatedDropdownHeight - 4
+          : dropdownTop + 4,
+        left: adjustedLeft,
+        width: dropdownWidth,
+        maxHeight: shouldOpenUpward
           ? Math.min(spaceAbove - 8, 300)
           : Math.min(spaceBelow - 8, 300)
       }}
@@ -168,21 +225,26 @@ export function EntitySearchMenu({
       {open && (
         <Command className="rounded-lg border shadow-md bg-popover">
           <CommandList className="max-h-full overflow-y-auto">
-            {loading ? (
+            {isLoadingDisplay ? (
               <CommandEmpty>
                 <div className="flex items-center justify-center gap-2">
                   <IconLoader2 className="h-4 w-4 animate-spin" />
-                  <span>Searching...</span>
+                  <span>{searchQuery ? 'Searching...' : 'Loading recent...'}</span>
                 </div>
               </CommandEmpty>
-            ) : entities.length === 0 ? (
-              <CommandEmpty>No entities found for "{searchQuery}"</CommandEmpty>
+            ) : displayEntities.length === 0 ? (
+              <CommandEmpty>
+                {searchQuery
+                  ? `No entities found for "${searchQuery}"`
+                  : 'No recent entities'
+                }
+              </CommandEmpty>
             ) : (
-              <CommandGroup heading="Suggested Entities">
-                {entities.map((entity, index) => {
-                  const Icon = entity.type === 'organization' ? IconBuilding : 
+              <CommandGroup heading={searchQuery ? 'Suggested Entities' : 'Recent Entities'}>
+                {displayEntities.map((entity, index) => {
+                  const Icon = entity.type === 'organization' ? IconBuilding :
                               entity.type === 'agent' ? IconRobot : IconUser
-                  
+
                   return (
                     <CommandItem
                       key={entity.id}

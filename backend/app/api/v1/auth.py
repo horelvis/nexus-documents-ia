@@ -1,29 +1,35 @@
 # backend/app/api/v1/auth.py
-from typing import Any
+"""
+Authentication endpoints.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+Clerk + Stripe authentication flow:
+- POST /login: Validate existing user, return subscription info
+- POST /logout: Log the event (Clerk handles session)
+- GET /me: Get current user data
+- POST /complete-onboarding: Mark onboarding as done
+"""
+from typing import Optional
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
-from app.schemas.user import UserCreate, UserResponse, UserSync, OnboardingComplete
-from app.services.async_auth_service import AsyncAuthService
-from app.api.async_dependencies import get_current_user_async
+from app.api.async_dependencies import get_current_user_async, _verify_clerk_token
 from app.db.models import User
-from app.core.config import settings
+from app.schemas.auth import LoginResponse, LogoutResponse, SubscriptionInfo, UserPermissions
+from app.services.subscription_service_v2 import SubscriptionServiceV2
 
 import logging
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Log que el router se está cargando
-logger.info("🚀 Auth router loaded with endpoints: register, sync-user, me, complete-onboarding")
 
-# Helper function to serialize user without lazy-loaded relationships
-def serialize_user(user: User) -> dict:
-    """Convert User model to dict avoiding lazy-loaded relationships."""
+def _serialize_user(user: User) -> dict:
+    """Convert User model to dict for response."""
     return {
         "id": str(user.id),
         "email": user.email,
@@ -41,174 +47,233 @@ def serialize_user(user: User) -> dict:
         "is_team_member": getattr(user, 'is_team_member', False),
         "is_admin": bool(getattr(user, "is_admin", False)),
         "trial_ends_at": user.trial_ends_at.isoformat() if hasattr(user, 'trial_ends_at') and user.trial_ends_at else None,
-        # Omit image and roles to avoid lazy loading issues
-        "image": None,
-        "roles": []
     }
-
-@router.post("/register", response_model=UserResponse)
-async def register_user(
-    user_in: UserCreate,
-    db: AsyncSession = Depends(get_async_db),
-) -> Any:
-    """
-    Create new user without the need to be logged in.
-    Only creates regular users, not superusers.
-    """
-    # Security: Force is_superuser to False for public registration
-    user = await AsyncAuthService.create_user(
-        db=db,
-        email=user_in.email,
-        password=user_in.password,
-        full_name=user_in.full_name,
-        is_superuser=False,  # Always False for public registration
-        tenant_id=str(user_in.tenant_id),
-        clerk_user_id=user_in.clerk_user_id
-    )
-    
-    return user
-
-@router.post("/sync-user", tags=["auth"])
-async def sync_user(
-    user_data: UserSync,
-    db: AsyncSession = Depends(get_async_db)
-) -> dict:
-    """
-    Sync user from Clerk authentication system.
-    Creates user if it doesn't exist, updates if it does.
-    """
-    logger.info(f"🔄 Syncing user from Clerk: {user_data.clerk_user_id}")
-    
-    user = await AsyncAuthService.sync_user_from_clerk(
-        db=db,
-        clerk_user_id=user_data.clerk_user_id,
-        email=user_data.email,
-        full_name=user_data.full_name,
-        stripe_customer_id=user_data.stripe_customer_id,
-        metadata={
-            'selected_plan': user_data.selected_plan
-        }
-    )
-    
-    logger.info(f"✅ User synced successfully: {user.id}")
-    
-    # Return user data without lazy-loaded relationships
-    return serialize_user(user)
 
 
 @router.get("/me")
 async def get_current_user_info(
-    current_user: User = Depends(get_current_user_async),
-    db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_user_async)
 ) -> dict:
-    """Get current authenticated user information with subscription details."""
-    logger.info(f"📋 [AUTH_ENDPOINT] /me endpoint reached - user: {current_user.email}")
-    
-    # Log user status for debugging
-    logger.info(f"📋 [AUTH_ENDPOINT] User onboarding completed: {current_user.onboarding_completed}")
-    
-    # Return user data without lazy-loaded relationships
-    return serialize_user(current_user)
+    """
+    Get current authenticated user.
+
+    Returns 401 if user doesn't exist in database.
+    Use POST /login for initial authentication with subscription data.
+    """
+    return _serialize_user(current_user)
 
 
 @router.post("/complete-onboarding")
 async def complete_onboarding(
-    onboarding_data: OnboardingComplete = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async)
 ) -> dict:
-    """
-    Mark user onboarding as completed. 
-    Datos de perfil se obtienen de Clerk y Stripe, no necesitamos duplicarlos.
-    """
+    """Mark user onboarding as completed."""
     try:
-        # Update user onboarding status
         current_user.onboarding_completed = True
-        
-        # Update user with basic information if provided
-        if onboarding_data:
-            if onboarding_data.first_name and onboarding_data.last_name:
-                current_user.full_name = f"{onboarding_data.first_name} {onboarding_data.last_name}"
-            
-            logger.info(f"📝 Onboarding completed for user {current_user.id}")
-            logger.info(f"  - Empresa: {onboarding_data.company_name}")
-            logger.info(f"  - Industria: {onboarding_data.industry}")
-            logger.info(f"  - Datos de perfil se obtienen de Clerk y Stripe (si aplica)")
-        
         await db.commit()
         await db.refresh(current_user)
-        
+
         logger.info(f"✅ Onboarding completed for user: {current_user.id}")
-        return serialize_user(current_user)
-        
+        return _serialize_user(current_user)
+
     except Exception as e:
-        logger.error(f"Error completing onboarding: {str(e)}")
+        logger.error(f"Error completing onboarding: {e}")
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error completing onboarding"
         )
 
-@router.post("/reset-onboarding", response_model=UserResponse)
-async def reset_onboarding(
+
+def _build_permissions(user: User, subscription_status: dict) -> UserPermissions:
+    """Build user permissions based on subscription and roles."""
+    plan = subscription_status.get('plan', 'trial')
+
+    # Permission mapping by plan
+    plan_permissions = {
+        'trial': {'can_use_agents': False, 'can_invite_members': False, 'can_access_api': False, 'can_export': False},
+        'basic': {'can_use_agents': True, 'can_invite_members': False, 'can_access_api': False, 'can_export': True},
+        'pro': {'can_use_agents': True, 'can_invite_members': True, 'can_access_api': True, 'can_export': True},
+        'professional': {'can_use_agents': True, 'can_invite_members': True, 'can_access_api': True, 'can_export': True},
+        'enterprise': {'can_use_agents': True, 'can_invite_members': True, 'can_access_api': True, 'can_export': True},
+    }
+
+    perms = plan_permissions.get(plan, plan_permissions['trial'])
+
+    return UserPermissions(
+        is_admin=bool(getattr(user, 'is_admin', False)),
+        is_team_member=bool(getattr(user, 'is_team_member', False)),
+        can_upload_documents=True,  # All plans can upload
+        can_use_agents=subscription_status.get('can_use_agents', perms['can_use_agents']),
+        can_invite_members=perms['can_invite_members'],
+        can_access_api=perms['can_access_api'],
+        can_export=perms['can_export']
+    )
+
+
+def _calculate_needs_upgrade(user: User, subscription_status: dict) -> bool:
+    """Check if user needs to upgrade (trial expired without paid plan)."""
+    plan = subscription_status.get('plan', 'trial')
+    status = subscription_status.get('status', 'unknown')
+
+    # If not on trial, check if subscription is active
+    if plan != 'trial':
+        return status not in ['active', 'trialing']
+
+    # Check if trial expired
+    trial_ends_at = getattr(user, 'trial_ends_at', None)
+    if trial_ends_at:
+        if isinstance(trial_ends_at, str):
+            trial_ends_at = datetime.fromisoformat(trial_ends_at.replace('Z', '+00:00'))
+
+        now = datetime.now(timezone.utc)
+        if trial_ends_at.tzinfo is None:
+            trial_ends_at = trial_ends_at.replace(tzinfo=timezone.utc)
+
+        return now > trial_ends_at
+
+    return False
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async)
-) -> Any:
+    authorization: Optional[str] = Header(None, alias="Authorization")
+) -> LoginResponse:
     """
-    Reset user onboarding status for testing the new flow.
-    TEMPORARY ENDPOINT FOR DEVELOPMENT.
+    Login endpoint.
+
+    Validates Clerk JWT token and returns user data with subscription info.
+    Returns 401 if user doesn't exist (must register first via SignUp).
+
+    This endpoint does NOT create users - registration is handled separately
+    by the Clerk webhook on user.created event.
     """
-    try:
-        # Reset onboarding status
-        current_user.onboarding_completed = False
-        
-        await db.commit()
-        await db.refresh(current_user)
-        
-        logger.info(f"🔄 Onboarding reset for user: {current_user.id}")
-        return serialize_user(current_user)
-        
-    except Exception as e:
-        logger.error(f"Error resetting onboarding: {str(e)}")
-        await db.rollback()
+    # 1. Validate Authorization header
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error resetting onboarding"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+            headers={"WWW-Authenticate": "Bearer"}
         )
 
-@router.delete("/dev/delete-user", status_code=204)
-async def delete_user_dev(
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async)
-) -> None:
-    """
-    DEVELOPMENT ONLY: Delete current user completely from database.
-    WARNING: This will delete ALL user data including documents, subscriptions, etc.
-    """
+    token = authorization.split(" ")[1]
+
+    # 2. Verify Clerk JWT token
     try:
-        logger.warning(f"🚨 [DEV] Deleting user completely: {current_user.id} - {current_user.email}")
-        
-        # Delete all related data (cascade should handle most, but let's be explicit)
-        # Delete user subscriptions
-        from app.db.models import Subscription
-        from sqlalchemy import delete
-        
-        await db.execute(delete(Subscription).where(Subscription.user_id == current_user.id))
-        
-        # Delete user image
-        from app.db.models import UserImage
-        await db.execute(delete(UserImage).where(UserImage.user_id == current_user.id))
-        
-        # Delete the user (this should cascade delete other relationships like documents)
-        await db.delete(current_user)
-        
-        await db.commit()
-        logger.info(f"✅ [DEV] User {current_user.email} deleted completely")
-        
+        payload = _verify_clerk_token(token)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ [DEV] Error deleting user: {str(e)}")
-        await db.rollback()
+        logger.error(f"Token verification failed: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting user"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
         )
+
+    clerk_user_id = payload.get('sub')
+    if not clerk_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: no user ID"
+        )
+
+    # 3. Find user by clerk_user_id - NO JIT provisioning
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.roles), selectinload(User.tenant))
+        .where(User.clerk_user_id == clerk_user_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        logger.warning(f"Login attempt for unregistered clerk_user_id: {clerk_user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account not registered. Please sign up first."
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated"
+        )
+
+    # 4. Get subscription status from Stripe (force refresh on login)
+    try:
+        subscription_status = await SubscriptionServiceV2.verify_on_login(db, user)
+    except Exception as e:
+        logger.error(f"Error fetching subscription: {e}")
+        # Default to trial status if Stripe fails
+        subscription_status = {
+            'plan': getattr(user, 'subscription_plan', 'trial'),
+            'status': getattr(user, 'subscription_status', 'trialing'),
+            'can_use_agents': False,
+            'can_use_advanced_features': False,
+            'limits': {'documents': 10, 'storage_mb': 100},
+            'message': 'Unable to verify subscription'
+        }
+
+    # 5. Calculate needs_upgrade flag
+    needs_upgrade = _calculate_needs_upgrade(user, subscription_status)
+
+    # 6. Build permissions based on plan
+    permissions = _build_permissions(user, subscription_status)
+
+    # 7. Update last_login_at (use utcnow() for TIMESTAMP WITHOUT TIME ZONE column)
+    user.last_login_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(user)  # Refresh to avoid lazy loading issues after commit
+
+    # 8. Build subscription info
+    trial_days_remaining = None
+    trial_ends_at = getattr(user, 'trial_ends_at', None)
+    if trial_ends_at and subscription_status.get('plan') == 'trial':
+        now = datetime.now(timezone.utc)
+        if isinstance(trial_ends_at, str):
+            trial_ends_at = datetime.fromisoformat(trial_ends_at.replace('Z', '+00:00'))
+        if trial_ends_at.tzinfo is None:
+            trial_ends_at = trial_ends_at.replace(tzinfo=timezone.utc)
+        days_remaining = (trial_ends_at - now).days
+        trial_days_remaining = max(0, days_remaining)
+
+    subscription = SubscriptionInfo(
+        plan=subscription_status.get('plan', 'trial'),
+        status=subscription_status.get('status', 'trialing'),
+        can_use_agents=subscription_status.get('can_use_agents', False),
+        can_use_advanced_features=subscription_status.get('can_use_advanced_features', False),
+        limits=subscription_status.get('limits', {}),
+        needs_upgrade=needs_upgrade,
+        trial_days_remaining=trial_days_remaining,
+        current_period_end=subscription_status.get('current_period_end'),
+        subscription_id=subscription_status.get('subscription_id'),
+        cancel_at_period_end=subscription_status.get('cancel_at_period_end', False)
+    )
+
+    logger.info(f"✅ Login successful for user {user.id} - Plan: {subscription.plan}")
+
+    return LoginResponse(
+        user=_serialize_user(user),
+        subscription=subscription,
+        permissions=permissions,
+        tenant_id=str(user.tenant_id)
+    )
+
+
+@router.post("/logout", response_model=LogoutResponse)
+async def logout(
+    current_user: User = Depends(get_current_user_async)
+) -> LogoutResponse:
+    """
+    Logout endpoint.
+
+    Logs the logout event for monitoring.
+    Clerk handles actual session invalidation on the frontend.
+    """
+    logger.info(f"👋 User {current_user.id} ({current_user.email}) logged out")
+
+    return LogoutResponse(
+        success=True,
+        message="Logout successful"
+    )

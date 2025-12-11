@@ -13,8 +13,12 @@ import {
   IconWorld,
   IconBuilding,
   IconRefresh,
-  IconCheck,
-  IconX
+  IconX,
+  IconHistory,
+  IconExternalLink,
+  IconVersions,
+  IconCircleCheck,
+  IconClock
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,6 +34,12 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useNotifications } from "@/contexts/app-state-context"
 import { useTranslation } from "@/lib/i18n/hooks"
 import { useApiClient } from "@/lib/api-client"
@@ -40,6 +50,9 @@ interface PublicKnowledgeStats {
   documents_by_category: Record<string, number>
   documents_by_jurisdiction: Record<string, number>
   last_updated: string
+  // Extended stats (if available from backend)
+  current_versions_count?: number
+  total_content_size_kb?: number
 }
 
 interface PublicDocument {
@@ -51,6 +64,15 @@ interface PublicDocument {
   verified: boolean
   created_at: string
   similarity_score?: number
+  // Versioning fields
+  version_number?: number
+  is_current_version?: boolean
+  legal_status?: string
+  modification_type?: string
+  consolidation_date?: string
+  modifying_laws?: string[]
+  boe_id?: string
+  eli_uri?: string
 }
 
 interface SearchResult {
@@ -61,8 +83,7 @@ interface SearchResult {
 }
 
 export default function PublicKnowledgePage() {
-  const params = useParams()
-  const tenantId = params.tenantId as string
+  useParams() // tenantId available if needed for future features
   const { addNotification } = useNotifications()
   const { t } = useTranslation()
   const apiClient = useApiClient()
@@ -100,12 +121,13 @@ export default function PublicKnowledgePage() {
       }
 
       setStats(response.data || null)
-    } catch (error: any) {
-      setError(error.message || 'Failed to load public knowledge stats')
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load public knowledge stats'
+      setError(errorMessage)
       addNotification({
         type: 'error',
         title: t('publicKnowledgePage.notifications.loadFailed'),
-        message: error.message || 'An error occurred'
+        message: errorMessage
       })
     } finally {
       setIsLoading(false)
@@ -120,7 +142,7 @@ export default function PublicKnowledgePage() {
 
     try {
       const enabledCats = Object.entries(enabledCategories)
-        .filter(([_, enabled]) => enabled)
+        .filter(([, enabled]) => enabled)
         .map(([cat]) => cat)
 
       const response = await apiClient.post<SearchResult>('/weaviate/public-knowledge/search', {
@@ -135,12 +157,13 @@ export default function PublicKnowledgePage() {
       }
 
       setSearchResults(response.data || null)
-    } catch (error: any) {
-      setError(error.message || 'Search failed')
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Search failed'
+      setError(errorMessage)
       addNotification({
         type: 'error',
         title: t('publicKnowledgePage.notifications.searchFailed'),
-        message: error.message || 'An error occurred'
+        message: errorMessage
       })
     } finally {
       setIsSearching(false)
@@ -168,20 +191,6 @@ export default function PublicKnowledgePage() {
     return icons[category] || <IconFileText className="h-4 w-4" />
   }
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      legislation: 'blue',
-      regulation: 'green',
-      jurisprudence: 'purple',
-      template: 'orange',
-      guideline: 'cyan',
-      reference: 'gray',
-      form: 'yellow',
-      treaty: 'red'
-    }
-    return colors[category] || 'gray'
-  }
-
   const getJurisdictionLabel = (jurisdiction: string) => {
     const labels: Record<string, string> = {
       es: t('publicKnowledgePage.jurisdictions.es'),
@@ -194,6 +203,48 @@ export default function PublicKnowledgePage() {
 
   const getCategoryLabel = (category: string) => {
     return t(`publicKnowledgePage.categories.${category}`) || category
+  }
+
+  const getLegalStatusBadge = (status?: string) => {
+    const statusConfig: Record<string, { color: string; label: string }> = {
+      vigente: { color: 'bg-green-100 text-green-800', label: 'Vigente' },
+      derogada: { color: 'bg-red-100 text-red-800', label: 'Derogada' },
+      parcialmente_derogada: { color: 'bg-yellow-100 text-yellow-800', label: 'Parcialmente derogada' },
+      pendiente: { color: 'bg-blue-100 text-blue-800', label: 'Pendiente' }
+    }
+    const config = statusConfig[status || 'vigente'] || statusConfig.vigente
+    return (
+      <Badge className={`${config.color} border-0`}>
+        {config.label}
+      </Badge>
+    )
+  }
+
+  const getModificationTypeBadge = (type?: string) => {
+    const typeConfig: Record<string, { icon: React.ReactNode; label: string }> = {
+      original: { icon: <IconCircleCheck className="h-3 w-3" />, label: 'Original' },
+      modificacion: { icon: <IconHistory className="h-3 w-3" />, label: 'Modificación' },
+      correccion: { icon: <IconRefresh className="h-3 w-3" />, label: 'Corrección' },
+      derogacion_parcial: { icon: <IconX className="h-3 w-3" />, label: 'Derogación parcial' },
+      refundido: { icon: <IconVersions className="h-3 w-3" />, label: 'Texto refundido' }
+    }
+    const config = typeConfig[type || 'original'] || typeConfig.original
+    return (
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        {config.icon}
+        {config.label}
+      </span>
+    )
+  }
+
+  const formatConsolidationDate = (dateStr?: string) => {
+    if (!dateStr) return null
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    } catch {
+      return null
+    }
   }
 
   return (
@@ -352,57 +403,178 @@ export default function PublicKnowledgePage() {
                 </p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('publicKnowledgePage.table.title')}</TableHead>
-                    <TableHead>{t('publicKnowledgePage.table.category')}</TableHead>
-                    <TableHead>{t('publicKnowledgePage.table.jurisdiction')}</TableHead>
-                    <TableHead>{t('publicKnowledgePage.table.reference')}</TableHead>
-                    <TableHead>{t('publicKnowledgePage.table.verified')}</TableHead>
-                    <TableHead>{t('publicKnowledgePage.table.score')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {searchResults.results.map((doc) => (
-                    <TableRow key={doc.id}>
-                      <TableCell className="font-medium max-w-xs truncate">
-                        {doc.title}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`text-${getCategoryColor(doc.category)}-600`}>
-                          <span className="mr-1">{getCategoryIcon(doc.category)}</span>
-                          {getCategoryLabel(doc.category)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">
-                          {getJurisdictionLabel(doc.jurisdiction)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
-                        {doc.legal_reference || '-'}
-                      </TableCell>
-                      <TableCell>
-                        {doc.verified ? (
-                          <IconCheck className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <IconX className="h-4 w-4 text-gray-400" />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {doc.similarity_score ? (
-                          <span className="text-sm">{(doc.similarity_score * 100).toFixed(0)}%</span>
-                        ) : '-'}
-                      </TableCell>
+              <TooltipProvider>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('publicKnowledgePage.table.title')}</TableHead>
+                      <TableHead>{t('publicKnowledgePage.table.category')}</TableHead>
+                      <TableHead>{t('publicKnowledgePage.table.jurisdiction')}</TableHead>
+                      <TableHead>{t('publicKnowledgePage.table.reference')}</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Versión</TableHead>
+                      <TableHead>{t('publicKnowledgePage.table.score')}</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {searchResults.results.map((doc) => (
+                      <TableRow key={doc.id}>
+                        <TableCell className="max-w-sm">
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium line-clamp-2">{doc.title}</span>
+                            {doc.modifying_laws && doc.modifying_laws.length > 0 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-xs text-muted-foreground cursor-help flex items-center gap-1">
+                                    <IconHistory className="h-3 w-3" />
+                                    {doc.modifying_laws.length} modificaciones
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-sm">
+                                  <p className="font-medium mb-1">Modificada por:</p>
+                                  <ul className="text-xs space-y-1">
+                                    {doc.modifying_laws.map((law, i) => (
+                                      <li key={i}>• {law}</li>
+                                    ))}
+                                  </ul>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            <span className="mr-1">{getCategoryIcon(doc.category)}</span>
+                            {getCategoryLabel(doc.category)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            {getJurisdictionLabel(doc.jurisdiction)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-sm font-mono">
+                              {doc.boe_id || doc.legal_reference || '-'}
+                            </span>
+                            {doc.eli_uri && (
+                              <a
+                                href={doc.eli_uri}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                              >
+                                <IconExternalLink className="h-3 w-3" />
+                                BOE
+                              </a>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {getLegalStatusBadge(doc.legal_status)}
+                            {getModificationTypeBadge(doc.modification_type)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1">
+                              <IconVersions className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-sm font-medium">v{doc.version_number || 1}</span>
+                              {doc.is_current_version && (
+                                <Badge variant="outline" className="text-xs px-1 py-0 bg-green-50 text-green-700 border-green-200">
+                                  actual
+                                </Badge>
+                              )}
+                            </div>
+                            {doc.consolidation_date && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <IconClock className="h-3 w-3" />
+                                {formatConsolidationDate(doc.consolidation_date)}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {doc.similarity_score ? (
+                            <span className="text-sm font-medium">{(doc.similarity_score * 100).toFixed(0)}%</span>
+                          ) : '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TooltipProvider>
             )}
           </CardContent>
         </Card>
       )}
+
+      {/* Versioning System Info */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <IconVersions className="h-5 w-5" />
+            Sistema de Versionado Legal
+          </CardTitle>
+          <CardDescription>
+            Las leyes se actualizan y modifican constantemente. El sistema mantiene el historial de versiones para análisis temporal.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <IconCircleCheck className="h-5 w-5 text-green-600" />
+                <span className="font-medium">Estado Legal</span>
+              </div>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                  <strong>Vigente:</strong> Ley en vigor
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                  <strong>Parcialmente derogada:</strong> Algunos artículos sin efecto
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                  <strong>Derogada:</strong> Ley sin efecto
+                </li>
+              </ul>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <IconHistory className="h-5 w-5 text-blue-600" />
+                <span className="font-medium">Tipo de Modificación</span>
+              </div>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li><strong>Original:</strong> Texto inicial publicado</li>
+                <li><strong>Modificación:</strong> Cambios en artículos</li>
+                <li><strong>Corrección:</strong> Erratas del BOE</li>
+                <li><strong>Refundido:</strong> Texto consolidado oficial</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <IconClock className="h-5 w-5 text-purple-600" />
+                <span className="font-medium">Consolidación</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                La <strong>fecha de consolidación</strong> indica cuándo el BOE publicó la última versión integrada del texto.
+                Se recomienda verificar siempre en el BOE la versión más reciente para documentos críticos.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-950">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              <strong>💡 Nota:</strong> Emma AI utiliza automáticamente la versión vigente de las leyes para análisis de documentos.
+              El historial de versiones permite analizar contratos según la legislación aplicable en su fecha de firma.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Category Information */}
       <div className="mt-6 grid gap-4 md:grid-cols-4">

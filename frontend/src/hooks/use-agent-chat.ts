@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { ChatMessage, ChatRequest, StreamingEvent, useAgentsService } from '@/lib/services/agents.service'
+import { ChatMessage, ChatRequest, useAgentsService } from '@/lib/services/agents.service'
 
 export interface ThinkingEvent {
   type: 'thinking' | 'reasoning' | 'planning' | 'observation' | 'conclusion'
@@ -142,92 +142,9 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThink
     setIsStreaming(true)
 
     try {
-      // Create EventSource for streaming
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const streamUrl = `${apiUrl}/api/v1/agents/${agentId}/chat/stream`
-      
-      eventSourceRef.current = new EventSource(streamUrl)
-      
-      // Handle incoming messages
-      let assistantMessage = ''
-      let messageMetadata: Record<string, any> = {}
-
-      eventSourceRef.current.onmessage = (event) => {
-        try {
-          const data: StreamingEvent = JSON.parse(event.data)
-          
-          switch (data.type) {
-            case 'conversation_id':
-              setConversationId(data.content)
-              break
-              
-            case 'thinking':
-            case 'reasoning':
-            case 'planning':
-            case 'observation':
-            case 'conclusion':
-              // Handle thinking events
-              addThinkingEvent({
-                type: data.type as ThinkingEvent['type'],
-                content: data.content,
-                metadata: data.metadata
-              })
-              break
-              
-            case 'message':
-              assistantMessage += data.content
-              // Update the last assistant message in real-time
-              setMessages(prev => {
-                const newMessages = [...prev]
-                const lastIndex = newMessages.length - 1
-                if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
-                  newMessages[lastIndex] = {
-                    ...newMessages[lastIndex],
-                    content: assistantMessage,
-                    metadata: { ...messageMetadata, ...data.metadata }
-                  }
-                } else {
-                  newMessages.push({
-                    role: 'assistant',
-                    content: assistantMessage,
-                    timestamp: new Date().toISOString(),
-                    metadata: data.metadata
-                  })
-                }
-                return newMessages
-              })
-              break
-              
-            case 'completion':
-              onStreamEnd?.()
-              break
-              
-            case 'error':
-              onError?.(data.content)
-              break
-          }
-        } catch (error) {
-          console.error('Error parsing SSE data:', error)
-        }
-      }
-
-      eventSourceRef.current.onerror = (error) => {
-        console.error('EventSource error:', error)
-        onError?.('Connection error')
-        eventSourceRef.current?.close()
-      }
-
-      // Send the initial request to start the stream
-      const request: ChatRequest = {
-        message: content,
-        conversation_id: conversationId || undefined,
-        context
-      }
-
-      // This would need to be implemented differently in a real app
-      // For now, we'll fallback to regular API
+      // For now, reuse non-streaming flow against Emma endpoint
       await sendMessage(content, context)
-
+      onStreamEnd?.()
     } catch (error) {
       console.error('Error in streaming chat:', error)
       onError?.(error instanceof Error ? error.message : 'Unknown error')
@@ -235,7 +152,7 @@ export function useAgentChat({ agentId, onMessage, onError, onStreamEnd, onThink
       setIsLoading(false)
       setIsStreaming(false)
     }
-  }, [agentId, conversationId, addMessage, onError, onStreamEnd, sendMessage])
+  }, [addMessage, onError, onStreamEnd, sendMessage])
 
   const clearChat = useCallback(() => {
     setMessages([])

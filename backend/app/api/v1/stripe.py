@@ -49,10 +49,10 @@ async def create_checkout_session(
     """
     try:
         # Validate plan ID
-        if request.planId not in ['basic', 'pro']:
+        if request.planId not in ['basic', 'pro', 'enterprise']:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid plan ID: {request.planId}. Must be 'basic' or 'pro'"
+                detail=f"Invalid plan ID: {request.planId}. Must be 'basic', 'pro', or 'enterprise'"
             )
         
         # Normalize and validate interval values
@@ -78,6 +78,10 @@ async def create_checkout_session(
             'pro': {
                 'month': settings.STRIPE_PRO_PRICE_ID,
                 'year': getattr(settings, 'STRIPE_PRO_YEARLY_PRICE_ID', None)
+            },
+            'enterprise': {
+                'month': getattr(settings, 'STRIPE_ENTERPRISE_PRICE_ID', None),
+                'year': getattr(settings, 'STRIPE_ENTERPRISE_YEARLY_PRICE_ID', None)
             }
         }
         
@@ -119,6 +123,8 @@ async def create_checkout_session(
             await db.commit()
         
         # Crear sesión de checkout
+        # NOTE: Para planes de pago siempre recopilamos tarjeta
+        # El trial gratuito se maneja por separado (endpoint /start-free-trial)
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -139,9 +145,9 @@ async def create_checkout_session(
             billing_address_collection='auto',
             # Permitir códigos promocionales
             allow_promotion_codes=True,
-            # Configurar el trial si aplica
+            # SIEMPRE recopilar método de pago (requerido para cobrar)
+            payment_method_collection='always',
             subscription_data={
-                'trial_period_days': 14 if request.planId == 'pro' else None,
                 'metadata': {
                     'plan_id': request.planId,
                     'interval': normalized_interval,

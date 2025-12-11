@@ -80,7 +80,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 **Frontend**: Next.js 15 with App Router, TypeScript, and Clerk authentication
 **Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
 **Storage**: Google Cloud Storage for files
-**AI/ML**: Ollama LLMs with Elysia agentic framework (Emma AI)
+**AI/ML**: vLLM (GPU inference) + Microsoft Agent Framework for multi-agent orchestration (Emma AI)
 
 ### Key Architectural Patterns
 
@@ -90,14 +90,93 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 - Tenant context passed through dependency injection in FastAPI endpoints
 - Authentication via Clerk with tenant association
 
+#### Authentication Architecture (Clerk + Stripe)
+
+**Authentication Flow (NO JIT Provisioning):**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  LOGIN FLOW                                                  │
+├─────────────────────────────────────────────────────────────┤
+│  1. User → <SignIn /> Clerk component                        │
+│  2. Clerk authenticates → JWT token                          │
+│  3. Frontend → POST /api/v1/auth/login (Bearer token)        │
+│  4. Backend:                                                 │
+│     ├── Validates JWT against Clerk JWKS                     │
+│     ├── Finds user by clerk_user_id                          │
+│     ├── NOT FOUND → 401 "User not registered"                │
+│     ├── FOUND → Queries Stripe for subscription              │
+│     └── Calculates permissions based on plan                 │
+│  5. Backend → { user, subscription, permissions, tenant_id } │
+│  6. Frontend stores state, redirects to dashboard            │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  REGISTRATION FLOW (via Clerk webhook)                       │
+├─────────────────────────────────────────────────────────────┤
+│  1. User → <SignUp /> Clerk component                        │
+│  2. Clerk creates user → fires user.created webhook          │
+│  3. Backend webhook handler:                                 │
+│     ├── Creates Tenant (organization)                        │
+│     ├── Creates User with trial subscription                 │
+│     ├── Creates GCS bucket for tenant                        │
+│     └── Optionally creates Stripe customer                   │
+│  4. User redirected to complete onboarding                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Endpoints:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/auth/login` | POST | Validates Clerk JWT, returns user + subscription + permissions |
+| `/api/v1/auth/logout` | POST | Logs event (Clerk handles session invalidation) |
+| `/api/v1/auth/me` | GET | Returns current user data (for refresh) |
+| `/api/v1/auth/complete-onboarding` | POST | Marks onboarding as completed |
+| `/api/v1/webhooks/clerk` | POST | Handles Clerk webhooks (user.created, etc.) |
+
+**Login Response Structure:**
+```typescript
+interface LoginResponse {
+  user: BackendUser;
+  subscription: {
+    plan: string;                  // trial, basic, pro, enterprise
+    status: string;                // active, trialing, past_due, canceled
+    can_use_agents: boolean;
+    can_use_advanced_features: boolean;
+    limits: Record<string, number>; // { documents: 500, storage_mb: 10240 }
+    needs_upgrade: boolean;        // True if trial expired
+    trial_days_remaining: number | null;
+    current_period_end: string | null;
+  };
+  permissions: {
+    is_admin: boolean;
+    is_team_member: boolean;
+    can_upload_documents: boolean;
+    can_use_agents: boolean;
+    can_invite_members: boolean;
+    can_access_api: boolean;
+    can_export: boolean;
+  };
+  tenant_id: string;
+}
+```
+
+**Important:**
+- **NO JIT Provisioning**: Login does NOT create users. Unregistered users get 401.
+- **Registration via Clerk Webhook**: Users are created when Clerk fires `user.created` event.
+- **Trial expired = Login success + flag**: `needs_upgrade: true` in response.
+- **Stripe integration**: Subscription status is cached and synced via webhooks.
+
 #### Microservices Design
 - **Main API** (port 8000): Core business logic, authentication, document management
 - **Storage Service** (port 8003): Google Cloud Storage operations with signed URLs
-- **Weaviate Service** (port 8007): Emma AI with Elysia framework, vector search, RAG capabilities
+- **Weaviate Service** (port 8007): Vector search, RAG pipeline (7-layer), Emma AI (Agent Framework orchestration)
+- **vLLM Server** (internal): High-throughput GPU inference with OpenAI-compatible API
 - **Elasticsearch Service** (port 8008): Full-text search, document indexing, hybrid search
 - **Gotenberg Service** (port 3000): Document conversion, PDF generation, thumbnail creation
 - **Background Worker** (port 8100): Async task processing with Celery
-- **Temporal.io** (port 7233): Workflow orchestration for complex document pipelines
+- **Camunda Service** (port 8080): BPMN workflow orchestration for document pipelines
+- **LangExtract Service** (port 8009): Structured document extraction with LLM providers
 
 #### Database Schema Highlights
 - **Multi-tenant models**: All core entities have tenant_id foreign keys
@@ -129,11 +208,13 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 - **Alembic**: Database migration management
 - **Clerk**: Authentication and user management
 - **Stripe**: Payment processing integration
-- **Weaviate**: Vector database for semantic search with Elysia integration
+- **Weaviate**: Vector database for semantic search
+- **Microsoft Agent Framework**: Multi-agent orchestration with ChatAgent, @ai_function decorators
+- **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing
 - **Redis**: Caching and session storage
 - **Celery**: Distributed task queue for async processing
-- **Temporal.io**: Workflow orchestration engine
+- **Camunda**: BPMN workflow orchestration engine (replacing Temporal.io)
 
 #### Frontend Technologies
 - **Next.js 15**: React framework with App Router
@@ -240,11 +321,144 @@ If you encounter module resolution errors like "Export default doesn't exist":
 5. Write tests in `tests/test_api/`
 
 ### Adding New Microservice Feature
-1. Identify appropriate microservice (LangChain, Langroid, Storage, Ollama)
+1. Identify appropriate microservice (Weaviate Service, Storage Service, Elasticsearch Service)
 2. Implement endpoint in microservice's `api/` directory
 3. Update main API to call microservice
 4. Add necessary environment variables
 5. Update docker-compose configuration
+
+### Working with Microsoft Agent Framework
+The Weaviate Service includes a complete Microsoft Agent Framework + vLLM integration for high-throughput GPU inference:
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Emma Service                            │
+│          (PlanningFlow + RAG Pipeline Orchestration)        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+   ┌─────▼─────┐   ┌────▼──────┐  ┌────▼────────┐
+   │ Sequential│   │PlanningFlow│  │ RAG Pipeline │
+   │ Workflow  │   │(Graph-based)│  │  (Fallback)  │
+   └─────┬─────┘   └────┬──────┘  └──────────────┘
+         └───────┬──────┘
+                 │
+    ┌────────────▼────────────────────────────────┐
+    │        Agent Framework Layer                 │
+    │  • ChatAgent (stateless per invocation)      │
+    │  • AgentThread (state management)            │
+    │  • @ai_function decorators (tools)           │
+    │  • Middleware (logging, auth)                │
+    └────────────┬────────────────────────────────┘
+                 │
+    ┌────────────▼────────────────────────────────┐
+    │        LLM Provider Factory                  │
+    │  • vLLM (primary) → Qwen3-14B       │
+    │  • OpenAI (fallback) → GPT-4o-mini           │
+    │  • Anthropic (fallback) → Claude 3.5        │
+    └────────────┬────────────────────────────────┘
+                 │
+    ┌────────────▼────────────────────────────────┐
+    │           vLLM Server (Docker)               │
+    │  • GPU: NVIDIA CUDA 12.2 (RTX 4090)          │
+    │  • API: OpenAI-compatible (:8000)            │
+    │  • Model: Qwen/Qwen3-14B            │
+    │  • Context: 32K native (131K with YaRN)      │
+    │  • Tool calling: Hermes-style parser         │
+    └─────────────────────────────────────────────┘
+```
+
+**Structure:**
+```
+weaviate-service/app/agents/
+├── config.py          # Agent configuration (providers, timeouts)
+├── model_client.py    # Multi-provider LLM client factory (vLLM primary)
+├── orchestrator.py    # Main entry point
+├── agents/            # Specialized agents (Search, Analyst, Contract, Compliance, Summarizer)
+├── tools/             # RAG pipeline wrappers as @ai_function tools
+└── workflows/         # Orchestration patterns (Sequential, PlanningFlow)
+```
+
+**Usage:**
+```python
+from app.agents import get_orchestrator, WorkflowType
+
+orchestrator = get_orchestrator()
+result = await orchestrator.execute(
+    query="Analyze the contract for compliance issues",
+    tenant_id="tenant-123",
+    workflow_type=WorkflowType.AUTO  # or SEQUENTIAL, PLANNING_FLOW
+)
+```
+
+**Supported LLM Providers:**
+- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-14B)
+- `LLM_PROVIDER=ollama` - Legacy local models (llama3.2, qwen2.5, mistral)
+- `LLM_PROVIDER=openai` - Fallback to GPT-4o, GPT-4o-mini
+- `LLM_PROVIDER=anthropic` - Fallback to Claude 3.5 Sonnet, Claude 3 Opus
+- `LLM_PROVIDER=google` - Fallback to Gemini 1.5 Flash, Gemini 1.5 Pro
+
+**vLLM Configuration:**
+```bash
+# Environment variables for vLLM (docker-compose.yml)
+VLLM_ENABLED=true
+VLLM_BASE_URL=http://vllm:8000/v1
+VLLM_MODEL=Qwen/Qwen3-14B
+VLLM_MAX_MODEL_LEN=32768  # Native 32K, up to 131K with YaRN
+HF_TOKEN=your_huggingface_token  # Required for Qwen3
+
+# NOTE: Uses vllm/vllm-openai:latest (vLLM >= 0.9.0 required for Qwen3)
+# Hardware: RTX 4090 (24GB VRAM) - ~14GB VRAM usage at FP16
+# Tool calling: Hermes-style parser (--tool-call-parser hermes)
+```
+
+**vLLM Server API Endpoints:**
+The vLLM server exposes multiple APIs beyond the OpenAI-compatible interface:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
+| `/v1/completions` | POST | OpenAI-compatible text completions |
+| `/v1/models` | GET | List available models |
+| `/v1/embeddings` | POST | Generate text embeddings |
+| `/v1/score` | POST | Score/classify text |
+| `/v1/rerank` | POST | Rerank documents |
+| `/v2/rerank` | POST | Rerank v2 API |
+| `/health` | GET | Health check |
+| `/metrics` | GET | Prometheus metrics |
+| `/ping` | GET/POST | Liveness probe |
+| `/pooling` | POST | Pooling operations |
+| `/classify` | POST | Text classification |
+| `/inference/v1/generate` | POST | Direct inference generation |
+
+**Testing vLLM:**
+```bash
+# Check available models
+curl http://localhost:8000/v1/models | jq
+
+# Test chat completion
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-14B",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 100
+  }'
+
+# Test tool calling (Hermes format)
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-14B",
+    "messages": [{"role": "user", "content": "What is 25 * 4?"}],
+    "tools": [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}}}}]
+  }'
+
+# Check metrics
+curl http://localhost:8000/metrics
+```
 
 ### Database Schema Changes
 1. Modify models in `db/models.py`

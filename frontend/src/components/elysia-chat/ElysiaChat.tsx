@@ -7,7 +7,7 @@ import { Brain, MessageSquare, Trash2, RefreshCw, Zap, Settings, BarChart3 } fro
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useBackendUser } from "@/contexts/user-context"
-import { useElysiaService } from "@/lib/services/elysia.service"
+import { useEmmaService } from "@/lib/services/emma.service"
 import { useDocumentService } from "@/lib/services/document.service"
 import { useRouter } from "next/navigation"
 import { ElysiaQueryInput } from "./ElysiaQueryInput"
@@ -38,7 +38,7 @@ export const ElysiaChat = forwardRef<ElysiaChatRef, ElysiaChatProps>(function El
   tenantId, className, initialMessage, initialQuery, onClose, onFirstQuery, isAdmin = false, documentId, enableMentions = true
 }, ref) {
   const { backendUser } = useBackendUser()
-  const { sendMessage } = useElysiaService()
+  const { sendMessage } = useEmmaService()
   const documentService = useDocumentService()
   const router = useRouter()
   

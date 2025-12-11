@@ -24,12 +24,12 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-// Dynamic schema based on language
+// Dynamic schema based on language - ALL FIELDS OPTIONAL
 const createUnifiedDataSchema = (t: (key: string) => string) => z.object({
-  firstName: z.string().min(2, t('errors.validationError')),
-  lastName: z.string().min(2, t('errors.validationError')),
-  companyName: z.string().min(2, t('errors.validationError')),
-  cif: z.string().min(8, t('errors.validationError')),
+  firstName: z.string().optional().default(''),
+  lastName: z.string().optional().default(''),
+  companyName: z.string().optional().default(''),
+  cif: z.string().optional().default(''),
 })
 
 type UnifiedFormData = {
@@ -127,8 +127,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
   const handleNext = async () => {
     if (currentStepId === 'data') {
-      const isValid = await unifiedForm.trigger()
-      if (!isValid) return
+      // Fields are optional, just complete
       await handleComplete()
       return
     }
@@ -355,7 +354,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                             name="firstName"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>{t('onboarding.firstName')} *</FormLabel>
+                                <FormLabel>{t('onboarding.firstName')}</FormLabel>
                                 <FormControl>
                                   <Input placeholder={t('onboarding.yourFirstName')} {...field} />
                                 </FormControl>
@@ -363,13 +362,13 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                               </FormItem>
                             )}
                           />
-                          
+
                           <FormField
                             control={unifiedForm.control}
                             name="lastName"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>{t('onboarding.lastName')} *</FormLabel>
+                                <FormLabel>{t('onboarding.lastName')}</FormLabel>
                                 <FormControl>
                                   <Input placeholder={t('onboarding.yourLastName')} {...field} />
                                 </FormControl>
@@ -392,7 +391,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                           name="companyName"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>{t('onboarding.companyName')} *</FormLabel>
+                              <FormLabel>{t('onboarding.companyName')}</FormLabel>
                               <FormControl>
                                 <Input placeholder={t('onboarding.companyNamePlaceholder')} {...field} />
                               </FormControl>
@@ -400,13 +399,13 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
                             </FormItem>
                           )}
                         />
-                        
+
                         <FormField
                           control={unifiedForm.control}
                           name="cif"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>{t('onboarding.taxId')} *</FormLabel>
+                              <FormLabel>{t('onboarding.taxId')}</FormLabel>
                               <FormControl>
                                 <Input placeholder={t('onboarding.taxIdPlaceholder')} {...field} />
                               </FormControl>
@@ -449,39 +448,56 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
 
               {/* Navigation Buttons */}
               {currentStep < steps.length - 1 && (
-                <div className="flex justify-between pt-6 border-t mt-8">
-                  <Button
-                    variant="outline"
-                    onClick={handlePrevious}
-                    disabled={currentStep === 0}
-                    className={currentStep === 0 ? 'invisible' : ''}
-                  >
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    {t('common.previous')}
-                  </Button>
+                <div className="flex flex-col gap-4 pt-6 border-t mt-8">
+                  <div className="flex justify-between">
+                    <Button
+                      variant="outline"
+                      onClick={handlePrevious}
+                      disabled={currentStep === 0}
+                      className={currentStep === 0 ? 'invisible' : ''}
+                    >
+                      <ArrowLeft className="h-4 w-4 mr-2" />
+                      {t('common.previous')}
+                    </Button>
 
-                  <Button
-                    onClick={handleNext}
-                    disabled={isProcessing}
-                    className={currentStep === 0 ? 'ml-auto' : ''}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        {t('onboarding.processing')}
-                      </>
-                    ) : currentStep === steps.length - 2 ? (
-                      <>
-                        {t('onboarding.complete')}
-                        <CheckCircle className="h-4 w-4 ml-2" />
-                      </>
-                    ) : (
-                      <>
-                        {t('common.next')}
-                        <ArrowRight className="h-4 w-4 ml-2" />
-                      </>
-                    )}
-                  </Button>
+                    <Button
+                      onClick={handleNext}
+                      disabled={isProcessing}
+                      className={currentStep === 0 ? 'ml-auto' : ''}
+                    >
+                      {isProcessing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          {t('onboarding.processing')}
+                        </>
+                      ) : currentStep === steps.length - 2 ? (
+                        <>
+                          {t('onboarding.complete')}
+                          <CheckCircle className="h-4 w-4 ml-2" />
+                        </>
+                      ) : (
+                        <>
+                          {t('common.next')}
+                          <ArrowRight className="h-4 w-4 ml-2" />
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Skip option - only show on data step */}
+                  {currentStepId === 'data' && (
+                    <div className="text-center">
+                      <Button
+                        variant="ghost"
+                        onClick={handleComplete}
+                        disabled={isProcessing}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        {translate('onboarding.skipForNow', 'Completar más tarde')}
+                        <ArrowRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

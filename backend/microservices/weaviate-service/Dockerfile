@@ -12,17 +12,19 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 # Be resilient to slow PyPI: increase timeout and retries, prefer wheels
+# Suppress known deprecation warnings from third-party libraries
 ENV PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=5 \
-    PIP_NO_CACHE_DIR=1
-RUN pip install --prefer-binary -r requirements.txt
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONWARNINGS="ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic"
+# --pre allows installing beta versions (agent-framework is in preview)
+RUN pip install --prefer-binary --pre -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
 
-# Apply Elysia patches for local Weaviate support
-# This fixes a bug where ClientManager doesn't receive local Weaviate parameters
-COPY elysia_patches/collection.py /usr/local/lib/python3.12/site-packages/elysia/preprocessing/collection.py
+# Copy agent prompt configuration files
+COPY config/ ./config/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

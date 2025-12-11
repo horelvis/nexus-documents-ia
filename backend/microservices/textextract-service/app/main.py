@@ -1,5 +1,6 @@
 """
 Main application entry point for the text extraction microservice.
+Uses Apache Tika for document text extraction.
 """
 from contextlib import asynccontextmanager
 import sys
@@ -10,7 +11,6 @@ from loguru import logger
 
 from app.api import text_extraction
 from app.core.config import settings
-from app.core.nltk_bootstrap import prepare_nltk_data
 from app.schemas.text_extraction import HealthResponse
 
 # Configure loguru
@@ -33,18 +33,17 @@ logger.add(
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Application lifespan manager."""
-    prepare_nltk_data(settings.nltk_data_dir)
-    logger.info("🚀 Starting {} v{}", settings.service_name, settings.service_version)
-    logger.info("📡 Listening on port {}", settings.service_port)
+    logger.info("Starting {} v{}", settings.service_name, settings.service_version)
+    logger.info("Using Apache Tika at {}", settings.tika_url)
     logger.info("Allowed extensions: {}", ", ".join(settings.allowed_extensions))
     yield
-    logger.info("👋 Shutting down {}", settings.service_name)
+    logger.info("Shutting down {}", settings.service_name)
 
 
 app = FastAPI(
     title=settings.service_name,
     version=settings.service_version,
-    description="Document text extraction microservice powered by unstructured.",
+    description="Document text extraction microservice powered by Apache Tika.",
     lifespan=lifespan,
 )
 
@@ -67,6 +66,7 @@ async def root():
     return {
         "service": settings.service_name,
         "version": settings.service_version,
+        "backend": "apache-tika",
         "docs": "/docs",
         "health": "/health",
     }
@@ -75,15 +75,11 @@ async def root():
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health endpoint without authentication (used by orchestrators)."""
-    strategies = {
-        "default": settings.default_strategy,
-        "supported": ", ".join(strategy for strategy in ["auto", "fast", "hi_res"]),
-    }
     return HealthResponse(
         status="healthy",
         service=settings.service_name,
         version=settings.service_version,
-        strategies=strategies,
+        backend="apache-tika",
     )
 
 

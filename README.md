@@ -23,28 +23,26 @@
 - **🌐 Capacidades Multimodales**: Procesa texto, PDFs con firmas digitales y metadatos complejos
 - **⚖️ Chain of Thought**: Visualización transparente del proceso de razonamiento de la IA (solo para administradores)
 
-### 🧠 Elysia AI-Native Database
+### 🧠 AutoGen Multi-Agent Orchestration
 
-Emma se apoya en **Elysia**, la nueva base de datos AI-native construida por Weaviate. No es únicamente un vector store, sino una capa unificada que integra:
+Emma AI está construida sobre **Microsoft AutoGen 0.4.8+**, un framework de agentes de última generación que proporciona:
 
-- **Vectores + embeddings multimodales** (texto, imagen, audio)
-- **Documentos crudos y metadata estructurada**
-- **RAG engine integrado** con indexación híbrida grafo + vector
-- **Motor de búsqueda + Decision Trees** en el mismo plano de datos
+- **Multi-Agent Workflows**: Patrones Sequential, GroupChat y Swarm para orquestación avanzada
+- **RAG Pipeline de 7 capas**: Búsqueda híbrida, reranking y generación validada
+- **5 Agentes Especializados**: Search, Analyst, Contract, Compliance, Summarizer
+- **Multi-Provider LLM**: Soporta Ollama (local), OpenAI, Anthropic (Claude), Google (Gemini)
 
-Esto nos permite tratar a Elysia como el verdadero **centro neuronal** del sistema: los microservicios no necesitan reinventar la rueda para cada LLM o pipeline de herramientas, sino que delegan en Elysia la orquestación y selección de modelos.  
-La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL` y `OPENAI_MODEL`, pero es Elysia quien decide cómo ejecutar cada consulta (gpt-oss local u OpenAI) sin duplicar lógica en cada servicio.
+La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL`, `OPENAI_MODEL`, etc. El orquestador selecciona automáticamente el workflow óptimo según la consulta.
 
 ## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
 ### Emma AI Assistant
-**Emma** es nuestro asistente de IA avanzado **construido sobre Elysia Framework**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma.
+**Emma** es nuestro asistente de IA avanzado **construido sobre Microsoft AutoGen 0.4.8+**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma mediante orquestación multi-agente.
 
 #### Capacidades Principales de Emma:
 - **🧠 Procesamiento Contextual**: Comprende el contexto completo de tus documentos
-- **🔍 Búsqueda Inteligente**: Encuentra información relevante usando Elysia Framework con Weaviate vector search
+- **🔍 Búsqueda Inteligente**: Encuentra información relevante usando RAG Pipeline con Weaviate vector search
 - **🌐 Información en Tiempo Real**: Accede a datos actualizados via búsqueda web
-- **🌤️ Consultas Meteorológicas**: Información climática para cualquier ubicación
 - **📄 Análisis de Documentos**: Extrae insights de contratos, facturas y reportes
 - **🏷️ Extracción de Entidades**: Identifica automáticamente personas, organizaciones, fechas e importes
 - **🔄 Comparación de Documentos**: Análisis comparativo inteligente entre documentos
@@ -52,11 +50,12 @@ La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL` y
 - **✨ Respuestas Adaptativas**: Sistema de decisión que selecciona las mejores herramientas
 
 #### Tecnología Subyacente:
-- **Elysia Framework**: Sistema de decisión inteligente y orquestación de herramientas (core de Emma AI)
+- **AutoGen 0.4.8+**: Framework de Microsoft para orquestación multi-agente (core de Emma AI)
+- **RAG Pipeline 7-Layer**: Procesamiento completo con búsqueda híbrida, reranking y validación
 - **Weaviate**: Base de datos vectorial para búsqueda semántica avanzada
-- **Ollama Integration**: Modelos locales (gpt-oss:20b) para privacidad y rendimiento
+- **Multi-Provider LLM**: Ollama (local), OpenAI, Anthropic (Claude), Google (Gemini)
 - **LangExtract Integration**: Extracción automática de entidades en upload de documentos
-- **Multi-Tool Architecture**: 13+ herramientas especializadas para diferentes tareas
+- **5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
 
 ### Casos de Uso con IA
 1. **Due Diligence Automático**: Analiza 1000+ documentos en minutos con extracción de entidades
@@ -278,7 +277,7 @@ sequenceDiagram
     participant F as 🖥️ Frontend
     participant A as 🚀 FastAPI
     participant D as 📄 Document Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant E as 🤖 Emma AI (AutoGen)
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL
     participant G as ☁️ GCS
@@ -332,7 +331,7 @@ sequenceDiagram
     participant D as 📄 Document Service
     participant LE as 🏷️ LangExtract Service
     participant CAG as 📊 CAG Service
-    participant E as 🤖 Emma AI (Elysia)
+    participant E as 🤖 Emma AI (AutoGen)
     participant O as 🦙 Ollama Service
     participant W as 🔍 Weaviate
     participant P as 📊 PostgreSQL

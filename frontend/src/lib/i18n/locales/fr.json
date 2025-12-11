@@ -120,7 +120,23 @@
     "noDocuments": "Aucun document trouvé",
     "uploadHint": "Glissez-déposez des fichiers ici ou cliquez pour parcourir",
     "supportedFormats": "Formats supportés: PDF, DOC, DOCX, TXT",
-    "maxFileSize": "Taille maximale: 50MB"
+    "maxFileSize": "Taille maximale: 50MB",
+    "agentAnalysis": "Analyse Agents",
+    "agentAnalysisDialog": "Analyse Agents"
+  },
+  "analysisPage": {
+    "backToDocuments": "Retour aux documents",
+    "analyzing": "Analyse en cours",
+    "analysisPlan": "Plan d'analyse",
+    "completed": "terminés",
+    "retryAnalysis": "Réessayer l'analyse",
+    "reanalyze": "Ré-analyser",
+    "risks": "risques",
+    "recommendations": "recommandations",
+    "annotationsInPages": "annotations sur {pages} pages",
+    "generatingPlan": "Génération du plan d'analyse...",
+    "lastStepsBeforeError": "Dernières étapes avant l'erreur:",
+    "error": "Erreur"
   },
   "errors": {
     "genericError": "Quelque chose a mal tourné",
@@ -132,6 +148,44 @@
     "uploadError": "Échec du téléversement du fichier",
     "fileTooLarge": "Le fichier est trop volumineux",
     "unsupportedFormat": "Format de fichier non supporté"
+  },
+  "emma": {
+    "errors": {
+      "network": {
+        "title": "Erreur de connexion",
+        "message": "Impossible de se connecter au serveur. Vérifiez votre connexion internet et réessayez."
+      },
+      "timeout": {
+        "title": "Délai d'attente dépassé",
+        "message": "La requête a pris trop de temps. Essayez une question plus spécifique."
+      },
+      "server": {
+        "title": "Erreur serveur",
+        "message": "Un problème est survenu lors du traitement de votre demande. Notre équipe a été notifiée."
+      },
+      "auth": {
+        "title": "Session expirée",
+        "message": "Votre session a expiré. Veuillez vous reconnecter."
+      },
+      "serviceUnavailable": {
+        "title": "Service indisponible",
+        "message": "Emma est temporairement indisponible. Veuillez réessayer dans quelques minutes."
+      },
+      "unknown": {
+        "title": "Erreur inattendue",
+        "message": "Une erreur inattendue s'est produite. Veuillez réessayer."
+      },
+      "retry": "Réessayer",
+      "tryAgain": "Réessayer"
+    },
+    "thinking": {
+      "phrase1": "Analyse de votre demande...",
+      "phrase2": "Recherche dans vos documents...",
+      "phrase3": "Réflexion sur la meilleure réponse...",
+      "phrase4": "Préparation de l'analyse...",
+      "phrase5": "Consultation des informations pertinentes...",
+      "phrase6": "Un instant, traitement en cours..."
+    }
   },
   "chatPage": {
     "emmaResponding": "Emma génère une réponse..."
@@ -156,6 +210,10 @@
   "sidebar": {
     "admin": {
       "publicKnowledge": "Base de Connaissances Juridiques"
+    },
+    "channels": {
+      "title": "Canaux d'Info",
+      "description": "Sources de données externes pour RAG"
     }
   },
   "documentPreview": {
@@ -179,6 +237,27 @@
       "title": "Entités extraites",
       "extracting": "Extraction des entités...",
       "noEntities": "Aucune entité trouvée"
+    }
+  },
+  "userNotFound": {
+    "title": "Compte Utilisateur Non Trouvé",
+    "description": "Votre authentification est valide mais votre profil utilisateur n'a pas été trouvé. Cela se produit généralement quand :",
+    "reasons": {
+      "incomplete": "L'inscription de votre compte n'a pas été complétée",
+      "deleted": "Votre compte a été supprimé ou désactivé",
+      "sync": "Il y a un problème de synchronisation entre les systèmes"
+    },
+    "email": "Email",
+    "buttons": {
+      "tryAgain": "Réessayer",
+      "contactSupport": "Contacter le Support",
+      "reRegister": "S'inscrire à Nouveau",
+      "signOutHome": "Se Déconnecter et Retourner à l'Accueil"
+    },
+    "footer": "Si ce problème persiste, veuillez contacter notre équipe de support.",
+    "supportEmail": {
+      "subject": "Problème de Compte Utilisateur",
+      "body": "Bonjour Équipe de Support,\n\nJe rencontre un problème avec mon compte. Je peux me connecter mais mon profil utilisateur n'est pas trouvé dans le système.\n\n- Email de l'Utilisateur : {email}\n- ID Utilisateur Clerk : {clerkId}\n- Heure : {time}\n\nMerci de m'aider à résoudre ce problème.\n\nMerci !"
     }
   },
   "publicKnowledgePage": {

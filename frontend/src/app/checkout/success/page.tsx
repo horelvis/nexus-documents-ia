@@ -60,10 +60,18 @@ function CheckoutSuccessContent() {
 
   const handleContinueToSignup = () => {
     if (checkoutData) {
+      // Always check isLoaded before making decisions based on isSignedIn
+      if (!isLoaded) {
+        // Clerk not ready, wait a bit and retry
+        setTimeout(handleContinueToSignup, 500)
+        return
+      }
+
       // Check if user is already signed in
       if (isSignedIn) {
-        // User is already authenticated, go to dashboard
-        router.push('/dashboard?upgraded=true&sync=true')
+        // User is already authenticated, go to onboarding or dashboard
+        // The onboarding will detect if it's already complete and redirect to dashboard
+        router.push('/onboarding-simple?plan=' + checkoutData.plan_id)
       } else {
         // User needs to sign up with the session data
         router.push(`/auth/sign-up?session_id=${checkoutData.session_id}&plan=${checkoutData.plan_id}`)
