@@ -49,10 +49,10 @@ def test_search_empty_query(client, normal_user_token_headers):
     
     assert response.status_code == 422  # Validation error
 
-def test_ask_documents(client, test_documents, normal_user_token_headers, mock_embedding_service, mock_elysia_service):
+def test_ask_documents(client, test_documents, normal_user_token_headers, mock_embedding_service, mock_emma_service):
     """Prueba para hacer preguntas sobre documentos"""
     doc_ids = [str(doc.id) for doc in test_documents[:2]]
-    
+
     response = client.post(
         "/api/v1/search/ask",
         headers=normal_user_token_headers,
@@ -61,13 +61,13 @@ def test_ask_documents(client, test_documents, normal_user_token_headers, mock_e
             "doc_ids": doc_ids
         }
     )
-    
+
     assert response.status_code == 200
     content = response.json()
     assert "answer" in content
     assert "mock answer" in content["answer"].lower()
 
-def test_ask_without_documents(client, normal_user_token_headers, mock_embedding_service, mock_elysia_service):
+def test_ask_without_documents(client, normal_user_token_headers, mock_embedding_service, mock_emma_service):
     """Prueba para hacer preguntas sin especificar documentos"""
     response = client.post(
         "/api/v1/search/ask",
@@ -77,7 +77,7 @@ def test_ask_without_documents(client, normal_user_token_headers, mock_embedding
             "doc_ids": []
         }
     )
-    
+
     assert response.status_code == 200
     content = response.json()
     assert "answer" in content

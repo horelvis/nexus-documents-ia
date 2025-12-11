@@ -325,11 +325,11 @@ def mock_embedding_service():
 
 
 @pytest.fixture
-def mock_elysia_service():
-    """Mock ElysiaInsightsService for tests"""
+def mock_emma_service():
+    """Mock EmmaService for tests (replaces ElysiaInsightsService)"""
     mock = MagicMock()
     mock.generate_response = AsyncMock(return_value={
-        "answer": "Mock answer from Elysia",
+        "answer": "Mock answer from Emma",
         "sources": [],
         "quality_score": 0.92,
         "metadata": {}
@@ -342,7 +342,19 @@ def mock_elysia_service():
         "categoría": "Mock Category"
     })
     mock.summarize_text = AsyncMock(return_value="Resumen simulado")
+    mock.chat = AsyncMock(return_value={
+        "response": "Mock answer from Emma",
+        "sources": [],
+        "thinking_steps": []
+    })
     return mock
+
+
+# Keep backward compatibility alias
+@pytest.fixture
+def mock_elysia_service(mock_emma_service):
+    """Backward compatibility alias for mock_emma_service"""
+    return mock_emma_service
 
 
 @pytest.fixture
@@ -438,31 +450,25 @@ def mock_document_service():
 
 
 @pytest.fixture(autouse=True)
-def patch_services(mock_elysia_service, mock_vector_service, mock_embedding_service, mock_search_service, mock_storage_service, mock_document_service):
+def patch_services(mock_emma_service, mock_vector_service, mock_embedding_service, mock_search_service, mock_storage_service, mock_document_service):
     """Auto-patch services for all tests"""
-    with patch('app.services.search_service.ElysiaInsightsService') as mock_elysia_class, \
-         patch('app.services.search_service.VectorService') as mock_vector_class, \
-         patch('app.services.elysia_insights_service.ElysiaInsightsService') as mock_elysia_class2, \
-         patch('app.api.v1.chat.ElysiaInsightsService') as mock_elysia_class3, \
+    with patch('app.services.search_service.VectorService') as mock_vector_class, \
          patch('app.services.search_service.SearchService') as mock_search_class, \
          patch('app.api.v1.search.SearchService') as mock_search_class2, \
          patch('app.api.v1.chat.SearchService') as mock_search_class3, \
          patch('app.services.async_document_service.AsyncDocumentService._call_cag_query', new_callable=AsyncMock) as mock_async_cag_query, \
          patch('app.services.storage_service.StorageService') as mock_storage_class, \
          patch('app.services.document_service.DocumentService') as mock_document_class:
-        
+
         # Configure the service classes to return our mocks
-        mock_elysia_class.return_value = mock_elysia_service
         mock_vector_class.return_value = mock_vector_service
-        mock_elysia_class2.return_value = mock_elysia_service
-        mock_elysia_class3.return_value = mock_elysia_service
         mock_search_class.return_value = mock_search_service
         mock_search_class2.return_value = mock_search_service
         mock_search_class3.return_value = mock_search_service
         mock_async_cag_query.return_value = "Resumen simulado"
         mock_storage_class.return_value = mock_storage_service
         mock_document_class.return_value = mock_document_service
-        
+
         yield
 
 
