@@ -2,6 +2,39 @@
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
+
+# ========================================
+# ACL-RELATED SCHEMAS
+# ========================================
+
+class DocumentACLData(BaseModel):
+    """ACL data for a document"""
+    acl_user_ids: List[str] = []
+    acl_role_ids: List[str] = []
+    acl_everyone: bool = False
+    created_by: Optional[str] = None
+
+
+class DocumentACLUpdateRequest(BaseModel):
+    """Request to update document ACL in Elasticsearch"""
+    collection_name: str
+    acl_user_ids: List[str] = []
+    acl_role_ids: List[str] = []
+    acl_everyone: bool = False
+    created_by: Optional[str] = None
+
+
+class SearchUserContext(BaseModel):
+    """User context for ACL-filtered searches"""
+    user_id: str
+    role_ids: List[str] = []
+    is_admin: bool = False
+
+
+# ========================================
+# DOCUMENT INDEXING SCHEMAS
+# ========================================
+
 class DocumentIndexRequest(BaseModel):
     """Request to index a document"""
     doc_id: str
@@ -10,6 +43,12 @@ class DocumentIndexRequest(BaseModel):
     description: Optional[str] = None
     content_vector: Optional[List[float]] = None
     metadata: Optional[Dict[str, Any]] = None
+    # ACL fields
+    created_by: Optional[str] = None
+    acl_user_ids: Optional[List[str]] = None
+    acl_role_ids: Optional[List[str]] = None
+    acl_everyone: bool = False
+
 
 class SearchFilters(BaseModel):
     """Filters for search operations"""
@@ -26,6 +65,8 @@ class HybridSearchRequest(BaseModel):
     filters: Optional[SearchFilters] = None
     boost_semantic: float = 1.0
     boost_keyword: float = 1.0
+    # ACL-based filtering (optional for backward compatibility)
+    user_context: Optional[SearchUserContext] = None
 
 class SemanticSearchRequest(BaseModel):
     """Request for semantic search"""
@@ -33,6 +74,8 @@ class SemanticSearchRequest(BaseModel):
     limit: int = 10
     filters: Optional[SearchFilters] = None
     min_score: float = 0.7
+    # ACL-based filtering (optional for backward compatibility)
+    user_context: Optional[SearchUserContext] = None
 
 class SearchResult(BaseModel):
     """Individual search result"""

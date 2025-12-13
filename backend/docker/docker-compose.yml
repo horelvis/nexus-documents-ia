@@ -45,7 +45,6 @@ services:
       - TEXT_EXTRACTION_SERVICE_URL=${TEXT_EXTRACTION_SERVICE_URL:-http://textextract-service:8000}
       - ELASTICSEARCH_SERVICE_URL=${ELASTICSEARCH_SERVICE_URL:-http://elasticsearch-service:8000}
       - TEMPLATE_EDITOR_SERVICE_URL=${TEMPLATE_EDITOR_SERVICE_URL:-http://template-editor-service:8000}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://genai-ollama:11434}
       - GOTENBERG_BASE_URL=${GOTENBERG_BASE_URL:-http://gotenberg:3000}
       # Infrastructure
       - REDIS_HOST=redis
@@ -119,6 +118,8 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Rate limit for development (default is 10, too low for dev)
+      - RATE_LIMIT_PER_MINUTE=100
     volumes:
       # Montar código fuente para desarrollo
       - ../microservices/storage-service/app:/app/app:ro
@@ -213,13 +214,15 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
       # vLLM Configuration (PRIMARY - high-throughput GPU inference)
-      # Model: Qwen3-14B - 131K context, excellent Spanish + tool calling (Hermes-style)
+      # Model: Qwen3-4B - 32K context, Spanish + tool calling (Hermes-style)
+      # 4B model uses ~8-9GB VRAM, leaving room for embeddings and reranker
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-FP8}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
       # LLM Configuration
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Embedding Configuration (TEI - HuggingFace Text Embeddings Inference)
+      # Model: BAAI/bge-m3 (1024 dim, 8192 context, 100+ languages)
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-tei}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
@@ -235,6 +238,14 @@ services:
       # Montar archivos de configuración de prompts (editable sin rebuild)
       - ../microservices/weaviate-service/config:/app/config:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    # GPU access for CrossEncoder reranker (sentence-transformers)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -313,7 +324,6 @@ services:
       - backend-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-ollama-models.sh:/docker-entrypoint-initdb.d/init-ollama-models.sh
       - ./scripts/init-camunda-schema.sql:/docker-entrypoint-initdb.d/init-camunda-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
@@ -378,8 +388,8 @@ services:
     restart: unless-stopped
 
   # Text Embeddings Inference (TEI) - Dedicated GPU embedding server
-  # HuggingFace optimized server for fast embeddings
-  # Model: BAAI/bge-m3 (multilingual, 1024 dimensions)
+  # Model: BAAI/bge-m3 (1024 dim, 8192 context)
+  # Multilingual: 100+ languages, dense+sparse+multi-vector embeddings
   # NOTE: Using 'latest' (1.6+) - version 1.5 has a bug with HuggingFace Hub redirects
   text-embeddings-inference:
     image: ghcr.io/huggingface/text-embeddings-inference:latest
@@ -387,10 +397,10 @@ services:
       - backend-network
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_ID=BAAI/bge-m3
+      - MODEL_ID=${EMBEDDING_MODEL:-BAAI/bge-m3}
     volumes:
       - tei_cache:/data
-    command: ["--model-id", "BAAI/bge-m3", "--port", "8080", "--max-batch-tokens", "16384"]
+    command: ["--model-id", "${EMBEDDING_MODEL:-BAAI/bge-m3}", "--port", "8080", "--max-batch-tokens", "16384", "--dtype", "float16", "--auto-truncate"]
     deploy:
       resources:
         reservations:
@@ -406,39 +416,14 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  # Ollama para modelos de lenguaje local (con GPU) - LEGACY
-  # Start with: docker compose --profile legacy up
-  genai-ollama:
-    image: ollama/ollama:0.13.1
-    networks:
-      - backend-network
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    profiles:
-      - legacy  # Only start with: docker compose --profile legacy up
-
   # vLLM para inferencia de alta velocidad (GPU) - PRIMARY LLM SERVER
   # Requires HF_TOKEN in .env for gated models
   # Official vLLM image with full tool calling support (vLLM >= 0.9.0)
-  # Model: Qwen3-14B-FP8 - FP8 quantized for memory efficiency (fits RTX 4090 24GB)
-  # Spanish + tool calling (Hermes-style), 32K native context
+  # Model: Qwen3-4B - Efficient model with excellent Spanish + tool calling
+  # ~8-9GB VRAM, 32K native context, performance comparable to larger models
   vllm:
-    image: vllm/vllm-openai:latest
+    # Using v0.9.0 for Qwen3 support (requires >= 0.9.x)
+    image: vllm/vllm-openai:v0.9.0
     networks:
       - backend-network
     volumes:
@@ -449,18 +434,18 @@ services:
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
     # Tool calling enabled with --enable-auto-tool-choice
-    # Tool parser: hermes (recommended for Qwen3 function calling)
-    # FP8 quantization: ~50% memory savings, fits 24GB with TEI
+    # 4B model: ~8-9GB VRAM in bfloat16, leaves room for 16K context
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-14B-FP8}"
+      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
       - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-32768}"
+      - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
       - "0.85"
       - "--enable-auto-tool-choice"
       - "--tool-call-parser"
       - "hermes"
+      - "--trust-remote-code"
     deploy:
       resources:
         reservations:
@@ -473,7 +458,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 300s  # 14B model takes longer to load
+      start_period: 180s  # 8B model loads faster than 14B
     restart: unless-stopped
 
   # Gotenberg para conversión de documentos
@@ -561,6 +546,67 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # TTS Service - Text-to-Speech using Microsoft VibeVoice
+  # Real-time streaming TTS with ~300ms latency
+  # Supports: English, Spanish (experimental)
+  # GPU required for acceptable performance
+  tts-service:
+    build:
+      context: ../microservices/tts-service
+      dockerfile: Dockerfile
+    # Expose port for WebSocket connections from frontend
+    ports:
+      - "0.0.0.0:8010:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # TTS Provider Configuration
+      - TTS_PROVIDER=${TTS_PROVIDER:-vibevoice}
+      - VIBEVOICE_MODEL_PATH=${VIBEVOICE_MODEL_PATH:-microsoft/VibeVoice-Realtime-0.5B}
+      - VIBEVOICE_DEVICE=${VIBEVOICE_DEVICE:-cuda}
+      - VIBEVOICE_DEFAULT_VOICE=${VIBEVOICE_DEFAULT_VOICE:-Carter}
+      # Google TTS Fallback
+      - GOOGLE_TTS_ENABLED=${GOOGLE_TTS_ENABLED:-true}
+      - GOOGLE_TTS_DEFAULT_VOICE=${GOOGLE_TTS_DEFAULT_VOICE:-es-ES-Neural2-A}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/nexus-document-ia-1eb963df24a4.json}
+      # HuggingFace token for model download
+      - HF_TOKEN=${HF_TOKEN}
+      # Redis for audio caching
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_ENABLED=${TTS_CACHE_ENABLED:-true}
+    volumes:
+      # Mount source code for development
+      - ../microservices/tts-service/app:/app/app:ro
+      # Mount voice prompts for VibeVoice speakers
+      - ../microservices/tts-service/voice_prompts:/app/voice_prompts:ro
+      # Mount credentials for Google TTS fallback
+      - ../../credentials:/app/credentials:ro
+      # HuggingFace cache for model persistence (accessible to appuser)
+      - tts_model_cache:/app/.cache/huggingface
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    # GPU access for VibeVoice model
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Model loading takes time
+    restart: unless-stopped
+
 networks:
   backend-network:
     driver: bridge
@@ -570,7 +616,7 @@ volumes:
   redis_data:
   weaviate_data:
   elasticsearch_data:
-  ollama_data:
   vllm_cache:  # Cache for HuggingFace models used by vLLM
   tei_cache:   # Cache for TEI embedding models
   camunda_data:
+  tts_model_cache:  # Cache for VibeVoice TTS models

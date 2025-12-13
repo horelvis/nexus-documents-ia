@@ -12,9 +12,10 @@ const MICROSERVICES_API_KEY = process.env.MICROSERVICES_API_KEY
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  props: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const params = await props.params
     const { userId } = await auth()
     if (!userId) {
       return NextResponse.json(
@@ -57,9 +58,10 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  props: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const params = await props.params
     const { userId } = await auth()
     if (!userId) {
       return NextResponse.json(

@@ -182,7 +182,7 @@ export default function WorkflowTemplatePage({ params }: { params: Promise<{ ten
                 <SelectValue placeholder={`Seleccionar ${label.toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
-                {options?.map(option => (
+                {options?.map((option: string) => (
                   <SelectItem key={option} value={option}>
                     {option}
                   </SelectItem>

@@ -101,9 +101,6 @@ export function TemplateEditor({ template, onTemplateUpdated }: TemplateEditorPr
         throw new Error(response.error || 'Failed to initiate Google Drive connection')
       }
       window.location.href = response.data.authorization_url
-      } else {
-        throw new Error('Invalid authorization URL')
-      }
     } catch (err) {
       console.error(err)
       toast.error('Unable to start Google Drive connection')

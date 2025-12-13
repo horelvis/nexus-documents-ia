@@ -28,7 +28,9 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(se
 
 def get_tenant_collection_name(tenant_id: str, collection_type: str = "documents") -> str:
     """Generate tenant-specific collection name for Weaviate"""
-    return f"{settings.collection_prefix}{tenant_id}_{collection_type}".lower().replace("-", "_")
+    # Note: Keep prefix case (Nexus_) but normalize tenant_id (replace hyphens with underscores)
+    tenant_normalized = tenant_id.replace("-", "_")
+    return f"{settings.collection_prefix}{tenant_normalized}_{collection_type}"
 
 
 def get_channel_collection_name(tenant_id: str, channel_id: str) -> str:

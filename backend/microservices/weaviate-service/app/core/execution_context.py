@@ -198,10 +198,11 @@ def resolve_tenant_id(llm_provided: Optional[str] = None) -> str:
     context_tenant_id = _tenant_id_var.get()
 
     if context_tenant_id:
-        # Log if LLM tried to use a different tenant_id
+        # Log if LLM tried to use a different tenant_id (DEBUG level - expected behavior)
+        # The LLM often invents placeholder values like "tenant-123" which we safely override
         if llm_provided and llm_provided != context_tenant_id:
-            logger.warning(
-                f"🔒 tenant_id override: LLM passed '{llm_provided}', "
+            logger.debug(
+                f"🔒 tenant_id resolved: LLM passed '{llm_provided}', "
                 f"using context '{context_tenant_id}'"
             )
         return context_tenant_id

@@ -14,6 +14,7 @@ import {
   IconClock,
   IconTrendingUp,
   IconUsers,
+  IconUserShare,
   IconSettings,
   IconCreditCard,
   IconDatabase,
@@ -188,6 +189,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         url: "/settings/tenant",
         icon: IconSettings,
         color: "gray",
+      },
+      {
+        title: t('sidebar.admin.siteGuest'),
+        url: "/settings/site",
+        icon: IconUserShare,
+        color: "cyan",
       },
       {
         title: t('sidebar.admin.providers'),

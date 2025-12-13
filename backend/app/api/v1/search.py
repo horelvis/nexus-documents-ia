@@ -31,25 +31,34 @@ async def search_elasticsearch(
     - hybrid: Elasticsearch (keyword + semantic) 
     - keyword: Elasticsearch (traditional search)
     """
-    from app.services.elasticsearch_client import elasticsearch_client
-    
+    from app.services.elasticsearch_client import elasticsearch_client, SearchUserContext
+
     # Prepare filters
     filters = {}
     if tags:
         filters["tags"] = tags
     if date_from:
-        filters["date_from"] = date_from  
+        filters["date_from"] = date_from
     if date_to:
         filters["date_to"] = date_to
-    
-    # Direct Elasticsearch microservice search - NO FALLBACKS
+
+    # Build user context for ACL filtering
+    user_role_ids = [str(role.id) for role in current_user.roles] if current_user.roles else []
+    user_context = SearchUserContext(
+        user_id=str(current_user.id),
+        role_ids=user_role_ids,
+        is_admin=current_user.is_admin
+    )
+
+    # Direct Elasticsearch microservice search with ACL filtering
     results = await elasticsearch_client.hybrid_search(
         tenant_id=tenant_id,
         query=query,
         limit=limit,
-        filters=filters
+        filters=filters,
+        user_context=user_context
     )
-    
+
     return results
 
 
@@ -148,9 +157,17 @@ async def search_documents(
     - elasticsearch: Force Elasticsearch search
     - database: Force database search (metadata only)
     """
-    from app.services.elasticsearch_client import elasticsearch_client
+    from app.services.elasticsearch_client import elasticsearch_client, SearchUserContext
 
     try:
+        # Build user context for ACL filtering
+        user_role_ids = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        user_context = SearchUserContext(
+            user_id=str(current_user.id),
+            role_ids=user_role_ids,
+            is_admin=current_user.is_admin
+        )
+
         # Always try Elasticsearch first (has the content)
         if search_type in ["auto", "elasticsearch"]:
             try:
@@ -164,12 +181,13 @@ async def search_documents(
                 if date_to:
                     filters["date_to"] = date_to
 
-                # Try Elasticsearch microservice search
+                # Try Elasticsearch microservice search with ACL filtering
                 results = await elasticsearch_client.hybrid_search(
                     tenant_id=tenant_id,
                     query=query,
                     limit=limit,
-                    filters=filters
+                    filters=filters,
+                    user_context=user_context
                 )
 
                 # Ensure results is a list

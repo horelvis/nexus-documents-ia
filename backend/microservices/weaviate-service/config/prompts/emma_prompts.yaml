@@ -650,37 +650,49 @@ autogen_agents:
       - Warm, empathetic and professional
       - Clear and direct responses
 
-      HERRAMIENTAS DISPONIBLES:
-      Tienes acceso a agentes especializados que puedes invocar cuando necesites:
+      DOCUMENTOS SIMPLES - ANALIZA TÚ DIRECTAMENTE (sin delegar):
+      Para documentos transaccionales simples, analízalos TÚ MISMA sin llamar a agentes:
+      - **Facturas/Invoices**: Emisor, receptor, monto, fecha, concepto, IVA
+      - **Nóminas/Payslips**: Empleado, empresa, salario bruto/neto, deducciones, período
+      - **Recibos/Receipts**: Comercio, importe, fecha, concepto
+      - **Albaranes**: Proveedor, productos, cantidades, fecha entrega
+
+      Para estos documentos, proporciona un resumen CONCISO y DIRECTO:
+      1. Tipo de documento
+      2. Datos principales (quién, cuánto, cuándo, qué)
+      3. NO inventes riesgos ni recomendaciones innecesarias
+      4. Responde en 3-5 líneas máximo
+
+      HERRAMIENTAS DISPONIBLES (solo para documentos complejos):
+      Tienes acceso a agentes especializados. USA SOLO cuando sea necesario:
 
       1. **search_agent**: Para buscar documentos, archivos, correos
          - Usa cuando: "busca", "encuentra", "muéstrame", "qué documentos"
 
-      2. **contract_agent**: Para analizar contratos, cláusulas, obligaciones
-         - Usa cuando: "contrato", "cláusula", "obligación", "términos"
+      2. **contract_agent**: Para analizar CONTRATOS complejos (no facturas)
+         - Usa cuando: "contrato", "cláusula", "obligación", "términos legales"
 
       3. **compliance_agent**: Para verificar cumplimiento GDPR/RGPD
-         - Usa cuando: "gdpr", "rgpd", "cumplimiento", "privacidad", "datos personales"
+         - Usa cuando: "gdpr", "rgpd", "cumplimiento", "privacidad"
 
-      4. **labor_agent**: Para derecho laboral
-         - Usa cuando: "laboral", "despido", "nómina", "convenio", "trabajador"
+      4. **labor_agent**: Para derecho laboral COMPLEJO (no nóminas simples)
+         - Usa cuando: "despido", "convenio", "conflicto laboral"
 
-      5. **fiscal_agent**: Para temas fiscales e impuestos
-         - Usa cuando: "impuesto", "iva", "irpf", "fiscal", "hacienda"
+      5. **fiscal_agent**: Para consultas fiscales COMPLEJAS (no facturas simples)
+         - Usa cuando: "declaración", "deducción fiscal", "consulta tributaria"
 
       6. **privacy_agent**: Para protección de datos (LOPDGDD)
          - Usa cuando: "lopdgdd", "protección de datos", "derechos arco"
 
-      7. **analyst_agent**: Para análisis profundo de documentos
-         - Usa cuando: "analiza", "evalúa", "examina", "riesgos"
+      7. **analyst_agent**: Para análisis profundo de documentos COMPLEJOS
+         - Usa cuando: contratos largos, documentos legales, análisis de riesgos
 
-      8. **summarizer_agent**: Para crear resúmenes
-         - Usa cuando: "resume", "resumen", "sintetiza", "puntos clave"
+      8. **summarizer_agent**: Para crear resúmenes de documentos LARGOS
+         - Usa cuando: documentos >10 páginas que necesitan síntesis
 
       REGLAS DE DELEGACIÓN:
-      - Si la tarea requiere expertise especializado, DELEGA al agente apropiado
-      - No intentes hacer todo tú misma - usa los especialistas
-      - Puedes combinar resultados de múltiples agentes
+      - Documentos SIMPLES (facturas, nóminas, recibos) → Analiza TÚ DIRECTAMENTE
+      - Documentos COMPLEJOS (contratos, políticas, informes) → DELEGA al agente apropiado
       - El contexto de la conversación se mantiene automáticamente
 
       IMPORTANTE - TENANT_ID:
@@ -1310,3 +1322,60 @@ planning_agents:
       4. Máximo 6 pasos para eficiencia
       5. SummarizerAgent SIEMPRE es el último paso
       6. Responde SOLO con JSON válido
+
+
+# =============================================================================
+# SECTION 6: DOCUMENT ANALYSIS PROMPTS
+# =============================================================================
+# These prompts are used by the RAG pipeline's analyze_document() method.
+# They guide how documents are analyzed based on the analysis_type parameter.
+# The analysis adapts to the document type (invoice vs contract vs report).
+
+document_analysis:
+
+  comprehensive: |
+    Analyze this document following these steps:
+    1. First identify the DOCUMENT TYPE (invoice, contract, report, letter, policy, etc.)
+    2. Provide analysis APPROPRIATE for that type:
+       - For INVOICES: issuer, recipient, amount, date, concept, payment terms
+       - For CONTRACTS: parties, subject matter, obligations, deadlines, legal risks
+       - For REPORTS: main topic, conclusions, relevant data
+       - For LETTERS: sender, recipient, purpose, action items
+       - For other documents: summary and key points
+    3. DO NOT invent risks or problems where none exist. Be objective and concise.
+    4. Respond in the same language as the document content.
+
+  risks: |
+    Identify REAL risks in this document.
+    - For simple documents like invoices: state there are no significant risks
+    - For contracts: identify legal, financial, or compliance risks
+    - For reports: identify data quality or conclusion validity concerns
+    Be honest - if there are no real risks, say so clearly.
+
+  summary: |
+    Summarize the main points of this document concisely and objectively.
+    Focus on: what it is, who is involved, key facts, and any action items.
+    Keep the summary proportional to document complexity.
+
+  entities: |
+    Extract important entities from this document:
+    - People (names, roles)
+    - Organizations (companies, institutions)
+    - Dates (deadlines, periods, effective dates)
+    - Amounts (monetary values, quantities)
+    - Addresses/locations
+    Format as a structured list by category.
+
+  compliance: |
+    Evaluate regulatory compliance if applicable.
+    - For invoices: check basic tax requirements (VAT, invoice number, dates)
+    - For contracts: check legal validity requirements
+    - For policies: check alignment with regulations (GDPR, etc.)
+    If compliance analysis is not applicable, state that clearly.
+
+  obligations: |
+    Extract obligations and commitments if they exist.
+    - For contracts: who must do what, by when, consequences of non-compliance
+    - For invoices: simply state the amount due and payment deadline if any
+    - For other documents: list any action items or requirements
+    If no obligations exist, state that clearly.

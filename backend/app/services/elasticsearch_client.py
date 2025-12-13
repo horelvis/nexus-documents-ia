@@ -1,6 +1,8 @@
 """
 Elasticsearch Microservice Client
 HTTP client for communicating with elasticsearch-service
+
+Supports ACL-based filtering for document-level access control.
 """
 import httpx
 import logging
@@ -8,6 +10,21 @@ from typing import List, Dict, Any, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class SearchUserContext:
+    """User context for ACL-filtered searches"""
+    def __init__(self, user_id: str, role_ids: List[str] = None, is_admin: bool = False):
+        self.user_id = user_id
+        self.role_ids = role_ids or []
+        self.is_admin = is_admin
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "role_ids": self.role_ids,
+            "is_admin": self.is_admin
+        }
 
 
 class ElasticsearchClient:
@@ -64,9 +81,14 @@ class ElasticsearchClient:
         content: str,
         description: str = None,
         content_vector: List[float] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        # ACL fields
+        created_by: str = None,
+        acl_user_ids: List[str] = None,
+        acl_role_ids: List[str] = None,
+        acl_everyone: bool = False
     ) -> bool:
-        """Index a document via microservice"""
+        """Index a document via microservice with ACL support"""
         logger.info(f"📝 Indexing document {doc_id} for tenant {tenant_id} via microservice")
         try:
             payload = {
@@ -75,7 +97,12 @@ class ElasticsearchClient:
                 "content": content,
                 "description": description,
                 "content_vector": content_vector,
-                "metadata": metadata
+                "metadata": metadata,
+                # ACL fields
+                "created_by": created_by,
+                "acl_user_ids": acl_user_ids or [],
+                "acl_role_ids": acl_role_ids or [],
+                "acl_everyone": acl_everyone
             }
 
             response = await self._make_request(
@@ -97,9 +124,11 @@ class ElasticsearchClient:
         limit: int = 10,
         filters: Dict[str, Any] = None,
         boost_semantic: float = 1.0,
-        boost_keyword: float = 1.0
+        boost_keyword: float = 1.0,
+        # ACL context
+        user_context: Optional[SearchUserContext] = None
     ) -> List[Dict[str, Any]]:
-        """Perform hybrid search via microservice with fallback to direct ES"""
+        """Perform hybrid search via microservice with ACL filtering"""
         logger.info(f"🔍 Searching tenant {tenant_id} query='{query}' via microservice")
         try:
             payload = {
@@ -109,6 +138,11 @@ class ElasticsearchClient:
                 "boost_semantic": boost_semantic,
                 "boost_keyword": boost_keyword
             }
+
+            # Add user context for ACL filtering if provided
+            if user_context:
+                payload["user_context"] = user_context.to_dict()
+                logger.debug(f"🔐 Search with ACL: user={user_context.user_id}, admin={user_context.is_admin}")
 
             response = await self._make_request(
                 "POST",
@@ -209,9 +243,11 @@ class ElasticsearchClient:
         query_vector: List[float],
         limit: int = 10,
         filters: Dict[str, Any] = None,
-        min_score: float = 0.7
+        min_score: float = 0.7,
+        # ACL context
+        user_context: Optional[SearchUserContext] = None
     ) -> List[Dict[str, Any]]:
-        """Perform semantic search via microservice"""
+        """Perform semantic search via microservice with ACL filtering"""
         try:
             payload = {
                 "query_vector": query_vector,
@@ -219,6 +255,10 @@ class ElasticsearchClient:
                 "filters": filters,
                 "min_score": min_score
             }
+
+            # Add user context for ACL filtering if provided
+            if user_context:
+                payload["user_context"] = user_context.to_dict()
 
             response = await self._make_request(
                 "POST",
@@ -327,6 +367,65 @@ class ElasticsearchClient:
         except Exception as e:
             logger.error(f"Failed to get document via microservice: {e}")
             return {}
+
+    async def sync_document_acl(
+        self,
+        document_id: str,
+        collection_name: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool,
+        created_by: str = None
+    ) -> bool:
+        """
+        Synchronize document ACL to Elasticsearch.
+
+        Called by DocumentACLService when document permissions change.
+        This keeps Elasticsearch in sync with PostgreSQL (source of truth).
+
+        Args:
+            document_id: Document UUID
+            collection_name: Elasticsearch index name (format: Nexus_{tenant_id}_documents)
+            acl_user_ids: List of user UUIDs with view permission
+            acl_role_ids: List of role UUIDs with view permission
+            acl_everyone: Whether everyone in tenant has access
+            created_by: Document owner UUID
+
+        Returns:
+            True if sync succeeded or document not found (not an error)
+        """
+        try:
+            payload = {
+                "collection_name": collection_name,
+                "acl_user_ids": acl_user_ids,
+                "acl_role_ids": acl_role_ids,
+                "acl_everyone": acl_everyone,
+                "created_by": created_by
+            }
+
+            response = await self._make_request(
+                "PUT",
+                f"/documents/{document_id}/acl",
+                json=payload
+            )
+
+            status = response.get("status")
+            if status == "success":
+                logger.info(
+                    f"✅ Synced ACL to Elasticsearch for document {document_id}: "
+                    f"users={len(acl_user_ids)}, roles={len(acl_role_ids)}, everyone={acl_everyone}"
+                )
+                return True
+            elif status == "not_found":
+                logger.warning(f"Document {document_id} not found in Elasticsearch (may not be indexed yet)")
+                return True  # Not an error - document may not be indexed yet
+            else:
+                logger.error(f"Unexpected response from Elasticsearch ACL sync: {response}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to sync ACL to Elasticsearch: {e}")
+            return False
 
 
 # Global client instance

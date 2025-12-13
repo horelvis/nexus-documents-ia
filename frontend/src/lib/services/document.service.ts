@@ -10,6 +10,7 @@ export interface DocumentListParams {
   tags?: string[]
   status?: string
   search?: string
+  folder?: string  // Filter by folder path (Google Drive style navigation)
 }
 
 export interface UploadDocumentParams {
@@ -17,6 +18,7 @@ export interface UploadDocumentParams {
   category?: string
   tags?: string
   description?: string
+  folder_path?: string  // Target folder for upload (Google Drive style)
 }
 
 export interface SingleDocumentParams {
@@ -26,6 +28,7 @@ export interface SingleDocumentParams {
   cliente?: string
   periodo?: string
   tipo_documento?: string
+  folder_path?: string  // Target folder for upload (Google Drive style)
 }
 
 export class DocumentService {
@@ -61,6 +64,9 @@ export class DocumentService {
     if (params.tipo_documento) {
       formData.append('tipo_documento', params.tipo_documento)
     }
+    if (params.folder_path) {
+      formData.append('folder_path', params.folder_path)
+    }
 
     return this.apiClient.upload<DocumentUploadResponse>(
       API_CONFIG.ENDPOINTS.DOCUMENTS,
@@ -71,7 +77,7 @@ export class DocumentService {
 
   async getDocuments(params: DocumentListParams = {}) {
     const searchParams = new URLSearchParams()
-    
+
     if (params.page) searchParams.append('page', params.page.toString())
     if (params.per_page) searchParams.append('per_page', params.per_page.toString())
     if (params.category) searchParams.append('category', params.category)
@@ -79,6 +85,10 @@ export class DocumentService {
     if (params.search) searchParams.append('search', params.search)
     if (params.tags) {
       params.tags.forEach(tag => searchParams.append('tags', tag))
+    }
+    // Folder param: empty string = root, string = specific folder path
+    if (params.folder !== undefined) {
+      searchParams.append('folder', params.folder)
     }
 
     const endpoint = `${API_CONFIG.ENDPOINTS.DOCUMENTS}?${searchParams.toString()}`
@@ -118,6 +128,9 @@ export class DocumentService {
         }
         if (params.category) {
           formData.append('category', params.category)
+        }
+        if (params.folder_path) {
+          formData.append('folder_path', params.folder_path)
         }
 
         const result = await this.apiClient.upload<DocumentUploadResponse>(

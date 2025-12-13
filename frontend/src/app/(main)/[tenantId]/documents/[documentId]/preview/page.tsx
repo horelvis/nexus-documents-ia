@@ -179,11 +179,11 @@ export default function DocumentPreviewPage() {
     try {
       // Use authenticated download service for images
       const downloadResult = await documentService.downloadDocument(document.id)
-      if (downloadResult.blob) {
+      if ('blob' in downloadResult && downloadResult.blob) {
         const localUrl = URL.createObjectURL(downloadResult.blob)
         setImageUrl(localUrl)
       } else {
-        console.error('Failed to fetch image:', downloadResult.error)
+        console.error('Failed to fetch image:', 'error' in downloadResult ? downloadResult.error : 'Unknown error')
         setError('Failed to load image')
       }
     } catch (err) {
@@ -311,8 +311,8 @@ export default function DocumentPreviewPage() {
   const MAX_POLLING_ATTEMPTS = 5
 
   useEffect(() => {
-    // Poll for preview if conversion is pending or in progress (max 5 attempts)
-    const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+    // Poll for preview if conversion is not yet complete (max 5 attempts)
+    const isPending = preview?.conversion_method === 'none' || !preview?.conversion_method
     if (preview && !preview.pdf_available && isPending && pollingAttempts < MAX_POLLING_ATTEMPTS) {
       const timer = setTimeout(() => {
         setPollingAttempts(prev => prev + 1)
@@ -328,7 +328,7 @@ export default function DocumentPreviewPage() {
 
   useEffect(() => {
     const hasNoEntities = !document?.extracted_entities || document.extracted_entities.length === 0
-    const isProcessing = document && document.indexed < 1
+    const isProcessing = document && Number(document.indexed) < 1
 
     // Start polling if document has no entities and might still be processing
     if (document && hasNoEntities && entityPollingAttempts < MAX_ENTITY_POLLING_ATTEMPTS) {
@@ -476,9 +476,9 @@ export default function DocumentPreviewPage() {
               variant="outline"
               size="sm"
               onClick={() => generatePreview(true)}
-              disabled={isLoadingPreview || preview?.conversion_method === 'pending'}
+              disabled={isLoadingPreview || !preview?.conversion_method}
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview || preview?.conversion_method === 'pending' ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPreview || !preview?.conversion_method ? 'animate-spin' : ''}`} />
               {t('documentPreview.regenerate')}
             </Button>
           )}
@@ -515,7 +515,7 @@ export default function DocumentPreviewPage() {
             {(() => {
               const isNativePdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
               if (isNativePdf) return false
-              const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+              const isPending = !preview?.conversion_method || preview?.conversion_method === 'none'
               if (pollingAttempts >= MAX_POLLING_ATTEMPTS) return false
               return isLoadingPreview || (preview && !preview.pdf_available && isPending)
             })() && (
@@ -537,7 +537,7 @@ export default function DocumentPreviewPage() {
             {(() => {
               const isNativePdf = document.file_type === 'pdf' || document.mime_type === 'application/pdf'
               if (isNativePdf) return false
-              const isPending = preview?.conversion_method === 'pending' || preview?.conversion_method === 'none'
+              const isPending = !preview?.conversion_method || preview?.conversion_method === 'none'
               return preview && !preview.pdf_available && isPending && pollingAttempts >= MAX_POLLING_ATTEMPTS
             })() && (
               <div className="text-center py-12 space-y-4">

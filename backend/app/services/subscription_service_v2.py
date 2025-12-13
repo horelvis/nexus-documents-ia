@@ -54,25 +54,25 @@ class PlanLimits:
     """Plan limits configuration"""
     LIMITS = {
         SubscriptionPlan.TRIAL: {
-            "documents": 10,
-            "storage_mb": 100,
-            "agents_per_month": 0,
+            "documents": 50,           # 50 documents for trial
+            "storage_mb": 500,         # 500 MB for trial
+            "agents_per_month": 10,    # Allow some agent usage in trial
             "team_members": 0,
             "api_calls_per_day": 100
         },
         SubscriptionPlan.BASIC: {
             "documents": 500,
             "storage_mb": 10240,  # 10 GB
-            "agents_per_month": 10,
+            "agents_per_month": 50,
             "team_members": 0,
             "api_calls_per_day": 1000
         },
         SubscriptionPlan.PRO: {
-            "documents": 1000,
-            "storage_mb": 10000,
-            "agents_per_month": 100,
-            "team_members": 5,
-            "api_calls_per_day": 5000
+            "documents": 2000,
+            "storage_mb": 51200,  # 50 GB
+            "agents_per_month": 500,
+            "team_members": 10,
+            "api_calls_per_day": 10000
         },
         SubscriptionPlan.ENTERPRISE: {
             "documents": -1,  # Unlimited
@@ -579,43 +579,72 @@ class SubscriptionServiceV2:
     @staticmethod
     async def check_document_permission(
         db: AsyncSession,
-        user: User
+        user: User,
+        file_size_bytes: int = 0
     ) -> Tuple[bool, Optional[str]]:
-        """Check if user can upload more documents"""
+        """Check if user can upload more documents (checks both document count and storage)"""
         status = await SubscriptionServiceV2.get_user_subscription_status(db, user)
-        
+
         # Check plan status
         if status['status'] not in [SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIAL.value]:
             return False, f"Your subscription is {status['status']}. Please update your subscription."
-        
+
         # Get limits
         limits = status.get('limits', {})
-        max_documents = limits.get('documents', 10)
-        
-        # Unlimited check
-        if max_documents == -1:
+        max_documents = limits.get('documents', 50)
+        max_storage_mb = limits.get('storage_mb', 500)
+
+        # Unlimited check (Enterprise)
+        if max_documents == -1 and max_storage_mb == -1:
             return True, None
-        
+
         # Count current documents
-        result = await db.execute(
+        doc_result = await db.execute(
             select(func.count()).select_from(Document).where(
                 Document.tenant_id == user.tenant_id
             )
         )
-        current_count = result.scalar() or 0
-        
-        if current_count >= max_documents:
-            upgrade_message = (
-                "You've reached the document limit for your plan. "
-                f"Upgrade to {'Pro' if status['plan'] == 'free' else 'Enterprise'} "
-                "for more storage."
+        current_count = doc_result.scalar() or 0
+
+        # Check document count limit
+        if max_documents != -1 and current_count >= max_documents:
+            plan_name = status.get('plan', 'trial')
+            upgrade_to = 'Basic' if plan_name == 'trial' else ('Pro' if plan_name == 'basic' else 'Enterprise')
+            return False, (
+                f"Has alcanzado el límite de {max_documents} documentos de tu plan. "
+                f"Actualiza a {upgrade_to} para más capacidad."
             )
-            return False, upgrade_message
-        
+
+        # Calculate current storage
+        storage_result = await db.execute(
+            select(func.coalesce(func.sum(Document.file_size), 0)).where(
+                Document.tenant_id == user.tenant_id
+            )
+        )
+        current_storage_bytes = storage_result.scalar() or 0
+        current_storage_mb = current_storage_bytes / (1024 * 1024)
+
+        # Check if new file would exceed storage limit
+        new_file_mb = file_size_bytes / (1024 * 1024)
+        projected_storage_mb = current_storage_mb + new_file_mb
+
+        if max_storage_mb != -1 and projected_storage_mb > max_storage_mb:
+            plan_name = status.get('plan', 'trial')
+            upgrade_to = 'Basic' if plan_name == 'trial' else ('Pro' if plan_name == 'basic' else 'Enterprise')
+            return False, (
+                f"Has alcanzado el límite de almacenamiento ({max_storage_mb} MB) de tu plan. "
+                f"Actualmente usas {current_storage_mb:.1f} MB. "
+                f"Actualiza a {upgrade_to} para más almacenamiento."
+            )
+
         # Calculate remaining
-        remaining = max_documents - current_count
-        logger.debug(f"📄 User {user.id} has {remaining} documents remaining")
-        
+        remaining_docs = max_documents - current_count if max_documents != -1 else -1
+        remaining_storage = max_storage_mb - current_storage_mb if max_storage_mb != -1 else -1
+        logger.debug(
+            f"📄 User {user.id} has {remaining_docs} documents and "
+            f"{remaining_storage:.1f} MB storage remaining"
+        )
+
         return True, None
     
     @staticmethod
@@ -672,9 +701,15 @@ class SubscriptionServiceV2:
             )
         )
         document_count = doc_result.scalar() or 0
-        
-        # Calculate storage (simplified - you might want to sum actual file sizes)
-        storage_mb = document_count * 10  # Rough estimate
+
+        # Calculate actual storage by summing file_size (in bytes)
+        storage_result = await db.execute(
+            select(func.coalesce(func.sum(Document.file_size), 0)).where(
+                Document.tenant_id == user.tenant_id
+            )
+        )
+        storage_bytes = storage_result.scalar() or 0
+        storage_mb = storage_bytes / (1024 * 1024)  # Convert bytes to MB
         
         return {
             "documents": {

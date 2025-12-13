@@ -94,7 +94,7 @@ class AgentConfig:
     # vLLM (PRIMARY - high-throughput GPU inference)
     vllm_enabled: bool = True
     vllm_base_url: str = "http://vllm:8000/v1"
-    vllm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    vllm_model: str = "Qwen/Qwen3-8B"
 
     # Ollama (LEGACY - use vLLM instead)
     ollama_base_url: str = "http://genai-ollama:11434"
@@ -162,7 +162,7 @@ class AgentConfig:
             # vLLM (PRIMARY)
             vllm_enabled=os.getenv("VLLM_ENABLED", "true").lower() == "true",
             vllm_base_url=os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"),
-            vllm_model=os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+            vllm_model=os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B"),
 
             # Ollama (LEGACY)
             ollama_base_url=os.getenv(

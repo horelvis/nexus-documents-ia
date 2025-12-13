@@ -7,9 +7,10 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export async function GET(
   req: Request,
-  { params }: { params: { sessionId: string } }
+  props: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const params = await props.params
     const session = await stripe.checkout.sessions.retrieve(params.sessionId, {
       expand: ['customer', 'subscription'],
     })

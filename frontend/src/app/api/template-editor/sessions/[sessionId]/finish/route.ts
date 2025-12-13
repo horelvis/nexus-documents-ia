@@ -12,9 +12,10 @@ const MICROSERVICES_API_KEY = process.env.MICROSERVICES_API_KEY
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  props: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const params = await props.params
     const { userId } = await auth()
     if (!userId) {
       return NextResponse.json(
@@ -24,7 +25,7 @@ export async function POST(
     }
 
     const body = await request.json()
-    
+
     // Validate user is finishing their own session
     if (body.user_id !== userId) {
       return NextResponse.json(

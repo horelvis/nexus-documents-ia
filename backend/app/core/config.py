@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 from pydantic import AnyHttpUrl, field_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,10 @@ class Settings(BaseSettings):
     
     # Development/Debug mode
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+
+    # Database bootstrap behavior
+    # In production, prefer running migrations in the deployment pipeline.
+    DB_AUTO_MIGRATE: bool = os.getenv("DB_AUTO_MIGRATE", "true" if DEBUG else "false").lower() == "true"
     
     # CORS - Valores por defecto para desarrollo
     # CORS Origins - Configuración para desarrollo con IPs dinámicas
@@ -86,10 +91,13 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # PostgreSQL
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
+    DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
+    ASYNC_DATABASE_URL: Optional[str] = os.getenv("ASYNC_DATABASE_URL")
+    POSTGRES_SERVER: Optional[str] = os.getenv("POSTGRES_SERVER")
+    POSTGRES_PORT: Optional[int] = int(os.getenv("POSTGRES_PORT", "5432")) if os.getenv("POSTGRES_PORT") else None
+    POSTGRES_USER: Optional[str] = os.getenv("POSTGRES_USER")
+    POSTGRES_PASSWORD: Optional[str] = os.getenv("POSTGRES_PASSWORD")
+    POSTGRES_DB: Optional[str] = os.getenv("POSTGRES_DB")
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
@@ -98,14 +106,45 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v
         values = info.data if hasattr(info, 'data') else {}
+        database_url = values.get("DATABASE_URL") or os.getenv("DATABASE_URL")
+        if database_url:
+            return database_url
         user = values.get("POSTGRES_USER")
         password = values.get("POSTGRES_PASSWORD")
         host = values.get("POSTGRES_SERVER")
         db = values.get("POSTGRES_DB")
-        
+
         # Construir URL manualmente para Pydantic v2
+        if not (user and password and host and db):
+            return None
         url = f"postgresql://{user}:{password}@{host}/{db}"
         return url
+
+    @model_validator(mode="after")
+    def _validate_and_populate_database_fields(self) -> "Settings":
+        database_url = self.SQLALCHEMY_DATABASE_URI or self.DATABASE_URL
+        if not database_url:
+            raise ValueError(
+                "Database configuration missing: set DATABASE_URL or "
+                "POSTGRES_SERVER/POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB"
+            )
+
+        if not self.SQLALCHEMY_DATABASE_URI:
+            self.SQLALCHEMY_DATABASE_URI = database_url
+
+        # Populate POSTGRES_* fields from URL if needed (used by security validator/logging).
+        try:
+            parsed = urlparse(database_url)
+            self.POSTGRES_SERVER = self.POSTGRES_SERVER or parsed.hostname
+            self.POSTGRES_PORT = self.POSTGRES_PORT or parsed.port
+            self.POSTGRES_USER = self.POSTGRES_USER or parsed.username
+            self.POSTGRES_PASSWORD = self.POSTGRES_PASSWORD or parsed.password
+            self.POSTGRES_DB = self.POSTGRES_DB or (parsed.path.lstrip("/") if parsed.path else None)
+        except Exception:
+            # Keep whatever we already have; downstream validators will handle missing fields if needed.
+            pass
+
+        return self
     
     # Redis
     _REDIS_URL_ENV: ClassVar[Optional[str]] = os.getenv("REDIS_URL")
@@ -215,6 +254,7 @@ class Settings(BaseSettings):
     # Microservices URLs
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
     CAMUNDA_SERVICE_URL: str = os.getenv("CAMUNDA_SERVICE_URL", "http://camunda-service:8000")
+    TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://tts-service:8000")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")

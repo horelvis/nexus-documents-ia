@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Form,
@@ -68,8 +69,7 @@ const signatureRequestSchema = z.object({
   provider_id: z.string().uuid("Please select a valid provider"),
   expires_in_days: z.number()
     .min(1, "Minimum 1 day")
-    .max(365, "Maximum 365 days")
-    .default(30),
+    .max(365, "Maximum 365 days"),
   document_id: z.string().uuid(),
 })
 
@@ -391,6 +391,10 @@ export default function SignatureRequestPage() {
       // Create signature request with field placements and language
       const request = await signatureService.createRequest({
         ...data,
+        signers: data.signers.map((signer, index) => ({
+          ...signer,
+          order: index + 1
+        })),
         document_name: document.filename,
         request_metadata: {
           signature_fields: signatureFields,
@@ -462,7 +466,7 @@ export default function SignatureRequestPage() {
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="relative">
                                     <Input
-                                      ref={(el) => nameInputRefs.current[index] = el}
+                                      ref={(el) => { nameInputRefs.current[index] = el }}
                                       placeholder="Name (type @ to search entities)"
                                       value={signer.name}
                                       onChange={(e) => handleNameInputChange(e.target.value, index)}

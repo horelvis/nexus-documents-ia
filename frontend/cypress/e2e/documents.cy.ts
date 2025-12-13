@@ -159,8 +159,8 @@ describe('Gestión de Documentos', () => {
       cy.contains('Documento eliminado').should('be.visible')
       
       // Verificar que no aparece en la lista
-      cy.get('@docName').then((name) => {
-        cy.contains(name as string).should('not.exist')
+      cy.get<string>('@docName').then((name) => {
+        cy.contains(name).should('not.exist')
       })
     })
   })

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine, event
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.declarative import declarative_base
@@ -121,9 +122,12 @@ async def get_async_db():
         # Convertir URI síncrona a asíncrona
         async_uri = settings.SQLALCHEMY_DATABASE_URI.replace("postgresql://", "postgresql+asyncpg://")
 
+        # create_async_engine doesn't accept sync poolclass objects (e.g., QueuePool)
+        async_pool_config = {k: v for k, v in POOL_CONFIG.items() if k != "poolclass"}
+
         get_async_db._async_engine = create_async_engine(
             async_uri,
-            **POOL_CONFIG
+            **async_pool_config
         )
 
         get_async_db._async_session = async_sessionmaker(
@@ -148,7 +152,7 @@ def test_connection() -> bool:
     """
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         logger.info("✅ Database connection test successful")
         return True
     except Exception as e:

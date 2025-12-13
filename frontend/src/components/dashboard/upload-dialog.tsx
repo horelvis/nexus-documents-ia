@@ -16,14 +16,15 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { 
-  IconCloudUpload, 
-  IconFile, 
-  IconX, 
+import {
+  IconCloudUpload,
+  IconFile,
+  IconX,
   IconCheck,
   IconLoader2,
   IconMinus,
-  IconMaximize
+  IconMaximize,
+  IconFolderFilled
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -50,9 +51,10 @@ interface UploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onUploadComplete?: (files: UploadFile[]) => void
+  folderPath?: string | null  // Target folder for upload (from context or prop)
 }
 
-export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDialogProps) {
+export function UploadDialog({ open, onOpenChange, onUploadComplete, folderPath }: UploadDialogProps) {
   const [files, setFiles] = useState<UploadFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
@@ -135,16 +137,18 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
 
         try {
           // Upload single file with progress tracking
+          // If folderPath is provided (not root), upload to that folder as manual classification
           const response = await documentService.uploadSingleDocument(
             fileObj.file,
             {
               category: values.category,
               tags: values.tags,
               description: values.description,
+              folder_path: folderPath && folderPath !== '/' ? folderPath : undefined,
             },
             (progress: number) => {
               // Update progress for this specific file
-              setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) => 
+              setFiles((prev: UploadFile[]) => prev.map((f: UploadFile) =>
                 f.id === fileObj.id ? { ...f, progress } : f
               ))
             }
@@ -329,6 +333,15 @@ export function UploadDialog({ open, onOpenChange, onUploadComplete }: UploadDia
             )}
           </div>
         </DialogHeader>
+
+        {/* Target Folder Indicator */}
+        {folderPath && folderPath !== '/' && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md text-sm">
+            <IconFolderFilled className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">Subiendo a:</span>
+            <span className="font-medium">{folderPath}</span>
+          </div>
+        )}
 
         {/* Success Message Overlay */}
         {showSuccess && !isMinimized && (

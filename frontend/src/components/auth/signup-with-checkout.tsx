@@ -201,18 +201,9 @@ export function SignUpWithCheckout() {
                 borderRadius: '0.5rem',
               }
             }}
-            redirectUrl={
-              invitation && tenantId 
-                ? `/${tenantId}/dashboard` 
-                : plan && plan !== 'free'
-                  ? `/checkout?plan=${plan}`
-                  : plan === 'free'
-                    ? '/onboarding-simple'
-                    : "/pricing"
-            }
-            afterSignUpUrl={
-              invitation && tenantId 
-                ? `/${tenantId}/dashboard` 
+            fallbackRedirectUrl={
+              invitation && tenantId
+                ? `/${tenantId}/dashboard`
                 : plan && plan !== 'free'
                   ? `/checkout?plan=${plan}`
                   : plan === 'free'

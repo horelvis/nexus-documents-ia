@@ -73,9 +73,9 @@ export default function TenantSettingsPage() {
         tenantService.getReindexStatus()
       ])
 
-      if (!infoResponse.error) setTenantInfo(infoResponse.data)
-      if (!statsResponse.error) setTenantStats(statsResponse.data)
-      if (!indexResponse.error) setReindexStatus(indexResponse.data)
+      if (!infoResponse.error) setTenantInfo(infoResponse.data ?? null)
+      if (!statsResponse.error) setTenantStats(statsResponse.data ?? null)
+      if (!indexResponse.error) setReindexStatus(indexResponse.data ?? null)
     } catch (error) {
       console.error('Failed to load tenant data:', error)
     } finally {
@@ -157,7 +157,7 @@ export default function TenantSettingsPage() {
       })
 
       const statusResponse = await tenantService.getReindexStatus()
-      if (!statusResponse.error) setReindexStatus(statusResponse.data)
+      if (!statusResponse.error) setReindexStatus(statusResponse.data ?? null)
     } catch (error) {
       addNotification({
         type: 'error',
@@ -368,15 +368,15 @@ export default function TenantSettingsPage() {
                     {t('tenantSettings.storage.usage', { used: formatBytes(tenantStats?.storage_used_bytes || 0), limit: formatBytes(tenantStats?.storage_limit_bytes || 0)})}
                   </span>
                   <span className="text-sm text-muted-foreground">
-                    {tenantStats?.storage_limit_bytes > 0 
-                      ? Math.round((tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100) 
+                    {tenantStats && tenantStats.storage_limit_bytes && tenantStats.storage_limit_bytes > 0
+                      ? Math.round((tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100)
                       : 0}%
                   </span>
                 </div>
-                <Progress 
-                  value={tenantStats?.storage_limit_bytes > 0 
-                    ? (tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100 
-                    : 0} 
+                <Progress
+                  value={tenantStats && tenantStats.storage_limit_bytes && tenantStats.storage_limit_bytes > 0
+                    ? (tenantStats.storage_used_bytes / tenantStats.storage_limit_bytes) * 100
+                    : 0}
                 />
               </div>
             </div>
@@ -416,7 +416,7 @@ export default function TenantSettingsPage() {
                   <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">
                     {t('tenantSettings.searchIndex.status')}
-                    <Badge variant={reindexStatus?.status === 'ready' ? 'success' : 'warning'} className="ml-2">
+                    <Badge variant={reindexStatus?.status === 'ready' ? 'default' : 'secondary'} className="ml-2">
                       {reindexStatus?.status ? t(`tenantSettings.searchIndex.status${reindexStatus.status.charAt(0).toUpperCase() + reindexStatus.status.slice(1)}`) : t('tenantSettings.searchIndex.statusUnknown')}
                     </Badge>
                   </span>

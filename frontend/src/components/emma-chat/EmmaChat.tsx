@@ -45,8 +45,21 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Persist conversationId in sessionStorage to maintain context across component remounts
+  // When documentId is provided, create a new conversation specific to that document
   const [conversationId] = useState(() => {
-    // Use a stable key based on tenantId to allow different sessions per tenant
+    // If analyzing a specific document, create a document-specific conversation
+    if (documentId && documentId !== "general") {
+      const docStorageKey = `emma_doc_conversation_${tenantId}_${documentId}`
+      if (typeof window !== 'undefined') {
+        // Always create a new conversation for document analysis (don't reuse old failed ones)
+        const newId = `conv_doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        sessionStorage.setItem(docStorageKey, newId)
+        return newId
+      }
+      return `conv_doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    }
+
+    // Use a stable key based on tenantId for general conversations
     const storageKey = `emma_conversation_${tenantId}`
 
     // Check if we have a stored session ID

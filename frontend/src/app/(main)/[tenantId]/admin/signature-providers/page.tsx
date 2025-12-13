@@ -149,7 +149,7 @@ export default function SignatureProvidersPage() {
     setTestingProvider(provider.id)
     
     try {
-      const result = await signatureService.testProvider(provider.id)
+      const result = await signatureService.testConnection(provider.id)
       
       addNotification({
         type: result.success ? 'success' : 'error',

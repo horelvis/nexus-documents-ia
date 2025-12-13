@@ -5,6 +5,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,19 @@ from app.db.database import engine
 from app.db.migrations import auto_upgrade_database
 
 logger = logging.getLogger(__name__)
+
+def _redact_database_url(database_url: str | None) -> str:
+    if not database_url:
+        return "N/A"
+    try:
+        parsed = urlparse(database_url)
+        host = parsed.hostname or "unknown-host"
+        port = f":{parsed.port}" if parsed.port else ""
+        db = parsed.path.lstrip("/") if parsed.path else ""
+        scheme = parsed.scheme or "db"
+        return f"{scheme}://{host}{port}/{db}"
+    except Exception:
+        return "[unparseable]"
 
 
 @asynccontextmanager
@@ -43,7 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"📍 Server URL: {settings.SERVER_HOST}:{settings.SERVER_PORT if hasattr(settings, 'SERVER_PORT') else '8000'}")
     logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
-    logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
+    logger.info(f"🗄️ Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
 
     # Database initialization
     await _initialize_database()
@@ -78,7 +92,7 @@ async def _initialize_database() -> None:
     """Initialize database with robust error handling"""
     try:
         logger.info("🔧 Initializing database...")
-        logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+        logger.info(f"🔗 Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
 
         # Import models to register them
         import app.db.models  # noqa: F401
@@ -96,21 +110,24 @@ async def _initialize_database() -> None:
             result = conn.execute(text("SELECT 1"))
             logger.info("✅ Database connection successful")
 
-        # Create tables
-        Base.metadata.create_all(bind=engine_configured)
-        logger.info("✅ Database structure verified/created")
+        if settings.DB_AUTO_MIGRATE:
+            # Create tables (dev/bootstrap convenience; prefer Alembic in production)
+            Base.metadata.create_all(bind=engine_configured)
+            logger.info("✅ Database structure verified/created")
 
-        # Try Alembic migration (non-fatal)
-        try:
-            logger.info("🔧 Running Alembic migrations...")
-            auto_upgrade_database()
-            logger.info("✅ Alembic migrations completed")
-        except Exception as alembic_e:
-            logger.warning(f"⚠️ Alembic migration failed (continuing): {alembbic_e}")
+            # Try Alembic migration (non-fatal)
+            try:
+                logger.info("🔧 Running Alembic migrations...")
+                auto_upgrade_database()
+                logger.info("✅ Alembic migrations completed")
+            except Exception as alembic_e:
+                logger.warning(f"⚠️ Alembic migration failed (continuing): {alembic_e}")
+        else:
+            logger.info("⏭️ DB_AUTO_MIGRATE disabled; skipping create_all/migrations")
 
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
-        logger.error(f"🔍 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+        logger.error(f"🔍 Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
         logger.warning("⚠️ Continuing without database - API will have limited functionality")
 
 

@@ -151,7 +151,7 @@ async def _reindex_single_document(
         if not vector_success:
             raise ValueError("VectorService.add_document devolvió False")
 
-        # Indexar en Elasticsearch
+        # Indexar en Elasticsearch con ACL
         es_metadata = {
             "file_type": document.file_type,
             "category": document.category,
@@ -162,7 +162,41 @@ async def _reindex_single_document(
             "tenant_id": str(document.tenant_id),
         }
 
-        logger.info("📥 Indexando en Elasticsearch documento %s", document.id)
+        # Get ACL data for the document
+        from app.db.models import DocumentACL
+        from datetime import datetime, timezone
+        from sqlalchemy import or_
+
+        acl_user_ids = []
+        acl_role_ids = []
+        acl_everyone = False
+
+        try:
+            now = datetime.now(timezone.utc)
+            acls = db.query(DocumentACL).filter(
+                DocumentACL.document_id == document.id,
+                DocumentACL.tenant_id == document.tenant_id,
+                DocumentACL.can_view == True,
+                or_(
+                    DocumentACL.expires_at.is_(None),
+                    DocumentACL.expires_at > now
+                )
+            ).all()
+
+            for acl in acls:
+                if acl.grantee_type == 'user' and acl.grantee_id:
+                    acl_user_ids.append(str(acl.grantee_id))
+                elif acl.grantee_type == 'role' and acl.grantee_id:
+                    acl_role_ids.append(str(acl.grantee_id))
+                elif acl.grantee_type == 'everyone':
+                    acl_everyone = True
+        except Exception as acl_exc:
+            logger.warning(f"Could not fetch ACLs for document {document.id}: {acl_exc}")
+            # Default to everyone=True for backward compatibility
+            acl_everyone = True
+
+        logger.info("📥 Indexando en Elasticsearch documento %s (ACL: users=%d, roles=%d, everyone=%s)",
+                    document.id, len(acl_user_ids), len(acl_role_ids), acl_everyone)
         es_success = await elasticsearch_client.index_document(
             tenant_id=tenant_id,
             doc_id=str(document.id),
@@ -170,6 +204,11 @@ async def _reindex_single_document(
             content=text_content,
             description=document.description,
             metadata=es_metadata,
+            # ACL fields
+            created_by=str(document.created_by) if document.created_by else None,
+            acl_user_ids=acl_user_ids,
+            acl_role_ids=acl_role_ids,
+            acl_everyone=acl_everyone,
         )
 
         if not es_success:

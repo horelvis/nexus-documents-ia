@@ -174,10 +174,10 @@ export default function TemplateSessionsPage({ params }: { params: Promise<{ ten
     [sessions]
   )
 
-  const statusBadgeVariant = (status: string) => {
+  const statusBadgeVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     switch (status) {
       case "active":
-        return "success"
+        return "default"
       case "completed":
         return "secondary"
       case "cleanup_pending":

@@ -10,58 +10,102 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.services.weaviate_client import weaviate_client
-from app.services.elasticsearch_client import elasticsearch_client
-from app.services.elysia_insights_service import ElysiaInsightsService
+from app.services.elasticsearch_client import elasticsearch_client, SearchUserContext
 from app.db.database import SessionLocal
 from app.db.models import Document
 
 logger = logging.getLogger(__name__)
 
+# Weaviate service URL for Emma AI
+WEAVIATE_SERVICE_URL = settings.WEAVIATE_SERVICE_URL
+
 
 class SearchService:
     """Hybrid Search Service: Elasticsearch (primary) + Weaviate (specialized)"""
-    
-    def __init__(self, tenant_id: str):
+
+    def __init__(
+        self,
+        tenant_id: str,
+        user_id: str = None,
+        role_ids: List[str] = None,
+        is_admin: bool = False
+    ):
         self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.role_ids = role_ids or []
+        self.is_admin = is_admin
         self.collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
-        self.elysia = ElysiaInsightsService(default_tenant=tenant_id, default_user="search_service")
+        self._emma_timeout = 120.0  # 2 minutes for AI operations
         # Elasticsearch is now a microservice - no local initialization needed
 
-        logger.info(f"SearchService initialized for tenant: {tenant_id}")
+        logger.info(f"SearchService initialized for tenant: {tenant_id}, user: {user_id}")
         logger.info("Using hybrid architecture: Elasticsearch (primary) + Weaviate (semantic specialized)")
     
     async def chat_with_documents(
-        self, 
-        query: str, 
+        self,
+        query: str,
         doc_ids: List[str] = None
     ) -> Dict[str, Any]:
         """
-        Realiza chat con documentos usando RAG.
-        
+        Realiza chat con documentos usando RAG via Emma AI (weaviate-service).
+
         Args:
             query: Pregunta del usuario
             doc_ids: Lista opcional de IDs de documentos para filtrar
-            
+
         Returns:
             Respuesta con fuentes
         """
+        import httpx
+
         try:
             logger.info(f"Chat query for tenant {self.tenant_id}: {query[:100]}...")
-            
-            response = await self.elysia.generate_response(
-                query=query,
-                tenant_id=self.tenant_id,
-                user_id="search_service",
-                doc_ids=doc_ids,
-                context={"service": "search_chat"}
-            )
-            
-            logger.debug(
-                "Generated response with %d sources",
-                len(response.get("sources") or []),
-            )
-            return response
-            
+
+            payload = {
+                "query": query,
+                "tenant_id": self.tenant_id,
+                "session_id": f"search_chat_{self.tenant_id}",
+                "context": {"service": "search_chat"}
+            }
+
+            if doc_ids:
+                payload["context"]["document_ids"] = doc_ids
+
+            async with httpx.AsyncClient(timeout=self._emma_timeout) as client:
+                response = await client.post(
+                    f"{WEAVIATE_SERVICE_URL}/emma/query",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {settings.microservices_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    result = {
+                        "answer": data.get("answer", ""),
+                        "sources": data.get("sources", []),
+                        "confidence": data.get("confidence_score", 0.0),
+                        "execution_time_ms": data.get("execution_time_ms", 0)
+                    }
+                    logger.debug("Generated response with %d sources", len(result.get("sources") or []))
+                    return result
+                else:
+                    logger.error(f"Emma AI error: {response.status_code} - {response.text}")
+                    return {
+                        "answer": "Error al procesar la consulta.",
+                        "sources": [],
+                        "error": f"Service error: {response.status_code}"
+                    }
+
+        except httpx.TimeoutException:
+            logger.error("Emma AI timeout in chat_with_documents")
+            return {
+                "answer": "La consulta tardó demasiado tiempo.",
+                "sources": [],
+                "error": "timeout"
+            }
         except Exception as e:
             logger.error(f"Error in chat_with_documents: {str(e)}")
             return {
@@ -96,13 +140,24 @@ class SearchService:
             
             # Route to appropriate search engine
             if search_type == "hybrid" or search_type == "keyword":
-                # Use Elasticsearch for hybrid/keyword search
+                # Use Elasticsearch for hybrid/keyword search with ACL filtering
                 logger.info("🔍 Using Elasticsearch for hybrid/keyword search")
+
+                # Build user context for ACL filtering
+                user_context = None
+                if self.user_id:
+                    user_context = SearchUserContext(
+                        user_id=self.user_id,
+                        role_ids=self.role_ids,
+                        is_admin=self.is_admin
+                    )
+
                 results = await elasticsearch_client.hybrid_search(
                     tenant_id=self.tenant_id,
                     query=query,
                     limit=limit,
-                    filters=filters or {}
+                    filters=filters or {},
+                    user_context=user_context
                 )
                 
             else:
@@ -378,64 +433,98 @@ class SearchService:
     
     async def suggest_tags(self, text: str, num_tags: int = 5) -> List[str]:
         """
-        Sugiere tags para un texto.
-        
+        Sugiere tags para un texto usando Emma AI.
+
         Args:
             text: Texto para analizar
             num_tags: Número de tags a sugerir
-            
+
         Returns:
             Lista de tags sugeridos
         """
         try:
-            return await self.elysia.suggest_tags(
-                text,
-                tenant_id=self.tenant_id,
-                user_id="search_service",
-                num_tags=num_tags,
-            )
+            prompt = f"Sugiere {num_tags} etiquetas cortas y relevantes para este texto. Responde SOLO con las etiquetas separadas por comas, sin explicaciones:\n\n{text[:2000]}"
+
+            response = await self.chat_with_documents(query=prompt)
+            answer = response.get("answer", "")
+
+            if answer and not response.get("error"):
+                tags = [tag.strip().lower() for tag in answer.split(",")]
+                tags = [tag for tag in tags if tag and len(tag) < 50]
+                return tags[:num_tags]
+
+            return ["documento", "texto"]
+
         except Exception as e:
             logger.error(f"Error suggesting tags: {str(e)}")
             return ["documento", "texto"]
     
     async def extract_metadata(self, text: str) -> Dict[str, str]:
         """
-        Extrae metadatos de un texto.
-        
+        Extrae metadatos de un texto usando Emma AI.
+
         Args:
             text: Texto para analizar
-            
+
         Returns:
             Diccionario con metadatos
         """
+        import json
+
         try:
-            return await self.elysia.extract_metadata(
-                text,
-                tenant_id=self.tenant_id,
-                user_id="search_service",
-            )
+            prompt = f"""Extrae los siguientes metadatos del texto si están disponibles:
+- título: El título del documento
+- tipo: Tipo de documento (contrato, factura, informe, carta, etc.)
+- fecha: Fecha del documento si la hay
+- autor: Autor o remitente si se menciona
+
+Responde en formato JSON simple. Ejemplo: {{"título": "...", "tipo": "..."}}
+
+Texto:
+{text[:3000]}"""
+
+            response = await self.chat_with_documents(query=prompt)
+            answer = response.get("answer", "")
+
+            if answer and not response.get("error"):
+                try:
+                    start = answer.find("{")
+                    end = answer.rfind("}") + 1
+                    if start >= 0 and end > start:
+                        return json.loads(answer[start:end])
+                except json.JSONDecodeError:
+                    pass
+
+            return {"título": "Documento", "tipo": "texto"}
+
         except Exception as e:
             logger.error(f"Error extracting metadata: {str(e)}")
             return {"título": "Documento", "tipo": "texto"}
     
     async def summarize_document(self, text: str, max_length: int = 200) -> str:
         """
-        Genera un resumen de un documento.
-        
+        Genera un resumen de un documento usando Emma AI.
+
         Args:
             text: Texto a resumir
             max_length: Longitud máxima del resumen
-            
+
         Returns:
             Resumen del documento
         """
         try:
-            return await self.elysia.summarize_text(
-                text,
-                tenant_id=self.tenant_id,
-                user_id="search_service",
-                max_length=max_length,
-            )
+            prompt = f"Resume este texto en máximo {max_length} caracteres, capturando los puntos más importantes:\n\n{text[:4000]}"
+
+            response = await self.chat_with_documents(query=prompt)
+            answer = response.get("answer", "")
+
+            if answer and not response.get("error"):
+                if len(answer) > max_length:
+                    answer = answer[:max_length - 3] + "..."
+                return answer
+
+            return "Resumen no disponible."
+
         except Exception as e:
             logger.error(f"Error summarizing document: {str(e)}")
             return "Resumen no disponible."

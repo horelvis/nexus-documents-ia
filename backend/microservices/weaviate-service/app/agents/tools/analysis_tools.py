@@ -84,11 +84,13 @@ async def analyze_document(
     """
     # Resolve tenant_id from execution context (overrides LLM-provided value)
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Analyzing document: id={document_id}, tenant={actual_tenant_id}, type={analysis_type}")
+    logger.info(f"🔍 ANALYSIS_TOOL CALLED: analyze_document")
+    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}, actual_tenant_id={actual_tenant_id}, type={analysis_type}")
 
     try:
         service = _get_weaviate_service()
         collection_name = get_tenant_collection_name(actual_tenant_id)
+        logger.info(f"🔍 Collection name: {collection_name}")
 
         # Get document content
         doc = await service.get_document_by_id(
@@ -109,17 +111,17 @@ async def analyze_document(
         pipeline = _get_rag_pipeline()
 
         if analysis_type == "comprehensive":
-            analysis = await _comprehensive_analysis(content, title, pipeline)
+            analysis = await _comprehensive_analysis(content, title, pipeline, document_id, actual_tenant_id)
         elif analysis_type == "summary":
-            analysis = await _summary_analysis(content, title, pipeline)
+            analysis = await _summary_analysis(content, title, pipeline, document_id, actual_tenant_id)
         elif analysis_type == "structure":
             analysis = await _structure_analysis(content, title)
         elif analysis_type == "risks":
-            analysis = await _risk_analysis(content, title, pipeline)
+            analysis = await _risk_analysis(content, title, pipeline, document_id, actual_tenant_id)
         elif analysis_type == "obligations":
-            analysis = await _obligation_analysis(content, title, pipeline)
+            analysis = await _obligation_analysis(content, title, pipeline, document_id, actual_tenant_id)
         else:
-            analysis = await _comprehensive_analysis(content, title, pipeline)
+            analysis = await _comprehensive_analysis(content, title, pipeline, document_id, actual_tenant_id)
 
         return json.dumps({
             "document_id": document_id,
@@ -136,67 +138,61 @@ async def analyze_document(
         })
 
 
-async def _comprehensive_analysis(content: str, title: str, pipeline) -> Dict:
-    """Perform comprehensive document analysis."""
-    # Use RAG pipeline for LLM-based analysis
-    prompt = f"""Analyze the following document comprehensively.
-
-Document Title: {title}
-
-Content:
-{content[:8000]}
-
-Provide analysis in the following structure:
-1. Executive Summary (2-3 sentences)
-2. Key Points (bullet list of 5-7 main points)
-3. Document Type and Purpose
-4. Main Topics Covered
-5. Important Dates or Numbers mentioned
-6. Recommendations or Action Items (if applicable)
-"""
-
+async def _comprehensive_analysis(content: str, title: str, pipeline, document_id: str = "", tenant_id: str = "") -> Dict:
+    """Perform comprehensive document analysis using RAG pipeline."""
     try:
-        result = await pipeline.generate_response(
-            query=prompt,
-            context=content[:8000],
-            system_prompt="You are a document analyst. Provide structured, factual analysis."
+        # Use the pipeline's analyze_document method
+        result = await pipeline.analyze_document(
+            document_content=content,
+            document_id=document_id or "analysis",
+            tenant_id=tenant_id or "default",
+            analysis_type="comprehensive"
         )
-        return {
-            "analysis": result,
-            "word_count": len(content.split()),
-            "char_count": len(content),
-        }
+
+        if result.get("success"):
+            return {
+                "analysis": result.get("answer", "No analysis generated"),
+                "word_count": len(content.split()),
+                "char_count": len(content),
+                "execution_time_ms": result.get("execution_time_ms", 0),
+            }
+        else:
+            logger.warning(f"Pipeline analysis returned no success: {result}")
+            return _basic_analysis(content, title)
+
     except Exception as e:
         logger.warning(f"LLM analysis failed, using basic analysis: {e}")
-        return {
-            "analysis": f"Document: {title}\nLength: {len(content)} characters",
-            "word_count": len(content.split()),
-            "char_count": len(content),
-        }
+        return _basic_analysis(content, title)
 
 
-async def _summary_analysis(content: str, title: str, pipeline) -> Dict:
-    """Generate executive summary."""
-    prompt = f"""Create an executive summary of this document.
+def _basic_analysis(content: str, title: str) -> Dict:
+    """Fallback basic analysis when LLM fails."""
+    # Extract basic info from content
+    lines = content.strip().split('\n')
+    word_count = len(content.split())
 
-Document: {title}
+    return {
+        "analysis": f"Document: {title}\nWord count: {word_count}\nLines: {len(lines)}\nPreview: {content[:500]}...",
+        "word_count": word_count,
+        "char_count": len(content),
+    }
 
-Content:
-{content[:6000]}
 
-Provide:
-1. Main purpose of the document
-2. Key conclusions or findings
-3. Most important takeaways (3-5 points)
-"""
-
+async def _summary_analysis(content: str, title: str, pipeline, document_id: str = "", tenant_id: str = "") -> Dict:
+    """Generate executive summary using RAG pipeline."""
     try:
-        result = await pipeline.generate_response(
-            query=prompt,
-            context=content[:6000],
-            system_prompt="You are an executive assistant. Create clear, concise summaries."
+        result = await pipeline.analyze_document(
+            document_content=content,
+            document_id=document_id or "summary",
+            tenant_id=tenant_id or "default",
+            analysis_type="summary"
         )
-        return {"summary": result}
+
+        if result.get("success"):
+            return {"summary": result.get("answer", "No summary generated")}
+        else:
+            return {"summary": f"Summary: {content[:500]}..."}
+
     except Exception as e:
         return {"summary": f"Summary not available: {e}"}
 
@@ -229,61 +225,42 @@ async def _structure_analysis(content: str, title: str) -> Dict:
     }
 
 
-async def _risk_analysis(content: str, title: str, pipeline) -> Dict:
-    """Identify risks in document."""
-    prompt = f"""Analyze this document for potential risks and concerns.
-
-Document: {title}
-
-Content:
-{content[:6000]}
-
-Identify:
-1. Legal risks
-2. Financial risks
-3. Operational risks
-4. Compliance concerns
-5. Any red flags or warnings
-
-Rate each risk as: High, Medium, or Low
-"""
-
+async def _risk_analysis(content: str, title: str, pipeline, document_id: str = "", tenant_id: str = "") -> Dict:
+    """Identify risks in document using RAG pipeline."""
     try:
-        result = await pipeline.generate_response(
-            query=prompt,
-            context=content[:6000],
-            system_prompt="You are a risk analyst. Identify and categorize risks objectively."
+        result = await pipeline.analyze_document(
+            document_content=content,
+            document_id=document_id or "risks",
+            tenant_id=tenant_id or "default",
+            analysis_type="risks"
         )
-        return {"risk_analysis": result}
+
+        if result.get("success"):
+            return {"risk_analysis": result.get("answer", "No risk analysis generated")}
+        else:
+            return {"risk_analysis": "Risk analysis not available"}
+
     except Exception as e:
         return {"risk_analysis": f"Risk analysis not available: {e}"}
 
 
-async def _obligation_analysis(content: str, title: str, pipeline) -> Dict:
-    """Extract obligations and requirements."""
-    prompt = f"""Extract all obligations, requirements, and commitments from this document.
-
-Document: {title}
-
-Content:
-{content[:6000]}
-
-For each obligation identify:
-1. Who is obligated
-2. What they must do
-3. Any deadlines or conditions
-4. Consequences of non-compliance (if mentioned)
-"""
-
+async def _obligation_analysis(content: str, title: str, pipeline, document_id: str = "", tenant_id: str = "") -> Dict:
+    """Extract obligations and requirements using RAG pipeline."""
     try:
-        result = await pipeline.generate_response(
-            query=prompt,
-            context=content[:6000],
-            system_prompt="You are a legal analyst. Extract obligations precisely."
+        result = await pipeline.analyze_document(
+            document_content=content,
+            document_id=document_id or "obligations",
+            tenant_id=tenant_id or "default",
+            analysis_type="obligations"
         )
-        return {"obligations": result}
+
+        if result.get("success"):
+            return {"obligation_analysis": result.get("answer", "No obligation analysis generated")}
+        else:
+            return {"obligation_analysis": "Obligation analysis not available"}
+
     except Exception as e:
-        return {"obligations": f"Obligation extraction not available: {e}"}
+        return {"obligation_analysis": f"Obligation extraction not available: {e}"}
 
 
 @ai_function
@@ -418,11 +395,13 @@ async def extract_entities(
     """
     # Resolve tenant_id from execution context (overrides LLM-provided value)
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Extracting entities: doc={document_id}, tenant={actual_tenant_id}, types={entity_types}")
+    logger.info(f"🔍 ANALYSIS_TOOL CALLED: extract_entities")
+    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}, actual_tenant_id={actual_tenant_id}, types={entity_types}")
 
     try:
         service = _get_weaviate_service()
         collection_name = get_tenant_collection_name(actual_tenant_id)
+        logger.info(f"🔍 Collection name: {collection_name}")
 
         doc = await service.get_document_by_id(
             collection_name=collection_name,

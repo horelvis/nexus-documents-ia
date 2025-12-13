@@ -86,7 +86,6 @@ export default function Page() {
                     footerActionLink: 'text-cyan-200 hover:text-white',
                   },
                 }}
-                afterSignInUrl="/dashboard"
                 signUpUrl="/auth/sign-up"
               />
             </div>

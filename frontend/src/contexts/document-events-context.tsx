@@ -14,6 +14,11 @@ type DocumentEventPayloads = {
     source?: "upload" | "delete" | "edit" | "refresh"
     files?: UploadResult[]
   }
+  "folders:updated": {
+    tenantId?: string
+    source?: "create" | "delete" | "rename"
+    folderPath?: string
+  }
 }
 
 export type DocumentsUpdatedPayload = DocumentEventPayloads["documents:updated"]

@@ -75,6 +75,20 @@ from .document_acl import (
     ShareLinkRequest, ShareLinkResponse,
 )
 
+# Site Guest (External Sharing)
+from .site_guest import (
+    SiteGuestBase, SiteGuestCreate, SiteGuestUpdate, SiteGuestResponse, SiteGuestListResponse,
+    SiteGuestInviteRequest,
+    OTPRequestPayload, OTPRequestResponse, OTPVerifyPayload, OTPVerifyResponse,
+    SiteGuestSessionResponse, SiteGuestSessionListResponse,
+    SiteGuestPermissionBase, SiteGuestDocumentPermissionCreate, SiteGuestFolderPermissionCreate,
+    SiteGuestPermissionResponse, SiteGuestPermissionListResponse,
+    SiteGuestAccessLogResponse, SiteGuestAccessLogListResponse,
+    PortalDocumentInfo, PortalFolderInfo, PortalContentResponse, GuestMeResponse,
+    TenantSiteInfo, TenantSiteSettingsUpdate, TenantSiteSettingsResponse,
+    SiteGuestStatistics,
+)
+
 __all__ = [
     # Auth (minimal - Clerk handles authentication)
     "TokenPayload",
@@ -227,4 +241,33 @@ __all__ = [
     "BulkACLUpdateResponse",
     "ShareLinkRequest",
     "ShareLinkResponse",
+
+    # Site Guest (External Sharing)
+    "SiteGuestBase",
+    "SiteGuestCreate",
+    "SiteGuestUpdate",
+    "SiteGuestResponse",
+    "SiteGuestListResponse",
+    "SiteGuestInviteRequest",
+    "OTPRequestPayload",
+    "OTPRequestResponse",
+    "OTPVerifyPayload",
+    "OTPVerifyResponse",
+    "SiteGuestSessionResponse",
+    "SiteGuestSessionListResponse",
+    "SiteGuestPermissionBase",
+    "SiteGuestDocumentPermissionCreate",
+    "SiteGuestFolderPermissionCreate",
+    "SiteGuestPermissionResponse",
+    "SiteGuestPermissionListResponse",
+    "SiteGuestAccessLogResponse",
+    "SiteGuestAccessLogListResponse",
+    "PortalDocumentInfo",
+    "PortalFolderInfo",
+    "PortalContentResponse",
+    "GuestMeResponse",
+    "TenantSiteInfo",
+    "TenantSiteSettingsUpdate",
+    "TenantSiteSettingsResponse",
+    "SiteGuestStatistics",
 ]

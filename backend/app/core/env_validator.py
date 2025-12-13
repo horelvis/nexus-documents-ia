@@ -11,10 +11,19 @@ logger = logging.getLogger(__name__)
 # Default set of required environment variables for secure operation
 REQUIRED_ENV_VARS: List[str] = [
     "MICROSERVICES_API_KEY",
-    "POSTGRES_PASSWORD",
     "CLERK_SECRET_KEY",
     "STRIPE_SECRET_KEY",
     "SIGNATURE_ENCRYPTION_KEY",
+]
+
+TEST_REQUIRED_ENV_VARS: List[str] = [
+    "MICROSERVICES_API_KEY",
+    "SIGNATURE_ENCRYPTION_KEY",
+]
+
+DB_REQUIRED_GROUPS: List[List[str]] = [
+    ["DATABASE_URL"],
+    ["POSTGRES_SERVER", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"],
 ]
 
 
@@ -35,8 +44,17 @@ def validate_environment(extra_required: Iterable[str] | None = None) -> None:
     Raises:
         EnvironmentError: If any required environment variable is missing.
     """
+    is_testing = os.getenv("TESTING", "false").lower() == "true"
+    base_required = TEST_REQUIRED_ENV_VARS if is_testing else REQUIRED_ENV_VARS
+
     required_vars = _resolve_required_vars(extra_required)
+    required_vars = list(dict.fromkeys(base_required + required_vars))
+
     missing = [var for var in required_vars if not os.getenv(var)]
+
+    db_ok = any(all(os.getenv(v) for v in group) for group in DB_REQUIRED_GROUPS)
+    if not db_ok:
+        missing.append("DATABASE_URL (or POSTGRES_SERVER/POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB)")
 
     if missing:
         logger.error("❌ Missing required environment variables: %s", ", ".join(missing))

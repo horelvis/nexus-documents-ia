@@ -82,7 +82,7 @@ export default function SharedDocumentsPage() {
         // Filter by search query on client side if provided
         let shares = response.data.shares
         if (searchQuery) {
-          shares = shares.filter(share => 
+          shares = shares.filter((share: SharedDocument) =>
             share.document_title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             share.document_filename?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             share.recipient_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||

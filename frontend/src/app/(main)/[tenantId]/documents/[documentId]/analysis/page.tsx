@@ -401,9 +401,10 @@ function AnalysisPageContent() {
                     case 'step_complete':
                         // Mark step as completed in the plan tracker
                         if (data.step_index !== undefined) {
-                            console.log(`[Analysis SSE] Step COMPLETE: step_index=${data.step_index}, findings=${data.findings_count}`)
+                            const stepIdx = data.step_index
+                            console.log(`[Analysis SSE] Step COMPLETE: step_index=${stepIdx}, findings=${data.findings_count}`)
                             setCompletedStepIndices(prev => {
-                                const newSet = new Set([...prev, data.step_index])
+                                const newSet = new Set([...prev, stepIdx])
                                 console.log(`[Analysis SSE] Completed indices: ${Array.from(newSet).join(', ')}`)
                                 return newSet
                             })
@@ -431,7 +432,8 @@ function AnalysisPageContent() {
                     case 'step_error':
                         // Mark step as error in the plan tracker
                         if (data.step_index !== undefined) {
-                            setErrorStepIndices(prev => new Set([...prev, data.step_index]))
+                            const stepIdx = data.step_index
+                            setErrorStepIndices(prev => new Set([...prev, stepIdx]))
                             setCurrentStepIndex(-1)
                         }
                         updateLastStep('agent', { status: 'error' })
@@ -479,7 +481,12 @@ function AnalysisPageContent() {
                         if (data.analysis) {
                             const result: AnnotatedPDFResponse = {
                                 annotated_pdf: data.annotated_pdf || '',
-                                annotations: data.annotations || [],
+                                annotations: (data.annotations || []).map(a => ({
+                                    ...a,
+                                    type: a.type as 'risk' | 'recommendation' | 'info',
+                                    severity: a.severity as 'high' | 'medium' | 'low' | null | undefined,
+                                    text_found: (a as { text_found?: string }).text_found || ''
+                                })),
                                 pages_annotated: data.pages_annotated || 0,
                                 total_annotations: data.total_annotations || 0,
                                 failed_annotations: data.failed_annotations || 0,
@@ -588,7 +595,7 @@ function AnalysisPageContent() {
                         }
                         setAnalysisResult(result)
                         console.log('[AnalysisPage] Stored analysis loaded successfully')
-                    } else if (stored.status === 'in_progress' || stored.status === 'pending') {
+                    } else if (stored.status === 'processing' || stored.status === 'pending') {
                         // Analysis is still running - show waiting state
                         console.log('[AnalysisPage] Analysis still in progress, waiting...')
                         setIsAnalyzing(true)

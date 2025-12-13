@@ -687,6 +687,7 @@
     "admin": {
       "teams": "Team Management",
       "settings": "Tenant Settings",
+      "siteGuest": "External Access",
       "providers": "Signature Providers",
       "publicKnowledge": "Legal Knowledge Base",
       "billing": "Billing",
@@ -1113,5 +1114,280 @@
     "loading": "Loading channels...",
     "error": "Failed to load channels",
     "retry": "Retry"
+  },
+  "siteGuest": {
+    "title": "Site Portal",
+    "subtitle": "Manage external document access for invited users",
+    "description": "Securely share documents with external users via OTP authentication",
+    "tabs": {
+      "settings": "Settings",
+      "guests": "Guests"
+    },
+    "settings": {
+      "title": "Portal Settings",
+      "description": "Configure the appearance and behavior of the portal for external guests",
+      "portalUrl": "Portal URL",
+      "portalUrlDescription": "Share this URL with guests so they can access the portal",
+      "slug": "Tenant Slug",
+      "slugDescription": "Unique identifier for the portal URL",
+      "slugPlaceholder": "my-company",
+      "logoUrl": "Logo URL",
+      "logoUrlDescription": "Logo displayed on the portal (recommended: 200x50px)",
+      "logoUrlPlaceholder": "https://example.com/logo.png",
+      "welcomeMessage": "Welcome Message",
+      "welcomeMessageDescription": "Text shown on the portal login page",
+      "welcomeMessagePlaceholder": "Enter your email to receive an access code",
+      "saveChanges": "Save Changes",
+      "saving": "Saving...",
+      "preview": "Preview",
+      "previewDescription": "This is how the portal will look for your guests",
+      "copyUrl": "Copy URL"
+    },
+    "guests": {
+      "title": "Portal Guests",
+      "description": "External users with access to shared documents",
+      "addGuest": "Add Guest",
+      "inviteGuest": "Invite Guest",
+      "noGuests": {
+        "title": "No guests yet",
+        "description": "Add guests to securely share documents"
+      },
+      "table": {
+        "name": "Name",
+        "email": "Email",
+        "status": "Status",
+        "permissions": "Permissions",
+        "lastAccess": "Last Access",
+        "accessCount": "Access Count",
+        "actions": "Actions",
+        "never": "Never"
+      },
+      "status": {
+        "active": "Active",
+        "inactive": "Inactive"
+      },
+      "permissions": {
+        "view": "View",
+        "download": "Download",
+        "upload": "Upload"
+      },
+      "actions": {
+        "edit": "Edit",
+        "delete": "Delete",
+        "deactivate": "Deactivate",
+        "activate": "Activate",
+        "resendInvite": "Resend Invitation",
+        "viewPermissions": "View Permissions",
+        "viewLogs": "View Logs"
+      }
+    },
+    "form": {
+      "title": "Guest Details",
+      "createTitle": "Add New Guest",
+      "editTitle": "Edit Guest",
+      "email": "Email",
+      "emailPlaceholder": "guest@example.com",
+      "emailDescription": "The guest will receive access codes at this email",
+      "name": "Name (optional)",
+      "namePlaceholder": "John Doe",
+      "nameDescription": "Name to identify the guest",
+      "globalPermissions": "Global Permissions",
+      "globalPermissionsDescription": "Permissions that apply to all shared content",
+      "canView": "Can view documents",
+      "canDownload": "Can download documents",
+      "canUpload": "Can upload documents",
+      "sendInvitation": "Send invitation email",
+      "sendInvitationDescription": "The guest will receive an email with the portal link",
+      "create": "Create Guest",
+      "update": "Update Guest",
+      "creating": "Creating...",
+      "updating": "Updating..."
+    },
+    "permissionsDialog": {
+      "title": "{name}'s Permissions",
+      "description": "Manage which documents and folders this guest can access",
+      "noPermissions": {
+        "title": "No specific permissions",
+        "description": "This guest only has access based on their global permissions"
+      },
+      "addPermission": "Add Permission",
+      "selectDocument": "Select Document",
+      "selectFolder": "Select Folder",
+      "permissionType": "Permission Type",
+      "expiresAt": "Expires",
+      "noExpiration": "No expiration",
+      "grantedBy": "Granted by",
+      "grantedAt": "Date",
+      "table": {
+        "resource": "Resource",
+        "type": "Type",
+        "permission": "Permission",
+        "expires": "Expires",
+        "actions": "Actions"
+      },
+      "resourceType": {
+        "document": "Document",
+        "folder": "Folder"
+      },
+      "grant": "Grant",
+      "revoke": "Revoke",
+      "granting": "Granting..."
+    },
+    "accessLogs": {
+      "title": "{name}'s Access Logs",
+      "description": "Guest activity history",
+      "noLogs": {
+        "title": "No logs yet",
+        "description": "This guest hasn't accessed the portal yet"
+      },
+      "table": {
+        "action": "Action",
+        "resource": "Resource",
+        "ip": "IP",
+        "userAgent": "Browser",
+        "timestamp": "Timestamp"
+      },
+      "actions": {
+        "login": "Login",
+        "logout": "Logout",
+        "view": "View",
+        "download": "Download",
+        "upload": "Upload",
+        "otp_request": "OTP Request",
+        "otp_verify": "OTP Verification"
+      },
+      "refresh": "Refresh",
+      "export": "Export"
+    },
+    "portal": {
+      "title": "Document Portal",
+      "loading": "Loading portal...",
+      "login": {
+        "title": "Portal Access",
+        "subtitle": "Enter your email to receive an access code",
+        "invitedOnly": "Enter your invited email address to receive an access code",
+        "emailLabel": "Email Address",
+        "emailPlaceholder": "your@email.com",
+        "sendCode": "Send Access Code",
+        "sending": "Sending..."
+      },
+      "otp": {
+        "title": "Enter Access Code",
+        "subtitle": "We sent a 6-digit code to {email}",
+        "codeLabel": "Access Code",
+        "codePlaceholder": "000000",
+        "expiresIn": "Code expires in {minutes} minutes",
+        "verify": "Verify Code",
+        "verifying": "Verifying...",
+        "backToLogin": "Back to Login",
+        "resendCode": "Resend code",
+        "invalidCode": "Invalid or expired code"
+      },
+      "content": {
+        "title": "Shared Documents",
+        "welcome": "Welcome, {name}",
+        "folders": "Folders",
+        "documents": "Documents",
+        "documentsCount": "{count} documents",
+        "noContent": {
+          "title": "No documents",
+          "description": "No documents have been shared with you yet"
+        },
+        "table": {
+          "name": "Name",
+          "type": "Type",
+          "size": "Size",
+          "updated": "Updated"
+        },
+        "actions": {
+          "view": "View",
+          "download": "Download"
+        },
+        "logout": "Logout",
+        "refresh": "Refresh"
+      },
+      "error": {
+        "title": "Portal Not Available",
+        "description": "This portal is not accessible at this time",
+        "notFound": "The portal you're looking for doesn't exist",
+        "notInvited": "Your email is not invited to this portal",
+        "sessionExpired": "Your session has expired. Please log in again."
+      }
+    },
+    "toast": {
+      "guestCreated": {
+        "title": "Guest Created",
+        "description": "Guest {email} has been added successfully"
+      },
+      "guestUpdated": {
+        "title": "Guest Updated",
+        "description": "Guest details have been updated"
+      },
+      "guestDeleted": {
+        "title": "Guest Deleted",
+        "description": "Guest has been deleted successfully"
+      },
+      "guestDeactivated": {
+        "title": "Guest Deactivated",
+        "description": "Guest can no longer access the portal"
+      },
+      "guestActivated": {
+        "title": "Guest Activated",
+        "description": "Guest can now access the portal again"
+      },
+      "inviteSent": {
+        "title": "Invitation Sent",
+        "description": "An invitation email has been sent to {email}"
+      },
+      "permissionGranted": {
+        "title": "Permission Granted",
+        "description": "Permission has been added successfully"
+      },
+      "permissionRevoked": {
+        "title": "Permission Revoked",
+        "description": "Permission has been removed"
+      },
+      "settingsSaved": {
+        "title": "Settings Saved",
+        "description": "Portal settings have been updated"
+      },
+      "urlCopied": {
+        "title": "URL Copied",
+        "description": "Portal URL has been copied to clipboard"
+      },
+      "otpSent": {
+        "title": "Code Sent",
+        "description": "Check your email for the access code"
+      },
+      "loginSuccess": {
+        "title": "Access Granted",
+        "description": "Welcome to the portal"
+      },
+      "error": {
+        "loadGuests": "Failed to load guests",
+        "createGuest": "Failed to create guest",
+        "updateGuest": "Failed to update guest",
+        "deleteGuest": "Failed to delete guest",
+        "loadPermissions": "Failed to load permissions",
+        "grantPermission": "Failed to grant permission",
+        "revokePermission": "Failed to revoke permission",
+        "loadLogs": "Failed to load logs",
+        "saveSettings": "Failed to save settings",
+        "sendOtp": "Failed to send code",
+        "verifyOtp": "Failed to verify code",
+        "loadContent": "Failed to load content",
+        "notInvited": "This email is not invited to the portal"
+      }
+    },
+    "delete": {
+      "title": "Delete Guest",
+      "description": "Are you sure you want to delete {name}? This will revoke all their permissions and they will no longer be able to access the portal.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    },
+    "sidebar": {
+      "title": "Site Portal",
+      "description": "External guest access"
+    }
   }
 }

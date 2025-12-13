@@ -7,7 +7,7 @@ import { useNotifications } from "@/contexts/app-state-context"
 import { useDocumentEvents } from "@/contexts/document-events-context"
 
 export function GlobalUploadDialog() {
-  const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete, closeUploadDialog } = useUpload()
+  const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete, closeUploadDialog, targetFolderPath } = useUpload()
   const { addNotification } = useNotifications()
   const { emitDocumentEvent } = useDocumentEvents()
   const params = useParams()
@@ -54,10 +54,11 @@ export function GlobalUploadDialog() {
   }
 
   return (
-    <UploadDialog 
+    <UploadDialog
       open={uploadDialogOpen}
       onOpenChange={setUploadDialogOpen}
       onUploadComplete={handleUploadComplete}
+      folderPath={targetFolderPath}
     />
   )
 }

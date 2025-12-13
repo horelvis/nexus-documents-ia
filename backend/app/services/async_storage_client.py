@@ -387,20 +387,52 @@ class AsyncStorageClient:
             logger.error(f"Failed to generate download signed URL for {file_path}: {e}")
             raise
     
+    async def move_file(self, source_path: str, destination_path: str) -> Dict[str, Any]:
+        """
+        Move a file to a new location asynchronously.
+
+        Args:
+            source_path: Current file path
+            destination_path: New file path
+
+        Returns:
+            Move operation result
+        """
+        try:
+            payload = {
+                "source_path": source_path,
+                "destination_path": destination_path
+            }
+
+            response = await self._make_request("POST", "/move", json=payload)
+
+            result = response.json()
+            logger.info(f"File moved successfully: {source_path} -> {destination_path}")
+            return result
+
+        except HTTPException as e:
+            if e.status_code == 404:
+                logger.warning(f"Source file not found for move: {source_path}")
+                raise
+            raise
+        except Exception as e:
+            logger.error(f"Failed to move file {source_path} -> {destination_path}: {e}")
+            raise
+
     async def cleanup_test_bucket(self) -> Dict[str, Any]:
         """
         Clean test bucket asynchronously. Only for testing.
-        
+
         Returns:
             Cleanup information
         """
         try:
             response = await self._make_request("POST", "/cleanup")
-            
+
             result = response.json()
             logger.info(f"Test bucket cleaned: {result}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to cleanup test bucket: {e}")
             raise

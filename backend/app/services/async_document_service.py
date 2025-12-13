@@ -14,7 +14,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, Tag, Tenant, DocumentView
+from app.db.models import Document, Tag, Tenant, DocumentView, FolderMarker
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
@@ -23,6 +23,7 @@ from app.services.elasticsearch_client import elasticsearch_client
 from app.services.queue_service import queue_service
 from app.services.text_extraction_client import TextExtractionClient
 from app.services.langextract_client import langextract_client
+from app.services.folder_classification_service import classify_document as classify_document_folder
 from .document_classifier import classify_document_type
 
 logger = logging.getLogger(__name__)
@@ -233,12 +234,17 @@ class AsyncDocumentService:
         date_to: Optional[str] = None,
         category: Optional[str] = None,
         document_ids: Optional[List] = None,  # ACL: Filter by accessible document IDs
+        folder: Optional[str] = None,  # Filter by folder path (Google Drive style)
     ) -> Dict[str, Any]:
         """Get paginated list of documents with filters using hybrid search when applicable.
+
+        Google Drive style: Returns folders + documents in a single list.
+        Folders are returned as items with type="folder" at the beginning.
 
         Args:
             document_ids: If provided, only return documents in this list (used for ACL filtering).
                          If None, returns all documents in tenant (legacy behavior for admins).
+            folder: If provided, filter by folder_path. Returns immediate subfolders as items.
         """
         try:
             # ACL: If document_ids is provided and empty, return no results
@@ -275,13 +281,36 @@ class AsyncDocumentService:
                 # ACL: Add document_ids filter for Elasticsearch
                 if document_ids is not None:
                     es_filters["document_ids"] = [str(doc_id) for doc_id in document_ids]
-                
-                # Perform hybrid search via microservice - LET IT FAIL if broken
+
+                # Build user context for ACL filtering
+                from app.services.elasticsearch_client import SearchUserContext
+                user_context = None
+                if self.user_id:
+                    # Get user roles from database if needed
+                    user_role_ids = []
+                    try:
+                        from app.db.models import User
+                        user_result = await db.execute(
+                            select(User).options(selectinload(User.roles)).filter(User.id == uuid.UUID(self.user_id))
+                        )
+                        user = user_result.scalars().first()
+                        if user:
+                            user_role_ids = [str(role.id) for role in user.roles] if user.roles else []
+                            user_context = SearchUserContext(
+                                user_id=self.user_id,
+                                role_ids=user_role_ids,
+                                is_admin=user.is_admin
+                            )
+                    except Exception as ctx_exc:
+                        logger.warning(f"Could not build user context for ACL filtering: {ctx_exc}")
+
+                # Perform hybrid search via microservice with ACL filtering
                 es_results = await elasticsearch_client.hybrid_search(
                     tenant_id=self.tenant_id,
                     query=search,
                     limit=per_page * 2,  # Get more results to account for filtering
-                    filters=es_filters
+                    filters=es_filters,
+                    user_context=user_context
                 )
                 
                 logger.info(f"✅ Elasticsearch returned {len(es_results)} results")
@@ -370,6 +399,168 @@ class AsyncDocumentService:
             if document_ids is not None:
                 base_filters.append(Document.id.in_(document_ids))
 
+            # Folder filtering (Google Drive style)
+            folder_items = []  # Subfolders to include at the beginning
+            if folder is not None:
+                # Normalize folder path
+                current_folder = folder.strip() if folder else ""
+                if current_folder and not current_folder.startswith("/"):
+                    current_folder = "/" + current_folder
+
+                if current_folder:
+                    # Filter documents in this specific folder only (not subfolders)
+                    base_filters.append(Document.folder_path == current_folder)
+                else:
+                    # Root folder: show documents with no folder or empty folder_path
+                    base_filters.append(
+                        or_(
+                            Document.folder_path.is_(None),
+                            Document.folder_path == "",
+                            Document.folder_path == "/"
+                        )
+                    )
+
+                # Get immediate subfolders as items (Google Drive style)
+                # Query to find distinct folder_path values that are direct children
+                from sqlalchemy import distinct, case, literal
+
+                if current_folder:
+                    # Find folders that start with current_folder/ but are only one level deeper
+                    subfolder_query = (
+                        select(
+                            Document.folder_path,
+                            func.count(Document.id).label("document_count")
+                        )
+                        .where(Document.tenant_id == self.tenant_id)
+                        .where(Document.folder_path.isnot(None))
+                        .where(Document.folder_path.startswith(current_folder + "/"))
+                        .group_by(Document.folder_path)
+                    )
+                else:
+                    # Root: find all top-level folders
+                    subfolder_query = (
+                        select(
+                            Document.folder_path,
+                            func.count(Document.id).label("document_count")
+                        )
+                        .where(Document.tenant_id == self.tenant_id)
+                        .where(Document.folder_path.isnot(None))
+                        .where(Document.folder_path != "")
+                        .where(Document.folder_path != "/")
+                        .group_by(Document.folder_path)
+                    )
+
+                # ACL: Filter subfolders by accessible document IDs
+                if document_ids is not None:
+                    subfolder_query = subfolder_query.where(Document.id.in_(document_ids))
+
+                subfolder_result = await db.execute(subfolder_query)
+                all_subpaths = subfolder_result.all()
+
+                # Extract immediate children only
+                seen_folders = set()
+                prefix_len = len(current_folder) + 1 if current_folder else 1
+
+                for full_path, count in all_subpaths:
+                    if not full_path:
+                        continue
+                    # Get the immediate child folder name
+                    remaining = full_path[prefix_len:] if prefix_len <= len(full_path) else full_path
+                    if "/" in remaining:
+                        # This is a nested folder, get only the first level
+                        immediate_child = remaining.split("/")[0]
+                    else:
+                        immediate_child = remaining
+
+                    if immediate_child and immediate_child not in seen_folders:
+                        seen_folders.add(immediate_child)
+                        child_path = f"{current_folder}/{immediate_child}" if current_folder else f"/{immediate_child}"
+
+                        # Count documents in this subfolder (recursively)
+                        subfolder_count_query = (
+                            select(func.count(Document.id))
+                            .where(Document.tenant_id == self.tenant_id)
+                            .where(Document.folder_path.startswith(child_path))
+                        )
+                        if document_ids is not None:
+                            subfolder_count_query = subfolder_count_query.where(Document.id.in_(document_ids))
+
+                        count_result = await db.execute(subfolder_count_query)
+                        subfolder_doc_count = count_result.scalar() or 0
+
+                        folder_items.append({
+                            "id": f"folder:{child_path}",
+                            "type": "folder",
+                            "title": immediate_child,
+                            "filename": immediate_child,
+                            "folder_path": child_path,
+                            "document_count": subfolder_doc_count,
+                            "file_type": "folder",
+                            "file_size": 0,
+                            "mime_type": "inode/directory",
+                            "indexed": "N/A",
+                            "category": None,
+                            "created_at": None,
+                            "updated_at": None,
+                            "tags": [],
+                            "created_by": None
+                        })
+
+                # Also include empty folders (FolderMarkers) at this level
+                if current_folder:
+                    # Find markers that start with current_folder/ but are one level deeper
+                    marker_query = (
+                        select(FolderMarker.folder_path, FolderMarker.created_at)
+                        .where(FolderMarker.tenant_id == self.tenant_id)
+                        .where(FolderMarker.folder_path.startswith(current_folder + "/"))
+                    )
+                else:
+                    # Root: find all top-level folder markers
+                    marker_query = (
+                        select(FolderMarker.folder_path, FolderMarker.created_at)
+                        .where(FolderMarker.tenant_id == self.tenant_id)
+                        .where(FolderMarker.folder_path != "")
+                        .where(FolderMarker.folder_path != "/")
+                    )
+
+                marker_result = await db.execute(marker_query)
+                all_markers = marker_result.all()
+
+                # Add immediate children from markers that aren't already in seen_folders
+                for marker_path, marker_created_at in all_markers:
+                    if not marker_path:
+                        continue
+                    remaining = marker_path[prefix_len:] if prefix_len <= len(marker_path) else marker_path
+                    if "/" in remaining:
+                        immediate_child = remaining.split("/")[0]
+                    else:
+                        immediate_child = remaining
+
+                    if immediate_child and immediate_child not in seen_folders:
+                        seen_folders.add(immediate_child)
+                        child_path = f"{current_folder}/{immediate_child}" if current_folder else f"/{immediate_child}"
+
+                        folder_items.append({
+                            "id": f"folder:{child_path}",
+                            "type": "folder",
+                            "title": immediate_child,
+                            "filename": immediate_child,
+                            "folder_path": child_path,
+                            "document_count": 0,  # Empty folder
+                            "file_type": "folder",
+                            "file_size": 0,
+                            "mime_type": "inode/directory",
+                            "indexed": "N/A",
+                            "category": None,
+                            "created_at": marker_created_at.isoformat() if marker_created_at else None,
+                            "updated_at": None,
+                            "tags": [],
+                            "created_by": None
+                        })
+
+                # Sort folders alphabetically
+                folder_items.sort(key=lambda x: x["title"].lower())
+
             query = select(Document).filter(
                 *base_filters
             ).options(
@@ -386,45 +577,59 @@ class AsyncDocumentService:
                         Document.filename.ilike(f"%{search}%")
                     )
                 )
-            
+
             if category:
                 query = query.filter(Document.category == category)
-            
+
             if tags:
                 # Join with tags
                 query = query.join(Document.tags).filter(
                     Tag.name.in_(tags)
                 )
-            
+
             if date_from:
                 date_from_obj = datetime.datetime.fromisoformat(date_from)
                 query = query.filter(Document.created_at >= date_from_obj)
-            
+
             if date_to:
                 date_to_obj = datetime.datetime.fromisoformat(date_to)
                 query = query.filter(Document.created_at <= date_to_obj)
-            
-            # Count total
+
+            # Count total documents (not including folders)
             count_query = select(func.count()).select_from(query.subquery())
             total_result = await db.execute(count_query)
-            total = total_result.scalar()
-            
-            # Apply pagination
+            total_docs = total_result.scalar()
+
+            # Total items = folders + documents
+            total = len(folder_items) + total_docs
+
+            # Pagination logic accounting for folders
+            # Folders are always shown first on page 1
             offset = (page - 1) * per_page
-            query = query.offset(offset).limit(per_page).order_by(Document.created_at.desc())
-            
+
+            if page == 1:
+                # First page: show folders first, then documents
+                docs_to_fetch = per_page - len(folder_items)
+                query = query.offset(0).limit(max(0, docs_to_fetch)).order_by(Document.created_at.desc())
+            else:
+                # Other pages: adjust offset for folders shown on page 1
+                adjusted_offset = offset - len(folder_items)
+                query = query.offset(max(0, adjusted_offset)).limit(per_page).order_by(Document.created_at.desc())
+
             # Execute query
             result = await db.execute(query)
             documents = result.scalars().all()
-            
-            # Convert to dict
-            items = []
+
+            # Convert documents to dict with type="document"
+            doc_items = []
             for doc in documents:
                 doc_dict = {
                     "id": str(doc.id),
+                    "type": "document",
                     "title": doc.title,
                     "description": doc.description,
                     "filename": doc.filename,
+                    "folder_path": doc.folder_path,
                     "file_type": doc.file_type,
                     "file_size": doc.file_size,
                     "mime_type": doc.mime_type,
@@ -439,15 +644,24 @@ class AsyncDocumentService:
                         "full_name": doc.creator.full_name
                     } if doc.creator else None
                 }
-                items.append(doc_dict)
-            
+                doc_items.append(doc_dict)
+
+            # Combine: folders first (only on page 1), then documents
+            if page == 1:
+                items = folder_items + doc_items
+            else:
+                items = doc_items
+
             return {
                 "items": items,
                 "total": total,
                 "page": page,
                 "per_page": per_page,
                 "pages": (total + per_page - 1) // per_page,
-                "search_engine": "sql"
+                "search_engine": "sql",
+                "current_folder": folder if folder is not None else None,
+                "folder_count": len(folder_items) if page == 1 else 0,
+                "document_count": total_docs
             }
             
         except Exception as e:
@@ -486,9 +700,17 @@ class AsyncDocumentService:
         category: Optional[str] = None,
         cliente: Optional[str] = None,
         periodo: Optional[str] = None,
-        tipo_documento: Optional[str] = None
+        tipo_documento: Optional[str] = None,
+        folder_path: Optional[str] = None
     ) -> Document:
-        """Upload a new document"""
+        """
+        Upload a new document.
+
+        If folder_path is provided, the document is placed in that folder
+        and marked as manually classified (auto_classified=False).
+        This supports Google Drive style navigation where uploading
+        while inside a folder places the document there.
+        """
         try:
             # Ensure service is initialized
             if not self._initialized:
@@ -509,13 +731,27 @@ class AsyncDocumentService:
             if tipo_documento:
                 document_metadata['tipo_documento'] = tipo_documento
 
+            # Determine folder path and classification status
+            # If folder_path is provided, it's a manual classification (user uploaded to specific folder)
+            # If not provided, default to /Sin Clasificar for future auto-classification
+            effective_folder_path = folder_path if folder_path else "/Sin Clasificar"
+            is_manually_classified = folder_path is not None and folder_path != "/Sin Clasificar"
+
+            # Normalize folder path
+            if not effective_folder_path.startswith("/"):
+                effective_folder_path = "/" + effective_folder_path
+
+            # Build file path including folder structure
+            file_path_with_folder = f"{effective_folder_path.lstrip('/')}/{stored_filename}"
+
             # Create document record
             doc = Document(
                 id=uuid.uuid4(),
                 title=title,
                 description=description,
                 filename=file.filename,
-                file_path=stored_filename,
+                file_path=file_path_with_folder,
+                folder_path=effective_folder_path,
                 file_type=file_ext,
                 file_size=file_size,
                 mime_type=file.content_type,
@@ -523,13 +759,15 @@ class AsyncDocumentService:
                 document_metadata=document_metadata if document_metadata else None,
                 tenant_id=self.tenant_id,
                 created_by=self.user_id,
-                indexed=IndexingStatus.PROCESSING  # Set initial status
+                indexed=IndexingStatus.PROCESSING,  # Set initial status
+                auto_classified=False,  # Manual upload is never auto-classified
+                classification_reasoning=f"Subido manualmente a {effective_folder_path}" if is_manually_classified else None
             )
             
-            # Upload to storage
+            # Upload to storage (using full path with folder structure)
             upload_success = await self.storage_service.upload_file(
                 file=io.BytesIO(contents),
-                object_name=stored_filename,
+                object_name=file_path_with_folder,
                 metadata={"content_type": file.content_type}
             )
             
@@ -758,7 +996,44 @@ class AsyncDocumentService:
                         }
                         
                         logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
-                        
+
+                        # Get ACL data for the document
+                        from app.db.models import DocumentACL
+                        from datetime import datetime, timezone
+
+                        acl_user_ids = []
+                        acl_role_ids = []
+                        acl_everyone = False
+
+                        try:
+                            now = datetime.now(timezone.utc)
+                            acl_result = await db.execute(
+                                select(DocumentACL).filter(
+                                    and_(
+                                        DocumentACL.document_id == doc_id,
+                                        DocumentACL.tenant_id == uuid.UUID(self.tenant_id),
+                                        DocumentACL.can_view == True,
+                                        or_(
+                                            DocumentACL.expires_at.is_(None),
+                                            DocumentACL.expires_at > now
+                                        )
+                                    )
+                                )
+                            )
+                            acls = acl_result.scalars().all()
+
+                            for acl in acls:
+                                if acl.grantee_type == 'user' and acl.grantee_id:
+                                    acl_user_ids.append(str(acl.grantee_id))
+                                elif acl.grantee_type == 'role' and acl.grantee_id:
+                                    acl_role_ids.append(str(acl.grantee_id))
+                                elif acl.grantee_type == 'everyone':
+                                    acl_everyone = True
+                        except Exception as acl_exc:
+                            logger.warning(f"Could not fetch ACLs for document {doc_id}: {acl_exc}")
+                            # Default to everyone=True for backward compatibility with legacy documents
+                            acl_everyone = True
+
                         try:
                             es_success = await elasticsearch_client.index_document(
                                 tenant_id=self.tenant_id,
@@ -766,7 +1041,12 @@ class AsyncDocumentService:
                                 title=cached_doc["title"],
                                 content=text[:5000],  # Index more content for better search
                                 description=cached_doc["description"],
-                                metadata=es_metadata
+                                metadata=es_metadata,
+                                # ACL fields
+                                created_by=cached_doc["created_by"],
+                                acl_user_ids=acl_user_ids,
+                                acl_role_ids=acl_role_ids,
+                                acl_everyone=acl_everyone
                             )
                         except Exception as es_exc:
                             es_error = str(es_exc)
@@ -871,7 +1151,18 @@ class AsyncDocumentService:
                                 )
                 except Exception as e:
                     logger.warning(f"Entity extraction failed for {doc_id}: {e}")
-                
+
+                # Auto-classify document folder using RAG + LLM (Learn-First approach)
+                try:
+                    await self._auto_classify_folder(
+                        doc_id=doc_id,
+                        text_content=text_for_embedding,
+                        filename=doc_info.get("filename"),
+                        file_type=file_ext,
+                    )
+                except Exception as e:
+                    logger.warning(f"Folder classification failed for {doc_id}: {e}")
+
                 # Routing legacy deshabilitado
             else:
                 logger.warning(f"No text extracted from document {doc_id}")
@@ -1006,6 +1297,99 @@ class AsyncDocumentService:
         finally:
             if owns_session:
                 await session.close()
+
+    async def _auto_classify_folder(
+        self,
+        doc_id: str,
+        text_content: Optional[str] = None,
+        filename: Optional[str] = None,
+        file_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Auto-classify document into folder using RAG + LLM.
+
+        Learn-First approach:
+        - If auto_classification_enabled = FALSE → document stays in /Sin Clasificar
+        - If enabled → RAG finds similar docs, LLM decides folder
+        - If LLM confidence < min_confidence → /Sin Clasificar
+
+        Returns the assigned folder path, or None if classification failed.
+        """
+        async with AsyncSessionLocal() as session:
+            try:
+                # Get tenant settings
+                stmt = select(Tenant).filter(Tenant.id == self.tenant_id)
+                result = await session.execute(stmt)
+                tenant = result.scalar_one_or_none()
+
+                if not tenant:
+                    logger.warning(f"Tenant {self.tenant_id} not found for folder classification")
+                    return None
+
+                # Check if auto-classification is enabled
+                if not tenant.auto_classification_enabled:
+                    logger.info(
+                        f"📁 Folder classification DISABLED for tenant {self.tenant_id}. "
+                        f"Document {doc_id} stays in /Sin Clasificar (Learn-First mode)"
+                    )
+                    return "/Sin Clasificar"
+
+                # Get document
+                stmt = select(Document).filter(Document.id == doc_id)
+                result = await session.execute(stmt)
+                doc = result.scalar_one_or_none()
+
+                if not doc:
+                    logger.warning(f"Document {doc_id} not found for folder classification")
+                    return None
+
+                # Prepare document dict for classification
+                documento = {
+                    "doc_id": str(doc_id),
+                    "filename": filename or doc.filename,
+                    "file_type": file_type or doc.file_type,
+                    "content": text_content or "",
+                }
+
+                # Run RAG + LLM classification
+                logger.info(f"🔍 Running RAG+LLM folder classification for document {doc_id}")
+                classification = await classify_document_folder(
+                    tenant_id=self.tenant_id,
+                    documento=documento,
+                    k=tenant.auto_classification_k,
+                    min_confidence=tenant.auto_classification_min_confidence,
+                )
+
+                # Check confidence threshold
+                if classification.confianza < tenant.auto_classification_min_confidence:
+                    logger.info(
+                        f"📁 Confidence ({classification.confianza:.2f}) below threshold "
+                        f"({tenant.auto_classification_min_confidence}). "
+                        f"Document {doc_id} goes to /Sin Clasificar"
+                    )
+                    assigned_folder = "/Sin Clasificar"
+                    doc.folder_path = assigned_folder
+                    doc.auto_classified = False
+                    doc.classification_confidence = classification.confianza
+                    doc.classification_reasoning = classification.razonamiento
+                else:
+                    assigned_folder = classification.carpeta
+                    doc.folder_path = assigned_folder
+                    doc.auto_classified = True
+                    doc.classification_confidence = classification.confianza
+                    doc.classification_reasoning = classification.razonamiento
+                    logger.info(
+                        f"✅ Document {doc_id} auto-classified to '{assigned_folder}' "
+                        f"(confidence: {classification.confianza:.2f})"
+                    )
+
+                await session.commit()
+                return assigned_folder
+
+            except Exception as e:
+                logger.error(f"Error in folder classification for document {doc_id}: {e}")
+                await session.rollback()
+                return None
 
     async def categorize_document(
         self,
