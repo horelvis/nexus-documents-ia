@@ -10,6 +10,7 @@ Clerk + Stripe authentication flow:
 """
 from typing import Optional
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
-from app.api.async_dependencies import get_current_user_async, _verify_clerk_token
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth import verify_clerk_token, AuthError
 from app.db.models import User
 from app.schemas.auth import LoginResponse, LogoutResponse, SubscriptionInfo, UserPermissions
 from app.services.subscription_service_v2 import SubscriptionServiceV2
-
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -160,16 +160,14 @@ async def login(
 
     token = authorization.split(" ")[1]
 
-    # 2. Verify Clerk JWT token
+    # 2. Verify Clerk JWT token using unified auth module
     try:
-        payload = _verify_clerk_token(token)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Token verification failed: {e}")
+        payload = verify_clerk_token(token)
+    except AuthError as e:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            status_code=e.status_code,
+            detail=e.message,
+            headers={"WWW-Authenticate": "Bearer"}
         )
 
     clerk_user_id = payload.get('sub')

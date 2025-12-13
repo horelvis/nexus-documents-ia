@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, AsyncGenerator
 import logging
 import httpx
 
-from app.api.dependencies import get_current_tenant_id
+from app.api.async_dependencies import get_current_tenant_id_async
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ WEAVIATE_SERVICE_URL = settings.WEAVIATE_SERVICE_URL
 @router.post("/emma/query")
 async def emma_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Proxy Emma AI queries to Weaviate service"""
     try:
@@ -66,7 +66,7 @@ async def emma_query(
 @router.post("/emma/query/stream")
 async def emma_query_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Proxy Emma AI streaming queries to Weaviate service.
@@ -180,7 +180,7 @@ async def emma_list_tools():
 @router.post("/emma/feedback")
 async def emma_feedback(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Submit feedback to Emma AI for learning"""
     try:
@@ -216,7 +216,7 @@ async def emma_feedback(
 @router.get("/emma/analysis/{job_id}")
 async def emma_get_analysis(
     job_id: str,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get a stored analysis result by job ID.
@@ -258,7 +258,7 @@ async def emma_get_analysis(
 async def emma_document_markdown(
     document_id: str = Form(...),
     pdf_file: UploadFile = File(...),
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Convert a PDF document to Markdown format.
@@ -304,7 +304,7 @@ async def emma_analyze_with_annotations(
     document_id: str = Form(...),
     analysis_type: str = Form("legal"),
     file: Optional[UploadFile] = File(None),
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Analyze document and return annotated PDF with highlights.
@@ -362,7 +362,7 @@ async def emma_analyze_with_annotations_stream(
     document_id: str = Form(...),
     analysis_type: str = Form("legal"),
     file: Optional[UploadFile] = File(None),
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Analyze document with streaming progress updates.

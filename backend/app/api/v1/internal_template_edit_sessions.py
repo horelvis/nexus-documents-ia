@@ -8,7 +8,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, require_microservice_api_key
+from app.db.database import get_db
+from app.api.async_dependencies import require_microservice_api_key
 from app.schemas.template_edit_session import (
     TemplateEditSessionCreateRequest,
     TemplateEditSessionResponse,

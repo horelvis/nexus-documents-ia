@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.responses import RedirectResponse
 
 from app.core.config import settings
-from app.api.dependencies import get_current_active_superuser
+from app.api.async_dependencies import get_current_active_superuser_async
 
 router = APIRouter()
 
@@ -79,7 +79,7 @@ async def get_open_api_endpoint(request: Request):
 @router.get("/download-openapi", include_in_schema=False)
 async def download_openapi_spec(
     request: Request,
-    current_user = Depends(get_current_active_superuser)
+    current_user = Depends(get_current_active_superuser_async)
 ):
     """
     Descarga el esquema OpenAPI como archivo JSON (solo admin).

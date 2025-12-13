@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, get_db
+from app.db.database import get_db
+from app.api.async_dependencies import get_current_user_async
 from app.core.config import settings
 from app.db.models import User
 from app.schemas.google_drive import (
@@ -43,8 +44,8 @@ def _decode_state(state: str) -> dict:
 
 
 @router.get("/oauth-url", response_model=GoogleDriveAuthURLResponse)
-def get_authorization_url(
-    current_user: User = Depends(get_current_user),
+async def get_authorization_url(
+    current_user: User = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)
@@ -81,8 +82,8 @@ def oauth_callback(
 
 
 @router.get("/status", response_model=GoogleDriveStatusResponse)
-def get_status(
-    current_user: User = Depends(get_current_user),
+async def get_status(
+    current_user: User = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)
@@ -99,8 +100,8 @@ def get_status(
 
 
 @router.post("/disconnect", response_model=GoogleDriveDisconnectResponse)
-def disconnect(
-    current_user: User = Depends(get_current_user),
+async def disconnect(
+    current_user: User = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)

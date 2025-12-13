@@ -3,7 +3,7 @@ Async dependencies for FastAPI endpoints.
 
 Authentication flow (NO JIT Provisioning):
 1. Frontend sends Clerk JWT token in Authorization header
-2. Backend validates token with Clerk JWKS
+2. Backend validates token with Clerk JWKS (via unified auth module)
 3. If user doesn't exist in DB → returns 401 (must register first)
 4. Returns authenticated user
 
@@ -11,8 +11,6 @@ User creation is handled by Clerk webhook on user.created event.
 Login only validates existing users.
 """
 from typing import Optional
-from datetime import datetime, timedelta
-from uuid import uuid4
 import logging
 import os
 
@@ -22,95 +20,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
-from app.db.models import User, Tenant
+from app.db.models import User
 from app.core.config import settings
+from app.core.auth import (
+    verify_clerk_token,
+    AuthError,
+    TokenMissingError,
+    TokenExpiredError,
+    TokenInvalidError,
+    ClerkConfigError,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _verify_clerk_token(token: str) -> dict:
-    """
-    Verify Clerk JWT token using JWKS.
-    Returns payload with 'sub' (clerk_user_id) and email claims.
-    """
-    import jwt
-    from jwt import PyJWKClient
-
-    if not settings.CLERK_SECRET_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Clerk not configured"
-        )
-
-    try:
-        # Decode without verification to get issuer
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        issuer = unverified.get('iss', '')
-
-        if not issuer:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token: no issuer"
-            )
-
-        # Verify with JWKS
-        jwks_client = PyJWKClient(f"{issuer}/.well-known/jwks.json")
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            options={"verify_aud": False}
-        )
-
-        return payload
-
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    except jwt.InvalidTokenError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {e}")
-
-
-async def _create_user_jit(db: AsyncSession, clerk_user_id: str, email: str, full_name: str) -> User:
-    """
-    Just-In-Time user provisioning.
-    Creates tenant + user when a valid Clerk user first accesses the system.
-    """
-    logger.info(f"🆕 JIT provisioning new user: {email}")
-
-    # Create tenant for new user
-    tenant_name = email.split('@')[0].replace('.', '-')
-    tenant = Tenant(
-        id=uuid4(),
-        name=f"{tenant_name}-org",
-        bucket_name=f"nexus-{tenant_name}-{uuid4().hex[:8]}",
-        is_active=True
-    )
-    db.add(tenant)
-
-    # Create user with trial
-    user = User(
-        id=uuid4(),
-        email=email,
-        full_name=full_name or email.split('@')[0],
-        clerk_user_id=clerk_user_id,
-        tenant_id=tenant.id,
-        is_active=True,
-        is_superuser=False,
-        onboarding_completed=False,
-        subscription_plan='trial',
-        subscription_status='trialing',
-        trial_ends_at=datetime.utcnow() + timedelta(days=14),
-        hashed_password="clerk_managed"
-    )
-    db.add(user)
-
-    await db.commit()
-    await db.refresh(user)
-
-    logger.info(f"✅ Created user {user.id} with tenant {tenant.id}")
-    return user
 
 
 async def get_current_user_async(
@@ -122,7 +43,7 @@ async def get_current_user_async(
     Get current authenticated user (NO JIT provisioning).
 
     Flow:
-    1. Validate Clerk token
+    1. Validate Clerk token via unified auth module
     2. Find user by clerk_user_id
     3. If not found → return 401 (user must register via SignUp)
     4. Return user
@@ -155,15 +76,34 @@ async def get_current_user_async(
 
     token = authorization.split(" ")[1]
 
-    # Verify token
-    payload = _verify_clerk_token(token)
-    clerk_user_id = payload.get('sub')
-
-    if not clerk_user_id:
+    # Verify token using unified auth module
+    try:
+        payload = verify_clerk_token(token)
+    except TokenExpiredError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: no user ID"
+            detail="Token expired",
+            headers={"WWW-Authenticate": "Bearer"}
         )
+    except TokenInvalidError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e.message),
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    except ClerkConfigError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service not configured"
+        )
+    except AuthError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    clerk_user_id = payload.get('sub')
 
     # Find user
     result = await db.execute(
@@ -175,7 +115,7 @@ async def get_current_user_async(
 
     # NO JIT provisioning - user must register via SignUp flow
     if not user:
-        logger.warning(f"Auth attempt for unregistered clerk_user_id: {clerk_user_id}")
+        logger.warning(f"Auth attempt for unregistered user: {clerk_user_id[:8]}...")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not registered. Please sign up first.",
@@ -190,12 +130,88 @@ async def get_current_tenant_id_async(
     x_tenant_id: Optional[str] = Header(None)
 ) -> str:
     """
-    Async version of get_current_tenant_id
+    Get the current tenant ID.
+
+    Superusers can override via X-Tenant-ID header in multi-tenant mode.
     """
     if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
         return x_tenant_id
-    
+
     return str(current_user.tenant_id)
+
+
+async def get_current_tenant_async(
+    current_user: User = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
+    x_tenant_id: Optional[str] = Header(None)
+):
+    """
+    Get the current Tenant object.
+
+    Superusers can override via X-Tenant-ID header in multi-tenant mode.
+    """
+    from app.db.models import Tenant
+
+    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
+        result = await db.execute(select(Tenant).where(Tenant.id == x_tenant_id))
+        tenant = result.scalar_one_or_none()
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tenant not found"
+            )
+        return tenant
+
+    # Use tenant from current user's relationship if loaded
+    if current_user.tenant:
+        return current_user.tenant
+
+    # Fallback: query by tenant_id
+    result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User tenant not found"
+        )
+
+    return tenant
+
+
+def require_microservice_api_key(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+) -> str:
+    """
+    Validate internal microservice calls using the shared API key.
+
+    Accepts both:
+    - Authorization: Bearer <api_key> (legacy)
+    - X-API-Key: <api_key> (preferred)
+
+    During transition, both are supported. X-API-Key takes precedence.
+    """
+    api_key = None
+
+    # Prefer X-API-Key header (new standard)
+    if x_api_key:
+        api_key = x_api_key
+    elif authorization and authorization.startswith("Bearer "):
+        api_key = authorization.split(" ")[1]
+
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key. Use X-API-Key header.",
+        )
+
+    if api_key != settings.MICROSERVICES_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid microservice API key",
+        )
+
+    return api_key
 
 
 async def get_current_active_user_async(

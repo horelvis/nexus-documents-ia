@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Dict, Any, List, Optional
 import logging
 
-from app.api.dependencies import get_current_tenant
+from app.api.async_dependencies import get_current_tenant_async
 from app.services.migration_service import migration_service
 from app.db.models import Tenant
 
@@ -37,7 +37,7 @@ async def search_documents_migrated(
     limit: int = Query(default=10, ge=1, le=100),
     query_type: str = Query(default="search", regex="^(search|analyze|extract|summarize|compare)$"),
     collections: Optional[List[str]] = Query(default=None),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Search documents using current migration strategy"""
     try:
@@ -62,7 +62,7 @@ async def search_documents_migrated(
 @router.post("/documents")
 async def add_document_migrated(
     document_data: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Add document using current migration strategy"""
     try:
@@ -81,7 +81,7 @@ async def add_document_migrated(
 async def start_migration(
     source_collection: str = Query(..., description="Source Qdrant collection name"),
     target_collection: Optional[str] = Query(None, description="Target Weaviate collection name"),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Start migration from Qdrant to Weaviate for current tenant"""
     try:
@@ -104,7 +104,7 @@ async def start_migration(
 @router.get("/compare")
 async def compare_systems(
     query: str,
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Compare results between Qdrant and Weaviate systems"""
     try:
@@ -176,7 +176,7 @@ async def list_available_tools():
 @router.post("/feedback")
 async def submit_feedback(
     feedback_data: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Submit feedback for learning (Weaviate/Elysia only)"""
     try:
@@ -200,7 +200,7 @@ async def submit_feedback(
 @router.post("/visualize") 
 async def create_visualization(
     visualization_data: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_async)
 ):
     """Create dynamic visualization (Weaviate/Elysia only)"""
     try:

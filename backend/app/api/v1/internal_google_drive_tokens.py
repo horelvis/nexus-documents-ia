@@ -6,7 +6,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, require_microservice_api_key
+from app.db.database import get_db
+from app.api.async_dependencies import require_microservice_api_key
 from app.schemas.google_drive import InternalGoogleDriveTokenResponse
 from app.services.google_drive_token_service import GoogleDriveTokenService
 
