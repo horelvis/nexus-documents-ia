@@ -17,9 +17,7 @@ from app.core.security_validator import validate_security_on_startup
 from app.core.structured_logging import setup_structured_logging
 from app.core.alerting import initialize_alerting, start_alert_evaluation
 from app.core.health_checks import initialize_health_checks, start_health_check_monitoring
-from app.db.base_class import Base
 from app.db.database import engine
-from app.db.migrations import auto_upgrade_database
 
 logger = logging.getLogger(__name__)
 
@@ -75,43 +73,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 async def _initialize_database() -> None:
-    """Initialize database with robust error handling"""
-    try:
-        logger.info("🔧 Initializing database...")
-        logger.info(f"🔗 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+    """
+    Validate database connectivity on startup.
 
-        # Import models to register them
+    NOTE: This function only validates connectivity. It does NOT:
+    - Create tables (use: alembic upgrade head)
+    - Run migrations (use: alembic upgrade head)
+
+    Schema changes should be applied during deployment, not at runtime,
+    to avoid race conditions in scaled environments with multiple replicas.
+
+    Run migrations before starting the application:
+        cd backend && alembic upgrade head
+    """
+    try:
+        logger.info("🔧 Validating database connectivity...")
+
+        # Import models to register them with SQLAlchemy
         import app.db.models  # noqa: F401
 
-        # Configure engine for Cloud Run
-        engine_configured = engine.execution_options(
-            pool_pre_ping=True,
-            pool_recycle=300
-        )
-
-        # Test connection first
+        # Test connection with pre-ping for resilience
         logger.info("🧪 Testing database connection...")
         from sqlalchemy import text
-        with engine_configured.connect() as conn:
+        with engine.connect() as conn:
             result = conn.execute(text("SELECT 1"))
             logger.info("✅ Database connection successful")
 
-        # Create tables
-        Base.metadata.create_all(bind=engine_configured)
-        logger.info("✅ Database structure verified/created")
-
-        # Try Alembic migration (non-fatal)
-        try:
-            logger.info("🔧 Running Alembic migrations...")
-            auto_upgrade_database()
-            logger.info("✅ Alembic migrations completed")
-        except Exception as alembic_e:
-            logger.warning(f"⚠️ Alembic migration failed (continuing): {alembbic_e}")
+        # Log connection pool status
+        pool = engine.pool
+        logger.info(
+            f"📊 Connection pool: size={pool.size()} "
+            f"checked_in={pool.checkedin()} overflow={pool.overflow()}"
+        )
 
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"❌ Database connection failed: {e}")
         logger.error(f"🔍 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
-        logger.warning("⚠️ Continuing without database - API will have limited functionality")
+        logger.warning(
+            "⚠️ Continuing without database - API will have limited functionality. "
+            "Ensure the database is running and run 'alembic upgrade head' to initialize schema."
+        )
 
 
 def configure_static_files(app: FastAPI) -> None:

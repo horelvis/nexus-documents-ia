@@ -14,7 +14,7 @@ class WeaviateClient:
         self.base_url = getattr(settings, 'WEAVIATE_SERVICE_URL', 'http://weaviate-service:8007')
         self.api_key = settings.MICROSERVICES_API_KEY
         self.headers = {
-            'Authorization': f'Bearer {self.api_key}',
+            'X-API-Key': self.api_key,
             'Content-Type': 'application/json'
         }
         logger.info("WeaviateClient initialized | base_url=%s", self.base_url)

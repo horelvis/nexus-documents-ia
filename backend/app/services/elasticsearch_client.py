@@ -40,7 +40,7 @@ class ElasticsearchClient:
         logger.info(f"📡 ES Client Request: {method} {url} | Payload: {payload_preview}")
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key": self.api_key,
             "Content-Type": "application/json"
         }
 

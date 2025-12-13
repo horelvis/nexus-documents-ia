@@ -49,7 +49,7 @@ class CAGClient:
         }
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key": self.api_key,
             "Content-Type": "application/json",
         }
 

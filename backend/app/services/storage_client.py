@@ -1,3 +1,22 @@
+"""
+DEPRECATED: Synchronous Storage Client
+
+This module is DEPRECATED. Use AsyncStorageClient instead.
+
+The synchronous client blocks the event loop and should not be used
+in async FastAPI endpoints. It is kept for backward compatibility
+with legacy code that has not been migrated to async.
+
+Migration:
+    # Before (sync - deprecated)
+    client = StorageClient(tenant_id, user_id)
+    result = client.upload_file(file, filename)
+
+    # After (async - recommended)
+    client = AsyncStorageClient(tenant_id, user_id)
+    result = await client.upload_file(file, filename)
+"""
+import warnings
 import httpx
 import logging
 import io
@@ -11,13 +30,27 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Emit deprecation warning on module import
+warnings.warn(
+    "StorageClient (sync) is deprecated. Use AsyncStorageClient instead. "
+    "The sync client blocks the event loop in async contexts.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+
 class StorageClient:
-    """Cliente para comunicarse con el storage microservice"""
-    
+    """
+    DEPRECATED: Synchronous client for storage microservice.
+
+    Use AsyncStorageClient instead. This client blocks the event loop
+    when used in async contexts and will be removed in a future version.
+    """
+
     def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
         """
-        Inicializa el cliente de storage.
-        
+        Initialize the storage client.
+
         Args:
             tenant_id: ID del tenant
             user_id: ID del usuario (opcional)
