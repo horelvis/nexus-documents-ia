@@ -255,44 +255,21 @@ async def get_system_stats(
 @router.post("/init-ollama-model", response_model=dict)
 async def initialize_ollama_model(
     model_name: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: User = Depends(get_current_active_superuser_async),
 ):
     """
-    Inicializa un modelo en Ollama si no está disponible (solo administradores).
+    DEPRECATED: Ollama microservice was removed in favor of vLLM.
+
+    vLLM loads the model at process startup (via container args/env),
+    so there is no runtime "pull model" API equivalent.
     """
-    import requests
-    from app.core.config import settings
-    
-    try:
-        # Verificar si el modelo ya está disponible
-        response = requests.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
-        if response.status_code == 200:
-            models = response.json().get("models", [])
-            
-            # Verificar si el modelo ya está descargado
-            for model in models:
-                if model.get("name") == model_name:
-                    return {"message": f"El modelo {model_name} ya está disponible"}
-        
-        # Iniciar descarga del modelo
-        response = requests.post(
-            f"{settings.OLLAMA_BASE_URL}/api/pull",
-            json={"name": model_name}
-        )
-        
-        if response.status_code == 200:
-            return {"message": f"Modelo {model_name} descargado exitosamente"}
-        else:
-            return {
-                "message": f"Error al descargar modelo: {response.status_code}",
-                "details": response.text
-            }
-            
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al interactuar con Ollama: {str(e)}"
-        )
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Ollama was removed. Configure vLLM via VLLM_MODEL/VLLM_BASE_URL "
+            "and restart the vLLM service to load a model."
+        ),
+    )
 
 
 @router.get("/stats/document-activity", response_model=Dict[str, Any])
@@ -392,10 +369,10 @@ async def delete_all_documents(
         for doc in documents:
             # Delete from storage
             try:
-                from app.services.storage_service import StorageService
-                storage_service = StorageService(tenant_id, str(current_user.id))
+                from app.services.async_storage_service import AsyncStorageService
+                storage_service = AsyncStorageService(tenant_id, str(current_user.id))
                 if doc.file_path:
-                    storage_service.delete_file(doc.file_path)
+                    await storage_service.delete_file(doc.file_path)
                     logger.info(f"Deleted file from storage: {doc.file_path}")
             except Exception as e:
                 logger.warning(f"Could not delete file from storage: {e}")
@@ -502,8 +479,8 @@ async def run_maintenance(
         # 2. Clean orphaned files
         if clean_orphaned_files:
             try:
-                from app.services.storage_service import StorageService
-                storage_service = StorageService(tenant_id, str(current_user.id))
+                from app.services.async_storage_service import AsyncStorageService
+                storage_service = AsyncStorageService(tenant_id, str(current_user.id))
                 
                 # Get all document file paths from database
                 stmt = select(Document.file_path).filter(

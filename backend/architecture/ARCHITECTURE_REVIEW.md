@@ -4,77 +4,84 @@ Fecha: 2025-12-13
 
 ## Resumen ejecutivo
 
-El backend está bien encaminado hacia una arquitectura modular (FastAPI + routers + `services/` + microservicios), pero hoy hay **duplicidad de caminos** (sync vs async, dos verificadores de Clerk, varios “clientes HTTP” con headers distintos, 3 formas de manejar DB). Eso incrementa coste de mantenimiento, riesgo de bugs sutiles y dificulta observabilidad y seguridad consistente.
+El backend está bien encaminado hacia una arquitectura modular (FastAPI + routers + `services/` + microservicios). Ya se corrigieron puntos críticos de consistencia (auth Clerk y DB async), pero aún quedan **áreas parcialmente homogenizadas** (clientes HTTP y organización por bounded contexts). También se alineó configuración hacia **vLLM** y se eliminaron referencias a microservicios retirados (Temporalio/Ollama) en los artefactos de despliegue.
 
 Este documento lista mejoras **priorizadas** para simplificar componentes, endurecer límites y mejorar resiliencia sin reescrituras grandes.
+
+## Estado de implementación (por fases)
+
+- Fase 0 (alineación de auth interna): **Parcial** (dependency acepta `X-API-Key` y `Authorization: Bearer`).
+- Fase 1 (Auth Clerk unificada): **Aplicada** (un solo módulo, usado por sync/async).
+- Fase 2 (DB async como fuente de verdad): **Aplicada** (sin `database_proxy.py`, sesiones async consistentes).
+- Fase 3 (SDK HTTP común): **Parcial** (`app/clients/*` existe; migración de clientes en curso).
+- Fase 4 (Startup seguro): **Parcial** (sin side-effects y con redacción de credenciales; falta endurecer “readiness”).
+- Fase 5 (bounded contexts): **Pendiente** (servicios siguen planos).
 
 ## Observaciones clave
 
 ### 1) Autenticación y dependencias duplicadas
-- Hay dos implementaciones para validar tokens Clerk:
-  - `app/services/auth_service.py` (`AuthService.verify_clerk_token`)
-  - `app/api/async_dependencies.py` (`_verify_clerk_token`)
-- También hay dos árboles de dependencias:
-  - Sync: `app/api/dependencies.py` + `app/db/database.py`
-  - Async: `app/api/async_dependencies.py` + `app/db/async_database.py`
-- Además, `async_dependencies.py` declara “NO JIT Provisioning”, pero conserva helpers de JIT (`_create_user_jit`) que contradicen el flujo documentado.
+- La verificación Clerk está **unificada** en `app/core/auth/clerk.py` y se consume desde:
+  - `backend/app/api/async_dependencies.py` (principal para endpoints async)
+  - `backend/app/api/dependencies.py` (legacy, deprecado)
+  - `backend/app/services/auth_service.py` (delegación)
+- El camino sync permanece por compatibilidad, pero el flujo recomendado es **async end-to-end**.
 
-Impacto: divergencia de comportamiento, dobles fixes, distinta telemetría/errores según endpoint.
-
-Recomendación:
-- Unificar verificación de Clerk en **un solo módulo** (ej. `app/core/auth/clerk.py`) y reutilizarlo desde sync/async.
-- Elegir una estrategia predominante para el API (ideal: **async end-to-end**), y deprecatear el camino alternativo gradualmente.
-- Eliminar o aislar el código de JIT si ya no se usa (o moverlo a un módulo explícito “legacy”).
+Pendiente:
+- Reducir uso del árbol sync a casos estrictamente necesarios (y documentar el “por qué”).
 
 ### 2) Contrato inconsistente de auth entre microservicios
-- Los clientes usan headers distintos:
-  - `Authorization: Bearer <api_key>` (p.ej. `WeaviateClient`, `TemplateEditorClient`, `ElasticsearchClient`)
-  - `X-API-Key: <api_key>` (p.ej. `QueueService`, `LangExtractClient`, `TextExtractionClient`, `GotenbergMicroserviceClient`)
-- La dependencia `require_microservice_api_key` valida únicamente `Authorization: Bearer ...` (`app/api/dependencies.py`), pero varios servicios ya están usando `X-API-Key`.
+- `require_microservice_api_key` ahora acepta únicamente:
+  - `X-API-Key: <api_key>`
+- Aún hay clientes no migrados que construyen headers manualmente en `backend/app/services/*_client.py`.
 
-Impacto: fricción de integración, fallos “intermitentes” por header, migraciones más costosas.
-
-Recomendación:
-- Definir un estándar único (“internal auth”) y aplicarlo:
-  - Opción A (simple): `X-API-Key` + `X-Tenant-ID` + `X-User-ID`
-  - Opción B (HTTP auth): `Authorization: Bearer`
-- Si hay transición, soportar **ambos** temporalmente en middleware/dependency y loggear deprecación.
+Pendiente:
+- Migrar todos los clientes internos a `X-API-Key` + headers de contexto.
+- Eliminar cualquier dependencia de `Authorization: Bearer` para auth interna (retirado del backend y microservicios principales; revisar wrappers legacy si existieran).
 
 ### 3) Capa de clientes HTTP sin base común
-Patrón actual:
-- Varios clientes crean `httpx.AsyncClient()` por request; otros reciben un `http_client` externo.
-- Timeouts/retries/backoff no están estandarizados.
-- Manejo de errores no es homogéneo: algunos devuelven `{"success": False}`; otros lanzan `HTTPException`; otros retornan `None`.
+Ya existe un SDK interno base en `backend/app/clients/`:
+- `backend/app/clients/base.py` (`BaseHTTPClient`, retries/backoff, headers estándar)
+- `backend/app/clients/config.py` (timeouts/retries/headers)
+- `backend/app/clients/exceptions.py` (errores tipados)
 
-Impacto: consumo extra de sockets/handshakes, comportamiento distinto ante fallos, difícil de monitorear.
+Estado:
+- Migrados a `BaseHTTPClient`:
+  - `backend/app/services/template_editor_client.py`
+  - `backend/app/services/cag_client.py`
+  - `backend/app/services/langextract_client.py`
+  - `backend/app/services/weaviate_client.py`
+  - `backend/app/services/text_extraction_client.py`
+  - `backend/app/services/signature_microservice_client.py`
+  - `backend/app/services/elasticsearch_client.py`
+  - `backend/app/services/gotenberg_microservice_client.py` (GotenbergClient)
+  - `backend/app/services/async_storage_client.py` (AsyncStorageClient)
 
-Recomendación:
-- Crear un “SDK interno” mínimo: `app/clients/http.py` con:
-  - `AsyncClient` único por proceso (creado en lifespan) o pool controlado
-  - timeouts estándar
-  - retries con backoff (p.ej. `tenacity`)
-  - tipado de respuestas + errores (`ServiceUnavailableError`, `UpstreamError`, etc.)
-- Los clientes concretos (weaviate/cag/langextract/...) se vuelven “thin wrappers” sobre ese SDK.
+- Endpoints migrados de StorageService (sync) a AsyncStorageService:
+  - `backend/app/api/v1/storage.py`
+  - `backend/app/api/v1/signature_ai.py`
+  - `backend/app/api/v1/admin.py`
+  - `backend/app/services/document_preview_service.py`
+
+- Deprecated (pendientes de eliminar en próxima iteración):
+  - `backend/app/services/storage_client.py` (sync) → usar AsyncStorageClient
+  - `backend/app/services/storage_service.py` (sync) → usar AsyncStorageService
+  - `backend/app/services/storage_factory.py` (sync) → usar AsyncStorageServiceFactory
+
+Pendiente:
+- Migrar `document_service.py` y `reindex_service.py` para usar versiones async del storage.
 
 ### 4) Persistencia: 3 formas de DB (alto riesgo)
-Actualmente coexisten:
-- `app/db/database.py` (sync engine + session + `get_async_db` ad-hoc)
-- `app/db/async_database.py` (async engine + session)
-- `app/db/database_proxy.py` (auto-detección + engine propio)
-
-Impacto: posibilidad de engines distintos en runtime, pooling incoherente, bugs por “dos fuentes de verdad”.
-
-Recomendación:
-- Definir una sola fuente de verdad:
-  - `app/db/async_database.py` para operaciones del API (recomendado si el proyecto ya usa async ampliamente)
-  - `app/db/database.py` solo si hay endpoints sync inevitables
-- Deprecar `database_proxy.py` o convertirlo en una capa pequeña que solo seleccione el URL, no que cree engines alternativos.
+Se consolidó `backend/app/db/async_database.py` como fuente de verdad para el API:
+- `database_proxy.py` eliminado.
+- `get_async_db` único y `async_session_context()` para uso fuera de dependencias de FastAPI.
 
 ### 5) Startup/lifespan hace tareas “de provisioning”
-En `app/core/app_config.py` se hace:
-- conexión + `create_all` + migrations (condicionales)
+En `app/core/app_config.py` antes se hacía:
+- conexión + `create_all` + migraciones (condicionales)
 
-Impacto: en producción puede generar side-effects y condiciones de carrera; en entornos escalados múltiples instancias podrían competir.
+Estado:
+- Startup ahora solo valida conectividad de DB (sin `create_all`/migraciones en boot).
+- Logs de DB redaccionados para evitar fuga de credenciales.
 
 Recomendación:
 - En producción: startup solo valida conectividad + readiness.
@@ -104,6 +111,11 @@ Recomendación:
 - Separar settings por dominio, sin romper imports:
   - `SettingsDatabase`, `SettingsAuth`, `SettingsServices`, `SettingsAI`, etc.
 - Mantener un “facade” `settings` que compone para no cambiar todo el codebase en una sola PR.
+
+### 8) Alineación de servicios (Temporalio/Ollama retirados; vLLM)
+Estado:
+- Se retiraron referencias a `TEMPORALIO_SERVICE_URL` y `OLLAMA_BASE_URL` en despliegue y ejemplos (`backend/cloud-run-backend.yaml`, `backend/.env.example`, `backend/docker/docker-compose.yml`).
+- `LLM_PROVIDER` por defecto pasa a `vllm` en `backend/app/core/config.py`.
 
 ## Recomendaciones priorizadas (próximas 1–3 iteraciones)
 
@@ -143,9 +155,9 @@ Objetivo: mejorar arquitectura **sin reescrituras grandes**, manteniendo compati
    - Loggear solo `request_id`, `clerk_user_id` (si aplica) y resultado.
 
 Checklist:
-- [ ] Un solo verificador Clerk usado por sync/async
-- [ ] Misma semántica de errores `401/403` para endpoints equivalentes
-- [ ] Logs de auth sin PII/token
+- [x] Un solo verificador Clerk usado por sync/async
+- [x] Misma semántica de errores `401/403` para endpoints equivalentes
+- [x] Logs de auth sin PII/token
 
 ### Fase 2 — DB: una sola “fuente de verdad” (1–3 días)
 1. Elegir estrategia predominante:
@@ -158,12 +170,12 @@ Checklist:
    - Mantener un “compat layer” temporal si quedan endpoints sync.
 
 Checklist:
-- [ ] Un solo engine por modo (sync/async) y un solo `get_*_db` por modo
-- [ ] No hay creación de engines “ad-hoc” en runtime
+- [x] Un solo engine por modo (sync/async) y un solo `get_*_db` por modo
+- [x] No hay creación de engines “ad-hoc” en runtime
 
 ### Fase 3 — SDK HTTP común para microservicios (1–3 días)
 1. Crear cliente base:
-   - Nuevo: `app/clients/http.py` con `httpx.AsyncClient` compartido + timeouts estándar.
+   - Ya existe: `backend/app/clients/base.py` + `backend/app/clients/config.py` + `backend/app/clients/exceptions.py`.
 2. Estandarizar errores y retries:
    - Retries con backoff en fallos transitivos (timeouts, 5xx).
    - Errores tipados (`UpstreamError`, `ServiceUnavailableError`).
@@ -171,9 +183,10 @@ Checklist:
    - `WeaviateClient`, `CAGClient`, `LangExtractClient`, `TextExtractionClient`, `QueueService`, etc.
 
 Checklist:
-- [ ] Todos los clientes usan el mismo handler de auth interna
-- [ ] Timeouts/retries coherentes
-- [ ] Respuesta/errores consistentes (sin mezclar `None`/dict/HTTPException arbitrariamente)
+- [x] Todos los clientes usan el mismo handler de auth interna (X-API-Key via BaseHTTPClient)
+- [x] Timeouts/retries coherentes (presets: fast/default/document/ai/long/upload)
+- [x] Respuesta/errores consistentes (excepciones tipadas en `app/clients/exceptions.py`)
+- Progreso: **COMPLETADO** - todos los clientes migrados a BaseHTTPClient; sync storage deprecated.
 
 ### Fase 4 — Startup seguro y operable (0.5–1 día)
 1. Limitar side-effects en startup:
@@ -182,6 +195,11 @@ Checklist:
    - Documentar comando operativo.
 3. Añadir “readiness” real:
    - Healthcheck que valide dependencias críticas sin mutarlas.
+
+Checklist:
+- [x] Startup sin side-effects (sin DDL/migraciones en boot)
+- [x] Redacción de credenciales en logs de DB
+- [ ] Readiness que valide dependencias críticas (por ejemplo: Redis/Weaviate/Elasticsearch según flags)
 
 ### Fase 5 — Modularidad por bounded contexts (iterativo)
 1. Reorganizar `services/`:
@@ -193,7 +211,7 @@ Checklist:
 
 ## “Señales” concretas en el código (para navegar rápido)
 - Auth/Dependencias: `backend/app/api/dependencies.py`, `backend/app/api/async_dependencies.py`, `backend/app/services/auth_service.py`
-- DB: `backend/app/db/database.py`, `backend/app/db/async_database.py`, `backend/app/db/database_proxy.py`
+- DB: `backend/app/db/async_database.py` (principal) y `backend/app/db/database.py` (legacy sync)
 - Clientes microservicios: `backend/app/services/*_client.py`, `backend/app/services/queue_service.py`
 - Lifespan/Startup: `backend/app/core/app_config.py`
 - Logging: `backend/app/core/middlewares.py`, `backend/app/core/structured_logging.py`

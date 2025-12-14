@@ -1,5 +1,20 @@
+"""
+DEPRECATED: Synchronous Storage Factory
+
+Use AsyncStorageServiceFactory instead for async contexts.
+This module is kept for backward compatibility with legacy sync code
+and for MockStorageService which is used in testing.
+
+Migration:
+    # Before (sync - deprecated)
+    service = StorageServiceFactory.create_storage_service(tenant_id, user_id)
+
+    # After (async - recommended)
+    service = await AsyncStorageServiceFactory.create_storage_service(tenant_id, user_id, db)
+"""
 import logging
 import os
+import warnings
 from typing import Optional, Union
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +23,7 @@ from sqlalchemy import select
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 class StorageServiceFactory:
     """Factory que decide qué implementación de storage usar basado en la disponibilidad"""

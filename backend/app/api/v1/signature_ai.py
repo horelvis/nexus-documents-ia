@@ -87,9 +87,9 @@ async def analyze_document(
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Get document content from storage
-        from app.services.storage_service import StorageService
-        storage_service = StorageService(str(tenant_id), str(current_user.id))
-        document_content = storage_service.download_file(document.file_path or '')
+        from app.services.async_storage_service import AsyncStorageService
+        storage_service = AsyncStorageService(str(tenant_id), str(current_user.id))
+        document_content = await storage_service.download_file(document.file_path or '')
         
         if not document_content:
             raise HTTPException(status_code=500, detail="Could not retrieve document content")
@@ -212,9 +212,9 @@ async def suggest_placements_for_signers(
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Get content and analyze
-            from app.services.storage_service import StorageService
-            storage_service = StorageService(str(tenant_id), str(current_user.id))
-            document_content = storage_service.download_file(document.file_path or '')
+            from app.services.async_storage_service import AsyncStorageService
+            storage_service = AsyncStorageService(str(tenant_id), str(current_user.id))
+            document_content = await storage_service.download_file(document.file_path or '')
             
             document_analysis = await ai_service.analyze_document(
                 db=db,

@@ -1,420 +1,413 @@
-import httpx
-import logging
-import io
-import mimetypes
-import time
-import asyncio
-from typing import Optional, Tuple, BinaryIO, Union, Dict, Any, List
-from datetime import datetime
-from fastapi import UploadFile, HTTPException
+"""
+Async Storage Client
 
+Async HTTP client for the storage microservice (Google Cloud Storage).
+Provides file upload, download, deletion, and signed URL operations.
+"""
+from __future__ import annotations
+
+import io
+import json
+import logging
+import mimetypes
+from datetime import datetime
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
+
+from fastapi import UploadFile
+
+from app.clients.base import BaseHTTPClient
+from app.clients.exceptions import HTTPClientError, UpstreamError
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-class AsyncStorageClient:
-    """Async client for communicating with the storage microservice"""
-    
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
+
+# Common MIME type mappings
+COMMON_MIMETYPES: Dict[str, str] = {
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.html': 'text/html',
+    '.md': 'text/markdown',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.mp4': 'video/mp4',
+    '.avi': 'video/x-msvideo',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.zip': 'application/zip',
+    '.rar': 'application/vnd.rar',
+    '.7z': 'application/x-7z-compressed',
+}
+
+
+def get_mimetype(filename: str, fallback: str = "application/octet-stream") -> str:
+    """
+    Detect MIME type based on file extension.
+
+    Args:
+        filename: File name
+        fallback: Default MIME type if detection fails
+
+    Returns:
+        Detected MIME type or fallback
+    """
+    ext = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
+
+    # Check manual mapping first
+    if ext in COMMON_MIMETYPES:
+        return COMMON_MIMETYPES[ext]
+
+    # Fallback to standard mimetypes module
+    mimetype, _ = mimetypes.guess_type(filename)
+    return mimetype or fallback
+
+
+class AsyncStorageClient(BaseHTTPClient):
+    """
+    Async HTTP client for the storage microservice.
+
+    Provides operations for:
+    - File upload/download/delete
+    - File info and listing
+    - Signed URL generation
+    - Health checks
+
+    Example:
+        client = AsyncStorageClient(tenant_id="t1", user_id="u1")
+        result = await client.upload_file(file_bytes, "document.pdf")
+        url, expires = await client.generate_download_signed_url(result["file_path"])
+    """
+
+    def __init__(
+        self,
+        tenant_id: str,
+        user_id: Optional[str] = None,
+        bucket_name: Optional[str] = None
+    ) -> None:
         """
         Initialize the async storage client.
-        
+
         Args:
-            tenant_id: Tenant ID
+            tenant_id: Tenant ID (required for multi-tenant isolation)
             user_id: User ID (optional)
             bucket_name: Bucket name (optional, will be obtained from tenant if not provided)
         """
+        # Try internal URL first, then external URL
+        storage_url = getattr(
+            settings, 'STORAGE_SERVICE_INTERNAL_URL',
+            getattr(settings, 'STORAGE_SERVICE_URL', 'http://storage-service:8001')
+        )
+        self.storage_url = storage_url.rstrip("/")
+
         self.tenant_id = tenant_id
         self.user_id = user_id
-        # Try internal URL first, then fallback to external URL
-        self.base_url = getattr(settings, 'STORAGE_SERVICE_INTERNAL_URL', 
-                               getattr(settings, 'STORAGE_SERVICE_URL', 'http://storage-service:8001'))
-        self.api_key = settings.STORAGE_API_KEY
-        
-        # Common headers for all requests
-        self.headers = {
-            "X-API-Key": self.api_key,
-            "X-Tenant-ID": self.tenant_id,
-        }
-        
-        if self.user_id:
-            self.headers["X-User-ID"] = self.user_id
-            
-        # Add bucket name if provided
-        if bucket_name:
-            self.headers["X-Bucket-Name"] = bucket_name
-    
-    def _get_mimetype(self, filename: str, fallback: str = "application/octet-stream") -> str:
-        """
-        Detect mimetype based on file extension.
-        
-        Args:
-            filename: File name
-            fallback: Default mimetype if detection fails
-            
-        Returns:
-            Detected mimetype or fallback
-        """
-        # Manual mapping for common document types
-        common_mimetypes = {
-            '.pdf': 'application/pdf',
-            '.doc': 'application/msword',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.xls': 'application/vnd.ms-excel',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.ppt': 'application/vnd.ms-powerpoint',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            '.txt': 'text/plain',
-            '.csv': 'text/csv',
-            '.json': 'application/json',
-            '.xml': 'application/xml',
-            '.html': 'text/html',
-            '.md': 'text/markdown',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.svg': 'image/svg+xml',
-            '.mp4': 'video/mp4',
-            '.avi': 'video/x-msvideo',
-            '.mp3': 'audio/mpeg',
-            '.wav': 'audio/wav',
-            '.zip': 'application/zip',
-            '.rar': 'application/vnd.rar',
-            '.7z': 'application/x-7z-compressed',
-        }
-        
-        # Get extension in lowercase
-        ext = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
-        
-        # Search in manual mapping first
-        if ext in common_mimetypes:
-            return common_mimetypes[ext]
-        
-        # Fallback to standard mimetypes
-        mimetype, _ = mimetypes.guess_type(filename)
-        return mimetype or fallback
-    
-    async def _make_request(
-        self, 
-        method: str, 
-        endpoint: str, 
-        **kwargs
-    ) -> httpx.Response:
-        """
-        Make an async HTTP request to the storage service.
-        
-        Args:
-            method: HTTP method
-            endpoint: Endpoint (without base URL)
-            **kwargs: Additional arguments for httpx
-            
-        Returns:
-            httpx Response
-        """
-        url = f"{self.base_url}/api/v1/storage{endpoint}"
-        
-        # Merge headers
-        request_headers = {**self.headers}
-        if "headers" in kwargs:
-            request_headers.update(kwargs["headers"])
-            kwargs["headers"] = request_headers
-        else:
-            kwargs["headers"] = request_headers
-        
-        # Implement retry with exponential backoff for rate limits
-        max_retries = 3
-        base_delay = 1  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.request(method, url, **kwargs)
-                    response.raise_for_status()
-                    return response
-                    
-            except httpx.HTTPStatusError as e:
-                # If rate limit (429), retry with backoff
-                if e.response.status_code == 429 and attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-                    logger.warning(f"Rate limit hit, retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(delay)
-                    continue
-                    
-                logger.error(f"Storage service HTTP error: {e.response.status_code} - {e.response.text}")
-                raise HTTPException(
-                    status_code=e.response.status_code,
-                    detail=f"Storage service error: {e.response.text}"
-                )
-            except (httpx.RequestError, httpx.TimeoutException, httpx.ConnectError) as e:
-                logger.error(f"Storage service connection error: {e}")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Storage service unavailable"
-                )
-    
+        self.bucket_name = bucket_name
+
+        # Use custom API key for storage if configured
+        api_key = getattr(settings, 'STORAGE_API_KEY', None) or settings.MICROSERVICES_API_KEY
+
+        super().__init__(
+            service_name="storage",
+            base_url=self.storage_url,
+            timeout_type="upload",  # 60s read, 120s write for large files
+            api_key=api_key,
+        )
+
+    def _build_headers(
+        self,
+        extra_headers: Optional[Dict[str, str]] = None,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Override to add bucket name header."""
+        headers = super()._build_headers(extra_headers, tenant_id, user_id, request_id)
+
+        # Add bucket name if configured
+        if self.bucket_name:
+            headers["X-Bucket-Name"] = self.bucket_name
+
+        return headers
+
     async def upload_file(
-        self, 
-        file: Union[UploadFile, BinaryIO, bytes], 
+        self,
+        file: Union[UploadFile, BinaryIO, bytes],
         filename: str,
         metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Upload a file to storage asynchronously.
-        
+        Upload a file to storage.
+
         Args:
-            file: File to upload
+            file: File to upload (bytes, BinaryIO, or UploadFile)
             filename: File name
-            metadata: Optional metadata
-            
+            metadata: Optional metadata dictionary
+
         Returns:
-            Uploaded file information
+            Dict with file information (file_path, size, etc.)
+
+        Raises:
+            HTTPClientError: On upload failure
         """
-        try:
-            # Detect mimetype
-            detected_mimetype = self._get_mimetype(filename)
-            
-            # Prepare file for upload
-            if isinstance(file, bytes):
-                files = {"file": (filename, io.BytesIO(file), detected_mimetype)}
-            elif isinstance(file, UploadFile):
-                content = await file.read()
-                await file.seek(0)  # Reset for later use
-                # Use UploadFile mimetype if available, otherwise detected
-                mimetype = file.content_type or detected_mimetype
-                files = {"file": (filename, io.BytesIO(content), mimetype)}
-            else:
-                # For BinaryIO
-                file.seek(0)
-                content = file.read()
-                file.seek(0)  # Reset
-                files = {"file": (filename, io.BytesIO(content), detected_mimetype)}
-            
-            # Prepare form data
-            data = {}
-            if metadata:
-                import json
-                data["metadata"] = json.dumps(metadata)
-            
-            response = await self._make_request(
-                "POST", 
-                "/upload", 
-                files=files,
-                data=data
-            )
-            
-            result = response.json()
-            logger.info(f"File uploaded successfully: {filename}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Failed to upload file {filename}: {e}")
-            raise
-    
+        # Detect MIME type
+        detected_mimetype = get_mimetype(filename)
+
+        # Prepare file for upload
+        if isinstance(file, bytes):
+            files = {"file": (filename, io.BytesIO(file), detected_mimetype)}
+        elif isinstance(file, UploadFile):
+            content = await file.read()
+            await file.seek(0)  # Reset for later use
+            mimetype = file.content_type or detected_mimetype
+            files = {"file": (filename, io.BytesIO(content), mimetype)}
+        else:
+            # BinaryIO
+            file.seek(0)
+            content = file.read()
+            file.seek(0)  # Reset
+            files = {"file": (filename, io.BytesIO(content), detected_mimetype)}
+
+        # Prepare form data
+        data = {}
+        if metadata:
+            data["metadata"] = json.dumps(metadata)
+
+        response = await self.request(
+            "POST",
+            "/api/v1/storage/upload",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            files=files,
+            data=data if data else None,
+        )
+
+        result = response.json()
+        logger.info(f"File uploaded successfully: {filename}")
+        return result
+
     async def download_file(self, file_path: str) -> Optional[bytes]:
         """
-        Download a file from storage asynchronously.
-        
+        Download a file from storage.
+
         Args:
-            file_path: File path
-            
+            file_path: Path to the file in storage
+
         Returns:
-            File content as bytes or None if not found
+            File content as bytes, or None if not found
         """
         try:
-            response = await self._make_request("GET", f"/download/{file_path}")
-            
+            response = await self.request(
+                "GET",
+                f"/api/v1/storage/download/{file_path}",
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
             logger.info(f"File downloaded successfully: {file_path}")
             return response.content
-            
-        except HTTPException as e:
+
+        except UpstreamError as e:
             if e.status_code == 404:
                 logger.warning(f"File not found: {file_path}")
                 return None
             raise
-        except Exception as e:
-            logger.error(f"Failed to download file {file_path}: {e}")
-            raise
-    
+
     async def delete_file(self, file_path: str) -> bool:
         """
-        Delete a file from storage asynchronously.
-        
+        Delete a file from storage.
+
         Args:
-            file_path: File path
-            
+            file_path: Path to the file in storage
+
         Returns:
-            True if deleted successfully
+            True if deleted successfully, False if not found
         """
         try:
-            response = await self._make_request("DELETE", f"/delete/{file_path}")
-            
+            await self.request(
+                "DELETE",
+                f"/api/v1/storage/delete/{file_path}",
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
             logger.info(f"File deleted successfully: {file_path}")
             return True
-            
-        except HTTPException as e:
+
+        except UpstreamError as e:
             if e.status_code == 404:
                 logger.warning(f"File not found for deletion: {file_path}")
                 return False
             raise
-        except Exception as e:
-            logger.error(f"Failed to delete file {file_path}: {e}")
-            raise
-    
+
     async def get_file_info(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
-        Get file information asynchronously.
-        
+        Get file information.
+
         Args:
-            file_path: File path
-            
+            file_path: Path to the file in storage
+
         Returns:
-            File information or None if not found
+            File information dict, or None if not found
         """
         try:
-            response = await self._make_request("GET", f"/info/{file_path}")
-            
+            response = await self.request(
+                "GET",
+                f"/api/v1/storage/info/{file_path}",
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
             result = response.json()
-            logger.info(f"File info retrieved: {file_path}")
+            logger.debug(f"File info retrieved: {file_path}")
             return result
-            
-        except HTTPException as e:
+
+        except UpstreamError as e:
             if e.status_code == 404:
                 return None
             raise
-        except Exception as e:
-            logger.error(f"Failed to get file info {file_path}: {e}")
-            raise
-    
-    async def list_files(self, prefix: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+
+    async def list_files(
+        self,
+        prefix: str = "",
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
         """
-        List tenant files asynchronously.
-        
+        List files for the tenant.
+
         Args:
             prefix: Prefix to filter files
-            limit: File limit
-            
+            limit: Maximum number of files to return
+
         Returns:
-            List of file information
+            List of file information dicts
         """
-        try:
-            params = {"prefix": prefix, "limit": limit}
-            response = await self._make_request("GET", "/list", params=params)
-            
-            result = response.json()
-            files = result.get("files", [])
-            
-            logger.info(f"Listed {len(files)} files with prefix '{prefix}'")
-            return files
-            
-        except Exception as e:
-            logger.error(f"Failed to list files with prefix {prefix}: {e}")
-            raise
-    
+        response = await self.request(
+            "GET",
+            "/api/v1/storage/list",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            params={"prefix": prefix, "limit": limit},
+        )
+
+        result = response.json()
+        files = result.get("files", [])
+        logger.debug(f"Listed {len(files)} files with prefix '{prefix}'")
+        return files
+
     async def generate_upload_signed_url(
-        self, 
-        filename: str, 
+        self,
+        filename: str,
         content_type: str,
         expiration: Optional[int] = None
     ) -> Tuple[str, datetime]:
         """
-        Generate a signed URL for file upload asynchronously.
-        
+        Generate a signed URL for file upload.
+
         Args:
             filename: File name
             content_type: MIME content type
             expiration: Expiration time in seconds
-            
+
         Returns:
-            Tuple with signed URL and expiration date
+            Tuple of (signed_url, expiration_datetime)
         """
-        try:
-            payload = {
-                "filename": filename,
-                "content_type": content_type
-            }
-            
-            if expiration:
-                payload["expiration"] = expiration
-            
-            response = await self._make_request("POST", "/signed-url/upload", json=payload)
-            
-            result = response.json()
-            url = result["url"]
-            expires_at = datetime.fromisoformat(result["expires_at"])
-            
-            logger.info(f"Generated upload signed URL for: {filename}")
-            return url, expires_at
-            
-        except Exception as e:
-            logger.error(f"Failed to generate upload signed URL for {filename}: {e}")
-            raise
-    
+        payload = {
+            "filename": filename,
+            "content_type": content_type
+        }
+        if expiration:
+            payload["expiration"] = expiration
+
+        response = await self.request(
+            "POST",
+            "/api/v1/storage/signed-url/upload",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            json=payload,
+        )
+
+        result = response.json()
+        url = result["url"]
+        expires_at = datetime.fromisoformat(result["expires_at"])
+
+        logger.debug(f"Generated upload signed URL for: {filename}")
+        return url, expires_at
+
     async def generate_download_signed_url(
-        self, 
+        self,
         file_path: str,
         expiration: Optional[int] = None
     ) -> Tuple[str, datetime]:
         """
-        Generate a signed URL for file download asynchronously.
-        
+        Generate a signed URL for file download.
+
         Args:
-            file_path: File path
+            file_path: Path to the file
             expiration: Expiration time in seconds
-            
+
         Returns:
-            Tuple with signed URL and expiration date
+            Tuple of (signed_url, expiration_datetime)
         """
-        try:
-            params = {}
-            if expiration:
-                params["expiration"] = expiration
-            
-            response = await self._make_request(
-                "POST", 
-                f"/signed-url/download/{file_path}",
-                params=params
-            )
-            
-            result = response.json()
-            url = result["url"]
-            expires_at = datetime.fromisoformat(result["expires_at"])
-            
-            logger.info(f"Generated download signed URL for: {file_path}")
-            return url, expires_at
-            
-        except Exception as e:
-            logger.error(f"Failed to generate download signed URL for {file_path}: {e}")
-            raise
-    
+        params = {}
+        if expiration:
+            params["expiration"] = expiration
+
+        response = await self.request(
+            "POST",
+            f"/api/v1/storage/signed-url/download/{file_path}",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            params=params if params else None,
+        )
+
+        result = response.json()
+        url = result["url"]
+        expires_at = datetime.fromisoformat(result["expires_at"])
+
+        logger.debug(f"Generated download signed URL for: {file_path}")
+        return url, expires_at
+
     async def cleanup_test_bucket(self) -> Dict[str, Any]:
         """
-        Clean test bucket asynchronously. Only for testing.
-        
+        Clean test bucket. Only for testing.
+
         Returns:
             Cleanup information
         """
-        try:
-            response = await self._make_request("POST", "/cleanup")
-            
-            result = response.json()
-            logger.info(f"Test bucket cleaned: {result}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Failed to cleanup test bucket: {e}")
-            raise
-    
+        response = await self.request(
+            "POST",
+            "/api/v1/storage/cleanup",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+        )
+
+        result = response.json()
+        logger.info(f"Test bucket cleaned: {result}")
+        return result
+
     async def health_check(self) -> Dict[str, Any]:
         """
-        Check storage service health asynchronously.
-        
+        Check storage service health.
+
         Returns:
-            Service status
+            Service status dict
         """
         try:
-            response = await self._make_request("GET", "/health")
+            response = await self.request(
+                "GET",
+                "/api/v1/storage/health",
+                tenant_id=self.tenant_id,
+            )
             return response.json()
-        except Exception as e:
+        except HTTPClientError as e:
             logger.error(f"Storage service health check failed: {e}")
-            raise
+            return {"status": "unhealthy", "service": self.service_name, "error": str(e)}

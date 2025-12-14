@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async, get_current_active_superuser_async
 from app.db.models import User
 from app.schemas.document import UploadRequest
-from app.services.storage_service import StorageService
+from app.services.async_storage_service import AsyncStorageService
 
 router = APIRouter()
 
@@ -22,10 +22,10 @@ async def list_files(
     """
     Lista los archivos en el almacenamiento del tenant.
     """
-    storage_service = StorageService(tenant_id=tenant_id)
-    
-    files = storage_service.list_files(prefix=prefix)
-    
+    storage_service = AsyncStorageService(tenant_id=tenant_id)
+
+    files = await storage_service.list_files(prefix=prefix)
+
     return files
 
 
@@ -38,16 +38,16 @@ async def delete_file(
     """
     Elimina un archivo del almacenamiento.
     """
-    storage_service = StorageService(tenant_id=tenant_id)
-    
+    storage_service = AsyncStorageService(tenant_id=tenant_id)
+
     # Validar que el usuario tenga acceso al objeto
     # Aquí podría implementarse una verificación de acceso más detallada
-    
-    success = storage_service.delete_file(object_name=object_name)
-    
+
+    success = await storage_service.delete_file(object_name=object_name)
+
     if not success:
         raise HTTPException(status_code=404, detail="El archivo no existe o no pudo ser eliminado")
-    
+
     return {"message": f"Archivo {object_name} eliminado exitosamente"}
 
 
