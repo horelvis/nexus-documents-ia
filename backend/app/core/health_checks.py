@@ -300,6 +300,43 @@ class SystemHealthCheck(HealthChecker):
             )
 
 
+class StorageServiceHealthCheck(HealthChecker):
+    """Storage Service health check"""
+
+    async def _check_impl(self) -> HealthCheckResult:
+        try:
+            from app.services.async_storage_client import AsyncStorageClient
+
+            # Create client with minimal context (health check doesn't need tenant)
+            client = AsyncStorageClient(tenant_id="health-check")
+            result = await client.health_check()
+
+            if result.get("status") == "healthy":
+                return HealthCheckResult(
+                    name="storage",
+                    status=HealthStatus.HEALTHY,
+                    response_time=0,
+                    message="Storage service is healthy",
+                    details=result
+                )
+            else:
+                return HealthCheckResult(
+                    name="storage",
+                    status=HealthStatus.UNHEALTHY,
+                    response_time=0,
+                    message=f"Storage service unhealthy: {result.get('error', 'Unknown')}",
+                    details=result
+                )
+
+        except Exception as e:
+            return HealthCheckResult(
+                name="storage",
+                status=HealthStatus.UNHEALTHY,
+                response_time=0,
+                message=f"Storage service health check failed: {str(e)}"
+            )
+
+
 class ApplicationHealthCheck(HealthChecker):
     """Application-specific health check"""
 
@@ -388,6 +425,10 @@ class HealthCheckManager:
 
         # Application check
         self.add_check(ApplicationHealthCheck("application"))
+
+        # Storage service check
+        if hasattr(settings, 'STORAGE_SERVICE_URL') or hasattr(settings, 'STORAGE_SERVICE_INTERNAL_URL'):
+            self.add_check(StorageServiceHealthCheck("storage"))
 
         # External service checks (if configured)
         if hasattr(settings, 'WEAVIATE_SERVICE_URL'):

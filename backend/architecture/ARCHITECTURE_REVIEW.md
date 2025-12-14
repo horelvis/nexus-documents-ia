@@ -199,7 +199,11 @@ Checklist:
 Checklist:
 - [x] Startup sin side-effects (sin DDL/migraciones en boot)
 - [x] Redacción de credenciales en logs de DB
-- [ ] Readiness que valide dependencias críticas (por ejemplo: Redis/Weaviate/Elasticsearch según flags)
+- [x] Readiness que valide dependencias críticas
+  - `app/core/health_checks.py` - DatabaseHealthCheck, RedisHealthCheck, SystemHealthCheck
+  - ExternalServiceHealthCheck para Weaviate/Elasticsearch
+  - StorageServiceHealthCheck añadido para Storage Service
+  - `/health/ready` endpoint para Kubernetes readiness probe
 
 ### Fase 5 — Modularidad por bounded contexts (iterativo)
 1. Reorganizar `services/`:
@@ -208,6 +212,38 @@ Checklist:
    - Interfaces/ports para microservicios y repositorios.
 3. Contratos versionados:
    - OpenAPI por microservicio y validación de payloads.
+
+Estructura propuesta (a implementar iterativamente):
+```
+backend/app/
+├── domains/                    # Bounded contexts
+│   ├── documents/              # Document management domain
+│   │   ├── services/
+│   │   ├── repositories/
+│   │   └── schemas/
+│   ├── search/                 # Search & RAG domain
+│   │   ├── services/           # Weaviate, Elasticsearch clients
+│   │   └── schemas/
+│   ├── auth/                   # Authentication domain
+│   │   ├── services/
+│   │   └── schemas/
+│   ├── storage/                # File storage domain
+│   │   ├── services/
+│   │   └── schemas/
+│   └── billing/                # Subscription & billing domain
+│       ├── services/
+│       └── schemas/
+├── shared/                     # Cross-cutting concerns
+│   ├── clients/                # HTTP client SDK (actual)
+│   └── infrastructure/         # DB, cache, logging
+└── api/                        # FastAPI routers (unchanged)
+```
+
+Checklist (iterativo):
+- [ ] Crear estructura `domains/` con primer bounded context (documents)
+- [ ] Mover servicios relacionados sin romper imports (facade pattern)
+- [ ] Definir interfaces/ports para microservicios
+- [ ] Documentar contratos OpenAPI por dominio
 
 ## “Señales” concretas en el código (para navegar rápido)
 - Auth/Dependencias: `backend/app/api/dependencies.py`, `backend/app/api/async_dependencies.py`, `backend/app/services/auth_service.py`
