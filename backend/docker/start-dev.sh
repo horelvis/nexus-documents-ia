@@ -71,24 +71,9 @@ fi
 echo "👷 Ensuring background-worker service is running..."
 docker compose up -d background-worker
 
-# Wait a bit for Ollama to be ready
-echo "⏳ Waiting for Ollama service to be ready..."
-sleep 5
-
-# Initialize Ollama models if needed
-echo "🤖 Checking Ollama models..."
-if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "all-minilm"; then
-    echo "📥 Downloading fast embedding model (all-minilm)..."
-    docker compose exec -T ollama-service ollama pull all-minilm:latest || echo "⚠️  Failed to download embedding model. You may need to pull it manually."
-else
-    echo "✅ Embedding model already present"
-fi
-
-if ! docker compose exec -T ollama-service ollama list 2>/dev/null | grep -q "llama3.2"; then
-    echo "📥 Downloading LLM model (llama3.2)..."
-    docker compose exec -T ollama-service ollama pull llama3.2 || echo "⚠️  Failed to download LLM model. You may need to pull it manually."
-else
-    echo "✅ LLM model already present"
+# Wait for vLLM to be ready (if enabled)
+if docker compose ps vllm 2>/dev/null | grep -q "Up"; then
+    echo "🤖 vLLM service is running (GPU inference)"
 fi
 
 # Show status
@@ -98,19 +83,20 @@ echo ""
 echo "📋 Service URLs:"
 echo "   • Main API:          http://localhost:8000"
 echo "   • API Docs:          http://localhost:8000/docs"
-echo "   • LangChain Service: http://localhost:8001"
-echo "   • Langroid Service:  http://localhost:8002"
 echo "   • Storage Service:   http://localhost:8003"
-echo "   • Ollama Service:    http://localhost:8004"
-echo "   • Ollama API:        http://localhost:11434"
+echo "   • Weaviate Service:  http://localhost:8007"
+echo "   • Elasticsearch Svc: http://localhost:8008"
+echo "   • vLLM API:          http://localhost:8001 (GPU inference)"
 echo ""
 echo "🗄️  Infrastructure:"
 echo "   • PostgreSQL:        localhost:5432"
 echo "   • Redis:             localhost:6379"
+echo "   • Weaviate:          localhost:8080"
+echo "   • Elasticsearch:     localhost:9200"
 echo ""
 echo "📊 View logs with:"
 echo "   docker compose logs -f [service-name]"
-echo "   docker compose logs -f background-worker"
+echo "   docker compose logs -f weaviate-service"
 echo ""
 echo "🛑 Stop services with:"
 echo "   docker compose down [--remove-orphans]"
