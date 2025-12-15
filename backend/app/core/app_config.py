@@ -5,6 +5,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +21,25 @@ from app.core.health_checks import initialize_health_checks, start_health_check_
 from app.db.database import engine
 
 logger = logging.getLogger(__name__)
+
+def _redact_database_url(database_url: str | None) -> str:
+    """
+    Redact credentials from database URLs for safe logging.
+
+    Example:
+        postgresql://user:pass@host:5432/db -> postgresql://host:5432/db
+    """
+    if not database_url:
+        return "N/A"
+    try:
+        parsed = urlparse(database_url)
+        scheme = parsed.scheme or "db"
+        host = parsed.hostname or "unknown-host"
+        port = f":{parsed.port}" if parsed.port else ""
+        db = parsed.path.lstrip("/") if parsed.path else ""
+        return f"{scheme}://{host}{port}/{db}"
+    except Exception:
+        return "[unparseable]"
 
 
 @asynccontextmanager
@@ -41,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"📍 Server URL: {settings.SERVER_HOST}:{settings.SERVER_PORT if hasattr(settings, 'SERVER_PORT') else '8000'}")
     logger.info(f"🔧 API Prefix: {settings.API_PREFIX}")
     logger.info(f"🌐 CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
-    logger.info(f"🗄️ Database URL: {settings.SQLALCHEMY_DATABASE_URI}")
+    logger.info(f"🗄️ Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
 
     # Database initialization
     await _initialize_database()
@@ -108,7 +128,7 @@ async def _initialize_database() -> None:
 
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")
-        logger.error(f"🔍 Database URI: {settings.SQLALCHEMY_DATABASE_URI}")
+        logger.error(f"🔍 Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
         logger.warning(
             "⚠️ Continuing without database - API will have limited functionality. "
             "Ensure the database is running and run 'alembic upgrade head' to initialize schema."

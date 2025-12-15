@@ -143,12 +143,8 @@ spec:
           value: "https://langextract-service-HASH-uc.a.run.app"
         - name: TEXT_EXTRACTION_SERVICE_URL
           value: "https://textextract-service-HASH-uc.a.run.app"
-        - name: TEMPORALIO_SERVICE_URL
-          value: "https://temporalio-service-HASH-uc.a.run.app"
         - name: ENGINE_TEMPLATE_SERVICE_URL
           value: "https://engine-template-service-HASH-uc.a.run.app"
-        - name: OLLAMA_BASE_URL
-          value: "https://ollama-service-HASH-uc.a.run.app"
         - name: GOTENBERG_BASE_URL
           value: "https://gotenberg-service-HASH-uc.a.run.app"
         - name: OPENAI_API_KEY

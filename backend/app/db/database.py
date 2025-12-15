@@ -109,38 +109,6 @@ def get_db_context():
     finally:
         db.close()
 
-async def get_async_db():
-    """
-    Async version of database session provider.
-    For use with async endpoints.
-    """
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-
-    # Crear motor async si no existe
-    if not hasattr(get_async_db, '_async_engine'):
-        # Convertir URI síncrona a asíncrona
-        async_uri = settings.SQLALCHEMY_DATABASE_URI.replace("postgresql://", "postgresql+asyncpg://")
-
-        get_async_db._async_engine = create_async_engine(
-            async_uri,
-            **POOL_CONFIG
-        )
-
-        get_async_db._async_session = async_sessionmaker(
-            get_async_db._async_engine,
-            expire_on_commit=False
-        )
-
-    session = get_async_db._async_session()
-    try:
-        yield session
-    except Exception as e:
-        logger.error(f"❌ Async database session error: {str(e)}")
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
-
 def test_connection() -> bool:
     """
     Test database connection and return status.
@@ -148,7 +116,7 @@ def test_connection() -> bool:
     """
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.exec_driver_sql("SELECT 1")
         logger.info("✅ Database connection test successful")
         return True
     except Exception as e:

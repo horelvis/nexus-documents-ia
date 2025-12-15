@@ -1,11 +1,17 @@
-const baseUrl =
+const rawBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   ""
 
+// If no absolute API base URL is configured, default to Next.js rewrite proxy (/api/*).
+// This avoids "requests not reaching the backend" when env vars are missing.
+const isProxyBase = !rawBaseUrl || rawBaseUrl.startsWith("/")
+const baseUrl = isProxyBase ? "/api" : rawBaseUrl
+
 export const API_CONFIG = {
   BASE_URL: baseUrl,
-  API_V1: '/api/v1',
+  // When using proxy base (/api), v1 prefix becomes /v1 to form /api/v1/* (matched by next.config.js rewrites).
+  API_V1: isProxyBase ? "/v1" : "/api/v1",
   TIMEOUT: 30000, // 30 seconds (default)
   EMMA_TIMEOUT: 180000, // 3 minutes for Emma AI (PlanningFlow with multiple agents)
   

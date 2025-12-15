@@ -155,36 +155,26 @@ def get_current_active_user(
 
 
 def require_microservice_api_key(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> str:
     """
     Validate internal microservice calls using the shared API key.
 
-    Accepts both:
-    - Authorization: Bearer <api_key> (legacy)
-    - X-API-Key: <api_key> (preferred)
+    Internal auth standard: X-API-Key.
     """
-    api_key = None
-
-    if x_api_key:
-        api_key = x_api_key
-    elif authorization and authorization.startswith("Bearer "):
-        api_key = authorization.split(" ")[1]
-
-    if not api_key:
+    if not x_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing API key. Use X-API-Key header.",
         )
 
-    if api_key != settings.MICROSERVICES_API_KEY:
+    if x_api_key != settings.MICROSERVICES_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid microservice API key",
         )
 
-    return api_key
+    return x_api_key
 
 
 def get_current_active_superuser(

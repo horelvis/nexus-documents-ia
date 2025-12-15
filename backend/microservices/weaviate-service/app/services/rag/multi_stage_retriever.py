@@ -25,6 +25,12 @@ import httpx
 
 from .models import QueryAnalysis, RetrievedDocument, QueryIntent
 from .rrf_fusion import reciprocal_rank_fusion, multi_list_rrf
+from .soft_selection import (
+    SoftSelector,
+    SoftSelectionConfig,
+    SoftSelectionResult,
+    allocate_token_budget,
+)
 from ...core.config import settings
 from ..weaviate_service import weaviate_service
 from ...schemas.weaviate import SearchRequest
@@ -64,7 +70,13 @@ class MultiStageRetriever:
     This typically achieves +15-20% recall improvement over simple weighted average.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        soft_selection_enabled: Optional[bool] = None,
+        soft_selection_config: Optional[SoftSelectionConfig] = None,
+        public_knowledge_enabled: Optional[bool] = None,
+    ):
         self._reranker = None
         self._reranker_model = settings.embedding_model  # Use same for now
         self._tei_url = settings.tei_url
@@ -74,13 +86,39 @@ class MultiStageRetriever:
         self._dense_weight = 1.0
         self._sparse_weight = 1.0
         # Public Knowledge configuration
-        self._public_knowledge_enabled = settings.rag_public_knowledge_enabled
+        self._public_knowledge_enabled = (
+            settings.rag_public_knowledge_enabled
+            if public_knowledge_enabled is None
+            else public_knowledge_enabled
+        )
         self._public_knowledge_weight = settings.rag_public_knowledge_weight
         self._public_knowledge_limit = settings.rag_public_knowledge_limit
         self._public_knowledge_categories = [
             cat.strip() for cat in settings.rag_public_knowledge_categories.split(",")
         ]
         self._public_knowledge_service = None
+
+        # Soft Selection configuration (heuristic diversity-aware selection)
+        self._soft_selection_enabled = (
+            settings.rag_soft_selection_enabled
+            if soft_selection_enabled is None
+            else soft_selection_enabled
+        )
+        if self._soft_selection_enabled:
+            config = soft_selection_config or SoftSelectionConfig(
+                temperature=settings.rag_soft_selection_temperature,
+                mmr_lambda=settings.rag_mmr_lambda,
+                num_clusters=settings.rag_num_clusters,
+                max_docs=settings.rag_max_docs,
+                min_weight=settings.rag_min_weight,
+                min_tokens_per_doc=settings.rag_min_tokens_per_doc,
+            )
+            self._soft_selector = SoftSelector(config)
+        else:
+            self._soft_selector = None
+
+        # Storage for document embeddings (populated during retrieval)
+        self._document_embeddings: Dict[str, List[float]] = {}
 
     async def initialize(self):
         """Initialize the retriever and load reranker model"""
@@ -145,7 +183,7 @@ class MultiStageRetriever:
         stage1_limit: int = 50,
         stage2_limit: int = 20,
         include_public_knowledge: Optional[bool] = None,
-    ) -> List[RetrievedDocument]:
+    ) -> Tuple[List[RetrievedDocument], Dict[str, Any]]:
         """
         Execute 3-stage retrieval pipeline with optional Public Knowledge integration.
 
@@ -159,9 +197,12 @@ class MultiStageRetriever:
             include_public_knowledge: Whether to include public legal knowledge (defaults to config setting)
 
         Returns:
-            List of RetrievedDocument sorted by final score
+            Tuple of (List[RetrievedDocument], Dict[str, Any]) where dict contains selection_metadata
         """
         await self.initialize()
+
+        # Clear embedding storage for this retrieval
+        self._document_embeddings.clear()
 
         # Determine collection name
         if not collection_name:
@@ -170,7 +211,7 @@ class MultiStageRetriever:
         # Determine if public knowledge should be included
         use_public_knowledge = include_public_knowledge if include_public_knowledge is not None else self._public_knowledge_enabled
 
-        logger.info(f"🔍 Starting 3-stage retrieval for: '{query_analysis.original_query}' (public_knowledge={use_public_knowledge})")
+        logger.info(f"🔍 Starting 3-stage retrieval for: '{query_analysis.original_query}' (public_knowledge={use_public_knowledge}, soft_selection={self._soft_selection_enabled})")
 
         # Stage 1: Filtered vector/hybrid search (tenant documents)
         tenant_candidates = await self._stage1_filtered_search(
@@ -207,7 +248,7 @@ class MultiStageRetriever:
 
         if not candidates:
             logger.warning("⚠️ No candidates found in Stage 1")
-            return []
+            return [], {}
 
         # Stage 2: Semantic reranking
         reranked = await self._stage2_semantic_rerank(
@@ -217,15 +258,15 @@ class MultiStageRetriever:
         )
         logger.info(f"  Stage 2: {len(reranked)} results after reranking")
 
-        # Stage 3: Context fusion (group by document, diversify)
-        final = self._stage3_context_fusion(
+        # Stage 3: Context fusion with soft selection (group by document, diversify)
+        final, selection_metadata = self._stage3_context_fusion(
             query_analysis=query_analysis,
             documents=reranked,
             limit=top_k,
         )
         logger.info(f"  Stage 3: {len(final)} final results after fusion")
 
-        return final
+        return final, selection_metadata
 
     async def _search_public_knowledge(
         self,
@@ -602,15 +643,20 @@ class MultiStageRetriever:
         query_analysis: QueryAnalysis,
         documents: List[RetrievedDocument],
         limit: int,
-    ) -> List[RetrievedDocument]:
+    ) -> Tuple[List[RetrievedDocument], Dict[str, Any]]:
         """
-        Stage 3: Context fusion and diversity
+        Stage 3: Context fusion with soft selection (heuristic diversity)
 
-        Groups chunks by document and ensures diversity in results.
-        Prioritizes based on query intent.
+        Groups chunks by document, applies soft selection with:
+        - Softmax re-weighting
+        - MMR-based diversity (if embeddings available)
+        - Stratified cluster selection (if clustering enabled)
+
+        Returns:
+            Tuple of (selected_documents, selection_metadata)
         """
         if not documents:
-            return []
+            return [], {}
 
         # Group by document title (chunks from same document)
         doc_groups: Dict[str, List[RetrievedDocument]] = defaultdict(list)
@@ -632,7 +678,7 @@ class MultiStageRetriever:
 
             best_per_doc.append(best_chunk)
 
-        # Apply intent-based prioritization
+        # Apply intent-based pre-sorting (before soft selection)
         if query_analysis.intent == QueryIntent.ANALYZE:
             # For analysis, prefer longer documents
             best_per_doc.sort(key=lambda d: (len(d.content), d.score), reverse=True)
@@ -646,7 +692,33 @@ class MultiStageRetriever:
             # Default: sort by score
             best_per_doc.sort(key=lambda d: d.score, reverse=True)
 
-        # Ensure diversity in final results (MMR-like)
+        # Use soft selection if enabled
+        if self._soft_selection_enabled and self._soft_selector:
+            selection_result = self._soft_selector.select(
+                documents=best_per_doc,
+                embeddings=self._document_embeddings if self._document_embeddings else None,
+                top_k=limit,
+                query_embedding=query_analysis.embeddings,
+            )
+
+            # Populate soft selection fields on documents
+            for doc in selection_result.documents:
+                doc.soft_weight = selection_result.soft_weights.get(doc.id)
+                doc.cluster_id = selection_result.cluster_assignments.get(doc.id)
+
+            selection_metadata = {
+                "soft_weights": selection_result.soft_weights,
+                "cluster_assignments": selection_result.cluster_assignments,
+                "diversity_score": selection_result.diversity_score,
+                "coverage_score": selection_result.coverage_score,
+                "dropped_by_weight": selection_result.dropped_by_weight,
+                "dropped_by_cap": selection_result.dropped_by_cap,
+                "soft_selection_enabled": True,
+            }
+
+            return selection_result.documents, selection_metadata
+
+        # Fallback: Legacy hard cutoff with type diversity
         final_results: List[RetrievedDocument] = []
         seen_types: Dict[str, int] = defaultdict(int)
 
@@ -670,7 +742,7 @@ class MultiStageRetriever:
             if doc not in final_results:
                 final_results.append(doc)
 
-        return final_results[:limit]
+        return final_results[:limit], {"soft_selection_enabled": False}
 
 
 # Global instance

@@ -167,9 +167,10 @@ class Settings(BaseSettings):
     )
 
     # LLM / AI providers
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    # NOTE: Ollama was removed; vLLM is the default local provider.
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "vllm").lower()
+    VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1").rstrip("/")
+    VLLM_MODEL: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-14B-FP8")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = "nomic-embed-text"

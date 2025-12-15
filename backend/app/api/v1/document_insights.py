@@ -79,33 +79,28 @@ async def mark_document_as_viewed(
     document_id: str,
     view_duration_seconds: int = Query(None),
     scroll_percentage: float = Query(None),
-    current_user = Depends(get_current_user_async)
+    current_user = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Marca un documento como visto por el usuario actual"""
-    from app.services.async_document_service import AsyncDocumentService
-    from app.db.async_database import get_async_db
-    from fastapi import Depends
-    from sqlalchemy.ext.asyncio import AsyncSession
-    
     try:
-        async with get_async_db() as db:
-            document_service = await AsyncDocumentService.create(
-                tenant_id=str(current_user.tenant_id),
-                user_id=str(current_user.id),
-                db=db
-            )
-            
-            view_id = await document_service.mark_document_viewed(
-                document_id=document_id,
-                view_duration_seconds=view_duration_seconds,
-                scroll_percentage=scroll_percentage
-            )
-            
-            return {
-                "success": True,
-                "view_id": str(view_id),
-                "message": "Document marked as viewed"
-            }
+        document_service = await AsyncDocumentService.create(
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.id),
+            db=db,
+        )
+
+        view_id = await document_service.mark_document_viewed(
+            document_id=document_id,
+            view_duration_seconds=view_duration_seconds,
+            scroll_percentage=scroll_percentage,
+        )
+
+        return {
+            "success": True,
+            "view_id": str(view_id),
+            "message": "Document marked as viewed",
+        }
             
     except Exception as e:
         logger.error(f"Error marking document as viewed: {str(e)}")

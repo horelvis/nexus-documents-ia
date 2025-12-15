@@ -23,14 +23,13 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from statistics import mean, median, quantiles
+from statistics import mean
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.rag.rag_pipeline import RAGPipeline
-from app.services.rag.soft_selection import SoftSelector, SoftSelectionConfig
-from app.services.rag.models import RetrievedDocument
+from app.services.rag.multi_stage_retriever import MultiStageRetriever
 from app.core.config import settings
 
 logging.basicConfig(
@@ -65,6 +64,9 @@ class QueryResult:
     coverage_score: float
     avg_score: float
     top_score: float
+    context_tokens: int = 0
+    context_max_tokens: int = 0
+    context_truncated: bool = False
     soft_weights: Dict[str, float] = field(default_factory=dict)
     cluster_distribution: Dict[int, int] = field(default_factory=dict)
     confidence: float = 0.0
@@ -87,6 +89,10 @@ class BenchmarkResult:
     avg_redundancy: float  # 1 - diversity
     avg_docs_per_query: float
     avg_confidence: float
+    # Context assembly
+    avg_context_tokens: float
+    avg_context_utilization: float
+    truncation_rate: float
     # Scores
     avg_top_score: float
     avg_mean_score: float
@@ -112,6 +118,11 @@ class BenchmarkResult:
                 "avg_docs": round(self.avg_docs_per_query, 1),
                 "confidence": round(self.avg_confidence, 3),
             },
+            "context": {
+                "avg_tokens": round(self.avg_context_tokens, 1),
+                "avg_utilization": round(self.avg_context_utilization, 3),
+                "truncation_rate": round(self.truncation_rate, 3),
+            },
             "scores": {
                 "avg_top": round(self.avg_top_score, 3),
                 "avg_mean": round(self.avg_mean_score, 3),
@@ -130,7 +141,9 @@ class RAGBenchmark:
     ):
         self.tenant_id = tenant_id
         self.soft_selection_enabled = soft_selection_enabled
-        self.pipeline = RAGPipeline()
+        self.pipeline = RAGPipeline(
+            retriever=MultiStageRetriever(soft_selection_enabled=soft_selection_enabled),
+        )
 
     async def initialize(self):
         """Initialize the RAG pipeline."""
@@ -139,7 +152,7 @@ class RAGBenchmark:
 
     async def run_query(self, query: str) -> QueryResult:
         """Run a single query and collect metrics."""
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         try:
             response = await self.pipeline.process_query(
@@ -150,7 +163,7 @@ class RAGBenchmark:
                 use_cache=False,  # Don't use cache for benchmarking
             )
 
-            latency_ms = (time.time() - start_time) * 1000
+            latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Extract metrics from response
             sources = response.sources
@@ -158,8 +171,15 @@ class RAGBenchmark:
 
             # Calculate diversity and coverage from context_info
             selection_metadata = context_info.get("selection_metadata", {})
-            diversity = selection_metadata.get("diversity_score", 1.0)
-            coverage = selection_metadata.get("coverage_score", 1.0)
+            diversity_raw = selection_metadata.get("diversity_score", 0.0)
+            coverage_raw = selection_metadata.get("coverage_score", 0.0)
+            diversity = float(diversity_raw) if diversity_raw is not None else 0.0
+            coverage = float(coverage_raw) if coverage_raw is not None else 0.0
+
+            # Context assembly metrics
+            context_tokens = int(context_info.get("total_tokens") or 0)
+            context_max_tokens = int(context_info.get("max_tokens") or 0)
+            context_truncated = bool(context_info.get("truncated") or False)
 
             # Extract soft weights and cluster distribution
             soft_weights = {}
@@ -171,7 +191,7 @@ class RAGBenchmark:
                     cluster_dist[doc.cluster_id] = cluster_dist.get(doc.cluster_id, 0) + 1
 
             # Calculate scores
-            scores = [d.score for d in sources] if sources else [0.0]
+            scores = [d.score for d in sources] if sources else []
 
             return QueryResult(
                 query=query,
@@ -181,14 +201,17 @@ class RAGBenchmark:
                 coverage_score=coverage,
                 avg_score=mean(scores) if scores else 0.0,
                 top_score=max(scores) if scores else 0.0,
+                context_tokens=context_tokens,
+                context_max_tokens=context_max_tokens,
+                context_truncated=context_truncated,
                 soft_weights=soft_weights,
                 cluster_distribution=cluster_dist,
                 confidence=response.confidence_score,
             )
 
         except Exception as e:
-            latency_ms = (time.time() - start_time) * 1000
-            logger.error(f"Query failed: {e}")
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.exception("Query failed")
             return QueryResult(
                 query=query,
                 latency_ms=latency_ms,
@@ -200,6 +223,30 @@ class RAGBenchmark:
                 confidence=0.0,
                 error=str(e),
             )
+
+    @staticmethod
+    def _percentile(sorted_values: List[float], p: float) -> float:
+        """
+        Compute percentile using linear interpolation.
+
+        Args:
+            sorted_values: Values sorted ascending.
+            p: Percentile in [0, 100].
+        """
+        if not sorted_values:
+            return 0.0
+        if p <= 0:
+            return sorted_values[0]
+        if p >= 100:
+            return sorted_values[-1]
+
+        pos = (len(sorted_values) - 1) * (p / 100.0)
+        lower = int(pos)
+        upper = min(lower + 1, len(sorted_values) - 1)
+        if lower == upper:
+            return sorted_values[lower]
+        weight = pos - lower
+        return sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
 
     async def run_benchmark(
         self,
@@ -227,14 +274,21 @@ class RAGBenchmark:
         confidences = [r.confidence for r in results if r.error is None]
         top_scores = [r.top_score for r in results if r.error is None]
         avg_scores = [r.avg_score for r in results if r.error is None]
+        context_tokens = [r.context_tokens for r in results if r.error is None]
+        context_utils = [
+            (r.context_tokens / r.context_max_tokens)
+            for r in results
+            if r.error is None and r.context_max_tokens
+        ]
+        truncations = [r.context_truncated for r in results if r.error is None]
         errors = [r for r in results if r.error is not None]
 
         # Calculate percentiles
         if latencies:
             sorted_latencies = sorted(latencies)
-            p50 = median(sorted_latencies)
-            p90 = quantiles(sorted_latencies, n=10)[8] if len(sorted_latencies) >= 10 else max(sorted_latencies)
-            p99 = quantiles(sorted_latencies, n=100)[98] if len(sorted_latencies) >= 100 else max(sorted_latencies)
+            p50 = self._percentile(sorted_latencies, 50)
+            p90 = self._percentile(sorted_latencies, 90)
+            p99 = self._percentile(sorted_latencies, 99)
         else:
             p50 = p90 = p99 = 0.0
 
@@ -250,6 +304,9 @@ class RAGBenchmark:
             avg_redundancy=1.0 - mean(diversities) if diversities else 1.0,
             avg_docs_per_query=mean(doc_counts) if doc_counts else 0.0,
             avg_confidence=mean(confidences) if confidences else 0.0,
+            avg_context_tokens=mean(context_tokens) if context_tokens else 0.0,
+            avg_context_utilization=mean(context_utils) if context_utils else 0.0,
+            truncation_rate=(sum(1 for t in truncations if t) / len(truncations)) if truncations else 0.0,
             avg_top_score=mean(top_scores) if top_scores else 0.0,
             avg_mean_score=mean(avg_scores) if avg_scores else 0.0,
             error_count=len(errors),
@@ -294,6 +351,13 @@ def print_comparison(baseline: BenchmarkResult, soft_selection: BenchmarkResult)
     print(f"{'Avg Docs/Query':<25} {baseline.avg_docs_per_query:>12.1f} {soft_selection.avg_docs_per_query:>12.1f} {fmt_change(baseline.avg_docs_per_query, soft_selection.avg_docs_per_query, True):>12}")
 
     print("-" * 70)
+
+    # Context
+    print(f"{'Ctx Tokens (avg)':<25} {baseline.avg_context_tokens:>12.1f} {soft_selection.avg_context_tokens:>12.1f} {fmt_change(baseline.avg_context_tokens, soft_selection.avg_context_tokens, True):>12}")
+    print(f"{'Ctx Utilization':<25} {baseline.avg_context_utilization:>12.3f} {soft_selection.avg_context_utilization:>12.3f} {fmt_change(baseline.avg_context_utilization, soft_selection.avg_context_utilization, True):>12}")
+    print(f"{'Ctx Truncation Rate':<25} {baseline.truncation_rate:>12.3f} {soft_selection.truncation_rate:>12.3f} {fmt_change(baseline.truncation_rate, soft_selection.truncation_rate, False):>12}")
+
+    print("-" * 70)
     print(f"{'Errors':<25} {baseline.error_count:>12d} {soft_selection.error_count:>12d}")
     print("=" * 70)
 
@@ -324,6 +388,11 @@ def print_single_result(result: BenchmarkResult):
     print(f"  Avg Confidence: {result.avg_confidence:.3f}")
     print(f"  Avg Docs/Query: {result.avg_docs_per_query:.1f}")
 
+    print("\n--- Context ---")
+    print(f"  Avg Tokens: {result.avg_context_tokens:.1f}")
+    print(f"  Avg Utilization: {result.avg_context_utilization:.3f}")
+    print(f"  Truncation Rate: {result.truncation_rate:.3f}")
+
     print("=" * 50)
 
 
@@ -339,7 +408,7 @@ async def main():
 
     # Load queries
     if args.queries_file and os.path.exists(args.queries_file):
-        with open(args.queries_file, 'r') as f:
+        with open(args.queries_file, 'r', encoding="utf-8") as f:
             queries = [line.strip() for line in f if line.strip()]
     else:
         queries = DEFAULT_QUERIES[:args.num_queries]
@@ -351,7 +420,6 @@ async def main():
 
         # First, run with soft selection OFF
         logger.info("\n=== Running BASELINE (soft selection OFF) ===")
-        os.environ["RAG_SOFT_SELECTION_ENABLED"] = "false"
 
         baseline_benchmark = RAGBenchmark(
             tenant_id=args.tenant_id,
@@ -365,7 +433,6 @@ async def main():
 
         # Then, run with soft selection ON
         logger.info("\n=== Running SOFT SELECTION (ON) ===")
-        os.environ["RAG_SOFT_SELECTION_ENABLED"] = "true"
 
         soft_benchmark = RAGBenchmark(
             tenant_id=args.tenant_id,

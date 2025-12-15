@@ -25,6 +25,22 @@ Documento de referencia para evolucionar la arquitectura RAG de NexusDocs360 tom
 
 ## 2. Recomendaciones de Adaptación para NexusDocs360
 
+> Nota: este documento describe un “north star”. En paralelo, se han incorporado **mejoras pragmáticas** dentro del `weaviate-service` para capturar beneficios inmediatos (especialmente en control/reducción de tokens de contexto) sin re-implementar toda la arquitectura propuesta.
+
+### 2.0 Estado actual (mejoras ya incorporadas)
+Implementado en `backend/microservices/weaviate-service/app/services/rag/`:
+
+- **Multi-stage retrieval** con fusión (RRF), reranking y fusión final por documento (con opción de diversidad).
+- **Soft Selection** (opcional): selección con pesos suaves + diversidad (MMR/clustering cuando hay embeddings) y hard caps.
+- **Context Assembly mejorado**:
+  - **Presupuesto total configurable** del contexto: `RAG_CONTEXT_BUDGET_FRACTION` (default `0.7`) en `ContextAssembler`.
+  - **Asignación proporcional de tokens por documento** cuando hay `soft_weights`, con mínimo configurable `RAG_MIN_TOKENS_PER_DOC`.
+  - **Smart Truncation**: prioriza cortes por secciones → párrafos → frases según `RAG_TRUNCATION_PRIORITY`.
+
+Benchmarking/validación (ejecución dentro del contenedor `weaviate-service`):
+- Script: `backend/microservices/weaviate-service/scripts/benchmark_soft_selection.py`
+- Uso típico: `python benchmark_soft_selection.py --tenant-id <TENANT> --baseline --output /tmp/bench.json`
+
 ### 2.1 Document Intelligence
 - Extender los pipelines de ingesta (`app/document_processing` y conectores hacia Weaviate, nuestro GAP vectorial) para producir objetos `DocumentSection` con:
   - Tipo de sección (abstract, cláusula legal, KPI financiero, etc.).
@@ -49,6 +65,11 @@ Documento de referencia para evolucionar la arquitectura RAG de NexusDocs360 tom
 - Construir bloques con encabezados que incluyan título, autores/empresa, año, tipo de estudio/documento y score de relevancia.
 - Limitar tokens por documento (p.ej. 1500) y total (p.ej. 6k) para no saturar el LLM.
 - Ordenar secciones según `importance_score` y relevancia combinada del reranker.
+
+Configuración ya disponible en `weaviate-service`:
+- `RAG_CONTEXT_BUDGET_FRACTION`: controla el presupuesto total del contexto (porcentaje de `max_tokens`).
+- `RAG_TRUNCATION_PRIORITY`: define si el truncado intenta preservar secciones (`sections`) o cae a párrafos/frases.
+- `RAG_MIN_TOKENS_PER_DOC`: mínimo útil por documento; si no cabe, se omite.
 
 ### 2.5 Generación + Validación
 - Prompt estricto que obligue a citar “Documento N, Sección”.

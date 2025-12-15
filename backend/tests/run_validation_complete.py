@@ -37,12 +37,10 @@ def check_system_status():
     services = [
         ("http://localhost:8000", "API Principal"),
         ("http://localhost:8003", "Storage Service"),
-        ("http://localhost:8004", "Ollama Service"),
         ("http://localhost:8005", "Gotenberg Service"),
         ("http://localhost:8007", "Weaviate Service"),
         ("http://localhost:8007", "CAG Service"),
         ("http://localhost:8009", "LangExtract Service"),
-        ("http://localhost:8010", "Temporalio Service"),
     ]
 
     healthy_services = 0

@@ -65,7 +65,6 @@ class ServiceConfig:
 
 # Standard headers for microservice communication
 STANDARD_HEADERS = {
-    "Content-Type": "application/json",
     "Accept": "application/json",
 }
 

@@ -45,7 +45,6 @@ services:
       - TEXT_EXTRACTION_SERVICE_URL=${TEXT_EXTRACTION_SERVICE_URL:-http://textextract-service:8000}
       - ELASTICSEARCH_SERVICE_URL=${ELASTICSEARCH_SERVICE_URL:-http://elasticsearch-service:8000}
       - TEMPLATE_EDITOR_SERVICE_URL=${TEMPLATE_EDITOR_SERVICE_URL:-http://template-editor-service:8000}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://genai-ollama:11434}
       - GOTENBERG_BASE_URL=${GOTENBERG_BASE_URL:-http://gotenberg:3000}
       # Infrastructure
       - REDIS_HOST=redis
@@ -132,7 +131,7 @@ services:
       retries: 3
 
   # LangExtract Service - DEVELOPMENT MODE
-  # NOTE: langextract only supports: anthropic, gemini, ollama, openai (NOT vllm)
+  # NOTE: langextract supports: anthropic, gemini, openai, vllm (ollama legacy)
   # Use gemini as default since it's fast and has good document understanding
   langextract-service:
     build:
@@ -313,7 +312,6 @@ services:
       - backend-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-ollama-models.sh:/docker-entrypoint-initdb.d/init-ollama-models.sh
       - ./scripts/init-camunda-schema.sql:/docker-entrypoint-initdb.d/init-camunda-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
@@ -405,32 +403,6 @@ services:
       retries: 5
       start_period: 120s
     restart: unless-stopped
-
-  # Ollama para modelos de lenguaje local (con GPU) - LEGACY
-  # Start with: docker compose --profile legacy up
-  genai-ollama:
-    image: ollama/ollama:0.13.1
-    networks:
-      - backend-network
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    profiles:
-      - legacy  # Only start with: docker compose --profile legacy up
 
   # vLLM para inferencia de alta velocidad (GPU) - PRIMARY LLM SERVER
   # Requires HF_TOKEN in .env for gated models
@@ -570,7 +542,6 @@ volumes:
   redis_data:
   weaviate_data:
   elasticsearch_data:
-  ollama_data:
   vllm_cache:  # Cache for HuggingFace models used by vLLM
   tei_cache:   # Cache for TEI embedding models
   camunda_data:

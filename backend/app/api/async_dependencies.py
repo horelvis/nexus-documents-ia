@@ -14,7 +14,7 @@ from typing import Optional
 import logging
 import os
 
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, status, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -35,9 +35,11 @@ logger = logging.getLogger(__name__)
 
 
 async def get_current_user_async(
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
     authorization: Optional[str] = Header(None, alias="Authorization"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
 ) -> User:
     """
     Get current authenticated user (NO JIT provisioning).
@@ -50,6 +52,10 @@ async def get_current_user_async(
 
     User creation is handled by Clerk webhook on user.created event.
     """
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    client_host = getattr(getattr(request, "client", None), "host", None)
+
     # Development mode: Allow X-User-Id header for testing
     if x_user_id and os.getenv("ENVIRONMENT", "development") == "development":
         result = await db.execute(
@@ -57,10 +63,27 @@ async def get_current_user_async(
         )
         user = result.scalar_one_or_none()
         if user:
+            logger.info(
+                "Auth bypass via X-User-Id (dev only) | method=%s path=%s origin=%s client=%s request_id=%s",
+                request.method,
+                request.url.path,
+                origin,
+                client_host,
+                x_request_id,
+            )
             return user
 
     # Require Authorization header
     if not authorization:
+        logger.warning(
+            "Missing Authorization header | method=%s path=%s origin=%s referer=%s client=%s request_id=%s",
+            request.method,
+            request.url.path,
+            origin,
+            referer,
+            client_host,
+            x_request_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header",
@@ -68,6 +91,14 @@ async def get_current_user_async(
         )
 
     if not authorization.startswith("Bearer "):
+        logger.warning(
+            "Invalid Authorization header format | method=%s path=%s origin=%s client=%s request_id=%s",
+            request.method,
+            request.url.path,
+            origin,
+            client_host,
+            x_request_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Authorization header format",
@@ -80,23 +111,56 @@ async def get_current_user_async(
     try:
         payload = verify_clerk_token(token)
     except TokenExpiredError:
+        logger.info(
+            "Auth token expired | method=%s path=%s origin=%s client=%s request_id=%s",
+            request.method,
+            request.url.path,
+            origin,
+            client_host,
+            x_request_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired",
             headers={"WWW-Authenticate": "Bearer"}
         )
     except TokenInvalidError as e:
+        logger.warning(
+            "Auth token invalid | method=%s path=%s origin=%s client=%s request_id=%s error=%s",
+            request.method,
+            request.url.path,
+            origin,
+            client_host,
+            x_request_id,
+            e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e.message),
             headers={"WWW-Authenticate": "Bearer"}
         )
     except ClerkConfigError:
+        logger.error(
+            "Auth misconfigured (Clerk) | method=%s path=%s request_id=%s",
+            request.method,
+            request.url.path,
+            x_request_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service not configured"
         )
     except AuthError as e:
+        logger.warning(
+            "Auth error | method=%s path=%s origin=%s client=%s request_id=%s status=%s error=%s",
+            request.method,
+            request.url.path,
+            origin,
+            client_host,
+            x_request_id,
+            e.status_code,
+            e.message,
+        )
         raise HTTPException(
             status_code=e.status_code,
             detail=e.message,
@@ -115,7 +179,15 @@ async def get_current_user_async(
 
     # NO JIT provisioning - user must register via SignUp flow
     if not user:
-        logger.warning(f"Auth attempt for unregistered user: {clerk_user_id[:8]}...")
+        logger.warning(
+            "Auth attempt for unregistered user | user=%s method=%s path=%s origin=%s client=%s request_id=%s",
+            f"{clerk_user_id[:8]}..." if clerk_user_id else None,
+            request.method,
+            request.url.path,
+            origin,
+            client_host,
+            x_request_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not registered. Please sign up first.",
@@ -179,39 +251,26 @@ async def get_current_tenant_async(
 
 
 def require_microservice_api_key(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> str:
     """
     Validate internal microservice calls using the shared API key.
 
-    Accepts both:
-    - Authorization: Bearer <api_key> (legacy)
-    - X-API-Key: <api_key> (preferred)
-
-    During transition, both are supported. X-API-Key takes precedence.
+    Internal auth standard: X-API-Key.
     """
-    api_key = None
-
-    # Prefer X-API-Key header (new standard)
-    if x_api_key:
-        api_key = x_api_key
-    elif authorization and authorization.startswith("Bearer "):
-        api_key = authorization.split(" ")[1]
-
-    if not api_key:
+    if not x_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing API key. Use X-API-Key header.",
         )
 
-    if api_key != settings.MICROSERVICES_API_KEY:
+    if x_api_key != settings.MICROSERVICES_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid microservice API key",
         )
 
-    return api_key
+    return x_api_key
 
 
 async def get_current_active_user_async(

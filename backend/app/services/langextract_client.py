@@ -6,23 +6,26 @@ El LLM decide el tipo basándose en análisis inteligente del contenido.
 import logging
 from typing import Dict, Any, Optional
 
-import httpx
-
 from app.core.config import settings
+from app.clients.base import BaseHTTPClient
+from app.clients.exceptions import HTTPClientError
 
 logger = logging.getLogger(__name__)
 
 
-class LangExtractClient:
+class LangExtractClient(BaseHTTPClient):
     """Cliente async para llamar a langextract-service con categorización inteligente."""
 
     # ❌ ELIMINADO: _TYPE_MAPPING hardcodeado
     # El LLM ahora decide el tipo directamente mediante análisis de contenido
 
     def __init__(self):
-        self.base_url = settings.LANGEXTRACT_SERVICE_URL.rstrip("/")
-        self.api_key = settings.MICROSERVICES_API_KEY
-        self.timeout = httpx.Timeout(60.0, connect=5.0)
+        base_url = settings.LANGEXTRACT_SERVICE_URL.rstrip("/")
+        super().__init__(
+            service_name="langextract",
+            base_url=base_url,
+            timeout_type="ai",
+        )
         # No override provider - let langextract use its own configuration
         self.default_provider = None
 
@@ -54,31 +57,23 @@ class LangExtractClient:
         """
         logger.info(f"📋 Solicitando categorización LangExtract: {filename or 'documento'}")
 
-        url = f"{self.base_url}/api/v1/extraction/categorize"
         payload = {
             "text": text[:3000],  # Primeros 3000 chars suficientes para categorización
             "filename": filename,
             "context": context
         }
-        headers = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result = response.json()
+            result = await self.post_json("/api/v1/extraction/categorize", json=payload)
 
-                logger.info(
-                    f"✅ Categorizado como '{result.get('detected_type')}' "
-                    f"(confianza: {result.get('confidence', 0):.2f})"
-                )
-                return result
+            logger.info(
+                f"✅ Categorizado como '{result.get('detected_type')}' "
+                f"(confianza: {result.get('confidence', 0):.2f})"
+            )
+            return result
 
-        except httpx.HTTPStatusError as e:
-            error_msg = f"HTTP {e.response.status_code}: {e.response.text}"
+        except HTTPClientError as e:
+            error_msg = f"HTTP {e.status_code}: {e.response_body or e.message}"
             logger.error(f"❌ Error en categorización: {error_msg}")
             return {
                 "detected_type": "general",
@@ -137,58 +132,49 @@ class LangExtractClient:
         # Only pass provider if explicitly specified, otherwise let service use its config
         if provider:
             payload["provider"] = provider.lower()
-        headers = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
-
-        url = f"{self.base_url}/api/v1/extraction/extract"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result = response.json()
+            result = await self.post_json("/api/v1/extraction/extract", json=payload)
 
-                extractions = result.get("extractions") or []
-                logger.info(f"✅ Extraídas {len(extractions)} entidades de tipo '{document_type}'")
+            extractions = result.get("extractions") or []
+            logger.info(f"✅ Extraídas {len(extractions)} entidades de tipo '{document_type}'")
 
-                # Formatear entidades para compatibilidad con código existente
-                # NOTA: Usar "or {}" porque result.get("metadata", {}) devuelve None si metadata es null
-                metadata = result.get("metadata") or {}
-                used_provider = metadata.get("provider", "unknown")
-                used_model = metadata.get("model", "unknown")
+            # Formatear entidades para compatibilidad con código existente
+            # NOTA: Usar "or {}" porque result.get("metadata", {}) devuelve None si metadata es null
+            metadata = result.get("metadata") or {}
+            used_provider = metadata.get("provider", "unknown")
+            used_model = metadata.get("model", "unknown")
 
-                formatted_entities = []
-                for extraction in extractions:
-                    attributes = extraction.get("attributes") or {}
-                    formatted_entities.append({
-                        "name": extraction.get("text", ""),
-                        "type": extraction.get("class", "other"),
-                        "role": attributes.get("role", ""),
-                        "context": attributes.get("type", ""),
-                        "metadata": {
-                            "extraction_method": "langextract",
-                            "provider": used_provider,
-                            "model": used_model,
-                            "confidence": attributes.get("confidence", 0.8),
-                            "source_indices": extraction.get("source_indices"),
-                            "document_type": document_type,
-                        },
-                    })
+            formatted_entities = []
+            for extraction in extractions:
+                attributes = extraction.get("attributes") or {}
+                formatted_entities.append({
+                    "name": extraction.get("text", ""),
+                    "type": extraction.get("class", "other"),
+                    "role": attributes.get("role", ""),
+                    "context": attributes.get("type", ""),
+                    "metadata": {
+                        "extraction_method": "langextract",
+                        "provider": used_provider,
+                        "model": used_model,
+                        "confidence": attributes.get("confidence", 0.8),
+                        "source_indices": extraction.get("source_indices"),
+                        "document_type": document_type,
+                    },
+                })
 
-                return {
-                    "success": True,
-                    "extractions": formatted_entities,
-                    "summary": result.get("summary", {}),
-                    "total_extractions": len(formatted_entities),
-                    "document_type": document_type,
-                    "provider": used_provider,
-                    "visualization_html": result.get("visualization_html"),
-                }
+            return {
+                "success": True,
+                "extractions": formatted_entities,
+                "summary": result.get("summary", {}),
+                "total_extractions": len(formatted_entities),
+                "document_type": document_type,
+                "provider": used_provider,
+                "visualization_html": result.get("visualization_html"),
+            }
 
-        except httpx.HTTPStatusError as e:
-            error_msg = f"HTTP {e.response.status_code}: {e.response.text}"
+        except HTTPClientError as e:
+            error_msg = f"HTTP {e.status_code}: {e.response_body or e.message}"
             logger.error(f"❌ Error en extracción: {error_msg}")
             return {
                 "success": False,

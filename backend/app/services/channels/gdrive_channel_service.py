@@ -434,11 +434,11 @@ class GoogleDriveChannelService:
             collection_name = f"nexus_{tenant_str}_documents"
             weaviate_url = f"http://weaviate-service:8007/weaviate/collections/{collection_name}/documents"
 
-            # Get API key from settings for service-to-service auth
+            # Service-to-service auth uses X-API-Key
             from app.core.config import settings
             headers = {}
-            if hasattr(settings, 'MICROSERVICES_API_KEY') and settings.MICROSERVICES_API_KEY:
-                headers["Authorization"] = f"Bearer {settings.MICROSERVICES_API_KEY}"
+            if hasattr(settings, "MICROSERVICES_API_KEY") and settings.MICROSERVICES_API_KEY:
+                headers["X-API-Key"] = settings.MICROSERVICES_API_KEY
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(

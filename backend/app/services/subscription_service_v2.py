@@ -724,8 +724,8 @@ class SubscriptionServiceV2:
             
             if customer_id:
                 # Find user by customer ID
-                from app.db.database import get_async_db
-                async with get_async_db() as db:
+                from app.db.async_database import async_session_context
+                async with async_session_context() as db:
                     result = await db.execute(
                         select(User).where(User.stripe_customer_id == customer_id)
                     )

@@ -63,9 +63,13 @@ class RetrievedDocument:
     metadata: Dict[str, Any] = field(default_factory=dict)
     chunk_index: Optional[int] = None       # Position in original document
     total_chunks: Optional[int] = None      # Total chunks in document
+    # Soft selection fields (populated by SoftSelector)
+    soft_weight: Optional[float] = None     # Softmax weight [0,1]
+    cluster_id: Optional[int] = None        # K-means cluster assignment
+    allocated_tokens: Optional[int] = None  # Proportional token budget
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "id": self.id,
             "title": self.title,
             "content": self.content[:500] + "..." if len(self.content) > 500 else self.content,
@@ -77,6 +81,14 @@ class RetrievedDocument:
             "document_type": self.document_type,
             "metadata": self.metadata,
         }
+        # Include soft selection fields if present
+        if self.soft_weight is not None:
+            result["soft_weight"] = self.soft_weight
+        if self.cluster_id is not None:
+            result["cluster_id"] = self.cluster_id
+        if self.allocated_tokens is not None:
+            result["allocated_tokens"] = self.allocated_tokens
+        return result
 
 
 @dataclass
@@ -110,15 +122,26 @@ class AssembledContext:
     query_analysis: QueryAnalysis           # Original query analysis
     document_headers: List[str]             # Headers for each document
     truncated: bool = False                 # Whether context was truncated
+    # Soft selection metadata (for debugging/metrics)
+    selection_metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "total_tokens": self.total_tokens,
             "max_tokens": self.max_tokens,
             "documents_count": len(self.documents),
             "truncated": self.truncated,
             "document_ids": [d.id for d in self.documents],
         }
+        # Include selection metrics if available
+        if self.selection_metadata:
+            result["selection_metadata"] = {
+                "diversity_score": self.selection_metadata.get("diversity_score"),
+                "coverage_score": self.selection_metadata.get("coverage_score"),
+                "dropped_by_weight": self.selection_metadata.get("dropped_by_weight"),
+                "dropped_by_cap": self.selection_metadata.get("dropped_by_cap"),
+            }
+        return result
 
 
 @dataclass

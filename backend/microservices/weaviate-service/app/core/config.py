@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     rag_cache_similarity_threshold: float = float(os.getenv("RAG_CACHE_SIMILARITY_THRESHOLD", "0.92"))
     rag_cache_ttl_seconds: int = int(os.getenv("RAG_CACHE_TTL_SECONDS", "3600"))
     rag_cache_max_entries: int = int(os.getenv("RAG_CACHE_MAX_ENTRIES", "1000"))
+    rag_cache_min_confidence: float = float(os.getenv("RAG_CACHE_MIN_CONFIDENCE", "0.65"))
 
     # RAG Pipeline - RRF Fusion settings
     rag_rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
@@ -97,6 +98,21 @@ class Settings(BaseSettings):
     rag_public_knowledge_weight: float = float(os.getenv("RAG_PUBLIC_KNOWLEDGE_WEIGHT", "0.7"))  # Weight for public vs tenant docs
     rag_public_knowledge_limit: int = int(os.getenv("RAG_PUBLIC_KNOWLEDGE_LIMIT", "10"))  # Max public docs to include
     rag_public_knowledge_categories: str = os.getenv("RAG_PUBLIC_KNOWLEDGE_CATEGORIES", "legislation,regulation,jurisprudence")  # Comma-separated
+
+    # RAG Pipeline - Soft Selection (heuristic diversity-aware selection)
+    rag_soft_selection_enabled: bool = os.getenv("RAG_SOFT_SELECTION_ENABLED", "true").lower() == "true"
+    rag_soft_selection_temperature: float = float(os.getenv("RAG_SOFT_SELECTION_TEMPERATURE", "0.5"))  # Lower=sharper, Higher=uniform
+    # MMR formula: λ*relevance - (1-λ)*redundancy (NOT: rel - λ*redundancy)
+    rag_mmr_lambda: float = float(os.getenv("RAG_MMR_LAMBDA", "0.7"))  # 1.0=pure relevance, 0.0=pure diversity
+    rag_num_clusters: int = int(os.getenv("RAG_NUM_CLUSTERS", "5"))  # For stratified selection
+    # Safety caps to avoid noise
+    rag_max_docs: int = int(os.getenv("RAG_MAX_DOCS", "12"))  # Hard cap on documents
+    rag_min_weight: float = float(os.getenv("RAG_MIN_WEIGHT", "0.02"))  # Drop docs with weight < 2%
+    rag_min_tokens_per_doc: int = int(os.getenv("RAG_MIN_TOKENS_PER_DOC", "200"))  # If can't fit minimum, drop
+    # Context assembly budget: fraction of model max tokens reserved for context (rest for query/response)
+    rag_context_budget_fraction: float = float(os.getenv("RAG_CONTEXT_BUDGET_FRACTION", "0.7"))
+    # Smart truncation priority: sections > paragraphs > sentences
+    rag_truncation_priority: str = os.getenv("RAG_TRUNCATION_PRIORITY", "sections")  # sections, paragraphs, sentences
 
     # Storage service URL
     storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")

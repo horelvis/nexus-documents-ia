@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app.core.config import settings
@@ -36,3 +37,14 @@ async def get_async_db():
             yield session
         finally:
             await session.close()
+
+
+@asynccontextmanager
+async def async_session_context() -> AsyncSession:
+    """
+    AsyncSession context manager for non-FastAPI/Depends code paths.
+
+    Use this in background jobs, webhooks, utilities, etc.
+    """
+    async with AsyncSessionLocal() as session:
+        yield session

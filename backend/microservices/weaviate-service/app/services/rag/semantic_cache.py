@@ -112,13 +112,13 @@ class SemanticCache:
             await self._redis.close()
             self._initialized = False
 
-    def _cache_key(self, tenant_id: str, query_hash: str) -> str:
+    def _cache_key(self, tenant_id: str, scope: str, query_hash: str) -> str:
         """Generate cache key for a query"""
-        return f"rag:cache:{tenant_id}:{query_hash}"
+        return f"rag:cache:{tenant_id}:{scope}:{query_hash}"
 
-    def _index_key(self, tenant_id: str) -> str:
+    def _index_key(self, tenant_id: str, scope: str) -> str:
         """Key for tenant's cache index (list of all cached query hashes)"""
-        return f"rag:cache:index:{tenant_id}"
+        return f"rag:cache:index:{tenant_id}:{scope}"
 
     def _query_hash(self, query: str) -> str:
         """Generate deterministic hash for a query"""
@@ -129,6 +129,7 @@ class SemanticCache:
         query: str,
         query_embedding: List[float],
         tenant_id: str,
+        scope: Optional[str] = None,
     ) -> Optional[CachedResponse]:
         """
         Check cache for semantically similar queries.
@@ -147,15 +148,16 @@ class SemanticCache:
         self._stats.total_queries += 1
 
         try:
+            scope_value = scope or "default"
             # Get all cached entries for this tenant
-            index_key = self._index_key(tenant_id)
+            index_key = self._index_key(tenant_id, scope_value)
             cached_hashes = await self._redis.lrange(index_key, 0, -1)
 
             best_match: Optional[CachedResponse] = None
             best_similarity = 0.0
 
             for query_hash in cached_hashes:
-                cache_key = self._cache_key(tenant_id, query_hash)
+                cache_key = self._cache_key(tenant_id, scope_value, query_hash)
                 cached_data = await self._redis.hgetall(cache_key)
 
                 if not cached_data:
@@ -218,6 +220,7 @@ class SemanticCache:
         confidence_score: float,
         query_analysis: Dict[str, Any],
         context_info: Dict[str, Any],
+        scope: Optional[str] = None,
     ) -> bool:
         """
         Store a RAG response in the cache.
@@ -239,9 +242,10 @@ class SemanticCache:
             return False
 
         try:
+            scope_value = scope or "default"
             query_hash = self._query_hash(query)
-            cache_key = self._cache_key(tenant_id, query_hash)
-            index_key = self._index_key(tenant_id)
+            cache_key = self._cache_key(tenant_id, scope_value, query_hash)
+            index_key = self._index_key(tenant_id, scope_value)
 
             # Prepare cache entry
             cache_data = {

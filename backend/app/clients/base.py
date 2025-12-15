@@ -130,6 +130,7 @@ class BaseHTTPClient:
             headers["X-User-ID"] = str(user_id)
         if request_id:
             headers["X-Request-ID"] = str(request_id)
+            headers.setdefault("X-Correlation-ID", str(request_id))
 
         # Merge extra headers
         if extra_headers:
@@ -246,6 +247,8 @@ class BaseHTTPClient:
         """
         url = f"{self.base_url}{endpoint}"
         request_headers = self._build_headers(headers, tenant_id, user_id, request_id)
+        if "json" in kwargs and "Content-Type" not in request_headers:
+            request_headers["Content-Type"] = "application/json"
 
         # Log request (without sensitive data)
         log_kwargs = {k: v for k, v in kwargs.items() if k not in ('data', 'content', 'files')}

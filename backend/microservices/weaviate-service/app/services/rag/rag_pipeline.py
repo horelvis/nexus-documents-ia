@@ -166,10 +166,22 @@ class RAGPipeline:
                 logger.info("  Layer 6: Checking semantic cache...")
                 query_embedding = await self.cache.get_embedding(query)
                 if query_embedding:
+                    public_flag = (
+                        include_public_knowledge
+                        if include_public_knowledge is not None
+                        else settings.rag_public_knowledge_enabled
+                    )
+                    cache_scope = (
+                        f"model_type={model_type}"
+                        f"|vllm_model={settings.vllm_model}"
+                        f"|public={public_flag}"
+                        f"|validate={validate_claims}"
+                    )
                     cached = await self.cache.get(
                         query=query,
                         query_embedding=query_embedding,
                         tenant_id=tenant_id,
+                        scope=cache_scope,
                     )
                     if cached:
                         execution_time_ms = (time.time() - start_time) * 1000
@@ -215,10 +227,10 @@ class RAGPipeline:
                 if metrics:
                     metrics.cache_check_ms = (time.time() - cache_start) * 1000
 
-            # === Layer 3: Hybrid Retrieval + RRF + Public Knowledge ===
+            # === Layer 3: Hybrid Retrieval + RRF + Public Knowledge + Soft Selection ===
             retrieval_start = time.time()
-            logger.info("  Layer 3: Hybrid Retrieval + RRF + Public Knowledge")
-            retrieved_docs = await self.retriever.retrieve(
+            logger.info("  Layer 3: Hybrid Retrieval + RRF + Public Knowledge + Soft Selection")
+            retrieved_docs, selection_metadata = await self.retriever.retrieve(
                 query_analysis=query_analysis,
                 tenant_id=tenant_id,
                 collection_name=collection_name,
@@ -228,7 +240,10 @@ class RAGPipeline:
             # Log public vs tenant document count
             public_count = sum(1 for d in retrieved_docs if d.tenant_id == "public")
             tenant_count = len(retrieved_docs) - public_count
-            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({tenant_count} tenant, {public_count} public)")
+            soft_selection_info = ""
+            if selection_metadata.get("soft_selection_enabled"):
+                soft_selection_info = f", diversity={selection_metadata.get('diversity_score', 0):.2f}, coverage={selection_metadata.get('coverage_score', 0):.2f}"
+            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({tenant_count} tenant, {public_count} public{soft_selection_info})")
 
             if metrics:
                 metrics.retrieval_ms = (time.time() - retrieval_start) * 1000
@@ -248,13 +263,15 @@ class RAGPipeline:
                     start_time=start_time,
                 )
 
-            # === Layer 4: Context Assembly ===
+            # === Layer 4: Context Assembly (with proportional token allocation) ===
             context_start = time.time()
-            logger.info("  Layer 4: Context Assembly")
+            logger.info("  Layer 4: Context Assembly (proportional allocation)")
             assembled_context = self.assembler.assemble_context(
                 query_analysis=query_analysis,
                 documents=retrieved_docs,
                 model_type=model_type,
+                soft_weights=selection_metadata.get("soft_weights") if selection_metadata else None,
+                selection_metadata=selection_metadata,
             )
             logger.info(f"    Context: {assembled_context.total_tokens} tokens, "
                        f"{len(assembled_context.documents)} docs included")
@@ -298,17 +315,38 @@ class RAGPipeline:
             # === Layer 6: Store in Semantic Cache ===
             if use_cache and self._cache_enabled and query_embedding:
                 try:
-                    await self.cache.set(
-                        query=query,
-                        query_embedding=query_embedding,
-                        tenant_id=tenant_id,
-                        answer=validated_response.answer,
-                        sources=[s.to_dict() for s in assembled_context.documents],
-                        confidence_score=validated_response.confidence_score,
-                        query_analysis=query_analysis.to_dict(),
-                        context_info=assembled_context.to_dict(),
-                    )
-                    logger.info("    Cached response for future similar queries")
+                    if validated_response.has_unsupported_claims:
+                        logger.info("    Skipping cache: response has unsupported claims")
+                    elif validated_response.confidence_score < settings.rag_cache_min_confidence:
+                        logger.info(
+                            "    Skipping cache: confidence %.2f < %.2f",
+                            validated_response.confidence_score,
+                            settings.rag_cache_min_confidence,
+                        )
+                    else:
+                        public_flag = (
+                            include_public_knowledge
+                            if include_public_knowledge is not None
+                            else settings.rag_public_knowledge_enabled
+                        )
+                        cache_scope = (
+                            f"model_type={model_type}"
+                            f"|vllm_model={settings.vllm_model}"
+                            f"|public={public_flag}"
+                            f"|validate={validate_claims}"
+                        )
+                        await self.cache.set(
+                            query=query,
+                            query_embedding=query_embedding,
+                            tenant_id=tenant_id,
+                            answer=validated_response.answer,
+                            sources=[s.to_dict() for s in assembled_context.documents],
+                            confidence_score=validated_response.confidence_score,
+                            query_analysis=query_analysis.to_dict(),
+                            context_info=assembled_context.to_dict(),
+                            scope=cache_scope,
+                        )
+                        logger.info("    Cached response for future similar queries")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to cache response: {e}")
 
@@ -378,9 +416,9 @@ class RAGPipeline:
                 "progress": 20
             }
 
-            # === Layer 2: Multi-Stage Retrieval ===
+            # === Layer 2: Multi-Stage Retrieval + Soft Selection ===
             yield {"type": "progress", "content": "Buscando documentos relevantes...", "progress": 30}
-            retrieved_docs = await self.retriever.retrieve(
+            retrieved_docs, selection_metadata = await self.retriever.retrieve(
                 query_analysis=query_analysis,
                 tenant_id=tenant_id,
                 collection_name=collection_name,
@@ -404,11 +442,13 @@ class RAGPipeline:
                 "progress": 50
             }
 
-            # === Layer 3: Context Assembly ===
+            # === Layer 3: Context Assembly (proportional allocation) ===
             yield {"type": "progress", "content": "Preparando contexto...", "progress": 60}
             assembled_context = self.assembler.assemble_context(
                 query_analysis=query_analysis,
                 documents=retrieved_docs,
+                soft_weights=selection_metadata.get("soft_weights") if selection_metadata else None,
+                selection_metadata=selection_metadata,
             )
 
             # === Layer 4: Validated Generation (streaming) ===

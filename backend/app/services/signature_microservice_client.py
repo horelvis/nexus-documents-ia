@@ -1,26 +1,25 @@
 """
 Client for Signature Microservice
 """
-import httpx
 import logging
 import base64
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 from app.core.config import settings
+from app.clients.base import BaseHTTPClient
+from app.clients.exceptions import HTTPClientError
 
 logger = logging.getLogger(__name__)
 
-class SignatureMicroserviceClient:
+class SignatureMicroserviceClient(BaseHTTPClient):
     """Client to communicate with the signature microservice"""
     
     def __init__(self):
-        self.base_url = "http://signature-service:8006/api/v1"
-        self.headers = {
-            "X-API-Key": settings.MICROSERVICES_API_KEY,
-            "Content-Type": "application/json"
-        }
-        self.timeout = httpx.Timeout(30.0, connect=5.0)
+        super().__init__(
+            service_name="signature",
+            base_url="http://signature-service:8006/api/v1",
+            timeout_type="default",
+        )
     
     async def create_signature_request(
         self,
@@ -58,25 +57,12 @@ class SignatureMicroserviceClient:
                 "metadata": metadata or {}
             }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/requests/create",
-                    json=request_data,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code != 200:
-                    logger.error(f"Signature service error: {response.status_code} - {response.text}")
-                    raise Exception(f"Failed to create signature request: {response.text}")
-                
-                return response.json()
-                
-        except httpx.TimeoutException:
-            logger.error("Timeout calling signature service")
-            raise Exception("Signature service timeout")
-        except Exception as e:
-            logger.error(f"Error calling signature service: {str(e)}")
+            return await self.post_json("/requests/create", json=request_data)
+        except HTTPClientError as exc:
+            logger.error("Signature service upstream error: %s", exc)
+            raise Exception(f"Signature service error: {exc.message}") from exc
+        except Exception as exc:
+            logger.error("Error calling signature service: %s", str(exc))
             raise
     
     async def get_signature_status(
@@ -93,22 +79,12 @@ class SignatureMicroserviceClient:
                 "external_id": external_id
             }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/requests/status",
-                    json=request_data,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code != 200:
-                    logger.error(f"Failed to get status: {response.text}")
-                    raise Exception(f"Failed to get signature status: {response.text}")
-                
-                return response.json()
-                
-        except Exception as e:
-            logger.error(f"Error getting signature status: {str(e)}")
+            return await self.post_json("/requests/status", json=request_data)
+        except HTTPClientError as exc:
+            logger.error("Error getting signature status: %s", exc)
+            raise Exception(f"Failed to get signature status: {exc.message}") from exc
+        except Exception as exc:
+            logger.error("Error getting signature status: %s", str(exc))
             raise
     
     async def cancel_signature_request(
@@ -127,18 +103,13 @@ class SignatureMicroserviceClient:
                 "reason": reason
             }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/requests/cancel",
-                    json=request_data,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                return response.status_code == 200
-                
-        except Exception as e:
-            logger.error(f"Error cancelling signature request: {str(e)}")
+            response = await self.post("/requests/cancel", json=request_data)
+            return response.status_code == 200
+        except HTTPClientError as exc:
+            logger.error("Error cancelling signature request: %s", exc)
+            return False
+        except Exception as exc:
+            logger.error("Error cancelling signature request: %s", str(exc))
             return False
     
     async def download_signed_document(
@@ -155,23 +126,13 @@ class SignatureMicroserviceClient:
                 "external_id": external_id
             }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/requests/download",
-                    json=request_data,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code != 200:
-                    raise Exception(f"Failed to download document: {response.text}")
-                
-                result = response.json()
-                # Decode from base64
-                return base64.b64decode(result['document'])
-                
-        except Exception as e:
-            logger.error(f"Error downloading document: {str(e)}")
+            result = await self.post_json("/requests/download", json=request_data)
+            return base64.b64decode(result["document"])
+        except HTTPClientError as exc:
+            logger.error("Error downloading document: %s", exc)
+            raise Exception(f"Failed to download document: {exc.message}") from exc
+        except Exception as exc:
+            logger.error("Error downloading document: %s", str(exc))
             raise
     
     async def test_provider_connection(
@@ -186,46 +147,24 @@ class SignatureMicroserviceClient:
                 "provider_credentials": provider_credentials
             }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/providers/test",
-                    json=request_data,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code != 200:
-                    return {
-                        "success": False,
-                        "message": f"Test failed: {response.text}"
-                    }
-                
-                return response.json()
-                
-        except Exception as e:
-            logger.error(f"Error testing provider: {str(e)}")
+            return await self.post_json("/providers/test", json=request_data)
+        except HTTPClientError as exc:
+            logger.error("Error testing provider: %s", exc)
             return {
                 "success": False,
-                "message": str(e)
+                "message": exc.message
             }
     
     async def get_supported_providers(self) -> List[Dict[str, Any]]:
         """Get list of supported providers"""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/providers/supported",
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code != 200:
-                    raise Exception(f"Failed to get providers: {response.text}")
-                
-                return response.json()
-                
-        except Exception as e:
-            logger.error(f"Error getting supported providers: {str(e)}")
+            response = await self.get("/providers/supported")
+            return response.json()
+        except HTTPClientError as exc:
+            logger.error("Error getting supported providers: %s", exc)
+            raise Exception(f"Failed to get providers: {exc.message}") from exc
+        except Exception as exc:
+            logger.error("Error getting supported providers: %s", str(exc))
             raise
 
 # Global client instance

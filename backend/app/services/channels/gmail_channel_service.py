@@ -615,11 +615,10 @@ class GmailChannelService:
             collection_name = f"nexus_{tenant_normalized}_channel_{channel_normalized}"
             weaviate_url = f"{settings.WEAVIATE_SERVICE_URL}/weaviate/collections/{collection_name}/documents"
 
-            # Get API key from settings for service-to-service auth
-            # Weaviate-service uses HTTPBearer authentication (Authorization: Bearer <token>)
+            # Service-to-service auth uses X-API-Key
             headers = {}
-            if hasattr(settings, 'MICROSERVICES_API_KEY') and settings.MICROSERVICES_API_KEY:
-                headers["Authorization"] = f"Bearer {settings.MICROSERVICES_API_KEY}"
+            if hasattr(settings, "MICROSERVICES_API_KEY") and settings.MICROSERVICES_API_KEY:
+                headers["X-API-Key"] = settings.MICROSERVICES_API_KEY
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(

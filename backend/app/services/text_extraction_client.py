@@ -6,8 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-import httpx
-
+from app.clients.base import BaseHTTPClient
 from app.core.config import settings
 
 
@@ -21,7 +20,7 @@ class TextExtractionResult:
     characters: int
 
 
-class TextExtractionClient:
+class TextExtractionClient(BaseHTTPClient):
     """HTTP client wrapper for the text extraction microservice."""
 
     def __init__(self, tenant_id: str, user_id: Optional[str] = None) -> None:
@@ -29,10 +28,13 @@ class TextExtractionClient:
         if not self.base_url:
             raise ValueError("TEXT_EXTRACTION_SERVICE_URL is not configured")
 
-        self.api_key = settings.MICROSERVICES_API_KEY
         self.tenant_id = tenant_id
         self.user_id = user_id
-        self.timeout = httpx.Timeout(120.0, connect=10.0)
+        super().__init__(
+            service_name="text-extraction",
+            base_url=self.base_url,
+            timeout_type="document",
+        )
 
     async def extract_text(
         self,
@@ -47,13 +49,6 @@ class TextExtractionClient:
         if not file_bytes:
             raise ValueError("File bytes cannot be empty")
 
-        headers = {
-            "X-API-Key": self.api_key,
-            "X-Tenant-ID": self.tenant_id,
-        }
-        if self.user_id:
-            headers["X-User-ID"] = self.user_id
-
         strategy_value = strategy or settings.TEXT_EXTRACTION_DEFAULT_STRATEGY
 
         files = {
@@ -67,15 +62,15 @@ class TextExtractionClient:
             "strategy": strategy_value,
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/api/v1/text-extraction/extract",
-                headers=headers,
-                files=files,
-                data=data,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self.request(
+            "POST",
+            "/api/v1/text-extraction/extract",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            files=files,
+            data=data,
+        )
+        payload = response.json()
 
         text = payload.get("text") or ""
         metadata = payload.get("metadata") or {}

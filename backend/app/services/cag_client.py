@@ -3,27 +3,27 @@ CAG (Corrective Agent Generation) Service Client
 Real agent-based processing for the virtual assistant
 """
 import logging
-import httpx
-import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 from app.core.config import settings
+from app.clients.base import BaseHTTPClient
+from app.clients.exceptions import HTTPClientError
 
 logger = logging.getLogger(__name__)
 
 
-class CAGClient:
+class CAGClient(BaseHTTPClient):
     """Client for interacting with the CAG microservice"""
     
     def __init__(self):
         # Use configured service URL (now served by weaviate-service)
-        self.base_url = settings.CAG_SERVICE_URL.rstrip("/")
-        self.timeout = httpx.Timeout(30.0, connect=5.0)
-        self.api_key = settings.MICROSERVICES_API_KEY
-        self.default_model = (
-            settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL
+        base_url = settings.CAG_SERVICE_URL.rstrip("/")
+        super().__init__(
+            service_name="cag",
+            base_url=base_url,
+            timeout_type="ai",
         )
+        self.default_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.VLLM_MODEL
 
     async def query(
         self,
@@ -48,31 +48,17 @@ class CAGClient:
             "max_iterations": max_iterations,
         }
 
-        headers = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
-
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/v1/cag/query",
-                    json=payload,
-                    headers=headers,
-                )
-        except httpx.HTTPError as exc:
-            logger.error("CAG query HTTP error: %s", exc)
-            return {"success": False, "error": str(exc)}
+            result = await self.post_json(
+                "/api/v1/cag/query",
+                json=payload,
+                tenant_id=str(tenant_id),
+                user_id=str(user_id),
+            )
+        except HTTPClientError as exc:
+            logger.error("CAG query upstream error: %s", exc)
+            return {"success": False, "error": exc.message, "status_code": exc.status_code}
 
-        if response.status_code != 200:
-            logger.error("CAG query failed: %s - %s", response.status_code, response.text)
-            return {
-                "success": False,
-                "error": f"CAG service error: {response.status_code}",
-                "status_code": response.status_code,
-            }
-
-        result = response.json()
         metadata = result.get("metadata") or {}
         metadata.setdefault("engine", "elysia")
         result["metadata"] = metadata
@@ -98,9 +84,7 @@ class CAGClient:
             Agent response with reasoning, actions, and final answer
         """
         try:
-            llm_model = (
-                settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL
-            )
+            llm_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.VLLM_MODEL
             tenant_id = context.get("tenant_id") or settings.DEFAULT_TENANT
             user_id = context.get("user_id") or "virtual_assistant"
             agent_context = {
@@ -162,17 +146,17 @@ class CAGClient:
                 "error": None,
             }
 
-        except httpx.TimeoutException:
-            logger.error("CAG service timeout")
+        except HTTPClientError as exc:
+            logger.error("CAG client upstream error: %s", exc)
             return {
-                "error": "CAG service timeout",
+                "error": exc.message,
                 "fallback": True,
-                "response": "El servicio está tardando más de lo esperado. Por favor, intenta de nuevo."
+                "response": "El servicio de agentes no está disponible ahora mismo.",
             }
-        except Exception as e:
-            logger.error(f"CAG client error: {e}")
+        except Exception as exc:
+            logger.error("CAG client error: %s", exc)
             return {
-                "error": str(e),
+                "error": str(exc),
                 "fallback": True,
                 "response": "Error al conectar con el servicio de agentes."
             }
@@ -195,129 +179,78 @@ class CAGClient:
             Tool execution results
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                request_data = {
-                    "tool": tool_name,
-                    "parameters": parameters,
-                    "context": context
-                }
-                
-                response = await client.post(
-                    f"{self.base_url}/api/v1/tools/execute",
-                    json=request_data,
-                    headers={
-                        "X-API-Key": self.api_key,
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.error(f"Tool execution error: {response.status_code}")
-                    return {"error": f"Tool execution failed: {response.status_code}"}
-                    
-        except Exception as e:
-            logger.error(f"Tool execution error: {e}")
-            return {"error": str(e)}
+            request_data = {"tool": tool_name, "parameters": parameters, "context": context}
+            return await self.post_json("/api/v1/tools/execute", json=request_data)
+        except HTTPClientError as exc:
+            logger.error("Tool execution upstream error: %s", exc)
+            return {"error": exc.message, "status_code": exc.status_code}
+        except Exception as exc:
+            logger.error("Tool execution error: %s", exc)
+            return {"error": str(exc)}
     
     async def get_agent_capabilities(self) -> Dict[str, Any]:
         """Get available agent capabilities and tools"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # Use health endpoint to check if service is available
-                response = await client.get(
-                    f"{self.base_url}/api/v1/cag/health",
-                    headers={"X-API-Key": self.api_key}
-                )
-                
-                if response.status_code == 200:
-                    # Return predefined capabilities since CAG doesn't have a capabilities endpoint
-                    return {
-                        "status": "healthy",
-                        "capabilities": [
-                            "document_analysis",
-                            "query_processing",
-                            "embeddings_generation",
-                            "contextual_search",
-                            "agent_reasoning"
-                        ],
-                        "tools": [
-                            "search_documents",
-                            "analyze_document",
-                            "extract_entities",
-                            "generate_summary"
-                        ]
-                    }
-                else:
-                    return {"error": f"Service unhealthy: {response.status_code}"}
-                    
-        except Exception as e:
-            logger.error(f"Error checking CAG service: {e}")
-            return {"error": str(e)}
+            response = await self.get("/api/v1/cag/health")
+            if response.status_code == 200:
+                return {
+                    "status": "healthy",
+                    "capabilities": [
+                        "document_analysis",
+                        "query_processing",
+                        "embeddings_generation",
+                        "contextual_search",
+                        "agent_reasoning",
+                    ],
+                    "tools": [
+                        "search_documents",
+                        "analyze_document",
+                        "extract_entities",
+                        "generate_summary",
+                    ],
+                }
+            return {"error": f"Service unhealthy: {response.status_code}"}
+        except HTTPClientError as exc:
+            logger.error("Error checking CAG service: %s", exc)
+            return {"error": exc.message}
+        except Exception as exc:
+            logger.error("Error checking CAG service: %s", exc)
+            return {"error": str(exc)}
     
     async def health_check(self) -> Dict[str, Any]:
         """Check health of CAG service"""
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-                response = await client.get(
-                    f"{self.base_url}/health",
-                    headers={"X-API-Key": self.api_key}
-                )
-                
-                if response.status_code == 200:
-                    return {"status": "healthy", "service": "cag"}
-                else:
-                    return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
-                    
-        except Exception as e:
-            logger.error(f"CAG health check failed: {e}")
-            return {"status": "unhealthy", "error": str(e)}
+            response = await self.get("/health", timeout=5.0)
+            if response.status_code == 200:
+                return {"status": "healthy", "service": "cag"}
+            return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+        except HTTPClientError as exc:
+            logger.error("CAG health check failed: %s", exc)
+            return {"status": "unhealthy", "error": exc.message}
+        except Exception as exc:
+            logger.error("CAG health check failed: %s", exc)
+            return {"status": "unhealthy", "error": str(exc)}
     
     async def search_documents(self, search_request: Dict[str, Any]) -> Dict[str, Any]:
         """Search documents using CAG service"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/v1/cag/search",
-                    json=search_request,
-                    headers={
-                        "X-API-Key": self.api_key,
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.error(f"CAG search error: {response.status_code}")
-                    return {"error": f"Search failed: {response.status_code}", "results": []}
-                    
-        except Exception as e:
-            logger.error(f"CAG search error: {e}")
-            return {"error": str(e), "results": []}
+            return await self.post_json("/api/v1/cag/search", json=search_request)
+        except HTTPClientError as exc:
+            logger.error("CAG search error: %s", exc)
+            return {"error": exc.message, "results": []}
+        except Exception as exc:
+            logger.error("CAG search error: %s", exc)
+            return {"error": str(exc), "results": []}
     
     async def add_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:
         """Add document to CAG service"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/v1/cag/documents",
-                    json=document_data,
-                    headers={
-                        "X-API-Key": self.api_key,
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.error(f"CAG add document error: {response.status_code}")
-                    raise Exception(f"Failed to add document: {response.status_code}")
-                    
-        except Exception as e:
-            logger.error(f"CAG add document error: {e}")
+            return await self.post_json("/api/v1/cag/documents", json=document_data)
+        except HTTPClientError as exc:
+            logger.error("CAG add document error: %s", exc)
+            raise
+        except Exception as exc:
+            logger.error("CAG add document error: %s", exc)
             raise
 
 

@@ -2,21 +2,24 @@
 Elasticsearch Microservice Client
 HTTP client for communicating with elasticsearch-service
 """
-import httpx
 import logging
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
+from app.clients.base import BaseHTTPClient
+from app.clients.exceptions import HTTPClientError
 
 logger = logging.getLogger(__name__)
 
 
-class ElasticsearchClient:
+class ElasticsearchClient(BaseHTTPClient):
     """Client for Elasticsearch microservice operations"""
 
     def __init__(self):
-        self.base_url = settings.ELASTICSEARCH_SERVICE_URL or "http://elasticsearch-service:8008"
-        self.api_key = settings.MICROSERVICES_API_KEY
-        self.timeout = 30.0
+        super().__init__(
+            service_name="elasticsearch",
+            base_url=(settings.ELASTICSEARCH_SERVICE_URL or "http://elasticsearch-service:8008"),
+            timeout_type="default",
+        )
 
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make HTTP request to elasticsearch service"""
@@ -38,23 +41,15 @@ class ElasticsearchClient:
                 payload_preview = "Payload parsing error"
                 
         logger.info(f"📡 ES Client Request: {method} {url} | Payload: {payload_preview}")
-
-        headers = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json"
-        }
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.request(method, url, headers=headers, **kwargs)
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                logger.error(f"Elasticsearch service error: {e.response.status_code} - {e.response.text}")
-                raise
-            except Exception as e:
-                logger.error(f"Elasticsearch service request failed: {e}")
-                raise
+        try:
+            response = await self.request(method, f"/api/v1/elasticsearch{endpoint}", **kwargs)
+            return response.json()
+        except HTTPClientError as exc:
+            logger.error("Elasticsearch service error: %s", exc)
+            raise
+        except Exception as exc:
+            logger.error("Elasticsearch service request failed: %s", exc)
+            raise
 
     async def index_document(
         self,

@@ -146,6 +146,18 @@ El bloque `Weaviate + AutoGen Service` del diagrama representa la capa de inteli
 - **Weaviate Vector Database**: Almacenamiento de embeddings y búsqueda semántica
 - **5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
 
+### Optimización de Contexto (tokens)
+Además de la recuperación híbrida, `weaviate-service` incorpora mejoras centradas en **reducir tokens útiles** y controlar el presupuesto del contexto antes de llamar al LLM:
+
+- **Smart Truncation** en `ContextAssembler`: truncado por límites semánticos (secciones → párrafos → frases) para preservar estructura.
+- **Presupuesto configurable de contexto**: porcentaje del `max_tokens` reservado para contexto, evitando el hardcode.
+- **Asignación proporcional** (cuando aplica soft selection): distribución del presupuesto por documento según pesos, con mínimo por documento.
+
+Variables de entorno relevantes (en `weaviate-service`):
+- `RAG_CONTEXT_BUDGET_FRACTION` (default `0.7`): fracción del máximo de tokens dedicada al contexto.
+- `RAG_TRUNCATION_PRIORITY` (`sections|paragraphs|sentences`, default `sections`): estrategia de truncado.
+- `RAG_MIN_TOKENS_PER_DOC` (default `200`): mínimo de tokens por documento; si no cabe, se descarta.
+
 ### Patrones de Orquestación
 - **Sequential (RoundRobinGroupChat)**: Pipeline ordenado Search → Analyze → Summarize
 - **GroupChat (SelectorGroupChat)**: LLM selecciona dinámicamente el agente apropiado

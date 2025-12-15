@@ -1,32 +1,21 @@
 """Security utilities for CAG Service"""
 from typing import Optional, Dict, Any
-from fastapi import HTTPException, Header, Depends
-from fastapi.security import HTTPBearer
+
+from fastapi import HTTPException, Header
 from loguru import logger
 
 from .config import settings
 
-security = HTTPBearer()
-
-
 async def verify_api_key(
     x_api_key: Optional[str] = Header(None),
-    authorization: Optional[str] = Header(None)
 ) -> bool:
     """Verify API key from headers"""
-    api_key = x_api_key
-    
-    # Check Authorization header if X-API-Key not provided
-    if not api_key and authorization:
-        if authorization.startswith("Bearer "):
-            api_key = authorization[7:]
-    
-    if not api_key:
+    if not x_api_key:
         logger.warning("No API key provided")
         raise HTTPException(status_code=401, detail="API key required")
     
-    if api_key != settings.MICROSERVICES_API_KEY:
-        logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
+    if x_api_key != settings.MICROSERVICES_API_KEY:
+        logger.warning(f"Invalid API key attempted: {x_api_key[:10]}...")
         raise HTTPException(status_code=401, detail="Invalid API key")
     
     return True
