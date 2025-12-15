@@ -156,8 +156,8 @@ export default function SimpleSearchPage() {
     if (currentFilters.date_from) setDateFrom(currentFilters.date_from)
     if (currentFilters.date_to) setDateTo(currentFilters.date_to)
     if (currentFilters.tags) setTags(currentFilters.tags.join(', '))
-    if (currentFilters.file_size_min) setFileSizeMin(currentFilters.file_size_min)
-    if (currentFilters.file_size_max) setFileSizeMax(currentFilters.file_size_max)
+    if (currentFilters.file_size_min) setFileSizeMin(String(currentFilters.file_size_min))
+    if (currentFilters.file_size_max) setFileSizeMax(String(currentFilters.file_size_max))
   }, [currentFilters])
 
   useEffect(() => {

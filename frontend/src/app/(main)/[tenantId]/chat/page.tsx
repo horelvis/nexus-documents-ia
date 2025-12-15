@@ -8,10 +8,20 @@ import {
   Zap,
   Brain,
   RefreshCw,
-  Mic
+  Mic,
+  Volume2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -23,8 +33,10 @@ import {
 
 import { EmmaChat, type EmmaChatRef, EmmaVoiceMode } from "@/components/emma-chat"
 import { useBackendUser } from "@/contexts/user-context"
+import { useUser } from "@clerk/nextjs"
 import { useTranslation } from "@/lib/i18n/hooks"
 import { cn } from "@/lib/utils"
+import { TTSProvider, useTTSPreferences } from "@/contexts/tts-context"
 
 type ChatMode = "chat" | "voice"
 
@@ -35,9 +47,18 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ params }: ChatPageProps) {
+  return (
+    <TTSProvider>
+      <ChatPageContent params={params} />
+    </TTSProvider>
+  )
+}
+
+function ChatPageContent({ params }: ChatPageProps) {
   const { tenantId } = React.use(params)
 
   const { backendUser } = useBackendUser()
+  const { user: clerkUser } = useUser()
   const searchParams = useSearchParams()
   const [chatMode, setChatMode] = useState<ChatMode>("chat")
   const [randomPrompts, setRandomPrompts] = useState<string[]>([])
@@ -46,6 +67,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [documentContext, setDocumentContext] = useState<{ id: string; name: string } | null>(null)
   const emmaChatRef = useRef<EmmaChatRef>(null)
   const { t } = useTranslation()
+  const { preferences: ttsPreferences, updatePreferences: updateTTSPreferences } = useTTSPreferences()
 
   // Get prompts - simple function, no useCallback needed
   const getRandomPrompts = (count: number = 4): string[] => {
@@ -140,12 +162,6 @@ export default function ChatPage({ params }: ChatPageProps) {
             </button>
           </div>
 
-          {/* Status Badge */}
-          <Badge variant="secondary">
-            <Zap className="h-3 w-3 mr-1" />
-            {t('chatPage.status.online')}
-          </Badge>
-
           {/* Settings Button */}
           <Sheet>
             <SheetTrigger asChild>
@@ -161,7 +177,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 space-y-6">
+              <div className="mt-6 space-y-6 px-4">
                 {/* Model Settings */}
                 <div className="space-y-3">
                   <h3 className="font-semibold flex items-center gap-2">
@@ -206,8 +222,106 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </h3>
                   <div className="space-y-1 text-sm">
                     <p><span className="text-muted-foreground">{t('chatPage.settingsPage.userInfo.tenant')}:</span> {tenantId}</p>
-                    <p><span className="text-muted-foreground">{t('chatPage.settingsPage.userInfo.user')}:</span> {backendUser?.email || t('chatPage.settingsPage.userInfo.notAvailable')}</p>
+                    <p><span className="text-muted-foreground">{t('chatPage.settingsPage.userInfo.user')}:</span> {clerkUser?.fullName || clerkUser?.firstName || backendUser?.full_name || t('chatPage.settingsPage.userInfo.notAvailable')}</p>
                     <p><span className="text-muted-foreground">{t('chatPage.settingsPage.userInfo.role')}:</span> {backendUser?.is_team_member ? t('chatPage.settingsPage.userInfo.member') : t('chatPage.settingsPage.userInfo.admin')}</p>
+                  </div>
+                </div>
+
+                {/* TTS Settings */}
+                <div className="space-y-3">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <Volume2 className="h-4 w-4" />
+                    {t('chatPage.settingsPage.ttsSettings.title') || 'Voz (TTS)'}
+                  </h3>
+                  <div className="space-y-4">
+                    {/* Auto-play toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="tts-autoplay" className="text-sm">
+                          {t('chatPage.settingsPage.ttsSettings.autoPlay') || 'Reproducir automáticamente'}
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          {t('chatPage.settingsPage.ttsSettings.autoPlayDescription') || 'Lee las respuestas de Emma en voz alta'}
+                        </p>
+                      </div>
+                      <Switch
+                        id="tts-autoplay"
+                        checked={ttsPreferences.autoPlay}
+                        onCheckedChange={(checked) => updateTTSPreferences({ autoPlay: checked })}
+                      />
+                    </div>
+
+                    {/* Voice selection */}
+                    <div className="space-y-2">
+                      <Label htmlFor="tts-voice" className="text-sm">
+                        {t('chatPage.settingsPage.ttsSettings.voice') || 'Voz'}
+                      </Label>
+                      <Select
+                        value={ttsPreferences.voiceId}
+                        onValueChange={(value) => updateTTSPreferences({ voiceId: value })}
+                      >
+                        <SelectTrigger id="tts-voice" className="w-full">
+                          <SelectValue placeholder="Seleccionar voz" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {/* English voices */}
+                          <SelectItem value="en-Carter_man">Carter (EN - Hombre)</SelectItem>
+                          <SelectItem value="en-Davis_man">Davis (EN - Hombre)</SelectItem>
+                          <SelectItem value="en-Mike_man">Mike (EN - Hombre)</SelectItem>
+                          <SelectItem value="en-Frank_man">Frank (EN - Hombre)</SelectItem>
+                          <SelectItem value="en-Emma_woman">Emma (EN - Mujer)</SelectItem>
+                          <SelectItem value="en-Grace_woman">Grace (EN - Mujer)</SelectItem>
+                          {/* Spanish voices */}
+                          <SelectItem value="sp-Spk0_woman">Español (Mujer)</SelectItem>
+                          <SelectItem value="sp-Spk1_man">Español (Hombre)</SelectItem>
+                          {/* German voices */}
+                          <SelectItem value="de-Spk0_man">Alemán (Hombre)</SelectItem>
+                          <SelectItem value="de-Spk1_woman">Alemán (Mujer)</SelectItem>
+                          {/* French voices */}
+                          <SelectItem value="fr-Spk0_man">Francés (Hombre)</SelectItem>
+                          <SelectItem value="fr-Spk1_woman">Francés (Mujer)</SelectItem>
+                          {/* Italian voices */}
+                          <SelectItem value="it-Spk0_woman">Italiano (Mujer)</SelectItem>
+                          <SelectItem value="it-Spk1_man">Italiano (Hombre)</SelectItem>
+                          {/* Portuguese voices */}
+                          <SelectItem value="pt-Spk0_woman">Portugués (Mujer)</SelectItem>
+                          <SelectItem value="pt-Spk1_man">Portugués (Hombre)</SelectItem>
+                          {/* Dutch voices */}
+                          <SelectItem value="nl-Spk0_man">Holandés (Hombre)</SelectItem>
+                          <SelectItem value="nl-Spk1_woman">Holandés (Mujer)</SelectItem>
+                          {/* Polish voices */}
+                          <SelectItem value="pl-Spk0_man">Polaco (Hombre)</SelectItem>
+                          <SelectItem value="pl-Spk1_woman">Polaco (Mujer)</SelectItem>
+                          {/* Japanese voices */}
+                          <SelectItem value="jp-Spk0_man">Japonés (Hombre)</SelectItem>
+                          <SelectItem value="jp-Spk1_woman">Japonés (Mujer)</SelectItem>
+                          {/* Korean voices */}
+                          <SelectItem value="kr-Spk0_woman">Coreano (Mujer)</SelectItem>
+                          <SelectItem value="kr-Spk1_man">Coreano (Hombre)</SelectItem>
+                          {/* Indian voice */}
+                          <SelectItem value="in-Samuel_man">Samuel (IN - Hombre)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Language selection */}
+                    <div className="space-y-2">
+                      <Label htmlFor="tts-language" className="text-sm">
+                        {t('chatPage.settingsPage.ttsSettings.language') || 'Idioma'}
+                      </Label>
+                      <Select
+                        value={ttsPreferences.language}
+                        onValueChange={(value) => updateTTSPreferences({ language: value })}
+                      >
+                        <SelectTrigger id="tts-language" className="w-full">
+                          <SelectValue placeholder="Seleccionar idioma" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="es-ES">Español</SelectItem>
+                          <SelectItem value="en-US">English</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
@@ -290,7 +404,7 @@ export default function ChatPage({ params }: ChatPageProps) {
               onFirstQuery={() => setHasStartedChat(true)}
               isAdmin={backendUser ? (
                 backendUser.is_superuser ||
-                backendUser.roles?.some((role: any) => role.name === 'admin') ||
+                backendUser.is_admin ||
                 !backendUser.is_team_member
               ) : false}
             />

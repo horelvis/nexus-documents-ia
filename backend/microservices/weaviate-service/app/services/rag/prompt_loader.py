@@ -230,3 +230,46 @@ def list_available_agents(filename: str = "emma_prompts.yaml") -> list:
     prompts = load_prompts(filename)
     autogen_agents = prompts.get("autogen_agents", {})
     return list(autogen_agents.keys())
+
+
+# Default analysis prompts (fallback if not in YAML)
+_DEFAULT_ANALYSIS_PROMPTS = {
+    "comprehensive": """Analyze this document following these steps:
+1. First identify the DOCUMENT TYPE (invoice, contract, report, letter, etc.)
+2. Provide analysis APPROPRIATE for that type:
+   - For INVOICES: issuer, recipient, amount, date, concept
+   - For CONTRACTS: parties, subject matter, obligations, deadlines, legal risks
+   - For REPORTS: main topic, conclusions, relevant data
+   - For other documents: summary and key points
+3. DO NOT invent risks or problems where none exist. Be objective and concise.""",
+    "risks": "Identify REAL risks in this document. For simple documents like invoices, state there are no significant risks.",
+    "summary": "Summarize the main points of this document concisely and objectively.",
+    "entities": "Extract important entities: people, organizations, dates, amounts, addresses.",
+    "compliance": "Evaluate regulatory compliance if applicable. For simple documents, state basic requirements.",
+    "obligations": "Extract obligations and commitments if they exist. For invoices, state the amount due and payment deadline.",
+}
+
+
+def get_analysis_prompt(analysis_type: str, filename: str = "emma_prompts.yaml") -> str:
+    """
+    Get analysis prompt for document analysis.
+
+    Loads from 'document_analysis' section in YAML, falls back to defaults.
+
+    Args:
+        analysis_type: Type of analysis (comprehensive, risks, summary, entities, compliance, obligations)
+        filename: YAML file to load from
+
+    Returns:
+        Analysis prompt string
+    """
+    prompts = load_prompts(filename)
+
+    # Get the document_analysis section
+    analysis_prompts = prompts.get("document_analysis", {})
+
+    if analysis_prompts and analysis_type in analysis_prompts:
+        return analysis_prompts[analysis_type]
+
+    # Fallback to defaults
+    return _DEFAULT_ANALYSIS_PROMPTS.get(analysis_type, _DEFAULT_ANALYSIS_PROMPTS["comprehensive"])

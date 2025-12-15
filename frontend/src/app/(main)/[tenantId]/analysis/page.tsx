@@ -137,9 +137,7 @@ export default function AnalysisPage() {
       // Map agent type to analysis type
       const analysisType = agentId === 'contract' || agentId === 'compliance'
         ? 'legal'
-        : agentId === 'summarizer'
-          ? 'summary'
-          : 'comprehensive'
+        : 'general'
 
       const result = await emmaService.analyzeDocument(
         document.id,
@@ -554,10 +552,10 @@ export default function AnalysisPage() {
                         {analysis.analysis.risks.slice(0, 3).map((risk, i) => (
                           <div key={i} className="flex items-start gap-2 text-sm">
                             <Badge
-                              variant={getSeverityColor(risk.severity) as 'destructive' | 'secondary' | 'outline'}
+                              variant={getSeverityColor(risk.severity || 'medium') as 'destructive' | 'secondary' | 'outline'}
                               className="text-xs shrink-0"
                             >
-                              {risk.severity}
+                              {risk.severity || 'medium'}
                             </Badge>
                             <span className="text-muted-foreground">{risk.title}</span>
                           </div>

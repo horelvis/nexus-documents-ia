@@ -86,7 +86,7 @@ export default function AIAgentsWorkflowsPage() {
       setTemplates(catalog)
 
       const previousId = selectedTemplate?.id
-      const nextSelection = catalog.find(t => t.id === previousId) || catalog[0] || null
+      const nextSelection = catalog.find((t: AIWorkflowTemplateMeta) => t.id === previousId) || catalog[0] || null
       setSelectedTemplate(nextSelection || null)
 
       if (!previousId || nextSelection?.id !== previousId) {
@@ -111,7 +111,11 @@ export default function AIAgentsWorkflowsPage() {
 
     try {
       const result = await temporalioService.executeAIWorkflow(templateId, inputData)
-      setExecution(result)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setExecution(result.data)
+      }
     } catch (err: any) {
       setError(`Error ejecutando workflow: ${err?.message || err}`)
     } finally {
@@ -245,7 +249,7 @@ export default function AIAgentsWorkflowsPage() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">Pasos:</span>
-                    <span>{template.workflow_definition?.steps?.length || 0}</span>
+                    <span>{typeof template.workflow_definition === 'object' && template.workflow_definition?.steps?.length || 0}</span>
                   </div>
                   {template.agent_types_used && template.agent_types_used.length > 0 && (
                     <div className="mt-3">
@@ -288,7 +292,7 @@ export default function AIAgentsWorkflowsPage() {
               <div className="text-sm text-gray-600 space-y-1">
                 <p><span className="font-semibold">ID:</span> {selectedTemplate.id}</p>
                 <p><span className="font-semibold">Tenant:</span> {selectedTemplate.tenant_id}</p>
-                <p><span className="font-semibold">Pasos:</span> {selectedTemplate.workflow_definition?.steps?.length || 0}</p>
+                <p><span className="font-semibold">Pasos:</span> {typeof selectedTemplate.workflow_definition === 'object' && selectedTemplate.workflow_definition?.steps?.length || 0}</p>
               </div>
               <div>
                 <Label>Estructura del workflow</Label>
@@ -342,11 +346,15 @@ export default function AIAgentsWorkflowsPage() {
                           <SelectValue placeholder={field.placeholder || "Selecciona una opción"} />
                         </SelectTrigger>
                         <SelectContent>
-                          {field.options.map(option => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
+                          {field.options.map((option: string | { value: string; label: string }) => {
+                            const value = typeof option === 'string' ? option : option.value
+                            const label = typeof option === 'string' ? option : option.label
+                            return (
+                              <SelectItem key={value} value={value}>
+                                {label}
+                              </SelectItem>
+                            )
+                          })}
                         </SelectContent>
                       </Select>
                     )
@@ -439,12 +447,14 @@ export default function AIAgentsWorkflowsPage() {
                       </Badge>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">Iniciado:</span>
-                    <span className="text-sm text-gray-600">
-                      {new Date(executionStatus.created_at).toLocaleString()}
-                    </span>
-                  </div>
+                  {executionStatus.created_at && (
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Iniciado:</span>
+                      <span className="text-sm text-gray-600">
+                        {new Date(executionStatus.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
                   {executionStatus.completed_at && (
                     <div className="flex items-center justify-between">
                       <span className="font-medium">Completado:</span>

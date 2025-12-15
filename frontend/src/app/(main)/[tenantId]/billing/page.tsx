@@ -326,9 +326,11 @@ export default function BillingPage() {
                     {t('billingPage.billingPortal.featureIntro')}
                   </p>
                   <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                    {t('billingPage.billingPortal.features', { returnObjects: true }).map((feature: string, index: number) => (
-                      <li key={index}>• {feature}</li>
-                    ))}
+                    <li>• {language === 'es' ? 'Actualizar métodos de pago' : 'Update payment methods'}</li>
+                    <li>• {language === 'es' ? 'Descargar facturas' : 'Download invoices'}</li>
+                    <li>• {language === 'es' ? 'Actualizar dirección de facturación' : 'Update billing address'}</li>
+                    <li>• {language === 'es' ? 'Gestionar suscripción' : 'Manage subscription'}</li>
+                    <li>• {language === 'es' ? 'Ver historial de pagos' : 'View payment history'}</li>
                   </ul>
                 </div>
               </CardContent>

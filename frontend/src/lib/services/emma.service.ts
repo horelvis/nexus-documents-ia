@@ -350,6 +350,7 @@ export interface AnalysisStreamEvent {
     message?: string
     progress?: number
     step?: number
+    step_index?: number
     total_steps?: number
     agent?: string
     description?: string

@@ -13,6 +13,8 @@ import { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
 import { DisplayRenderer } from "./displays/DisplayRenderer"
 import { EmmaRenderChatProps, EmmaMessage } from "./types"
 import { useTranslation } from "@/lib/i18n/hooks"
+import { TTSControls } from "./TTSControls"
+import { useTTSPreferences } from "@/contexts/tts-context"
 
 export function EmmaRenderChat(props: EmmaRenderChatProps) {
   const {
@@ -103,18 +105,25 @@ export function EmmaRenderChat(props: EmmaRenderChatProps) {
       {/* Messages Area */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
         <div className="space-y-6">
-          {processedMessages.map((message) => (
-            <MessageDisplay
-              key={message.id}
-              message={message}
-              onFeedback={onFeedback}
-              onSuggestionClick={onSuggestionClick}
-              onDocumentClick={safeOnDocumentClick}
-              onPreviewClick={safeOnPreviewClick}
-              onRetry={onRetry}
-              isAdmin={isAdmin}
-            />
-          ))}
+          {processedMessages.map((message, index) => {
+            // Check if this is the latest "result" message (for auto-play)
+            const isLatestResult = message.type === "result" &&
+              index === processedMessages.length - 1;
+
+            return (
+              <MessageDisplay
+                key={message.id}
+                message={message}
+                onFeedback={onFeedback}
+                onSuggestionClick={onSuggestionClick}
+                onDocumentClick={safeOnDocumentClick}
+                onPreviewClick={safeOnPreviewClick}
+                onRetry={onRetry}
+                isAdmin={isAdmin}
+                isLatestResult={isLatestResult}
+              />
+            );
+          })}
 
           {/* Loading State - only show if no progress message exists */}
           {isLoading && !processedMessages.some(m => m.type === 'progress') && <LoadingMessage />}
@@ -139,6 +148,7 @@ interface MessageDisplayProps {
   onPreviewClick?: (doc: any) => void
   onRetry?: (failedQuery: string) => void
   isAdmin?: boolean
+  isLatestResult?: boolean  // True if this is the latest result message (for auto-play)
 }
 
 function MessageDisplay({
@@ -148,9 +158,11 @@ function MessageDisplay({
   onDocumentClick,
   onPreviewClick,
   onRetry,
-  isAdmin = false
+  isAdmin = false,
+  isLatestResult = false
 }: MessageDisplayProps) {
   const { t } = useTranslation()
+  const { preferences: ttsPreferences } = useTTSPreferences()
 
   // Check if this is a "thinking" state (progress without workflow steps)
   const isThinkingState = message.type === "progress" && !message.metadata?.workflow_steps?.length
@@ -309,6 +321,18 @@ function MessageDisplay({
                   <RotateCcw className="h-3 w-3" />
                   {t('emma.errors.retry')}
                 </Button>
+              )}
+
+              {/* TTS Button - Read response aloud */}
+              {message.type !== "user" && message.type !== "error" && message.type !== "progress" && message.content && ttsPreferences.enabled && (
+                <TTSControls
+                  text={message.content}
+                  size="sm"
+                  iconOnly
+                  voiceId={ttsPreferences.voiceId}
+                  language={ttsPreferences.language}
+                  autoPlayOnMount={isLatestResult && ttsPreferences.autoPlay}
+                />
               )}
 
               {/* Feedback Buttons */}

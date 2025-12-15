@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # vLLM configuration (PRIMARY - high-throughput GPU inference)
     vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B")
     vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "4096"))
     vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.7"))
 
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
 
     # Collection naming (tenant isolation)
-    collection_prefix: str = "nexus_"
+    collection_prefix: str = "Nexus_"
     default_collection: str = "documents"
 
     # Agent Framework configuration

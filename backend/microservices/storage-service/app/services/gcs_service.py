@@ -384,10 +384,62 @@ class GCSService:
                 detail=f"Failed to generate signed URL: {str(e)}"
             )
     
+    def move_file(self, source_name: str, destination_name: str) -> Dict[str, Any]:
+        """
+        Move a file within the bucket (copy + delete).
+
+        Uses GCS's native copy operation which is atomic and efficient
+        for files within the same bucket.
+
+        Args:
+            source_name: Current object name/path
+            destination_name: New object name/path
+
+        Returns:
+            Information about the move operation
+        """
+        try:
+            source_blob = self.bucket.blob(source_name)
+
+            if not source_blob.exists():
+                logger.warning(f"Source file not found: {source_name}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Source file not found: {source_name}"
+                )
+
+            # Copy to new location
+            destination_blob = self.bucket.copy_blob(
+                source_blob,
+                self.bucket,
+                destination_name
+            )
+
+            # Delete original
+            source_blob.delete()
+
+            logger.info(f"File moved successfully: {source_name} -> {destination_name}")
+
+            return {
+                "source": source_name,
+                "destination": destination_name,
+                "bucket": self.bucket_name,
+                "moved_at": datetime.utcnow().isoformat()
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to move file {source_name} -> {destination_name}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to move file: {str(e)}"
+            )
+
     def cleanup_bucket(self) -> Dict[str, Any]:
         """
         Limpia todos los archivos del bucket (solo para testing).
-        
+
         Returns:
             Información sobre la limpieza
         """

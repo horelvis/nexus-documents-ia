@@ -32,25 +32,18 @@ from .soft_selection import (
     allocate_token_budget,
 )
 from ...core.config import settings
+from ...core.security import get_tenant_collection_name
 from ..weaviate_service import weaviate_service
 from ...schemas.weaviate import SearchRequest
 from ...schemas.public_knowledge import PublicSearchRequest, PublicDocumentCategory
 
-
-def _get_tenant_collection_name(tenant_id: str) -> str:
-    """
-    Generate tenant-specific collection name for Weaviate.
-
-    Format: Nexus_{tenant_id_with_underscores}_documents
-    Example: Nexus_1a94d369_8426_4d2b_afec_8971073fce1e_documents
-
-    Note: Weaviate collection names are case-sensitive and use underscores
-    """
-    # Normalize tenant_id: replace dashes with underscores
-    normalized_id = tenant_id.replace("-", "_")
-    return f"Nexus_{normalized_id}_documents"
-
 logger = logging.getLogger(__name__)
+
+
+# Use centralized function from security module
+def _get_tenant_collection_name(tenant_id: str) -> str:
+    """Wrapper for centralized collection name generation."""
+    return get_tenant_collection_name(tenant_id, "documents")
 
 
 class MultiStageRetriever:
@@ -161,11 +154,17 @@ class MultiStageRetriever:
         try:
             # Check if sentence-transformers is available
             from sentence_transformers import CrossEncoder
+            import torch
+
+            # Use GPU if available
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
             self._reranker = CrossEncoder(
                 "cross-encoder/ms-marco-MiniLM-L-6-v2",
-                max_length=512
+                max_length=512,
+                device=device
             )
-            logger.info("✅ Loaded CrossEncoder reranker: ms-marco-MiniLM-L-6-v2")
+            logger.info(f"✅ Loaded CrossEncoder reranker: ms-marco-MiniLM-L-6-v2 (device: {device})")
         except ImportError:
             logger.info("ℹ️ sentence-transformers not installed, using embedding fallback for reranking")
             self._reranker = None

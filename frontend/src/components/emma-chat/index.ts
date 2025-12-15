@@ -1,5 +1,5 @@
 // Emma Chat Components - Main exports
-export { EmmaChat } from "./EmmaChat"
+export { EmmaChat, type EmmaChatRef } from "./EmmaChat"
 export { EmmaQueryInput } from "./EmmaQueryInput"
 export { EmmaRenderChat } from "./EmmaRenderChat"
 export { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"

@@ -167,7 +167,6 @@ function SignUpContent() {
                     footerActionLink: 'text-cyan-200 hover:text-white',
                   },
                 }}
-                afterSignUpUrl="/dashboard"
                 unsafeMetadata={{
                   invitation_code: invitation || undefined,
                   tenant_id: tenantId || undefined,

@@ -194,44 +194,58 @@ class WeaviateService:
     def _build_document_access_filter(
         self,
         user_id: str,
-        user_role_ids: Optional[List[str]] = None
+        user_role_ids: Optional[List[str]] = None,
+        collection_has_acl: bool = False
     ) -> Any:
         """
         Build a filter for document-level ACL access control.
 
         Users can see documents that match ANY of these conditions:
-        1. acl_everyone=True (legacy behavior, default for existing docs)
-        2. user_id is in acl_user_ids array
-        3. Any of user's roles is in acl_role_ids array
+        1. acl_everyone=True (explicit ACL) - only if collection has ACL props
+        2. user_id is in acl_user_ids array (explicit ACL) - only if collection has ACL props
+        3. Any of user's roles is in acl_role_ids array (explicit ACL) - only if collection has ACL props
         4. User is the owner (owner_user_id matches)
+        5. Legacy documents without owner (owner_user_id is empty)
 
         This filter is combined with tenant_id and channel filters for complete isolation.
+
+        NOTE: For backwards compatibility with collections that don't have ACL properties,
+        we allow access to legacy documents where owner_user_id is empty (uploaded before ACL).
 
         Args:
             user_id: Current user's UUID as string
             user_role_ids: List of role UUIDs the user belongs to
+            collection_has_acl: Whether the collection has ACL properties in schema
 
         Returns:
             Weaviate filter expression
         """
         Filter = weaviate.classes.query.Filter
 
-        # Condition 1: Accessible to everyone in tenant (backwards compatible default)
-        everyone_access = Filter.by_property("acl_everyone").equal(True)
-
-        # Condition 2: User has explicit access
-        user_access = Filter.by_property("acl_user_ids").contains_any([user_id])
-
-        # Condition 3: User is the document owner
+        # Condition 1: User is the document owner
         owner_access = Filter.by_property("owner_user_id").equal(user_id)
 
-        # Start with: everyone OR user_explicit OR owner
-        acl_filter = everyone_access | user_access | owner_access
+        # Condition 2: Legacy documents without owner (uploaded before ACL system)
+        # These are accessible to all tenant users (backwards compatible)
+        legacy_no_owner = Filter.by_property("owner_user_id").equal("")
 
-        # Condition 4: User's roles have access (if roles provided)
-        if user_role_ids and len(user_role_ids) > 0:
-            role_access = Filter.by_property("acl_role_ids").contains_any(user_role_ids)
-            acl_filter = acl_filter | role_access
+        # Start with: owner OR legacy_no_owner (always safe, no schema dependency)
+        acl_filter = owner_access | legacy_no_owner
+
+        # Add ACL-based filters only if collection has ACL properties
+        if collection_has_acl:
+            # Condition 3: Accessible to everyone in tenant (explicit ACL)
+            everyone_access = Filter.by_property("acl_everyone").equal(True)
+            acl_filter = acl_filter | everyone_access
+
+            # Condition 4: User has explicit access
+            user_access = Filter.by_property("acl_user_ids").contains_any([user_id])
+            acl_filter = acl_filter | user_access
+
+            # Condition 5: User's roles have access (if roles provided)
+            if user_role_ids and len(user_role_ids) > 0:
+                role_access = Filter.by_property("acl_role_ids").contains_any(user_role_ids)
+                acl_filter = acl_filter | role_access
 
         return acl_filter
 
@@ -979,20 +993,16 @@ class WeaviateService:
 
                     collection = self.client.collections.get(collection_name)
 
-                    # Build filter: document_id + access control (channel + ACL)
+                    # Build filter: document_id only
+                    # NOTE: Tenant isolation is already guaranteed by the collection name
+                    # (Nexus_{tenant_id}_documents). ACL filtering is skipped here because:
+                    # 1. Legacy collections don't have ACL properties in schema
+                    # 2. Document-specific lookups should succeed if user has tenant access
+                    # 3. ACL is enforced at search_documents() level for listing/searching
                     doc_filter = wq.Filter.by_property("document_id").equal(document_id)
 
-                    # Apply combined access control (channel + document ACL) if user_id is provided
-                    # This ensures consistency with search_documents() which also uses
-                    # _build_combined_access_filter for access control
-                    if user_id:
-                        access_filter = self._build_combined_access_filter(user_id)
-                        combined_filter = doc_filter & access_filter
-                    else:
-                        combined_filter = doc_filter
-
                     response = collection.query.fetch_objects(
-                        filters=combined_filter,
+                        filters=doc_filter,
                         limit=1
                     )
 

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint, Index
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Float, LargeBinary, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -289,27 +289,40 @@ class TeamInvitation(Base):
 
 class Tenant(Base):
     __tablename__ = "tenants"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, unique=True)
+    slug = Column(String(100), nullable=True, unique=True, index=True)  # URL-friendly identifier for Site portal
     description = Column(Text, nullable=True)
     bucket_name = Column(String(255), nullable=False, unique=True)
     is_active = Column(Boolean(), default=True, nullable=False)
     settings = Column(JSONB, nullable=True, default={})
     max_users = Column(Integer, nullable=True)
     max_storage_mb = Column(Integer, nullable=True)
-    
+
+    # Auto-classification settings (RAG + LLM)
+    auto_classification_enabled = Column(Boolean, default=False, nullable=False)
+    auto_classification_k = Column(Integer, default=7, nullable=False)
+    auto_classification_min_confidence = Column(Float, default=0.6, nullable=False)
+
+    # Site Guest Portal settings
+    site_enabled = Column(Boolean, default=False, nullable=False)  # Enable external guest access
+    site_logo_url = Column(String(500), nullable=True)  # Custom logo for portal
+    site_welcome_message = Column(Text, nullable=True)  # Custom welcome message
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     users = relationship("User", back_populates="tenant")
     documents = relationship("Document", back_populates="tenant")
     tags = relationship("Tag", back_populates="tenant")
     roles = relationship("Role", back_populates="tenant")
     team_invitations = relationship("TeamInvitation", back_populates="tenant", cascade="all, delete-orphan")
-    
+    site_guests = relationship("SiteGuest", back_populates="tenant", cascade="all, delete-orphan")
+
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),
+        Index('idx_tenants_slug', 'slug'),
     )
 
 
@@ -339,7 +352,13 @@ class Document(Base):
     
     indexed = Column(Integer, default=0, nullable=False)
     indexing_error = Column(Text, nullable=True)
-    
+
+    # Folder organization (physical folders in GCS)
+    folder_path = Column(String(2000), nullable=True, default='/Sin Clasificar')
+    auto_classified = Column(Boolean, default=False, nullable=False)
+    classification_confidence = Column(Float, nullable=True)
+    classification_reasoning = Column(Text, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
@@ -358,6 +377,7 @@ class Document(Base):
         Index('idx_documents_indexed', 'indexed'),
         Index('idx_documents_category', 'category'),
         Index('idx_documents_category_tenant', 'category', 'tenant_id'),
+        Index('idx_documents_folder_path', 'tenant_id', 'folder_path'),
     )
     
     def increment_metric(self, metric_name: str, session, amount: int = 1):
@@ -397,6 +417,31 @@ class Document(Base):
                 recency_factor = 1 + ((30 - days_since_view) / 30) * recency_weight
         
         self.metrics.relevance_score = base_score * recency_factor
+
+
+class FolderMarker(Base):
+    """
+    Markers for empty folders created by users.
+
+    In the Google Drive style navigation, folders only "exist" when they have documents.
+    This table allows users to create empty folders that persist until they add documents.
+    When a folder has documents, the marker is not needed (folder is derived from document paths).
+    """
+    __tablename__ = "folder_markers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    folder_path = Column(String(2000), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'folder_path', name='uq_folder_marker_tenant_path'),
+        Index('idx_folder_markers_tenant_path', 'tenant_id', 'folder_path'),
+    )
 
 
 class DocumentView(Base):
@@ -1349,4 +1394,255 @@ class DocumentACLAudit(Base):
     __table_args__ = (
         Index('idx_acl_audits_tenant_created', 'tenant_id', 'created_at'),
         Index('idx_acl_audits_document_action', 'document_id', 'action'),
+    )
+
+
+# =====================================
+# SITE GUEST ACCESS SYSTEM (SharePoint-like External Sharing)
+# =====================================
+
+class SiteGuest(Base):
+    """
+    External users invited to access tenant content via OTP authentication.
+
+    Guests don't have full accounts - they authenticate via email OTP and can only
+    see documents/folders explicitly shared with them. Permissions are configurable
+    per guest (view, download, upload).
+    """
+    __tablename__ = "site_guests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    # Invitation tracking
+    invited_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    invited_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Access tracking
+    last_access_at = Column(DateTime(timezone=True), nullable=True)
+    access_count = Column(Integer, default=0, nullable=False)
+
+    # Default permissions (can be overridden per document/folder)
+    can_view = Column(Boolean, default=True, nullable=False)
+    can_download = Column(Boolean, default=False, nullable=False)
+    can_upload = Column(Boolean, default=False, nullable=False)
+
+    # Expiration (optional)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="site_guests")
+    inviter = relationship("User", foreign_keys=[invited_by_user_id])
+    otp_codes = relationship("SiteGuestOTP", back_populates="guest", cascade="all, delete-orphan")
+    sessions = relationship("SiteGuestSession", back_populates="guest", cascade="all, delete-orphan")
+    permissions = relationship("SiteGuestPermission", back_populates="guest", cascade="all, delete-orphan")
+    access_logs = relationship("SiteGuestAccessLog", back_populates="guest", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'email', name='uq_site_guest_tenant_email'),
+        Index('idx_site_guests_tenant_active', 'tenant_id', 'is_active'),
+        Index('idx_site_guests_email', 'email'),
+    )
+
+    def is_expired(self) -> bool:
+        """Check if guest access has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+    def is_valid(self) -> bool:
+        """Check if guest can access the portal."""
+        return self.is_active and not self.is_expired()
+
+
+class SiteGuestOTP(Base):
+    """
+    One-Time Password codes for guest authentication.
+
+    OTP codes are 6-digit numbers, hashed with SHA256, valid for 10 minutes.
+    Only one active OTP per guest at a time (previous ones are invalidated).
+    """
+    __tablename__ = "site_guest_otp"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # OTP code (SHA256 hash of the 6-digit code)
+    otp_hash = Column(String(64), nullable=False)
+
+    # Validity
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Tracking
+    ip_address = Column(String(45), nullable=True)
+    attempts = Column(Integer, default=0, nullable=False)  # Failed verification attempts
+
+    # Relationships
+    guest = relationship("SiteGuest", back_populates="otp_codes")
+
+    __table_args__ = (
+        Index('idx_site_guest_otp_guest_expires', 'guest_id', 'expires_at'),
+    )
+
+    def is_valid(self) -> bool:
+        """Check if OTP is still valid (not expired, not used)."""
+        now = datetime.now(timezone.utc)
+        return (
+            self.used_at is None and
+            self.expires_at > now and
+            self.attempts < 5  # Max 5 failed attempts
+        )
+
+
+class SiteGuestSession(Base):
+    """
+    Active sessions for authenticated guests.
+
+    After successful OTP verification, a session token is issued. Sessions
+    expire after 8 hours or on explicit logout. Token is stored as SHA256 hash.
+    """
+    __tablename__ = "site_guest_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Session token (SHA256 hash of the actual token)
+    session_token_hash = Column(String(64), nullable=False, unique=True, index=True)
+
+    # Validity
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_activity_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Client info
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+
+    # Relationships
+    guest = relationship("SiteGuest", back_populates="sessions")
+    access_logs = relationship("SiteGuestAccessLog", back_populates="session")
+
+    __table_args__ = (
+        Index('idx_site_guest_sessions_active', 'is_active', 'expires_at'),
+        Index('idx_site_guest_sessions_guest', 'guest_id', 'is_active'),
+    )
+
+    def is_valid(self) -> bool:
+        """Check if session is still valid."""
+        now = datetime.now(timezone.utc)
+        return (
+            self.is_active and
+            self.revoked_at is None and
+            self.expires_at > now
+        )
+
+
+class SiteGuestPermission(Base):
+    """
+    Specific permissions granted to a guest for a document or folder.
+
+    Each entry grants specific permission types (view, download, upload) to
+    a guest for a specific document OR folder (not both). Folder permissions
+    apply to all documents within that folder.
+    """
+    __tablename__ = "site_guest_permissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Target: document OR folder (mutually exclusive)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
+    folder_path = Column(String(2000), nullable=True)  # Folder path instead of folder_id
+
+    # Permission type
+    permission_type = Column(String(20), nullable=False)  # view, download, upload
+
+    # Granting info
+    granted_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Optional expiration
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    guest = relationship("SiteGuest", back_populates="permissions")
+    document = relationship("Document")
+    granter = relationship("User", foreign_keys=[granted_by_user_id])
+
+    __table_args__ = (
+        # Either document_id OR folder_path must be set, not both
+        CheckConstraint(
+            '(document_id IS NOT NULL AND folder_path IS NULL) OR '
+            '(document_id IS NULL AND folder_path IS NOT NULL)',
+            name='ck_site_guest_permission_target'
+        ),
+        UniqueConstraint('guest_id', 'document_id', 'permission_type', name='uq_site_guest_doc_permission'),
+        UniqueConstraint('guest_id', 'folder_path', 'permission_type', name='uq_site_guest_folder_permission'),
+        Index('idx_site_guest_permissions_guest', 'guest_id'),
+        Index('idx_site_guest_permissions_document', 'document_id'),
+    )
+
+    def is_expired(self) -> bool:
+        """Check if permission has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+
+class SiteGuestAccessLog(Base):
+    """
+    Audit trail for all guest actions.
+
+    Logs every significant action: login, document view, download, upload.
+    Used for security monitoring and compliance reporting.
+    """
+    __tablename__ = "site_guest_access_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("site_guest_sessions.id", ondelete="SET NULL"), nullable=True)
+
+    # Action details
+    action = Column(String(50), nullable=False, index=True)  # login, logout, otp_request, view, download, upload
+    success = Column(Boolean, default=True, nullable=False)
+    error_message = Column(Text, nullable=True)
+
+    # Target (optional, for document actions)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    folder_path = Column(String(2000), nullable=True)
+
+    # Client info
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+
+    # Additional context
+    details = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    guest = relationship("SiteGuest", back_populates="access_logs")
+    session = relationship("SiteGuestSession", back_populates="access_logs")
+    document = relationship("Document")
+
+    __table_args__ = (
+        Index('idx_site_guest_access_logs_guest_created', 'guest_id', 'created_at'),
+        Index('idx_site_guest_access_logs_action', 'action', 'created_at'),
+        Index('idx_site_guest_access_logs_document', 'document_id'),
     )

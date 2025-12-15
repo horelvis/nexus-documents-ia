@@ -75,13 +75,15 @@ async def log_requests_middleware(request: Request, call_next: Callable) -> Resp
     # Handle OPTIONS requests early (CORS preflight)
     if request.method == "OPTIONS":
         logger.info(f"🔄 OPTIONS: {request.url.path}")
-        logger.info(f"🌐 Origin: {request.headers.get('origin')}")
-        logger.info(f"🔍 Request headers: {dict(request.headers)}")
+        if settings.DEBUG:
+            logger.info(f"🌐 Origin: {request.headers.get('origin')}")
+            logger.debug("🔍 Request headers: %s", dict(request.headers))
 
         response = await call_next(request)
         process_time = time.time() - start_time
 
-        logger.info(f"📨 Response headers: {dict(response.headers)}")
+        if settings.DEBUG:
+            logger.debug("📨 Response headers: %s", dict(response.headers))
         logger.info(f"✅ OPTIONS completed: {response.status_code} ({process_time:.3f}s)")
 
         if response.status_code != 200:
@@ -108,15 +110,10 @@ async def log_requests_middleware(request: Request, call_next: Callable) -> Resp
     # Log headers for auth endpoints
     if request.url.path.startswith("/api/v1/auth"):
         logger.info(f"🔍 Auth endpoint: {request.url.path}")
-        logger.info(f"🔗 Origin: {origin or 'None'}")
-        logger.info(f"🎫 Auth header: {'Yes' if auth_header else 'No'}")
-
-        if auth_header and len(auth_header.split(' ')) == 2:
-            auth_type, token = auth_header.split(' ')
-            logger.info(f"🔐 Token: {auth_type} {token[:20]}...")
-
-        # Log all headers for debugging when there's an auth problem
-        logger.debug(f"📋 All headers: {dict(request.headers)}")
+        if settings.DEBUG:
+            logger.info(f"🔗 Origin: {origin or 'None'}")
+            logger.info(f"🎫 Auth header present: {'Yes' if auth_header else 'No'}")
+            logger.debug("📋 All headers: %s", dict(request.headers))
 
     try:
         # Procesar la solicitud

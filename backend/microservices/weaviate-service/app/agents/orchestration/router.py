@@ -565,3 +565,42 @@ def classify_domain(query: str) -> list[str]:
     """
     router = get_domain_router()
     return router.classify(query)
+
+
+def preload_semantic_routers() -> None:
+    """
+    Preload all semantic routers at service startup.
+
+    This downloads and caches the HuggingFace encoder model if not already cached,
+    then initializes both routers. This prevents the ~45s delay on the first
+    user request.
+
+    The model (all-MiniLM-L6-v2, ~23MB) is cached in:
+    - ~/.cache/huggingface/hub/ (default)
+    - Or HF_HOME environment variable if set
+
+    Call this function during service startup for optimal user experience.
+    """
+    import time
+    start = time.perf_counter()
+
+    logger.info("🚀 Preloading Semantic Routers (downloading model if needed)...")
+
+    try:
+        # Preload pattern router (also loads the encoder)
+        pattern_router = get_semantic_router()
+        pattern_time = time.perf_counter() - start
+        logger.info(f"✅ SemanticPatternRouter preloaded in {pattern_time:.2f}s")
+
+        # Preload domain router (reuses encoder from cache)
+        domain_start = time.perf_counter()
+        domain_router = get_domain_router()
+        domain_time = time.perf_counter() - domain_start
+        logger.info(f"✅ SemanticDomainRouter preloaded in {domain_time:.2f}s")
+
+        total_time = time.perf_counter() - start
+        logger.info(f"✅ All Semantic Routers preloaded in {total_time:.2f}s")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to preload Semantic Routers: {e}")
+        logger.warning("⚠️ First request will experience delay while loading routers")

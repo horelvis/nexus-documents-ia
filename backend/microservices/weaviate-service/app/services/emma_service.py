@@ -40,12 +40,6 @@ from app.agents.emma_coordinator import (
     get_emma_coordinator
 )
 
-# FALLBACK: EmmaHandoffWorkflow for specialized agent routing
-from app.agents.handoff_workflow import (
-    EmmaHandoffWorkflow, get_emma_handoff_workflow,
-    HandoffWorkflowResult
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -55,18 +49,11 @@ class EmmaService:
 
     Uses EmmaCoordinator as the ONLY execution path for agent-based queries.
     Falls back to RAGPipeline only when agents are disabled (settings.agents_enabled=False).
-
-    EmmaHandoffWorkflow is NOT used as fallback because it uses a different
-    context storage format, which causes context degradation when switching
-    between coordinator and handoff mid-session.
     """
 
     def __init__(self):
         # PRIMARY: EmmaCoordinator with .as_tool() delegation
         self._coordinator: EmmaCoordinator = get_emma_coordinator()
-
-        # FALLBACK: EmmaHandoffWorkflow for specialized routing
-        self._handoff_workflow: EmmaHandoffWorkflow = get_emma_handoff_workflow()
 
         self._initialized = False
         self._available_tools = []
@@ -256,6 +243,13 @@ Responde SOLO una palabra:"""
             # Profession (for legal domain)
             if request_context.get("profession") and not user_context.get("profession"):
                 user_context["profession"] = request_context["profession"]
+            # Document context (for focused document analysis)
+            if request_context.get("document_id"):
+                user_context["document_id"] = request_context["document_id"]
+                # Load document content for direct analysis (reduces LLM calls)
+                await self._load_document_content(tenant_id, request_context["document_id"], user_context)
+            if request_context.get("focus_document"):
+                user_context["focus_document"] = request_context["focus_document"]
 
         # Log what we have
         if user_context.get("name"):
@@ -263,7 +257,51 @@ Responde SOLO una palabra:"""
         else:
             logger.debug(f"👤 No user name in context for user_id={user_id}")
 
+        # Log document context if present
+        if user_context.get("document_id"):
+            logger.info(f"📄 Document context: {user_context.get('document_id')}")
+
         return user_context if user_context else None
+
+    async def _load_document_content(
+        self,
+        tenant_id: str,
+        document_id: str,
+        user_context: Dict[str, Any]
+    ) -> None:
+        """
+        Load document content into user_context for direct analysis.
+
+        This allows Emma to analyze simple documents (invoices, payslips)
+        directly without calling additional tools, reducing LLM calls.
+        """
+        try:
+            from app.services.weaviate_service import WeaviateService
+            from app.core.security import get_tenant_collection_name
+
+            service = WeaviateService()
+            collection_name = get_tenant_collection_name(tenant_id)
+
+            doc = await service.get_document_by_id(
+                collection_name=collection_name,
+                document_id=document_id
+            )
+
+            if doc:
+                content = doc.get("content", "")
+                title = doc.get("title", doc.get("filename", "Document"))
+
+                # Only load if content is reasonable size (< 6000 chars)
+                # Larger documents should use analyze_document tool
+                if len(content) < 6000:
+                    user_context["document_content"] = content
+                    user_context["document_title"] = title
+                    logger.info(f"📄 Loaded document content: {title} ({len(content)} chars)")
+                else:
+                    logger.info(f"📄 Document too large for direct analysis: {title} ({len(content)} chars)")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load document content: {e}")
 
     async def initialize(self):
         """Initialize Emma components."""
@@ -274,11 +312,6 @@ Responde SOLO una palabra:"""
             # PRIMARY: Initialize EmmaCoordinator
             await self._coordinator.initialize()
             logger.info("✅ EmmaCoordinator initialized (8 subagent tools with .as_tool())")
-
-            # LEGACY: EmmaHandoffWorkflow kept for reference but NOT used as fallback
-            # Initializing it anyway in case it's needed for debugging/testing
-            await self._handoff_workflow.initialize()
-            logger.info("✅ EmmaHandoffWorkflow initialized (legacy, not used as fallback)")
 
             # Initialize Tool Framework
             await self._tool_integration.initialize()
@@ -384,6 +417,9 @@ Responde SOLO una palabra:"""
                 orchestration_hint = query.context.get("orchestration")
 
             logger.info(f"🤖 Executing with EmmaCoordinator: {query.query[:50]}...")
+            logger.info(f"📋 Query context: tenant={query.tenant_id}, session={session_id[:16]}...")
+            logger.info(f"📋 User context: {user_context}")
+            logger.info(f"📋 Orchestration hint: {orchestration_hint}")
 
             result: EmmaCoordinatorResult = await self._coordinator.execute(
                 query=query.query,
@@ -395,6 +431,12 @@ Responde SOLO una palabra:"""
             )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
+
+            # Log result details
+            logger.info(f"📤 Coordinator result: success={result.success}")
+            logger.info(f"📤 Agents delegated: {result.agents_delegated}")
+            logger.info(f"📤 Tools called: {result.tools_called}")
+            logger.info(f"📤 Answer preview: {result.answer[:200] if result.answer else 'None'}...")
 
             # Build decision path
             decision_path = ["emma_coordinator"]
@@ -471,98 +513,20 @@ Responde SOLO una palabra:"""
                 available_tools=self._available_tools
             )
 
-    async def _execute_with_handoff(
-        self,
-        query: EmmaQuery,
-        session_id: str,
-        start_time: float
-    ) -> EmmaResponse:
-        """
-        Execute query using EmmaHandoffWorkflow (FALLBACK).
-
-        Routes to specialized agents using deterministic classification.
-        """
-        user_id = query.context.get("user_id") if query.context else None
-
-        user_context = None
-        if user_id and self._memory:
-            try:
-                user_context = await self._memory.get_user_context(
-                    query.tenant_id, user_id
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to load user context: {e}")
-
-        try:
-            logger.info(f"🎯 Executing with EmmaHandoffWorkflow: {query.query[:50]}...")
-
-            result: HandoffWorkflowResult = await self._handoff_workflow.execute(
-                query=query.query,
-                tenant_id=query.tenant_id,
-                session_id=session_id,
-                user_context=user_context
-            )
-
-            execution_time_ms = int((time.time() - start_time) * 1000)
-
-            decision_path = ["handoff_workflow"]
-            decision_path.extend(result.agents_used)
-            decision_path.append("completed" if result.success else "error")
-
-            debug_data = None
-            if query.enable_debug:
-                debug_data = {
-                    "handoff_success": result.success,
-                    "agents_used": result.agents_used,
-                    "handoffs": result.handoffs,
-                    "thread_id": result.thread_id,
-                    "workflow_type": result.metadata.get("workflow_type", "handoff"),
-                    "router": result.metadata.get("router", "EmmaRouter")
-                }
-
-            await self._store_conversation(
-                tenant_id=query.tenant_id,
-                session_id=session_id,
-                user_query=query.query,
-                assistant_response=result.answer,
-                user_id=user_id,
-                tools_used=result.agents_used
-            )
-
-            return EmmaResponse(
-                query=query.query,
-                answer=result.answer,
-                session_id=session_id,
-                tenant_id=query.tenant_id,
-                decision_path=decision_path,
-                tools_used=result.agents_used,
-                data=debug_data,
-                visualization=None,
-                confidence_score=0.85 if result.success else 0.5,
-                execution_time_ms=execution_time_ms,
-                iterations=1,
-                learning_applied=False,
-                suggestions=self._generate_suggestions(query.query),
-                available_tools=self._available_tools
-            )
-
-        except Exception as e:
-            logger.error(f"❌ EmmaHandoffWorkflow execution failed: {e}")
-            import traceback
-            traceback.print_exc()
-
-            # Final fallback to RAG
-            logger.info("↩️ Falling back to RAG pipeline")
-            return await self._fallback_rag_query(query, session_id, start_time)
-
     async def execute_query_stream(self, query: EmmaQuery) -> AsyncGenerator[Dict[str, Any], None]:
         """Execute Emma AI query with streaming progress."""
         session_id = query.session_id or str(uuid.uuid4())
 
+        # AGGRESSIVE STREAMING: Emit progress immediately
+        yield {
+            "event": "progress",
+            "data": {"message": "Procesando consulta...", "stage": "init", "session_id": session_id}
+        }
+
         if not self._initialized:
             await self.initialize()
 
-        # Load conversation history
+        # Load conversation history (in background, don't block streaming)
         conversation_history = []
         try:
             if session_id:
@@ -574,17 +538,33 @@ Responde SOLO una palabra:"""
         except Exception as e:
             logger.warning(f"⚠️ Failed to load conversation history: {e}")
 
-        # NOTE: All queries go through EmmaCoordinator to maintain AgentThread context
-        # The Coordinator handles greetings, identity questions, etc. while preserving memory
-
         try:
-            # Use EmmaCoordinator streaming
             user_id = query.context.get("user_id") if query.context else None
+            document_id = query.context.get("document_id") if query.context else None
 
-            # Get enriched user context for personalization
+            # AGGRESSIVE STREAMING: Show document loading progress
+            if document_id:
+                yield {
+                    "event": "progress",
+                    "data": {"message": "Cargando documento...", "stage": "loading_document", "session_id": session_id}
+                }
+
+            # Get enriched user context (includes document content loading)
             user_context = await self._get_enriched_user_context(
                 query.tenant_id, user_id, query.context
             )
+
+            # AGGRESSIVE STREAMING: Show document identified
+            if user_context and user_context.get("document_title"):
+                yield {
+                    "event": "progress",
+                    "data": {
+                        "message": f"Analizando: {user_context['document_title']}",
+                        "stage": "analyzing",
+                        "document": user_context["document_title"],
+                        "session_id": session_id
+                    }
+                }
 
             async for event in self._coordinator.execute_stream(
                 query=query.query,
@@ -804,9 +784,8 @@ Responde SOLO una palabra:"""
             "agents_enabled": settings.agents_enabled,
             "initialized": self._initialized,
             "coordinator_available": self._coordinator is not None,
-            "handoff_workflow_available": self._handoff_workflow is not None,
             "available_tools_count": len(self._available_tools),
-            "orchestration_type": "EmmaCoordinator + EmmaHandoffWorkflow",
+            "orchestration_type": "EmmaCoordinator",
             "coordinator_status": coordinator_status
         }
 

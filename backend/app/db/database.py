@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine, event
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.declarative import declarative_base
@@ -116,7 +117,7 @@ def test_connection() -> bool:
     """
     try:
         with engine.connect() as conn:
-            conn.exec_driver_sql("SELECT 1")
+            conn.execute(text("SELECT 1"))
         logger.info("✅ Database connection test successful")
         return True
     except Exception as e:

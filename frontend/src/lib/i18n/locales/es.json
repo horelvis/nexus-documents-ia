@@ -732,6 +732,7 @@
     "admin": {
       "teams": "Gestión de Equipos",
       "settings": "Configuración del Tenant",
+      "siteGuest": "Acceso Externo",
       "providers": "Proveedores de Firma",
       "publicKnowledge": "Base de Conocimiento Legal",
       "billing": "Facturación",
@@ -1158,5 +1159,366 @@
     "loading": "Cargando canales...",
     "error": "Error al cargar canales",
     "retry": "Reintentar"
+  },
+  "shareDialog": {
+    "title": "Compartir Documento",
+    "description": "Gestionar acceso para \"{title}\"",
+    "tabs": {
+      "publicLink": "Enlace Público",
+      "userAccess": "Acceso de Usuarios"
+    },
+    "linkTab": {
+      "shareType": "Tipo de Compartición",
+      "viewOnly": "Solo Ver",
+      "viewAndDownload": "Ver y Descargar",
+      "linkExpiration": "Expiración del Enlace",
+      "hours": {
+        "1": "1 Hora",
+        "6": "6 Horas",
+        "24": "24 Horas",
+        "72": "3 Días",
+        "168": "1 Semana",
+        "720": "30 Días"
+      },
+      "accessLimit": "Límite de Accesos (opcional)",
+      "accessLimitPlaceholder": "Ilimitado",
+      "accessLimitHelp": "Número máximo de veces que se puede acceder al enlace",
+      "passwordProtection": "Protección con Contraseña",
+      "enterPassword": "Introducir contraseña",
+      "recipientInfo": "Información del Destinatario (Opcional)",
+      "emailAddress": "Dirección de Email",
+      "emailPlaceholder": "destinatario@ejemplo.com",
+      "recipientName": "Nombre del Destinatario",
+      "recipientNamePlaceholder": "Juan García",
+      "shareMessage": "Mensaje de Compartición",
+      "shareMessagePlaceholder": "Te comparto este documento...",
+      "createSecureLink": "Crear Enlace Seguro",
+      "creating": "Creando...",
+      "secureShareLink": "Enlace Seguro de Compartición",
+      "expires": "Expira",
+      "hoursFromNow": "horas desde ahora",
+      "maxAccess": "Accesos Máximos",
+      "times": "veces",
+      "protected": "Protegido",
+      "type": "Tipo",
+      "sendTo": "Enviar a {email}",
+      "createAnotherLink": "Crear Otro Enlace"
+    },
+    "usersTab": {
+      "visibleToTeam": "Visible para el Equipo",
+      "visibleToTeamDesc": "Todos los miembros del equipo pueden ver este documento",
+      "grantAccess": "Conceder acceso a usuario",
+      "selectTeamUser": "Seleccionar usuario del equipo",
+      "searchUser": "Buscar usuario...",
+      "searchByNameOrEmail": "Buscar por nombre o email...",
+      "noUsersFound": "No se encontraron usuarios",
+      "noName": "Sin nombre",
+      "permissions": "Permisos",
+      "view": "Ver",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "share": "Compartir",
+      "granting": "Concediendo...",
+      "grantAccessBtn": "Conceder acceso",
+      "currentAccess": "Acceso actual ({count})",
+      "noDirectAccess": "Ningún usuario tiene acceso directo todavía.",
+      "unknownUser": "Usuario Desconocido",
+      "expiresOn": "Expira: {date}"
+    },
+    "toasts": {
+      "selectUser": "Selecciona un usuario",
+      "permissionGranted": "Permiso concedido a {name}",
+      "grantError": "Error al conceder permiso",
+      "accessRevoked": "Acceso revocado",
+      "accessRevokedFor": "Acceso revocado para {name}",
+      "revokeError": "Error al revocar permiso",
+      "documentPrivate": "El documento ahora es privado",
+      "documentPublic": "El documento ahora es visible para todo el equipo",
+      "updateAccessError": "Error al actualizar el acceso",
+      "loadAclsError": "Error al cargar permisos de acceso",
+      "documentIdRequired": "Se requiere ID del documento",
+      "serviceNotAvailable": "Servicio no disponible. Inténtalo de nuevo.",
+      "linkCreated": "¡Enlace seguro creado correctamente!",
+      "createLinkError": "Error al crear el enlace",
+      "linkCopied": "Enlace seguro copiado al portapapeles",
+      "copyError": "Error al copiar el enlace",
+      "enterEmail": "Por favor, introduce una dirección de email",
+      "emailOpened": "Cliente de email abierto con el enlace seguro"
+    }
+  },
+  "siteGuest": {
+    "title": "Portal Site",
+    "subtitle": "Gestiona el acceso externo a documentos para usuarios invitados",
+    "description": "Comparte documentos de forma segura con usuarios externos mediante autenticación OTP",
+    "tabs": {
+      "settings": "Configuración",
+      "guests": "Invitados"
+    },
+    "settings": {
+      "title": "Configuración del Portal",
+      "description": "Configura la apariencia y comportamiento del portal para invitados externos",
+      "portalUrl": "URL del Portal",
+      "portalUrlDescription": "Comparte esta URL con los invitados para que accedan al portal",
+      "slug": "Slug del Tenant",
+      "slugDescription": "Identificador único para la URL del portal",
+      "slugPlaceholder": "mi-empresa",
+      "logoUrl": "URL del Logo",
+      "logoUrlDescription": "Logo que se mostrará en el portal (recomendado: 200x50px)",
+      "logoUrlPlaceholder": "https://ejemplo.com/logo.png",
+      "welcomeMessage": "Mensaje de Bienvenida",
+      "welcomeMessageDescription": "Texto mostrado en la página de inicio del portal",
+      "welcomeMessagePlaceholder": "Introduce tu email para recibir un código de acceso",
+      "saveChanges": "Guardar Cambios",
+      "saving": "Guardando...",
+      "preview": "Vista Previa",
+      "previewDescription": "Así se verá el portal para tus invitados",
+      "copyUrl": "Copiar URL"
+    },
+    "guests": {
+      "title": "Invitados del Portal",
+      "description": "Usuarios externos con acceso a documentos compartidos",
+      "addGuest": "Añadir Invitado",
+      "inviteGuest": "Invitar Invitado",
+      "noGuests": {
+        "title": "No hay invitados",
+        "description": "Añade invitados para compartir documentos de forma segura"
+      },
+      "table": {
+        "name": "Nombre",
+        "email": "Email",
+        "status": "Estado",
+        "permissions": "Permisos",
+        "lastAccess": "Último Acceso",
+        "accessCount": "Accesos",
+        "actions": "Acciones",
+        "never": "Nunca"
+      },
+      "status": {
+        "active": "Activo",
+        "inactive": "Inactivo"
+      },
+      "permissions": {
+        "view": "Ver",
+        "download": "Descargar",
+        "upload": "Subir"
+      },
+      "actions": {
+        "edit": "Editar",
+        "delete": "Eliminar",
+        "deactivate": "Desactivar",
+        "activate": "Activar",
+        "resendInvite": "Reenviar Invitación",
+        "viewPermissions": "Ver Permisos",
+        "viewLogs": "Ver Registros"
+      }
+    },
+    "form": {
+      "title": "Datos del Invitado",
+      "createTitle": "Añadir Nuevo Invitado",
+      "editTitle": "Editar Invitado",
+      "email": "Email",
+      "emailPlaceholder": "invitado@ejemplo.com",
+      "emailDescription": "El invitado recibirá códigos de acceso en este email",
+      "name": "Nombre (opcional)",
+      "namePlaceholder": "Juan García",
+      "nameDescription": "Nombre para identificar al invitado",
+      "globalPermissions": "Permisos Globales",
+      "globalPermissionsDescription": "Permisos que aplican a todo el contenido compartido",
+      "canView": "Puede ver documentos",
+      "canDownload": "Puede descargar documentos",
+      "canUpload": "Puede subir documentos",
+      "sendInvitation": "Enviar invitación por email",
+      "sendInvitationDescription": "El invitado recibirá un email con el enlace al portal",
+      "create": "Crear Invitado",
+      "update": "Actualizar Invitado",
+      "creating": "Creando...",
+      "updating": "Actualizando..."
+    },
+    "permissionsDialog": {
+      "title": "Permisos de {name}",
+      "description": "Gestiona qué documentos y carpetas puede acceder este invitado",
+      "noPermissions": {
+        "title": "Sin permisos específicos",
+        "description": "Este invitado solo tiene acceso según sus permisos globales"
+      },
+      "addPermission": "Añadir Permiso",
+      "selectDocument": "Seleccionar Documento",
+      "selectFolder": "Seleccionar Carpeta",
+      "permissionType": "Tipo de Permiso",
+      "expiresAt": "Expira",
+      "noExpiration": "Sin expiración",
+      "grantedBy": "Otorgado por",
+      "grantedAt": "Fecha",
+      "table": {
+        "resource": "Recurso",
+        "type": "Tipo",
+        "permission": "Permiso",
+        "expires": "Expira",
+        "actions": "Acciones"
+      },
+      "resourceType": {
+        "document": "Documento",
+        "folder": "Carpeta"
+      },
+      "grant": "Otorgar",
+      "revoke": "Revocar",
+      "granting": "Otorgando..."
+    },
+    "accessLogs": {
+      "title": "Registros de Acceso de {name}",
+      "description": "Historial de actividad del invitado",
+      "noLogs": {
+        "title": "Sin registros",
+        "description": "Este invitado aún no ha accedido al portal"
+      },
+      "table": {
+        "action": "Acción",
+        "resource": "Recurso",
+        "ip": "IP",
+        "userAgent": "Navegador",
+        "timestamp": "Fecha y Hora"
+      },
+      "actions": {
+        "login": "Inicio de sesión",
+        "logout": "Cierre de sesión",
+        "view": "Visualización",
+        "download": "Descarga",
+        "upload": "Subida",
+        "otp_request": "Solicitud OTP",
+        "otp_verify": "Verificación OTP"
+      },
+      "refresh": "Actualizar",
+      "export": "Exportar"
+    },
+    "portal": {
+      "title": "Portal de Documentos",
+      "loading": "Cargando portal...",
+      "login": {
+        "title": "Acceso al Portal",
+        "subtitle": "Introduce tu email para recibir un código de acceso",
+        "invitedOnly": "Introduce tu email invitado para recibir un código de acceso",
+        "emailLabel": "Dirección de Email",
+        "emailPlaceholder": "tu@email.com",
+        "sendCode": "Enviar Código de Acceso",
+        "sending": "Enviando..."
+      },
+      "otp": {
+        "title": "Introduce el Código de Acceso",
+        "subtitle": "Enviamos un código de 6 dígitos a {email}",
+        "codeLabel": "Código de Acceso",
+        "codePlaceholder": "000000",
+        "expiresIn": "El código expira en {minutes} minutos",
+        "verify": "Verificar Código",
+        "verifying": "Verificando...",
+        "backToLogin": "Volver al Inicio",
+        "resendCode": "Reenviar código",
+        "invalidCode": "Código inválido o expirado"
+      },
+      "content": {
+        "title": "Documentos Compartidos",
+        "welcome": "Bienvenido, {name}",
+        "folders": "Carpetas",
+        "documents": "Documentos",
+        "documentsCount": "{count} documentos",
+        "noContent": {
+          "title": "Sin documentos",
+          "description": "Aún no se han compartido documentos contigo"
+        },
+        "table": {
+          "name": "Nombre",
+          "type": "Tipo",
+          "size": "Tamaño",
+          "updated": "Actualizado"
+        },
+        "actions": {
+          "view": "Ver",
+          "download": "Descargar"
+        },
+        "logout": "Cerrar Sesión",
+        "refresh": "Actualizar"
+      },
+      "error": {
+        "title": "Portal No Disponible",
+        "description": "Este portal no está accesible en este momento",
+        "notFound": "El portal que buscas no existe",
+        "notInvited": "Tu email no está invitado a este portal",
+        "sessionExpired": "Tu sesión ha expirado. Por favor, inicia sesión de nuevo."
+      }
+    },
+    "toast": {
+      "guestCreated": {
+        "title": "Invitado Creado",
+        "description": "El invitado {email} ha sido añadido correctamente"
+      },
+      "guestUpdated": {
+        "title": "Invitado Actualizado",
+        "description": "Los datos del invitado han sido actualizados"
+      },
+      "guestDeleted": {
+        "title": "Invitado Eliminado",
+        "description": "El invitado ha sido eliminado correctamente"
+      },
+      "guestDeactivated": {
+        "title": "Invitado Desactivado",
+        "description": "El invitado ya no puede acceder al portal"
+      },
+      "guestActivated": {
+        "title": "Invitado Activado",
+        "description": "El invitado puede volver a acceder al portal"
+      },
+      "inviteSent": {
+        "title": "Invitación Enviada",
+        "description": "Se ha enviado un email de invitación a {email}"
+      },
+      "permissionGranted": {
+        "title": "Permiso Otorgado",
+        "description": "El permiso ha sido añadido correctamente"
+      },
+      "permissionRevoked": {
+        "title": "Permiso Revocado",
+        "description": "El permiso ha sido eliminado"
+      },
+      "settingsSaved": {
+        "title": "Configuración Guardada",
+        "description": "La configuración del portal ha sido actualizada"
+      },
+      "urlCopied": {
+        "title": "URL Copiada",
+        "description": "La URL del portal ha sido copiada al portapapeles"
+      },
+      "otpSent": {
+        "title": "Código Enviado",
+        "description": "Revisa tu email para el código de acceso"
+      },
+      "loginSuccess": {
+        "title": "Acceso Concedido",
+        "description": "Bienvenido al portal"
+      },
+      "error": {
+        "loadGuests": "Error al cargar los invitados",
+        "createGuest": "Error al crear el invitado",
+        "updateGuest": "Error al actualizar el invitado",
+        "deleteGuest": "Error al eliminar el invitado",
+        "loadPermissions": "Error al cargar los permisos",
+        "grantPermission": "Error al otorgar el permiso",
+        "revokePermission": "Error al revocar el permiso",
+        "loadLogs": "Error al cargar los registros",
+        "saveSettings": "Error al guardar la configuración",
+        "sendOtp": "Error al enviar el código",
+        "verifyOtp": "Error al verificar el código",
+        "loadContent": "Error al cargar el contenido",
+        "notInvited": "Este email no está invitado al portal"
+      }
+    },
+    "delete": {
+      "title": "Eliminar Invitado",
+      "description": "¿Estás seguro de que deseas eliminar a {name}? Esta acción revocará todos sus permisos y no podrá acceder al portal.",
+      "confirm": "Eliminar",
+      "cancel": "Cancelar"
+    },
+    "sidebar": {
+      "title": "Portal Site",
+      "description": "Acceso externo de invitados"
+    }
   }
 }

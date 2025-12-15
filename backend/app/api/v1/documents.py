@@ -79,15 +79,22 @@ async def list_documents(
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    category: Optional[str] = Query(None)
+    category: Optional[str] = Query(None),
+    folder: Optional[str] = Query(None, description="Filter by folder path. Use empty string for root.")
 ):
     """
     Obtiene lista paginada de documentos con filtros opcionales.
+    Estilo Google Drive: devuelve carpetas + documentos en una sola lista.
 
     ACL filtering: Only returns documents the user has VIEW permission on.
     - Owners see their own documents
     - Admins see all documents in tenant
     - Other users see documents with explicit ACL grants
+
+    Folder filtering:
+    - If folder is None: Returns all documents (all folders)
+    - If folder is "": Returns documents in root folder + subfolders as items
+    - If folder is "/path": Returns documents in that folder + subfolders as items
     """
     # Get list of document IDs user can access
     acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
@@ -104,7 +111,8 @@ async def list_documents(
         date_from=date_from,
         date_to=date_to,
         category=category,
-        document_ids=accessible_doc_ids  # Filter by accessible documents
+        document_ids=accessible_doc_ids,  # Filter by accessible documents
+        folder=folder  # Filter by folder path
     )
 
 
@@ -118,6 +126,7 @@ async def create_document(
     cliente: Optional[str] = Form(None),
     periodo: Optional[str] = Form(None),
     tipo_documento: Optional[str] = Form(None),
+    folder_path: Optional[str] = Form(None),  # Target folder for upload (Google Drive style)
     file: UploadFile = File(...),
     current_user: User = Depends(require_document_upload_permission_async),
     tenant_id: str = Depends(get_current_tenant_id_async),
@@ -128,11 +137,14 @@ async def create_document(
 ):
     """
     Sube un nuevo documento al sistema.
+
+    Si se proporciona folder_path, el documento se guarda en esa carpeta
+    y se marca como clasificación manual (auto_classified=False).
     """
     # Convertir tags de string separado por comas a lista
     tag_list = tags.split(",") if tags else []
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
-    
+
     document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
     new_doc = await document_service.upload_document(
         db=db,
@@ -143,7 +155,8 @@ async def create_document(
         category=category,
         cliente=cliente,
         periodo=periodo,
-        tipo_documento=tipo_documento
+        tipo_documento=tipo_documento,
+        folder_path=folder_path  # Pass folder for manual classification
     )
     
     # Proactive Preview Generation: Enqueue background task

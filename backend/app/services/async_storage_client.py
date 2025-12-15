@@ -376,6 +376,34 @@ class AsyncStorageClient(BaseHTTPClient):
         logger.debug(f"Generated download signed URL for: {file_path}")
         return url, expires_at
 
+    async def move_file(self, source_path: str, destination_path: str) -> Dict[str, Any]:
+        """
+        Move a file to a new location.
+
+        Args:
+            source_path: Current file path
+            destination_path: New file path
+
+        Returns:
+            Move operation result
+        """
+        payload = {
+            "source_path": source_path,
+            "destination_path": destination_path
+        }
+
+        response = await self.request(
+            "POST",
+            "/api/v1/storage/move",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            json=payload,
+        )
+
+        result = response.json()
+        logger.info(f"File moved successfully: {source_path} -> {destination_path}")
+        return result
+
     async def cleanup_test_bucket(self) -> Dict[str, Any]:
         """
         Clean test bucket. Only for testing.

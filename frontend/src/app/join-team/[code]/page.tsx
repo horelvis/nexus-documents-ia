@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,15 +17,17 @@ interface TeamInvitationInfo {
   email?: string
 }
 
-export default function JoinTeamPage({ params }: { params: { code: string } }) {
+export default function JoinTeamPage() {
   const router = useRouter()
+  const params = useParams<{ code: string }>()
+  const code = params.code
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [invitationInfo, setInvitationInfo] = useState<TeamInvitationInfo | null>(null)
 
   useEffect(() => {
     checkInvitation()
-  }, [params.code])
+  }, [code])
 
   const checkInvitation = async () => {
     setLoading(true)
@@ -33,7 +35,7 @@ export default function JoinTeamPage({ params }: { params: { code: string } }) {
 
     try {
       // First, get invitation info
-      const response = await apiClient.get<TeamInvitationInfo>(`/teams/invitations/${params.code}/info`)
+      const response = await apiClient.get<TeamInvitationInfo>(`/teams/invitations/${code}/info`)
       
       if (response.error) {
         setError(response.error)
@@ -50,7 +52,7 @@ export default function JoinTeamPage({ params }: { params: { code: string } }) {
   const handleJoinTeam = () => {
     if (invitationInfo) {
       // Redirect to sign-up with invitation code
-      router.push(`/auth/sign-up?invitation=${params.code}&tenant=${invitationInfo.tenant_id}`)
+      router.push(`/auth/sign-up?invitation=${code}&tenant=${invitationInfo.tenant_id}`)
     }
   }
 

@@ -445,6 +445,58 @@ class EmmaCoordinator:
             # Always clear execution context to prevent leaking to other requests
             clear_execution_context()
 
+    async def _prepare_execution(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str,
+        user_context: Optional[Dict[str, Any]]
+    ) -> tuple:
+        """
+        Prepare execution context - shared by execute and execute_stream.
+
+        Returns:
+            tuple: (thread, full_query, is_new_session)
+        """
+        # Load or create thread (this is where context lives!)
+        thread, is_new_session = await self._load_thread_with_status(tenant_id, session_id)
+
+        # Build context-aware query with user info for new sessions
+        full_query = self._build_query_with_context(
+            query, tenant_id, user_context, is_new_session=is_new_session
+        )
+
+        logger.info(f"🤖 Emma processing: {query[:50]}...")
+        logger.info(f"📝 Full query: {full_query[:200]}...")
+
+        return thread, full_query, is_new_session
+
+    def _extract_tool_calls(self, response) -> tuple:
+        """
+        Extract tool calls from Emma response - shared by execute and execute_stream.
+
+        Returns:
+            tuple: (agents_delegated, tools_called)
+        """
+        agents_delegated = []
+        tools_called = []
+
+        if hasattr(response, 'messages'):
+            logger.info(f"📤 Emma response messages count: {len(response.messages)}")
+            for i, msg in enumerate(response.messages):
+                msg_type = type(msg).__name__
+                has_tools = hasattr(msg, 'tool_calls') and msg.tool_calls
+                logger.info(f"  📤 Message[{i}]: type={msg_type}, has_tool_calls={has_tools}")
+                if has_tools:
+                    for tc in msg.tool_calls:
+                        tool_name = tc.function.name if hasattr(tc, 'function') else str(tc)
+                        logger.info(f"    🔧 Tool call: {tool_name}")
+                        tools_called.append(tool_name)
+                        if tool_name in self._subagents:
+                            agents_delegated.append(tool_name)
+
+        return list(set(agents_delegated)), list(set(tools_called))
+
     async def _execute_handoff(
         self,
         query: str,
@@ -459,18 +511,10 @@ class EmmaCoordinator:
         The LLM (Emma) naturally decides when to delegate to specialists
         based on the query content and her instructions.
         """
-        agents_delegated = []
-        tools_called = []
-
-        # Load or create thread (this is where context lives!)
-        thread, is_new_session = await self._load_thread_with_status(tenant_id, session_id)
-
-        # Build context-aware query with user info for new sessions
-        full_query = self._build_query_with_context(
-            query, tenant_id, user_context, is_new_session=is_new_session
+        # Use shared preparation logic
+        thread, full_query, _ = await self._prepare_execution(
+            query, tenant_id, session_id, user_context
         )
-
-        logger.info(f"🤖 HANDOFF: Emma processing: {query[:50]}...")
 
         # Execute with Emma - she'll delegate to subagents as needed
         response = await self._emma.run(full_query, thread=thread)
@@ -479,26 +523,21 @@ class EmmaCoordinator:
         answer = response.text if hasattr(response, 'text') else str(response)
         answer = clean_thinking_tags(answer)
 
-        # Track tool calls (delegations to subagents)
-        if hasattr(response, 'messages'):
-            for msg in response.messages:
-                if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        tool_name = tc.function.name if hasattr(tc, 'function') else str(tc)
-                        tools_called.append(tool_name)
-                        if tool_name in self._subagents:
-                            agents_delegated.append(tool_name)
+        # Use shared tool extraction logic
+        agents_delegated, tools_called = self._extract_tool_calls(response)
 
         # Save thread with updated context
         await self._save_thread(thread, tenant_id, session_id)
 
         execution_time = (time.perf_counter() - start_time) * 1000
 
+        logger.info(f"📤 HANDOFF COMPLETE: agents={agents_delegated}, tools={tools_called}, time={execution_time:.0f}ms")
+
         return EmmaCoordinatorResult(
             success=True,
             answer=answer,
-            agents_delegated=list(set(agents_delegated)),
-            tools_called=list(set(tools_called)),
+            agents_delegated=agents_delegated,
+            tools_called=tools_called,
             execution_time_ms=execution_time,
             thread_id=session_id,
             metadata={
@@ -636,6 +675,23 @@ class EmmaCoordinator:
         # Add tenant context (required for all tool calls)
         context_parts.append(f"[Tenant: {tenant_id}]")
 
+        # Add document context if user is asking about a specific document
+        if user_context and user_context.get("document_id"):
+            doc_id = user_context.get("document_id")
+            context_parts.append(f"[Focus Document ID: {doc_id}]")
+
+            # Include document content for direct analysis (avoids extra LLM calls)
+            if user_context.get("document_content"):
+                doc_content = user_context.get("document_content")
+                doc_title = user_context.get("document_title", "Document")
+                # Truncate if too long (max 4000 chars for context)
+                if len(doc_content) > 4000:
+                    doc_content = doc_content[:4000] + "... [truncated]"
+                context_parts.append(f"[Document: {doc_title}]\n{doc_content}")
+            else:
+                # Fallback instruction for tools
+                context_parts.append(f"[IMPORTANT: When analyzing this document, use document_id='{doc_id}']")
+
         # Add user personalization
         if user_context:
             user_info_parts = []
@@ -652,6 +708,7 @@ class EmmaCoordinator:
                 context_parts.append(f"[User: {', '.join(user_info_parts)}]")
 
         context_prefix = " ".join(context_parts)
+        logger.info(f"🔧 Built context prefix: {context_prefix}")
 
         # For new sessions, add instruction to introduce herself
         if is_new_session and user_context:
@@ -671,10 +728,16 @@ class EmmaCoordinator:
         user_context: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Execute query with streaming responses.
+        Execute query with aggressive streaming responses.
 
         Yields events as Emma processes and delegates to subagents.
         For new sessions, Emma will introduce herself and greet the user by name.
+
+        AGGRESSIVE STREAMING:
+        - Emits progress events immediately at each stage
+        - Shows "thinking" indicator during LLM inference
+        - Sends partial tokens as soon as available
+        - Provides real-time feedback on tool delegation
         """
         if not self._initialized:
             await self.initialize()
@@ -690,16 +753,35 @@ class EmmaCoordinator:
             # Track execution time for performance metrics
             start_time = time.time()
 
-            # Load thread with status to detect new sessions
-            thread, is_new_session = await self._load_thread_with_status(tenant_id, session_id)
-            full_query = self._build_query_with_context(
-                query, tenant_id, user_context, is_new_session=is_new_session
+            # AGGRESSIVE STREAMING: Emit context preparation event
+            yield {
+                "event": "progress",
+                "data": {
+                    "message": "Preparando contexto...",
+                    "stage": "context_preparation",
+                    "agent": "Emma"
+                }
+            }
+
+            # Use shared preparation logic
+            thread, full_query, _ = await self._prepare_execution(
+                query, tenant_id, session_id, user_context
             )
+
+            # AGGRESSIVE STREAMING: Emit thinking event before LLM call
+            yield {
+                "event": "progress",
+                "data": {
+                    "message": "Emma está pensando...",
+                    "stage": "thinking",
+                    "agent": "Emma"
+                }
+            }
 
             yield {
                 "event": "start",
                 "data": {
-                    "message": "Analizando tu consulta...",
+                    "message": "Generando respuesta...",
                     "agent": "Emma"
                 }
             }
@@ -711,6 +793,7 @@ class EmmaCoordinator:
             in_thinking_mode = False  # Track if we're inside <think>...</think>
             final_answer = ""  # Accumulate the actual response for the complete event
             tools_used = []
+            first_token_emitted = False  # Track first real token for UX feedback
 
             async for chunk in self._emma.run_stream(full_query, thread=thread):
                 if hasattr(chunk, 'text') and chunk.text:
@@ -767,6 +850,19 @@ class EmmaCoordinator:
                     if text.strip():
                         final_answer += text
 
+                        # AGGRESSIVE STREAMING: Emit first_token event once
+                        if not first_token_emitted:
+                            first_token_emitted = True
+                            elapsed_ms = int((time.time() - start_time) * 1000)
+                            yield {
+                                "event": "first_token",
+                                "data": {
+                                    "message": "Escribiendo respuesta...",
+                                    "elapsed_ms": elapsed_ms,
+                                    "agent": "Emma"
+                                }
+                            }
+
                     yield {
                         "event": "token",
                         "data": {
@@ -775,15 +871,33 @@ class EmmaCoordinator:
                         }
                     }
 
-                # Track tool calls (delegations)
+                # Track tool calls (delegations) - AGGRESSIVE STREAMING
                 if hasattr(chunk, 'tool_call') and chunk.tool_call:
                     tool_name = chunk.tool_call.function.name if hasattr(chunk.tool_call, 'function') else str(chunk.tool_call)
+                    logger.info(f"🔧 STREAM TOOL CALL: {tool_name}")
                     tools_used.append(tool_name)
+
+                    # Get human-readable description for the tool
+                    tool_descriptions = {
+                        "search_agent": "Buscando documentos...",
+                        "contract_agent": "Analizando contrato...",
+                        "compliance_agent": "Verificando cumplimiento...",
+                        "analyst_agent": "Analizando documento...",
+                        "summarizer_agent": "Generando resumen...",
+                        "labor_agent": "Consultando normativa laboral...",
+                        "fiscal_agent": "Consultando normativa fiscal...",
+                        "privacy_agent": "Verificando protección de datos...",
+                    }
+                    delegation_message = tool_descriptions.get(tool_name, f"Consultando {tool_name}...")
+
+                    # Emit delegation event with elapsed time
+                    elapsed_ms = int((time.time() - start_time) * 1000)
                     yield {
                         "event": "delegation",
                         "data": {
                             "agent": tool_name,
-                            "message": f"Consultando {tool_name}..."
+                            "message": delegation_message,
+                            "elapsed_ms": elapsed_ms
                         }
                     }
 
@@ -792,6 +906,9 @@ class EmmaCoordinator:
 
             # Calculate execution time
             execution_time_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(f"🎬 STREAM COMPLETE: tools_used={tools_used}, time={execution_time_ms}ms")
+            logger.info(f"🎬 STREAM ANSWER preview: {final_answer[:200] if final_answer else 'EMPTY'}...")
 
             # Send complete event with the accumulated answer
             yield {

@@ -67,6 +67,8 @@ try:
         SemanticDomainRouter,
         get_domain_router,
         classify_domain,
+        # Preload function for startup
+        preload_semantic_routers,
     )
     _SEMANTIC_ROUTER_AVAILABLE = True
 except ImportError:
@@ -79,6 +81,8 @@ except ImportError:
     SemanticDomainRouter = None
     get_domain_router = None
     classify_domain = None
+    # Preload function
+    preload_semantic_routers = None
 
 from .sequential import (
     SequentialOrchestration,
@@ -114,6 +118,8 @@ __all__ = [
     "SemanticDomainRouter",
     "get_domain_router",
     "classify_domain",
+    # Preload function
+    "preload_semantic_routers",
     # Availability flag
     "_SEMANTIC_ROUTER_AVAILABLE",
     # Sequential orchestration

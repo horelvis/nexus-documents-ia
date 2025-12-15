@@ -105,7 +105,7 @@ export default function UserManagementPage() {
   const loadUsers = async () => {
     try {
       setIsLoading(true)
-      const response = await apiClient.get(`/users/list`)
+      const response = await apiClient.get<User[]>(`/users/list`)
       if (response.data) {
         setUsers(response.data)
       }

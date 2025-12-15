@@ -80,6 +80,17 @@ async def lifespan(app: FastAPI):
         await weaviate_service.initialize()
         logger.info("✅ Weaviate connection established")
 
+        # Preload Semantic Routers (downloads HuggingFace model if needed)
+        # This must happen BEFORE Emma AI to avoid 45s delay on first request
+        try:
+            from app.agents.orchestration import preload_semantic_routers, _SEMANTIC_ROUTER_AVAILABLE
+            if _SEMANTIC_ROUTER_AVAILABLE and preload_semantic_routers:
+                preload_semantic_routers()
+            else:
+                logger.warning("⚠️ Semantic Router not available, skipping preload")
+        except Exception as router_error:
+            logger.warning(f"⚠️ Semantic Router preload failed: {router_error}")
+
         # Initialize Emma AI (PlanningFlow orchestration)
         if settings.agents_enabled:
             try:

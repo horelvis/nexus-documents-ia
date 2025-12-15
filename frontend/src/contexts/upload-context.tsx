@@ -5,10 +5,12 @@ import { createContext, useContext, useState, ReactNode, useCallback } from "rea
 interface UploadContextType {
   uploadDialogOpen: boolean
   setUploadDialogOpen: (open: boolean) => void
-  openUploadDialog: () => void
+  openUploadDialog: (folderPath?: string) => void
   closeUploadDialog: () => void
   onUploadComplete?: (files: any[]) => void
   setOnUploadComplete: (callback?: (files: any[]) => void) => void
+  targetFolderPath: string | null
+  setTargetFolderPath: (path: string | null) => void
 }
 
 const UploadContext = createContext<UploadContextType | undefined>(undefined)
@@ -16,14 +18,19 @@ const UploadContext = createContext<UploadContextType | undefined>(undefined)
 export function UploadProvider({ children }: { children: ReactNode }) {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [onUploadComplete, setOnUploadComplete] = useState<((files: any[]) => void) | undefined>(undefined)
+  const [targetFolderPath, setTargetFolderPath] = useState<string | null>(null)
 
-  const openUploadDialog = () => {
-    console.log('[DEBUG] UploadContext: Opening dialog')
+  const openUploadDialog = (folderPath?: string) => {
+    console.log('[DEBUG] UploadContext: Opening dialog with folder:', folderPath)
+    if (folderPath) {
+      setTargetFolderPath(folderPath)
+    }
     setUploadDialogOpen(true)
   }
   const closeUploadDialog = () => {
     console.log('[DEBUG] UploadContext: Closing dialog')
     setUploadDialogOpen(false)
+    setTargetFolderPath(null)
   }
 
   const handleSetOnUploadComplete = useCallback((callback?: (files: any[]) => void) => {
@@ -37,7 +44,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       openUploadDialog,
       closeUploadDialog,
       onUploadComplete,
-      setOnUploadComplete: handleSetOnUploadComplete
+      setOnUploadComplete: handleSetOnUploadComplete,
+      targetFolderPath,
+      setTargetFolderPath
     }}>
       {children}
     </UploadContext.Provider>

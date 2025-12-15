@@ -17,7 +17,8 @@ from app.api.v1.channels import router as channels_router
 from app.api.v1 import (
     document_insights, documents, document_shares, document_acl, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
-    assistant, migration, workflows, analysis_queue, channels, gemini_voice
+    assistant, migration, workflows, analysis_queue, channels, gemini_voice,
+    site_guests, site_portal,
 )
 # from app.api.v1.document_analyzer import router as document_analyzer_router
 # from app.api.v1.contract_intelligence import router as contract_intelligence_router

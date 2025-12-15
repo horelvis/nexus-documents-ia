@@ -26,7 +26,6 @@ const nextConfig: NextConfig = {
   // Production optimizations
   experimental: {
     optimizePackageImports: ['@radix-ui/react-icons', 'lucide-react'],
-    allowedDevOrigins: ['*']
   },
 };
 

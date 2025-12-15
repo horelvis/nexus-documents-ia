@@ -209,7 +209,13 @@
   },
   "sidebar": {
     "admin": {
-      "publicKnowledge": "Base de Connaissances Juridiques"
+      "teams": "Gestion des Équipes",
+      "settings": "Paramètres du Tenant",
+      "siteGuest": "Accès Externe",
+      "providers": "Fournisseurs de Signature",
+      "publicKnowledge": "Base de Connaissances Juridiques",
+      "billing": "Facturation",
+      "templates": "Modèles de Documents"
     },
     "channels": {
       "title": "Canaux d'Info",
@@ -331,6 +337,281 @@
     "notifications": {
       "loadFailed": "Échec du chargement des statistiques",
       "searchFailed": "Échec de la recherche"
+    }
+  },
+  "siteGuest": {
+    "title": "Portail Site",
+    "subtitle": "Gérez l'accès externe aux documents pour les utilisateurs invités",
+    "description": "Partagez des documents de manière sécurisée avec des utilisateurs externes via authentification OTP",
+    "tabs": {
+      "settings": "Paramètres",
+      "guests": "Invités"
+    },
+    "settings": {
+      "title": "Paramètres du Portail",
+      "description": "Configurez l'apparence et le comportement du portail pour les invités externes",
+      "portalUrl": "URL du Portail",
+      "portalUrlDescription": "Partagez cette URL avec les invités pour qu'ils accèdent au portail",
+      "slug": "Slug du Tenant",
+      "slugDescription": "Identifiant unique pour l'URL du portail",
+      "slugPlaceholder": "mon-entreprise",
+      "logoUrl": "URL du Logo",
+      "logoUrlDescription": "Logo affiché sur le portail (recommandé: 200x50px)",
+      "logoUrlPlaceholder": "https://exemple.com/logo.png",
+      "welcomeMessage": "Message de Bienvenue",
+      "welcomeMessageDescription": "Texte affiché sur la page de connexion du portail",
+      "welcomeMessagePlaceholder": "Entrez votre email pour recevoir un code d'accès",
+      "saveChanges": "Enregistrer",
+      "saving": "Enregistrement...",
+      "preview": "Aperçu",
+      "previewDescription": "Voici comment le portail apparaîtra pour vos invités",
+      "copyUrl": "Copier l'URL"
+    },
+    "guests": {
+      "title": "Invités du Portail",
+      "description": "Utilisateurs externes avec accès aux documents partagés",
+      "addGuest": "Ajouter un Invité",
+      "inviteGuest": "Inviter un Invité",
+      "noGuests": {
+        "title": "Aucun invité",
+        "description": "Ajoutez des invités pour partager des documents de manière sécurisée"
+      },
+      "table": {
+        "name": "Nom",
+        "email": "Email",
+        "status": "Statut",
+        "permissions": "Permissions",
+        "lastAccess": "Dernier Accès",
+        "accessCount": "Nombre d'Accès",
+        "actions": "Actions",
+        "never": "Jamais"
+      },
+      "status": {
+        "active": "Actif",
+        "inactive": "Inactif"
+      },
+      "permissions": {
+        "view": "Voir",
+        "download": "Télécharger",
+        "upload": "Téléverser"
+      },
+      "actions": {
+        "edit": "Modifier",
+        "delete": "Supprimer",
+        "deactivate": "Désactiver",
+        "activate": "Activer",
+        "resendInvite": "Renvoyer l'Invitation",
+        "viewPermissions": "Voir les Permissions",
+        "viewLogs": "Voir les Journaux"
+      }
+    },
+    "form": {
+      "title": "Détails de l'Invité",
+      "createTitle": "Ajouter un Nouvel Invité",
+      "editTitle": "Modifier l'Invité",
+      "email": "Email",
+      "emailPlaceholder": "invite@exemple.com",
+      "emailDescription": "L'invité recevra les codes d'accès à cette adresse",
+      "name": "Nom (optionnel)",
+      "namePlaceholder": "Jean Dupont",
+      "nameDescription": "Nom pour identifier l'invité",
+      "globalPermissions": "Permissions Globales",
+      "globalPermissionsDescription": "Permissions qui s'appliquent à tout le contenu partagé",
+      "canView": "Peut voir les documents",
+      "canDownload": "Peut télécharger les documents",
+      "canUpload": "Peut téléverser des documents",
+      "sendInvitation": "Envoyer l'invitation par email",
+      "sendInvitationDescription": "L'invité recevra un email avec le lien du portail",
+      "create": "Créer l'Invité",
+      "update": "Mettre à Jour l'Invité",
+      "creating": "Création...",
+      "updating": "Mise à jour..."
+    },
+    "permissionsDialog": {
+      "title": "Permissions de {name}",
+      "description": "Gérez les documents et dossiers auxquels cet invité peut accéder",
+      "noPermissions": {
+        "title": "Aucune permission spécifique",
+        "description": "Cet invité n'a accès qu'en fonction de ses permissions globales"
+      },
+      "addPermission": "Ajouter une Permission",
+      "selectDocument": "Sélectionner un Document",
+      "selectFolder": "Sélectionner un Dossier",
+      "permissionType": "Type de Permission",
+      "expiresAt": "Expire le",
+      "noExpiration": "Sans expiration",
+      "grantedBy": "Accordé par",
+      "grantedAt": "Date",
+      "table": {
+        "resource": "Ressource",
+        "type": "Type",
+        "permission": "Permission",
+        "expires": "Expire",
+        "actions": "Actions"
+      },
+      "resourceType": {
+        "document": "Document",
+        "folder": "Dossier"
+      },
+      "grant": "Accorder",
+      "revoke": "Révoquer",
+      "granting": "Attribution..."
+    },
+    "accessLogs": {
+      "title": "Journaux d'Accès de {name}",
+      "description": "Historique d'activité de l'invité",
+      "noLogs": {
+        "title": "Aucun journal",
+        "description": "Cet invité n'a pas encore accédé au portail"
+      },
+      "table": {
+        "action": "Action",
+        "resource": "Ressource",
+        "ip": "IP",
+        "userAgent": "Navigateur",
+        "timestamp": "Horodatage"
+      },
+      "actions": {
+        "login": "Connexion",
+        "logout": "Déconnexion",
+        "view": "Visualisation",
+        "download": "Téléchargement",
+        "upload": "Téléversement",
+        "otp_request": "Demande OTP",
+        "otp_verify": "Vérification OTP"
+      },
+      "refresh": "Actualiser",
+      "export": "Exporter"
+    },
+    "portal": {
+      "title": "Portail de Documents",
+      "loading": "Chargement du portail...",
+      "login": {
+        "title": "Accès au Portail",
+        "subtitle": "Entrez votre email pour recevoir un code d'accès",
+        "invitedOnly": "Entrez votre adresse email invitée pour recevoir un code d'accès",
+        "emailLabel": "Adresse Email",
+        "emailPlaceholder": "votre@email.com",
+        "sendCode": "Envoyer le Code d'Accès",
+        "sending": "Envoi..."
+      },
+      "otp": {
+        "title": "Entrez le Code d'Accès",
+        "subtitle": "Nous avons envoyé un code à 6 chiffres à {email}",
+        "codeLabel": "Code d'Accès",
+        "codePlaceholder": "000000",
+        "expiresIn": "Le code expire dans {minutes} minutes",
+        "verify": "Vérifier le Code",
+        "verifying": "Vérification...",
+        "backToLogin": "Retour à la Connexion",
+        "resendCode": "Renvoyer le code",
+        "invalidCode": "Code invalide ou expiré"
+      },
+      "content": {
+        "title": "Documents Partagés",
+        "welcome": "Bienvenue, {name}",
+        "folders": "Dossiers",
+        "documents": "Documents",
+        "documentsCount": "{count} documents",
+        "noContent": {
+          "title": "Aucun document",
+          "description": "Aucun document n'a encore été partagé avec vous"
+        },
+        "table": {
+          "name": "Nom",
+          "type": "Type",
+          "size": "Taille",
+          "updated": "Mis à jour"
+        },
+        "actions": {
+          "view": "Voir",
+          "download": "Télécharger"
+        },
+        "logout": "Déconnexion",
+        "refresh": "Actualiser"
+      },
+      "error": {
+        "title": "Portail Non Disponible",
+        "description": "Ce portail n'est pas accessible pour le moment",
+        "notFound": "Le portail que vous recherchez n'existe pas",
+        "notInvited": "Votre email n'est pas invité à ce portail",
+        "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter."
+      }
+    },
+    "toast": {
+      "guestCreated": {
+        "title": "Invité Créé",
+        "description": "L'invité {email} a été ajouté avec succès"
+      },
+      "guestUpdated": {
+        "title": "Invité Mis à Jour",
+        "description": "Les détails de l'invité ont été mis à jour"
+      },
+      "guestDeleted": {
+        "title": "Invité Supprimé",
+        "description": "L'invité a été supprimé avec succès"
+      },
+      "guestDeactivated": {
+        "title": "Invité Désactivé",
+        "description": "L'invité ne peut plus accéder au portail"
+      },
+      "guestActivated": {
+        "title": "Invité Activé",
+        "description": "L'invité peut à nouveau accéder au portail"
+      },
+      "inviteSent": {
+        "title": "Invitation Envoyée",
+        "description": "Un email d'invitation a été envoyé à {email}"
+      },
+      "permissionGranted": {
+        "title": "Permission Accordée",
+        "description": "La permission a été ajoutée avec succès"
+      },
+      "permissionRevoked": {
+        "title": "Permission Révoquée",
+        "description": "La permission a été supprimée"
+      },
+      "settingsSaved": {
+        "title": "Paramètres Enregistrés",
+        "description": "Les paramètres du portail ont été mis à jour"
+      },
+      "urlCopied": {
+        "title": "URL Copiée",
+        "description": "L'URL du portail a été copiée dans le presse-papiers"
+      },
+      "otpSent": {
+        "title": "Code Envoyé",
+        "description": "Vérifiez votre email pour le code d'accès"
+      },
+      "loginSuccess": {
+        "title": "Accès Accordé",
+        "description": "Bienvenue sur le portail"
+      },
+      "error": {
+        "loadGuests": "Échec du chargement des invités",
+        "createGuest": "Échec de la création de l'invité",
+        "updateGuest": "Échec de la mise à jour de l'invité",
+        "deleteGuest": "Échec de la suppression de l'invité",
+        "loadPermissions": "Échec du chargement des permissions",
+        "grantPermission": "Échec de l'attribution de la permission",
+        "revokePermission": "Échec de la révocation de la permission",
+        "loadLogs": "Échec du chargement des journaux",
+        "saveSettings": "Échec de l'enregistrement des paramètres",
+        "sendOtp": "Échec de l'envoi du code",
+        "verifyOtp": "Échec de la vérification du code",
+        "loadContent": "Échec du chargement du contenu",
+        "notInvited": "Cet email n'est pas invité au portail"
+      }
+    },
+    "delete": {
+      "title": "Supprimer l'Invité",
+      "description": "Êtes-vous sûr de vouloir supprimer {name} ? Cela révoquera toutes ses permissions et il ne pourra plus accéder au portail.",
+      "confirm": "Supprimer",
+      "cancel": "Annuler"
+    },
+    "sidebar": {
+      "title": "Portail Site",
+      "description": "Accès externe des invités"
     }
   }
 }

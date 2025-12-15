@@ -32,7 +32,8 @@ import {
   IconRefresh,
   IconFileTypeDoc,
   IconLoader2,
-  IconMessageCircle
+  IconMessageCircle,
+  IconFolderFilled,
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -62,8 +63,15 @@ import {
 import { Document as ApiDocument } from "@/lib/types"
 import { getFileIcon, formatFileSize } from "@/lib/document-utils"
 
+// Extended type to support both documents and folders
+type TableItem = ApiDocument & {
+  type?: 'document' | 'folder'
+  folder_path?: string
+  document_count?: number
+}
+
 interface DocumentsDataTableProps {
-  data: ApiDocument[]
+  data: TableItem[]
   onViewDocument: (document: ApiDocument) => void
   onEditDocument: (document: ApiDocument) => void
   onDeleteDocument: (document: ApiDocument) => void
@@ -71,6 +79,7 @@ interface DocumentsDataTableProps {
   onPreviewDocument: (document: ApiDocument) => void
   onFullPagePreview: (document: ApiDocument) => void
   onShareDocument: (document: ApiDocument) => void
+  onFolderClick?: (folderPath: string) => void  // Google Drive style folder navigation
   onRequestSignature?: (document: ApiDocument) => void
   onConvertToTemplate?: (document: ApiDocument) => void
   onAskEmma?: (document: ApiDocument) => void
@@ -87,6 +96,7 @@ export function DocumentsDataTable({
   onPreviewDocument,
   onFullPagePreview,
   onShareDocument,
+  onFolderClick,
   onRequestSignature,
   onConvertToTemplate,
   onAskEmma,
@@ -159,11 +169,22 @@ export function DocumentsDataTable({
     {
       id: "icon",
       header: () => null,
-      cell: ({ row }) => (
-        <div className="flex items-center justify-center">
-          {getFileIcon(row.original.file_type, row.original.mime_type, row.original.filename)}
-        </div>
-      ),
+      cell: ({ row }) => {
+        const item = row.original as TableItem
+        // Render folder icon for folders
+        if (item.type === 'folder') {
+          return (
+            <div className="flex items-center justify-center">
+              <IconFolderFilled className="h-5 w-5 text-muted-foreground" />
+            </div>
+          )
+        }
+        return (
+          <div className="flex items-center justify-center">
+            {getFileIcon(item.file_type, item.mime_type, item.filename)}
+          </div>
+        )
+      },
       enableSorting: false,
       enableHiding: false,
     },
@@ -188,21 +209,45 @@ export function DocumentsDataTable({
         )
       },
       cell: ({ row }) => {
-        const document = row.original
+        const item = row.original as TableItem
+
+        // Folder rendering
+        if (item.type === 'folder') {
+          return (
+            <div>
+              <div
+                className="font-medium cursor-pointer hover:text-primary hover:underline transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onFolderClick && item.folder_path) {
+                    onFolderClick(item.folder_path)
+                  }
+                }}
+              >
+                {item.title || item.folder_path?.split('/').pop() || 'Carpeta'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {item.document_count || 0} {item.document_count === 1 ? 'documento' : 'documentos'}
+              </div>
+            </div>
+          )
+        }
+
+        // Document rendering
         return (
           <div>
             <div
               className="font-medium cursor-pointer hover:text-primary hover:underline transition-colors"
               onClick={(e) => {
                 e.stopPropagation()
-                onFullPagePreview(document)
+                onFullPagePreview(item)
               }}
             >
-              {document.title || document.filename}
+              {item.title || item.filename}
             </div>
-            {document.description && (
+            {item.description && (
               <div className="text-xs text-muted-foreground line-clamp-1">
-                {document.description}
+                {item.description}
               </div>
             )}
           </div>
@@ -212,7 +257,14 @@ export function DocumentsDataTable({
     {
       accessorKey: "file_size",
       header: "Size",
-      cell: ({ row }) => <span className="text-sm">{formatFileSize(row.original.file_size)}</span>,
+      cell: ({ row }) => {
+        const item = row.original as TableItem
+        // Don't show size for folders
+        if (item.type === 'folder') {
+          return <span className="text-sm text-muted-foreground">—</span>
+        }
+        return <span className="text-sm">{formatFileSize(item.file_size)}</span>
+      },
     },
     {
       accessorKey: "created_at",
@@ -234,24 +286,42 @@ export function DocumentsDataTable({
           </Button>
         )
       },
-      cell: ({ row }) => (
-        <span className="text-sm">
-          {new Date(row.original.created_at).toLocaleDateString()}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const item = row.original as TableItem
+        // Don't show date for folders
+        if (item.type === 'folder') {
+          return <span className="text-sm text-muted-foreground">—</span>
+        }
+        return (
+          <span className="text-sm">
+            {new Date(item.created_at).toLocaleDateString()}
+          </span>
+        )
+      },
     },
     {
       accessorKey: "category",
       header: "Category",
-      cell: ({ row }) => row.original.category || "Sin Categoría",
+      cell: ({ row }) => {
+        const item = row.original as TableItem
+        if (item.type === 'folder') {
+          return <span className="text-muted-foreground">—</span>
+        }
+        return item.category || "Sin Categoría"
+      },
     },
     {
       accessorKey: "tags",
       header: "Tags",
       cell: ({ row }) => {
-        const tags = row.original.tags || []
+        const item = row.original as TableItem
+        // Don't show tags for folders
+        if (item.type === 'folder') {
+          return <span className="text-muted-foreground">—</span>
+        }
+        const tags = item.tags || []
         if (tags.length === 0) return "-"
-        
+
         return (
           <div className="flex flex-wrap gap-0.5">
             {tags.slice(0, 2).map((tag: string) => (
@@ -272,8 +342,31 @@ export function DocumentsDataTable({
       id: "actions",
       header: () => <span className="sr-only">Actions</span>,
       cell: ({ row }) => {
-        const document = row.original
+        const item = row.original as TableItem
 
+        // For folders, show minimal actions or navigate on click
+        if (item.type === 'folder') {
+          return (
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => {
+                  if (onFolderClick && item.folder_path) {
+                    onFolderClick(item.folder_path)
+                  }
+                }}
+                title="Abrir carpeta"
+              >
+                <IconEye className="h-4 w-4" />
+                <span className="sr-only">Abrir carpeta</span>
+              </Button>
+            </div>
+          )
+        }
+
+        // Document actions
         return (
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             {/* 3 Main Actions */}
@@ -281,7 +374,7 @@ export function DocumentsDataTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
-              onClick={() => onFullPagePreview(document)}
+              onClick={() => onFullPagePreview(item)}
               title="Full Preview"
             >
               <IconEye className="h-4 w-4" />
@@ -291,7 +384,7 @@ export function DocumentsDataTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
-              onClick={() => onDownloadDocument(document)}
+              onClick={() => onDownloadDocument(item)}
               title="Download"
             >
               <IconDownload className="h-4 w-4" />
@@ -301,13 +394,13 @@ export function DocumentsDataTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
-              onClick={() => onShareDocument(document)}
+              onClick={() => onShareDocument(item)}
               title="Share"
             >
               <IconShare2 className="h-4 w-4" />
               <span className="sr-only">Share</span>
             </Button>
-            
+
             {/* More Actions Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -321,32 +414,32 @@ export function DocumentsDataTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={() => onViewDocument(document)}>
+                <DropdownMenuItem onClick={() => onViewDocument(item)}>
                   <IconEye className="mr-2 h-4 w-4" />
                   View Details
                 </DropdownMenuItem>
                 {onAskEmma && (
-                  <DropdownMenuItem onClick={() => onAskEmma(document)}>
+                  <DropdownMenuItem onClick={() => onAskEmma(item)}>
                     <IconMessageCircle className="mr-2 h-4 w-4" />
                     Ask Emma
                   </DropdownMenuItem>
                 )}
                 {onRequestSignature && (
-                  <DropdownMenuItem onClick={() => onRequestSignature(document)}>
+                  <DropdownMenuItem onClick={() => onRequestSignature(item)}>
                     <IconSignature className="mr-2 h-4 w-4" />
                     Request Signature
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => onEditDocument(document)}>
+                <DropdownMenuItem onClick={() => onEditDocument(item)}>
                   <IconEdit className="mr-2 h-4 w-4" />
                   Edit
                 </DropdownMenuItem>
                 {canConvertToTemplate && onConvertToTemplate && (
                   <DropdownMenuItem
-                    onClick={() => onConvertToTemplate(document)}
-                    disabled={convertLoadingId === document.id}
+                    onClick={() => onConvertToTemplate(item)}
+                    disabled={convertLoadingId === item.id}
                   >
-                    {convertLoadingId === document.id ? (
+                    {convertLoadingId === item.id ? (
                       <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <IconFileTypeDoc className="mr-2 h-4 w-4" />
@@ -359,7 +452,7 @@ export function DocumentsDataTable({
                 <DropdownMenuSeparator />
 
                 <DropdownMenuItem
-                  onClick={() => onDeleteDocument(document)}
+                  onClick={() => onDeleteDocument(item)}
                   className="text-red-600 focus:text-red-600"
                 >
                   <IconTrash className="mr-2 h-4 w-4" />
@@ -424,12 +517,22 @@ export function DocumentsDataTable({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row) => {
+                const item = row.original as TableItem
+                const isFolder = item.type === 'folder'
+
+                return (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => onViewDocument(row.original)}
+                  onClick={() => {
+                    if (isFolder && onFolderClick && item.folder_path) {
+                      onFolderClick(item.folder_path)
+                    } else if (!isFolder) {
+                      onViewDocument(item)
+                    }
+                  }}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
@@ -440,7 +543,8 @@ export function DocumentsDataTable({
                     </TableCell>
                   ))}
                 </TableRow>
-              ))
+                )
+              })
             ) : (
               <TableRow>
                 <TableCell

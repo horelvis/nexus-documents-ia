@@ -40,7 +40,8 @@ import {
   IconUsers,
   IconWorld,
   IconShieldCheck,
-  IconUserCheck
+  IconUserCheck,
+  IconFolderFilled,
 } from "@tabler/icons-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { formatDistanceToNow } from "date-fns"
@@ -54,6 +55,7 @@ interface DocumentListProps {
   showHighlights?: boolean
   useDetailedView?: boolean
   onDocumentClick?: (document: any) => void
+  onFolderClick?: (folderPath: string) => void  // Google Drive style folder navigation
   onDownload?: (document: any) => void
   onDelete?: (document: any) => void
   onShare?: (document: any) => void
@@ -746,6 +748,36 @@ function DocumentItem({
   )
 }
 
+// Folder Item component for Google Drive style navigation
+function FolderItem({
+  folder,
+  onFolderClick,
+}: {
+  folder: any
+  onFolderClick?: (folderPath: string) => void
+}) {
+  return (
+    <Card
+      className="cursor-pointer hover:bg-accent/50 transition-colors group"
+      onClick={() => onFolderClick?.(folder.folder_path)}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 w-10 h-10 bg-muted rounded-lg flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+            <IconFolderFilled className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium truncate">{folder.title}</h3>
+            <p className="text-xs text-muted-foreground">
+              {folder.document_count || 0} {folder.document_count === 1 ? 'documento' : 'documentos'}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function DocumentList({
   documents,
   loading,
@@ -754,6 +786,7 @@ export function DocumentList({
   showHighlights = false,
   useDetailedView = false,
   onDocumentClick,
+  onFolderClick,
   onDownload,
   onDelete,
   onShare,
@@ -791,26 +824,40 @@ export function DocumentList({
       ? "grid grid-cols-1 gap-4"
       : "space-y-3"
     }>
-      {documents.map((document, index) => (
-        <DocumentItem
-          key={document.id || index}
-          document={document}
-          showScore={showScore}
-          showHighlights={showHighlights}
-          useDetailedView={useDetailedView}
-          onDocumentClick={onDocumentClick}
-          onDownload={onDownload}
-          onDelete={onDelete}
-          onShare={onShare}
-          onEdit={onEdit}
-          onSignature={onSignature}
-          onAskEmma={onAskEmma}
-          selectable={selectable}
-          isSelected={selectedIds?.has(document.id)}
-          onToggleSelection={() => onToggleSelection?.(document.id)}
-          showPermissionBadges={showPermissionBadges}
-        />
-      ))}
+      {documents.map((item, index) => {
+        // Render folder items differently (Google Drive style)
+        if (item.type === 'folder') {
+          return (
+            <FolderItem
+              key={item.id || `folder-${index}`}
+              folder={item}
+              onFolderClick={onFolderClick}
+            />
+          )
+        }
+
+        // Regular document item
+        return (
+          <DocumentItem
+            key={item.id || index}
+            document={item}
+            showScore={showScore}
+            showHighlights={showHighlights}
+            useDetailedView={useDetailedView}
+            onDocumentClick={onDocumentClick}
+            onDownload={onDownload}
+            onDelete={onDelete}
+            onShare={onShare}
+            onEdit={onEdit}
+            onSignature={onSignature}
+            onAskEmma={onAskEmma}
+            selectable={selectable}
+            isSelected={selectedIds?.has(item.id)}
+            onToggleSelection={() => onToggleSelection?.(item.id)}
+            showPermissionBadges={showPermissionBadges}
+          />
+        )
+      })}
     </div>
   )
 }

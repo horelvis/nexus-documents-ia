@@ -264,14 +264,21 @@ class DocumentService:
             document_data=weaviate_document_data
         )
 
-        # Task 2: Elasticsearch (Keyword/Hybrid)
+        # Task 2: Elasticsearch (Keyword/Hybrid) with ACL
+        # For new documents, default to owner-only access (created_by)
+        # ACL will be synced later when permissions are granted
         elasticsearch_task = elasticsearch_client.index_document(
             tenant_id=self.tenant_id,
             doc_id=str(db_document.id),
             title=title,
             content=document_text,
             description=db_document.description,
-            metadata=document_metadata
+            metadata=document_metadata,
+            # ACL fields - new documents start with owner-only access
+            created_by=self.user_id or "system",
+            acl_user_ids=[],
+            acl_role_ids=[],
+            acl_everyone=True  # Default to everyone for backward compatibility
         )
 
         # Execute both

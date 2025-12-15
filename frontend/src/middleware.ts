@@ -11,7 +11,8 @@ const isPublicRoute = createRouteMatcher([
   '/user-not-found',
   '/tenant-not-found',
   '/shared/(.*)',  // Public share links
-  '/integrations/(.*)'
+  '/integrations/(.*)',
+  '/portal/(.*)'   // Site Guest portal (invitation-only, OTP auth)
 ])
 
 const isSubscriptionRoute = createRouteMatcher([

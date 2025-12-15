@@ -160,7 +160,7 @@ export default function TemplatesPage() {
     setEditingSessions(prev => new Set([...prev, template.id]))
 
     try {
-      const response = await apiClient.post(`/engine-templates/${template.id}/edit-sessions`, {
+      const response = await apiClient.post<{ google_doc_edit_url: string }>(`/engine-templates/${template.id}/edit-sessions`, {
         reason: 'Template edit requested from library',
       })
 

@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { DocumentList } from "@/components/documents/document-list"
@@ -8,28 +9,20 @@ import {
   IconSearch,
   IconFilter,
   IconFile,
-  IconFileText,
-  IconFileTypeDoc,
-  IconFileTypePdf,
-  IconClock,
-  IconEye,
   IconDownload,
   IconTrash,
-  IconEdit,
   IconLoader2,
   IconChevronLeft,
   IconChevronRight,
   IconLayoutGrid,
   IconLayoutList,
-  IconShare2,
-  IconSignature,
-  IconDotsVertical,
   IconBrain,
-  IconRefresh,
-  IconAlertTriangle,
   IconX,
   IconRobot,
-  IconCheck
+  IconFolderPlus,
+  IconArrowRight,
+  IconHome,
+  IconFolder,
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -51,6 +44,7 @@ import { useUserContext } from "@/contexts/user-context"
 import { useDocumentService } from "@/lib/services/document.service"
 import { useSearchService } from "@/lib/services/search.service"
 import { useDocumentInsightsService, type RecentDocument } from "@/lib/services/document-insights.service"
+import { useFolderService, type FolderInfo } from "@/lib/services/folder.service"
 import { useApiClient } from "@/lib/api-client"
 import { Document as ApiDocument } from "@/lib/types"
 import type { Entity as SearchEntity } from "@/lib/services/entity.service"
@@ -62,7 +56,7 @@ import {
 } from "@/components/documents"
 // AgentProcessDialog removed - using automatic mode now
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
-import { getFileIcon, formatFileSize } from "@/lib/document-utils"
+import { CreateFolderDialog, MoveToFolderDialog } from "@/components/folders"
 import { useTranslation } from "@/lib/i18n/hooks"
 import { createEntityTag } from "@/components/ui/entity-renderer"
 
@@ -106,6 +100,8 @@ export default function DocumentsPage() {
   ], [t]);
 
   const [documents, setDocuments] = useState<ApiDocument[]>([])
+  const [folders, setFolders] = useState<FolderInfo[]>([])
+  const [currentFolder, setCurrentFolder] = useState<string>('')  // '' = root
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -226,15 +222,21 @@ export default function DocumentsPage() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
   const [isProcessingWithAgent, setIsProcessingWithAgent] = useState(false)
 
+  // Folder dialog states
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false)
+  const [moveToFolderDialogOpen, setMoveToFolderDialogOpen] = useState(false)
+
   const { openUploadDialog } = useUpload()
   const { emitDocumentEvent } = useDocumentEvents()
   const { addNotification } = useNotifications()
   const documentService = useDocumentService()
   const searchService = useSearchService()
   const documentInsightsService = useDocumentInsightsService()
+  const folderService = useFolderService()
   const documentServiceRef = useRef(documentService)
   const searchServiceRef = useRef(searchService)
   const documentInsightsServiceRef = useRef(documentInsightsService)
+  const folderServiceRef = useRef(folderService)
 
   useEffect(() => {
     documentServiceRef.current = documentService
@@ -248,13 +250,33 @@ export default function DocumentsPage() {
     documentInsightsServiceRef.current = documentInsightsService
   }, [documentInsightsService])
 
+  useEffect(() => {
+    folderServiceRef.current = folderService
+  }, [folderService])
 
 
+
+
+  // Load folders from API
+  const loadFolders = useCallback(async () => {
+    try {
+      const response = await folderServiceRef.current.getFolderTree()
+      if (response.data) {
+        setFolders(response.data.folders || [])
+      }
+    } catch (err) {
+      console.warn('Failed to load folders:', err)
+      setFolders([])
+    }
+  }, [])
 
   // Load documents from API - simple pattern
   const loadDocuments = useCallback(async () => {
     setIsLoading(true)
     setError(null)
+
+    // Load folders in parallel (don't block on folders)
+    loadFolders()
 
     try {
       if (selectedFilter === 'recent') {
@@ -369,7 +391,8 @@ export default function DocumentsPage() {
           search: effectiveSearch,
           status: statusFilter,
           per_page: itemsPerPage,
-          page: viewMode === 'table' ? 1 : currentPage
+          page: viewMode === 'table' ? 1 : currentPage,
+          folder: currentFolder || undefined  // Filter by current folder
         })
       }
 
@@ -399,7 +422,7 @@ export default function DocumentsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage])
+  }, [searchQuery, useDeepSearch, viewMode, perPage, selectedFilter, currentPage, currentFolder, loadFolders])
 
   // Reload when dependencies change
   useEffect(() => {
@@ -412,8 +435,79 @@ export default function DocumentsPage() {
   }, [selectedFilter, searchQuery, viewMode])
 
 
-  // Documents are already filtered server-side
-  const filteredDocuments = documents || []
+  // Get current folder's subfolders
+  const currentFolders = useMemo(() => {
+    if (!folders.length) return []
+
+    // Filter folders at the current level
+    const getFoldersAtPath = (folderList: FolderInfo[], parentPath: string): FolderInfo[] => {
+      const result: FolderInfo[] = []
+      for (const folder of folderList) {
+        // Check if this folder is a direct child of the current path
+        const folderParent = folder.path.substring(0, folder.path.lastIndexOf('/')) || ''
+        if (folderParent === parentPath || (parentPath === '' && !folder.path.includes('/'))) {
+          result.push(folder)
+        }
+        // Also check children recursively
+        if (folder.children?.length) {
+          result.push(...getFoldersAtPath(folder.children, parentPath))
+        }
+      }
+      return result
+    }
+
+    return getFoldersAtPath(folders, currentFolder)
+  }, [folders, currentFolder])
+
+  // Convert folders to table items format
+  const folderItems = useMemo(() => {
+    return currentFolders.map(folder => ({
+      id: `folder-${folder.path}`,
+      type: 'folder' as const,
+      folder_path: folder.path,
+      title: folder.name,
+      filename: folder.name,
+      document_count: folder.document_count,
+      // Required fields for ApiDocument compatibility
+      original_filename: folder.name,
+      description: '',
+      file_size: 0,
+      file_type: 'folder',
+      mime_type: 'application/x-folder',
+      category: '',
+      tags: [],
+      indexed: 'INDEXED' as const,
+      status: 'active' as const,
+      tenant_id: tenantId,
+      created_by: {},
+      user_id: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      processed_at: new Date().toISOString(),
+    }))
+  }, [currentFolders, tenantId])
+
+  // Documents are already filtered server-side, combine with folders
+  const filteredDocuments = useMemo(() => {
+    // Don't show folders when searching or in recent view
+    if (searchQuery || selectedFilter === 'recent') {
+      return documents || []
+    }
+    // Show folders first, then documents
+    return [...folderItems, ...(documents || [])]
+  }, [documents, folderItems, searchQuery, selectedFilter])
+
+  // Handle folder navigation
+  const handleFolderClick = useCallback((folderPath: string) => {
+    setCurrentFolder(folderPath)
+  }, [])
+
+  // Handle going back to parent folder
+  const handleGoToParentFolder = useCallback(() => {
+    if (!currentFolder) return
+    const parentPath = currentFolder.substring(0, currentFolder.lastIndexOf('/')) || ''
+    setCurrentFolder(parentPath)
+  }, [currentFolder])
 
   const isOdtDocument = useCallback((document: ApiDocument) => {
     const fileType = (document.file_type || '').toLowerCase()
@@ -802,18 +896,64 @@ export default function DocumentsPage() {
     <div className="flex flex-col gap-4 p-6 md:gap-6 md:py-6">
       <div className="px-4 lg:px-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
           <div>
             <h1 className="text-3xl font-bold mb-2">{t('documentsPage.title')}</h1>
             <p className="text-muted-foreground">
               {t('documentsPage.subtitle')}
             </p>
           </div>
-          <Button onClick={openUploadDialog}>
-            <IconPlus className="mr-2 h-4 w-4" />
-            {t('documentsPage.uploadButton')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setCreateFolderDialogOpen(true)}>
+              <IconFolderPlus className="mr-2 h-4 w-4" />
+              Nueva carpeta
+            </Button>
+            <Button onClick={() => openUploadDialog()}>
+              <IconPlus className="mr-2 h-4 w-4" />
+              {t('documentsPage.uploadButton')}
+            </Button>
+          </div>
         </div>
+
+        {/* Folder Breadcrumb */}
+        {currentFolder && (
+          <div className="flex items-center gap-2 mb-4 text-sm">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 gap-1"
+              onClick={() => setCurrentFolder('')}
+            >
+              <IconHome className="h-4 w-4" />
+              Documentos
+            </Button>
+            {currentFolder.split('/').filter(Boolean).map((segment, index, arr) => {
+              const path = arr.slice(0, index + 1).join('/')
+              const isLast = index === arr.length - 1
+              return (
+                <React.Fragment key={path}>
+                  <IconChevronRight className="h-4 w-4 text-muted-foreground" />
+                  {isLast ? (
+                    <span className="flex items-center gap-1 font-medium">
+                      <IconFolder className="h-4 w-4" />
+                      {segment}
+                    </span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 gap-1"
+                      onClick={() => setCurrentFolder(path)}
+                    >
+                      <IconFolder className="h-4 w-4" />
+                      {segment}
+                    </Button>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </div>
+        )}
 
         {/* Selection Toolbar */}
         {selectedDocumentIds.size > 0 && (
@@ -842,6 +982,15 @@ export default function DocumentsPage() {
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setMoveToFolderDialogOpen(true)}
+                  >
+                    <IconArrowRight className="h-4 w-4" />
+                    Mover a carpeta
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1055,6 +1204,7 @@ export default function DocumentsPage() {
               onPreviewDocument={handleViewDocument}
               onFullPagePreview={handleFullPagePreview}
               onShareDocument={handleShareDocument}
+              onFolderClick={handleFolderClick}
               onRequestSignature={handleRequestSignature}
               onAskEmma={handleAskEmma}
               canConvertToTemplate={isTenantAdmin}
@@ -1075,7 +1225,7 @@ export default function DocumentsPage() {
                   }
                 </p>
                 {!searchQuery && selectedFilter === 'all' && (
-                  <Button onClick={openUploadDialog}>
+                  <Button onClick={() => openUploadDialog()}>
                     <IconPlus className="mr-2 h-4 w-4" />
                     {t('documentsPage.uploadButton')}
                   </Button>
@@ -1203,7 +1353,32 @@ export default function DocumentsPage() {
             onPermissionsChanged={loadDocuments}
           />
 
-          {/* AgentProcessDialog removed - now using automatic mode */}
+          <CreateFolderDialog
+            open={createFolderDialogOpen}
+            onOpenChange={setCreateFolderDialogOpen}
+            onFolderCreated={() => {
+              addNotification({
+                type: 'success',
+                title: 'Carpeta creada',
+                message: 'La carpeta se ha creado correctamente'
+              })
+            }}
+          />
+
+          <MoveToFolderDialog
+            open={moveToFolderDialogOpen}
+            onOpenChange={setMoveToFolderDialogOpen}
+            documentIds={Array.from(selectedDocumentIds)}
+            onMoveComplete={() => {
+              loadDocuments()
+              setSelectedDocumentIds(new Set())
+              addNotification({
+                type: 'success',
+                title: 'Documentos movidos',
+                message: `${selectedDocumentIds.size} documento(s) movido(s) correctamente`
+              })
+            }}
+          />
 
         </div> {/* End main content */}
 

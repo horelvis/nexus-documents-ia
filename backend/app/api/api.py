@@ -5,20 +5,14 @@ from app.api.v1 import (
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
     assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
-    document_acl,
+    document_acl, folders, classification, site_guests, site_portal,
 )
 from fastapi import APIRouter
 
 
 api_router = APIRouter()
 
-# Log para verificar que se incluye el router de auth
-import logging
-logger = logging.getLogger(__name__)
-logger.info("🔧 Including auth router with endpoints...")
-
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-logger.info("✅ Auth router included with prefix=/auth")
 api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
@@ -93,11 +87,27 @@ api_router.include_router(analysis_queue.router, prefix="/analysis", tags=["anal
 from app.api.v1 import gemini_voice
 api_router.include_router(gemini_voice.router, prefix="/gemini", tags=["gemini-voice"])
 
+# TTS Service - Text-to-Speech for Emma Chat responses
+from app.api.v1 import tts
+api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
+
 # Information Channels - Gmail, Google Drive, External DB for RAG
 api_router.include_router(channels.router, prefix="/channels", tags=["channels"])
 
 # Document ACL - Document-level Access Control Lists
 api_router.include_router(document_acl.router, prefix="/documents", tags=["document-acl"])
+
+# Folders - Document folder organization (physical folders in GCS)
+api_router.include_router(folders.router, prefix="/folders", tags=["folders"])
+
+# Classification - RAG + LLM auto-classification system
+api_router.include_router(classification.router, prefix="/classification", tags=["classification"])
+
+# Site Guests - External sharing (admin management)
+api_router.include_router(site_guests.router, prefix="/site-guests", tags=["site-guests"])
+
+# Site Portal - External sharing (public guest access)
+api_router.include_router(site_portal.router, prefix="/site-portal", tags=["site-portal"])
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

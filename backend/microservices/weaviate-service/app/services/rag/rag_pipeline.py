@@ -506,12 +506,16 @@ class RAGPipeline:
         start_time = time.time()
 
         # Build analysis query based on type
+        # Prompts are loaded from emma_prompts.yaml via prompt_loader
+        from app.services.rag.prompt_loader import get_analysis_prompt
+
         analysis_queries = {
-            "comprehensive": "Realiza un análisis completo del documento, identificando temas principales, riesgos, y puntos clave.",
-            "risks": "Identifica y analiza todos los riesgos potenciales en el documento.",
-            "summary": "Resume los puntos principales del documento.",
-            "entities": "Extrae todas las entidades importantes (personas, organizaciones, fechas, montos) del documento.",
-            "compliance": "Evalúa el cumplimiento normativo del documento.",
+            "comprehensive": get_analysis_prompt("comprehensive"),
+            "risks": get_analysis_prompt("risks"),
+            "summary": get_analysis_prompt("summary"),
+            "entities": get_analysis_prompt("entities"),
+            "compliance": get_analysis_prompt("compliance"),
+            "obligations": get_analysis_prompt("obligations"),
         }
 
         query = analysis_queries.get(analysis_type, analysis_queries["comprehensive"])

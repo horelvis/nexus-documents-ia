@@ -151,7 +151,7 @@ export default function UserSettingsPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">{t('userSettings.security.accountStatus')}</label>
               <div className="flex items-center gap-2">
-                {user.banned ? (
+                {(user.publicMetadata as { banned?: boolean })?.banned ? (
                   <Badge variant="destructive" className="text-xs">{t('userSettings.security.banned')}</Badge>
                 ) : (
                   <Badge variant="secondary" className="text-xs">

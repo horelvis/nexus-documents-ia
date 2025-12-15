@@ -60,10 +60,21 @@ export function NavUser({
   
   const tenantId = params.tenantId as string
 
-  // Use Clerk user data if available, fallback to prop
+  // Use Clerk user data as primary source (it's the auth provider)
+  // Check if email is a Clerk placeholder (e.g., user_xxx@clerk.local)
+  const clerkEmail = clerkUser?.primaryEmailAddress?.emailAddress || ''
+  const isPlaceholderEmail = clerkEmail.includes('@clerk.local') || clerkEmail.startsWith('user_')
+
+  // Get the best available name from Clerk
+  const clerkName = clerkUser?.fullName || clerkUser?.firstName || ''
+  const displayName = clerkName || backendUser?.full_name || 'User'
+
+  // For email display: show real email, or name if email is placeholder
+  const displayEmail = isPlaceholderEmail ? displayName : clerkEmail
+
   const user = clerkUser ? {
-    name: clerkUser.fullName || clerkUser.firstName || 'User',
-    email: clerkUser.primaryEmailAddress?.emailAddress || '',
+    name: displayName,
+    email: displayEmail,
     avatar: clerkUser.imageUrl || ''
   } : fallbackUser || { name: 'User', email: '', avatar: '' }
 

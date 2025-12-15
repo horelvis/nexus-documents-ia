@@ -69,6 +69,16 @@ class CleanupResponse(BaseModel):
     files_deleted: int
     bucket: str
 
+class MoveRequest(BaseModel):
+    source_path: str
+    destination_path: str
+
+class MoveResponse(BaseModel):
+    source: str
+    destination: str
+    bucket: str
+    moved_at: str
+
 def get_gcs_service(auth_context: dict = Depends(validate_tenant_access)) -> GCSService:
     """Dependency que retorna el servicio GCS configurado para el tenant (con cache)"""
     bucket_name = get_bucket_name(
@@ -342,6 +352,45 @@ async def delete_file(
         message="File deleted successfully",
         object_name=object_name
     )
+
+@router.post("/move", response_model=MoveResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def move_file(
+    request: Request,
+    move_request: MoveRequest,
+    auth_context: dict = Depends(validate_tenant_access),
+    gcs_service: GCSService = Depends(get_gcs_service)
+):
+    """
+    Move a file to a new location within the bucket.
+
+    - **source_path**: Current path of the file
+    - **destination_path**: New path for the file
+
+    This is used when moving documents between folders.
+    The operation is atomic (copy + delete).
+    """
+
+    # Build full paths
+    source_object = get_object_path(
+        auth_context["tenant_id"],
+        auth_context["user_id"],
+        move_request.source_path
+    )
+    destination_object = get_object_path(
+        auth_context["tenant_id"],
+        auth_context["user_id"],
+        move_request.destination_path
+    )
+
+    result = gcs_service.move_file(source_object, destination_object)
+
+    # Clear source from cache if exists
+    redis_cache.delete(auth_context["tenant_id"], source_object)
+
+    logger.info(f"File moved: {source_object} -> {destination_object} by tenant {auth_context['tenant_id']}")
+
+    return MoveResponse(**result)
 
 @router.get("/info/{path:path}", response_model=FileInfo)
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")

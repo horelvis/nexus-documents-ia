@@ -650,10 +650,10 @@ class DocumentACLService:
 
     async def _sync_document_acl_to_weaviate(self, document_id: UUID, db: AsyncSession = None):
         """
-        Sync ACL state to Weaviate document properties.
+        Sync ACL state to Weaviate and Elasticsearch document properties.
 
-        Updates acl_user_ids, acl_role_ids, acl_everyone in Weaviate
-        for efficient filtering during vector searches.
+        Updates acl_user_ids, acl_role_ids, acl_everyone in both systems
+        for efficient filtering during searches.
 
         Args:
             document_id: Document to sync
@@ -672,11 +672,11 @@ class DocumentACLService:
                 return await self._sync_document_acl_to_weaviate_impl(document_id, db)
 
         except Exception as e:
-            logger.error(f"Failed to sync ACL to Weaviate: {e}")
-            # Don't raise - ACL is source of truth, Weaviate sync is async
+            logger.error(f"Failed to sync ACL to Weaviate/Elasticsearch: {e}")
+            # Don't raise - ACL is source of truth, sync is async
 
     async def _sync_document_acl_to_weaviate_impl(self, document_id: UUID, db: AsyncSession):
-        """Internal implementation of Weaviate ACL sync."""
+        """Internal implementation of Weaviate and Elasticsearch ACL sync."""
         import httpx
         from app.core.config import settings
 
@@ -711,11 +711,38 @@ class DocumentACLService:
             elif acl.grantee_type == GranteeType.EVERYONE.value:
                 acl_everyone = True
 
+        # Get document owner for created_by field
+        doc_result = await db.execute(
+            select(Document.created_by).filter(Document.id == document_id)
+        )
+        doc_row = doc_result.first()
+        created_by = str(doc_row[0]) if doc_row and doc_row[0] else None
+
         # Get tenant collection name
-        from app.core.config import settings
         collection_name = f"Nexus_{str(self.tenant_id).replace('-', '_')}_documents"
 
-        # Call Weaviate service to update ACL properties
+        # Sync to Weaviate
+        await self._sync_acl_to_weaviate(
+            document_id, collection_name, acl_user_ids, acl_role_ids, acl_everyone
+        )
+
+        # Sync to Elasticsearch
+        await self._sync_acl_to_elasticsearch(
+            document_id, collection_name, acl_user_ids, acl_role_ids, acl_everyone, created_by
+        )
+
+    async def _sync_acl_to_weaviate(
+        self,
+        document_id: UUID,
+        collection_name: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool
+    ):
+        """Sync ACL to Weaviate service."""
+        import httpx
+        from app.core.config import settings
+
         weaviate_url = f"{settings.WEAVIATE_SERVICE_URL}/api/v1/weaviate/documents/{document_id}/acl"
 
         try:
@@ -748,6 +775,39 @@ class DocumentACLService:
             logger.warning(f"Could not connect to Weaviate service for ACL sync (document {document_id})")
         except Exception as e:
             logger.error(f"Error calling Weaviate service for ACL sync: {e}")
+
+    async def _sync_acl_to_elasticsearch(
+        self,
+        document_id: UUID,
+        collection_name: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool,
+        created_by: str = None
+    ):
+        """Sync ACL to Elasticsearch service."""
+        from app.services.elasticsearch_client import elasticsearch_client
+
+        try:
+            success = await elasticsearch_client.sync_document_acl(
+                document_id=str(document_id),
+                collection_name=collection_name,
+                acl_user_ids=acl_user_ids,
+                acl_role_ids=acl_role_ids,
+                acl_everyone=acl_everyone,
+                created_by=created_by
+            )
+
+            if success:
+                logger.info(
+                    f"✅ Synced ACL to Elasticsearch for document {document_id}: "
+                    f"users={len(acl_user_ids)}, roles={len(acl_role_ids)}, everyone={acl_everyone}"
+                )
+            else:
+                logger.warning(f"Elasticsearch ACL sync returned False for document {document_id}")
+
+        except Exception as e:
+            logger.error(f"Error syncing ACL to Elasticsearch: {e}")
 
     async def sync_all_documents_to_weaviate(self, db: AsyncSession):
         """

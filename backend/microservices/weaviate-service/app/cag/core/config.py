@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     # LLM configuration - vLLM is the primary provider
     llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    llm_model: str = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")  # Default model
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B")
+    llm_model: str = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")  # Default model
     # Legacy Ollama config (DEPRECATED)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

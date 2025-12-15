@@ -79,17 +79,7 @@ from .flows import DocumentAnalysisFlow, AnalysisResult, get_document_analysis_f
 from .flows import PlanningFlow, FlowResult, get_planning_flow
 from .tools.planning_tool import PlanningTool, PlanStepStatus, get_planning_tool
 
-# Handoff Workflow - Multi-agent with HandoffBuilder
-from .handoff_workflow import (
-    EmmaHandoffWorkflow,
-    HandoffWorkflowResult,
-    get_emma_handoff_workflow,
-    initialize_handoff_workflow,
-    classify_query_for_agent,      # Regex fallback
-    classify_agent_with_llm,       # LLM-based classification (preferred)
-)
-
-# Emma Coordinator - RECOMMENDED: Main agent with subagent delegation via .as_tool()
+# Emma Coordinator - Main agent with subagent delegation via .as_tool()
 from .emma_coordinator import (
     EmmaCoordinator,
     EmmaCoordinatorResult,
@@ -125,12 +115,7 @@ __all__ = [
     "PlanningTool",
     "PlanStepStatus",
     "get_planning_tool",
-    # Handoff Workflow (Multi-agent)
-    "EmmaHandoffWorkflow",
-    "HandoffWorkflowResult",
-    "get_emma_handoff_workflow",
-    "initialize_handoff_workflow",
-    # Emma Coordinator (RECOMMENDED - Main agent with .as_tool() delegation)
+    # Emma Coordinator (Main agent with .as_tool() delegation)
     "EmmaCoordinator",
     "EmmaCoordinatorResult",
     "get_emma_coordinator",

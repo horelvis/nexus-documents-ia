@@ -84,7 +84,12 @@ class ElasticsearchService:
                         "created_at": {"type": "date"},
                         "updated_at": {"type": "date"},
                         "file_size": {"type": "long"},
-                        "metadata": {"type": "object"}
+                        "metadata": {"type": "object"},
+                        # ACL fields for document-level access control
+                        "created_by": {"type": "keyword"},
+                        "acl_user_ids": {"type": "keyword"},
+                        "acl_role_ids": {"type": "keyword"},
+                        "acl_everyone": {"type": "boolean"}
                     }
                 },
                 "settings": {
@@ -130,10 +135,21 @@ class ElasticsearchService:
         content: str,
         description: str = None,
         content_vector: List[float] = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        # ACL fields
+        created_by: str = None,
+        acl_user_ids: List[str] = None,
+        acl_role_ids: List[str] = None,
+        acl_everyone: bool = False
     ) -> bool:
         """
-        Index a document for hybrid search
+        Index a document for hybrid search with ACL support.
+
+        ACL fields enable document-level access control:
+        - created_by: Owner user ID (always has access)
+        - acl_user_ids: List of user IDs with explicit access
+        - acl_role_ids: List of role IDs with access
+        - acl_everyone: If True, all tenant users have access
         """
         try:
             doc = {
@@ -142,13 +158,18 @@ class ElasticsearchService:
                 "content": content,
                 "description": description or "",
                 "tenant_id": self.tenant_id,
-                "file_type": metadata.get("file_type", "unknown"),
-                "category": metadata.get("category"),
-                "tags": metadata.get("tags", []),
-                "created_at": metadata.get("created_at"),
-                "updated_at": metadata.get("updated_at"),
-                "file_size": metadata.get("file_size"),
-                "metadata": metadata or {}
+                "file_type": metadata.get("file_type", "unknown") if metadata else "unknown",
+                "category": metadata.get("category") if metadata else None,
+                "tags": metadata.get("tags", []) if metadata else [],
+                "created_at": metadata.get("created_at") if metadata else None,
+                "updated_at": metadata.get("updated_at") if metadata else None,
+                "file_size": metadata.get("file_size") if metadata else None,
+                "metadata": metadata or {},
+                # ACL fields
+                "created_by": created_by or "",
+                "acl_user_ids": acl_user_ids or [],
+                "acl_role_ids": acl_role_ids or [],
+                "acl_everyone": acl_everyone
             }
 
             # Add vector if provided
@@ -161,12 +182,59 @@ class ElasticsearchService:
                 body=doc
             )
 
-            logger.debug(f"✅ Indexed document {doc_id} in Elasticsearch")
+            logger.debug(f"✅ Indexed document {doc_id} in Elasticsearch (ACL: users={len(acl_user_ids or [])}, roles={len(acl_role_ids or [])}, everyone={acl_everyone})")
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to index document {doc_id}: {e}")
             return False
+
+    def _build_acl_filter(
+        self,
+        user_id: str,
+        role_ids: List[str] = None,
+        is_admin: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build Elasticsearch filter clause for ACL-based access control.
+
+        Access is granted if ANY of these conditions is true:
+        1. User is admin (sees all documents in tenant)
+        2. User is the document owner (created_by = user_id)
+        3. User has explicit ACL (user_id in acl_user_ids)
+        4. User has role-based ACL (any role_id in acl_role_ids)
+        5. Document has 'everyone' ACL (acl_everyone = true)
+        6. Document has no ACL configured (legacy/migration - created_by is empty)
+
+        Returns:
+            Filter clause dict or None if admin (no filtering needed beyond tenant)
+        """
+        if is_admin:
+            # Admins see all documents in tenant
+            return None
+
+        should_clauses = [
+            # User is the owner
+            {"term": {"created_by": user_id}},
+            # User has explicit ACL
+            {"term": {"acl_user_ids": user_id}},
+            # Everyone has access
+            {"term": {"acl_everyone": True}},
+            # Legacy documents without ACL (created_by is empty string)
+            {"term": {"created_by": ""}}
+        ]
+
+        # Add role-based access if user has roles
+        if role_ids:
+            for role_id in role_ids:
+                should_clauses.append({"term": {"acl_role_ids": role_id}})
+
+        return {
+            "bool": {
+                "should": should_clauses,
+                "minimum_should_match": 1
+            }
+        }
 
     async def hybrid_search(
         self,
@@ -174,10 +242,17 @@ class ElasticsearchService:
         limit: int = 10,
         filters: Dict[str, Any] = None,
         boost_semantic: float = 1.0,
-        boost_keyword: float = 1.0
+        boost_keyword: float = 1.0,
+        # ACL parameters
+        user_id: str = None,
+        role_ids: List[str] = None,
+        is_admin: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Perform hybrid search combining keyword and semantic search
+        Perform hybrid search combining keyword and semantic search with ACL filtering.
+
+        If user_id is provided, results are filtered based on document-level ACL.
+        If user_id is None (backward compatibility), no ACL filtering is applied.
         """
         try:
             # Build the search query
@@ -230,8 +305,15 @@ class ElasticsearchService:
                         }
                     })
 
-            # Add filters
+            # Add filters - always filter by tenant
             filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]
+
+            # Add ACL filter if user context is provided
+            if user_id:
+                acl_filter = self._build_acl_filter(user_id, role_ids, is_admin)
+                if acl_filter:
+                    filter_clauses.append(acl_filter)
+                logger.debug(f"🔐 ACL filter applied: user={user_id}, roles={role_ids}, admin={is_admin}")
 
             if filters:
                 if filters.get("file_type"):
@@ -329,14 +411,27 @@ class ElasticsearchService:
         query_vector: List[float],
         limit: int = 10,
         filters: Dict[str, Any] = None,
-        min_score: float = 0.7
+        min_score: float = 0.7,
+        # ACL parameters
+        user_id: str = None,
+        role_ids: List[str] = None,
+        is_admin: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Perform semantic search using vector similarity
+        Perform semantic search using vector similarity with ACL filtering.
+
+        If user_id is provided, results are filtered based on document-level ACL.
         """
         try:
             # Build filter clauses
             filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]
+
+            # Add ACL filter if user context is provided
+            if user_id:
+                acl_filter = self._build_acl_filter(user_id, role_ids, is_admin)
+                if acl_filter:
+                    filter_clauses.append(acl_filter)
+                logger.debug(f"🔐 ACL filter applied to semantic search: user={user_id}")
 
             if filters:
                 if filters.get("file_type"):
@@ -589,6 +684,81 @@ class ElasticsearchService:
         except Exception as e:
             logger.error(f"❌ Failed to delete document {doc_id}: {e}")
             return False
+
+    async def update_document_acl(
+        self,
+        doc_id: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool,
+        created_by: str = None
+    ) -> bool:
+        """
+        Update ACL fields for an existing document.
+
+        This method is called when document permissions change to keep
+        Elasticsearch in sync with the source of truth (PostgreSQL).
+
+        Args:
+            doc_id: Document ID to update
+            acl_user_ids: List of user IDs with view permission
+            acl_role_ids: List of role IDs with view permission
+            acl_everyone: Whether everyone in tenant has access
+            created_by: Document owner (optional, only updated if provided)
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        try:
+            # Build update body - only update ACL fields
+            update_body = {
+                "acl_user_ids": acl_user_ids,
+                "acl_role_ids": acl_role_ids,
+                "acl_everyone": acl_everyone
+            }
+
+            # Optionally update created_by if provided
+            if created_by is not None:
+                update_body["created_by"] = created_by
+
+            await self.async_client.update(
+                index=self.index_name,
+                id=doc_id,
+                body={"doc": update_body}
+            )
+
+            logger.info(
+                f"✅ Updated ACL for document {doc_id}: "
+                f"users={len(acl_user_ids)}, roles={len(acl_role_ids)}, everyone={acl_everyone}"
+            )
+            return True
+
+        except NotFoundError:
+            logger.warning(f"Document {doc_id} not found in Elasticsearch for ACL update")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Failed to update ACL for document {doc_id}: {e}")
+            return False
+
+    async def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single document by ID.
+
+        Returns:
+            Document data or None if not found
+        """
+        try:
+            response = await self.async_client.get(
+                index=self.index_name,
+                id=doc_id,
+                _source_excludes=["content_vector"]
+            )
+            return response["_source"]
+        except NotFoundError:
+            return None
+        except Exception as e:
+            logger.error(f"❌ Failed to get document {doc_id}: {e}")
+            return None
 
     async def close(self):
         """Close async client connections"""
