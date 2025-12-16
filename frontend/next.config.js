@@ -31,6 +31,16 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Serve .mjs files with correct MIME type for PDF.js worker
+        source: '/:path*.mjs',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/javascript'
+          }
+        ]
+      },
+      {
         source: '/:path*',
         headers: [
           {
@@ -61,7 +71,11 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://192.168.1.58:8000'}/api/:path*`,
+        // IMPORTANT:
+        // - `destination` must be an absolute URL (server-side rewrite).
+        // - Do NOT use `NEXT_PUBLIC_*` here: those may be set to "/api" (relative), which would break rewrites.
+        // - Configure `API_BASE_URL` (server-only) in the frontend runtime.
+        destination: `${process.env.API_BASE_URL || 'http://127.0.0.1:8000'}/api/:path*`,
       },
     ]
   },

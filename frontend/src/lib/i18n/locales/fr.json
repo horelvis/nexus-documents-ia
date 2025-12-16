@@ -211,7 +211,7 @@
     "admin": {
       "teams": "Gestion des Équipes",
       "settings": "Paramètres du Tenant",
-      "siteGuest": "Accès Externe",
+      "siteGuest": "Configuration Portail",
       "providers": "Fournisseurs de Signature",
       "publicKnowledge": "Base de Connaissances Juridiques",
       "billing": "Facturation",

@@ -687,7 +687,7 @@
     "admin": {
       "teams": "Team Management",
       "settings": "Tenant Settings",
-      "siteGuest": "External Access",
+      "siteGuest": "Portal Settings",
       "providers": "Signature Providers",
       "publicKnowledge": "Legal Knowledge Base",
       "billing": "Billing",

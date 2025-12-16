@@ -1,9 +1,11 @@
-import * as pdfjs from 'pdfjs-dist'
+// Import pdfjs from react-pdf to ensure version consistency
+import { pdfjs } from 'react-pdf'
 
-// Configure PDF.js worker
+// Configure PDF.js worker - uses local worker file copied from react-pdf's pdfjs-dist (v5.3.93)
+// Using .js extension for better browser compatibility
 export function configurePdfWorker() {
   if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
+    pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
   }
 }
 

@@ -515,3 +515,36 @@
   color: var(--muted-foreground);
   font-size: 0.75rem;
 }
+
+/* Navigation Progress Animations */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+    width: 30%;
+  }
+  50% {
+    transform: translateX(100%);
+    width: 60%;
+  }
+  100% {
+    transform: translateX(300%);
+    width: 30%;
+  }
+}
+
+@keyframes fade-in-delayed {
+  0%, 50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-progress-indeterminate {
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+.animate-fade-in-delayed {
+  animation: fade-in-delayed 1s ease-out forwards;
+}

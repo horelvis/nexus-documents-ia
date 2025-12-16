@@ -732,7 +732,7 @@
     "admin": {
       "teams": "Gestión de Equipos",
       "settings": "Configuración del Tenant",
-      "siteGuest": "Acceso Externo",
+      "siteGuest": "Configuración Portal",
       "providers": "Proveedores de Firma",
       "publicKnowledge": "Base de Conocimiento Legal",
       "billing": "Facturación",

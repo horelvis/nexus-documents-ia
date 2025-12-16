@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 
 // Import PDF.js CSS for text layer and annotations support
@@ -30,8 +30,9 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Configure PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+// Configure PDF.js worker - use local worker file copied from react-pdf's pdfjs-dist (v5.3.93)
+// Using .js extension for better browser compatibility
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
 
 interface DigitalSignature {
   name: string
@@ -50,8 +51,11 @@ interface PDFViewerProps {
   fileName?: string
   className?: string
   showToolbar?: boolean
+  httpHeaders?: Record<string, string>
   initialScale?: number
   height?: string | number
+  allowDownload?: boolean
+  allowOpenExternal?: boolean
 }
 
 export default function PDFViewer({ 
@@ -59,8 +63,11 @@ export default function PDFViewer({
   fileName = 'document.pdf', 
   className,
   showToolbar = true,
+  httpHeaders,
   initialScale = 1.0,
-  height = '600px'
+  height = '600px',
+  allowDownload = true,
+  allowOpenExternal = true,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0)
   const [pageNumber, setPageNumber] = useState<number>(1)
@@ -71,56 +78,59 @@ export default function PDFViewer({
   const [signatures, setSignatures] = useState<DigitalSignature[]>([])
   const [showSignatureInfo, setShowSignatureInfo] = useState<boolean>(false)
 
-  const resolvedHeight =
-    typeof height === 'number' ? `${height}px` : height || '600px'
+  // Resolve height - support numbers (px), strings (%, vh, etc), or default
+  const resolvedHeight = typeof height === 'number' ? `${height}px` : height || '600px'
 
-  const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
-    setNumPages(numPages)
-    setIsLoading(false)
-    setError(null)
-    // Detectar firmas digitales
-    detectDigitalSignatures()
-  }, [])
+  // For percentage/relative heights, don't set minHeight as it can cause layout issues
+  const isRelativeHeight = typeof height === 'string' && (height.includes('%') || height.includes('vh'))
 
-  const detectDigitalSignatures = useCallback(async () => {
+  // Memoize file prop to prevent unnecessary reloads
+  // react-pdf compares by reference, so we must keep the same object
+  const fileSource = useMemo(() => {
+    if (httpHeaders) {
+      return { url, httpHeaders }
+    }
+    return url
+  }, [url, httpHeaders])
+
+  // Memoize options to prevent unnecessary reloads
+  const documentOptions = useMemo(() => ({
+    cMapUrl: 'https://unpkg.com/pdfjs-dist@5.3.93/cmaps/',
+    cMapPacked: true,
+  }), [])
+
+  // Detect digital signatures using the already-loaded PDF document
+  const detectDigitalSignatures = useCallback(async (pdf: any) => {
     try {
-      const loadingTask = pdfjs.getDocument(url)
-      const pdf = await loadingTask.promise
       const detectedSignatures: DigitalSignature[] = []
 
-      // Verificar si el documento tiene firmas
-      const hasSignatures = pdf.numPages > 0
-      
-      if (hasSignatures) {
-        // Iterar por cada página para buscar anotaciones de firmas
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum)
-          const annotations = await page.getAnnotations()
-          
-          // Buscar anotaciones de tipo Widget (formularios/firmas)
-          annotations.forEach((annotation: any) => {
-            if (annotation.subtype === 'Widget' && annotation.fieldType === 'Sig') {
-              const signature: DigitalSignature = {
-                name: annotation.fieldName || `Signature ${detectedSignatures.length + 1}`,
-                contactInfo: annotation.contactInfo,
-                location: annotation.location,
-                reason: annotation.reason,
-                date: annotation.modificationDate,
-                isValid: true, // Por defecto true, idealmente se validaría
-                subFilter: annotation.subFilter,
-                signedBy: annotation.title || annotation.contents,
-                pageNumber: pageNum
-              }
-              detectedSignatures.push(signature)
+      // Iterate through pages to find signature annotations
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        const annotations = await page.getAnnotations()
+
+        // Look for Widget annotations (forms/signatures)
+        annotations.forEach((annotation: any) => {
+          if (annotation.subtype === 'Widget' && annotation.fieldType === 'Sig') {
+            const signature: DigitalSignature = {
+              name: annotation.fieldName || `Signature ${detectedSignatures.length + 1}`,
+              contactInfo: annotation.contactInfo,
+              location: annotation.location,
+              reason: annotation.reason,
+              date: annotation.modificationDate,
+              isValid: true,
+              subFilter: annotation.subFilter,
+              signedBy: annotation.title || annotation.contents,
+              pageNumber: pageNum
             }
-          })
-        }
+            detectedSignatures.push(signature)
+          }
+        })
       }
 
-      // También verificar metadatos del documento para información de firmas
+      // Check document metadata for signature indicators
       const metadata = await pdf.getMetadata()
       if (metadata.info?.Producer?.includes('Sign') || metadata.info?.Creator?.includes('Sign')) {
-        // Si no se encontraron firmas específicas pero hay indicios, agregar una genérica
         if (detectedSignatures.length === 0) {
           detectedSignatures.push({
             name: 'Digital Signature Detected',
@@ -136,7 +146,15 @@ export default function PDFViewer({
       console.warn('Error detecting digital signatures:', error)
       setSignatures([])
     }
-  }, [url])
+  }, [])
+
+  const onDocumentLoadSuccess = useCallback((pdf: any) => {
+    setNumPages(pdf.numPages)
+    setIsLoading(false)
+    setError(null)
+    // Detect signatures using the already-loaded document
+    detectDigitalSignatures(pdf)
+  }, [detectDigitalSignatures])
 
   const onDocumentLoadError = useCallback((error: Error) => {
     console.error('Error loading PDF:', error)
@@ -175,17 +193,60 @@ export default function PDFViewer({
   }, [])
 
   const downloadPDF = useCallback(() => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }, [url, fileName])
+    if (!allowDownload) return
+
+    if (!httpHeaders) {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      return
+    }
+
+    fetch(url, { headers: httpHeaders })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`)
+        return await res.blob()
+      })
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = blobUrl
+        link.download = fileName
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
+      })
+      .catch((e) => {
+        console.error(e)
+      })
+  }, [url, fileName, httpHeaders, allowDownload])
 
   const openFullscreen = useCallback(() => {
-    window.open(url, '_blank')
-  }, [url])
+    if (!allowOpenExternal) return
+
+    if (!httpHeaders) {
+      window.open(url, '_blank')
+      return
+    }
+
+    fetch(url, { headers: httpHeaders })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to open PDF: ${res.status}`)
+        return await res.blob()
+      })
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob)
+        window.open(blobUrl, '_blank')
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
+      })
+      .catch((e) => {
+        console.error(e)
+      })
+  }, [url, httpHeaders, allowOpenExternal])
 
   if (error) {
     return (
@@ -209,7 +270,10 @@ export default function PDFViewer({
   return (
     <div
       className={cn("flex flex-col", className)}
-      style={{ minHeight: resolvedHeight, height: resolvedHeight }}
+      style={isRelativeHeight
+        ? { height: resolvedHeight }
+        : { minHeight: resolvedHeight, height: resolvedHeight }
+      }
     >
       {showToolbar && (
         <div className="flex items-center justify-between p-4 border-b bg-card">
@@ -268,11 +332,11 @@ export default function PDFViewer({
               <RotateCw className="h-4 w-4" />
             </Button>
 
-            <Button variant="outline" size="sm" onClick={downloadPDF}>
+            <Button variant="outline" size="sm" onClick={downloadPDF} disabled={!allowDownload}>
               <Download className="h-4 w-4" />
             </Button>
 
-            <Button variant="outline" size="sm" onClick={openFullscreen}>
+            <Button variant="outline" size="sm" onClick={openFullscreen} disabled={!allowOpenExternal}>
               <Maximize2 className="h-4 w-4" />
             </Button>
 
@@ -375,7 +439,8 @@ export default function PDFViewer({
           
           <div className="w-full flex justify-center">
             <Document
-              file={url}
+              file={fileSource}
+              options={documentOptions}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
               loading={null}
