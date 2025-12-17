@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'frontend-v*.*.*-pre.*'
+      - 'v*.*.*-pre.*'
   workflow_dispatch:
   workflow_call:
     inputs:
