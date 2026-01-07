@@ -1,8 +1,8 @@
-# Nexus Document - Funciones del Sistema SaaS
+# NexusDocs360 - Funciones del Sistema SaaS
 
 ## Resumen Ejecutivo
 
-Nexus Document es una plataforma SaaS de gestión documental inteligente impulsada por IA, diseñada para empresas que buscan optimizar su flujo de trabajo documental con capacidades avanzadas de búsqueda, análisis y colaboración.
+NexusDocs360 es una plataforma SaaS de gestión documental inteligente impulsada por IA, diseñada para empresas que buscan optimizar su flujo de trabajo documental con capacidades avanzadas de búsqueda, análisis y colaboración.
 
 ## 🚀 Funciones Principales
 
@@ -34,32 +34,34 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 
 #### Búsqueda Semántica
 - **Búsqueda en lenguaje natural** con comprensión contextual
-- **Motor vectorial Qdrant** para resultados precisos
+- **Motor vectorial Weaviate** con embeddings de 1024 dimensiones
+- **Modelo de embeddings BAAI/bge-m3** multilingüe (100+ idiomas)
+- **Búsqueda híbrida** semántica + keyword con Elasticsearch
+- **Reranking con CrossEncoder** para máxima precisión
 - **Búsqueda específica** dentro de documentos individuales
-- **Ranking inteligente** de resultados por relevancia
-- **Sugerencias automáticas** basadas en consultas previas
 
-#### Chat con Documentos
+#### Chat con Documentos (Emma AI)
 - **Conversaciones con IA** sobre el contenido de los documentos
 - **Soporte multi-documento** en una sola conversación
 - **Contexto persistente** entre sesiones de chat
-- **Integración con múltiples LLMs** (Ollama, OpenAI)
+- **Multi-proveedor LLM**: vLLM (Qwen3), OpenAI, Anthropic, Google
 - **Respuestas precisas** con referencias a las fuentes
+- **Text-to-Speech** con VibeVoice para respuestas por voz
 
 #### Inteligencia Documental
 - **Sugerencias automáticas de etiquetas** basadas en contenido
-- **Extracción de entidades** (nombres, fechas, montos)
+- **Extracción de entidades** (nombres, fechas, montos) con LangExtract
 - **Análisis de sentimiento** para documentos de comunicación
 - **Generación de resúmenes** automáticos
 - **Detección de anomalías** en patrones documentales
 
-#### Sistema de Agentes IA
-- **Agente de Firma Digital**: Gestión automatizada de flujos de firma
-- **Analizador de Documentos**: Análisis profundo del contenido
-- **Asistente RAG**: Respuestas basadas en toda la base documental
-- **Agente de Contratos**: Análisis especializado de términos contractuales
-- **Agente Financiero**: Extracción y análisis de datos financieros
-- **Agente Legal**: Identificación de cláusulas y términos legales
+#### Sistema de Agentes IA (Microsoft Agent Framework)
+- **Emma AI Orchestrator**: Coordinación multi-agente autónoma
+- **Search Agent**: Recuperación semántica optimizada
+- **Analyst Agent**: Análisis profundo del contenido
+- **Contract Agent**: Extracción de cláusulas y términos
+- **Compliance Agent**: Verificación LGPD/GDPR
+- **Summarizer Agent**: Generación de resúmenes ejecutivos
 
 ### 3. 👥 Colaboración y Compartición
 
@@ -79,9 +81,15 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 - **Espacio de trabajo compartido** por organización
 - **Historial de actividades** del equipo
 
+#### Portal de Invitados (Site Guests)
+- **Acceso controlado** para usuarios externos
+- **Autenticación OTP** por email
+- **Documentos compartidos** específicos por invitado
+- **Permisos granulares** de visualización/descarga
+
 ### 4. ✍️ Firmas Digitales
 
-- **Integración con múltiples proveedores** de firma electrónica
+- **Integración con múltiples proveedores** de firma electrónica (YouSign, DocuSign)
 - **Flujos de firma** secuenciales y paralelos
 - **Autenticación de firmantes** con múltiples métodos
 - **Seguimiento en tiempo real** del estado de firmas
@@ -94,6 +102,7 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 
 #### Autenticación Segura
 - **Integración con Clerk** para autenticación empresarial
+- **SSO, MFA y passwordless** disponibles
 - **Verificación de email** obligatoria
 - **Gestión de contraseñas** segura
 - **Seguimiento de sesiones** activas
@@ -116,7 +125,7 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 ### 6. 💳 Facturación y Suscripciones
 
 #### Integración con Stripe
-- **Planes de suscripción** (Gratuito, Pro, Enterprise)
+- **Planes de suscripción** (Trial, Basic, Pro, Enterprise)
 - **Facturación flexible** mensual o anual
 - **Portal del cliente** para autogestión
 - **Gestión de métodos de pago** seguros
@@ -127,7 +136,7 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 #### Características por Plan
 - **Límites de almacenamiento** escalables
 - **Número de usuarios** por organización
-- **Funciones premium** desbloqueables
+- **Funciones premium** desbloqueables (Agentes IA, TTS)
 - **Upgrades/downgrades** sin pérdida de datos
 - **Período de prueba** configurable
 
@@ -157,50 +166,37 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 ### 8. 🔍 Búsqueda y Descubrimiento
 
 #### Búsqueda Avanzada
-- **Búsqueda de texto completo** con operadores
-- **Búsqueda semántica/vectorial** con IA
+- **Búsqueda de texto completo** con Elasticsearch
+- **Búsqueda semántica/vectorial** con Weaviate
+- **Búsqueda híbrida** combinando ambos enfoques
 - **Filtros combinables** (etiquetas, fechas, categorías)
 - **Búsqueda dentro de documentos** específicos
 - **Ordenamiento** por relevancia o fecha
 
 #### Monitoreo del Sistema
 - **Verificación de salud** del sistema de búsqueda
-- **Gestión de modelos** de embeddings
-- **Monitoreo de base vectorial** Qdrant
-- **Descarga/reparación automática** de modelos
+- **Gestión de modelos** de embeddings (TEI)
+- **Monitoreo de base vectorial** Weaviate
+- **Métricas Prometheus** para observabilidad
 
 ### 9. 🔧 Arquitectura de Microservicios
 
 #### Servicios Especializados
-- **LangChain Service** (Puerto 8001)
-  - Generación de embeddings documentales
-  - Operaciones vectoriales optimizadas
-  - Motor de recomendaciones
 
-- **Langroid Service** (Puerto 8002)
-  - Ejecución de agentes IA avanzados
-  - Conversaciones multi-agente
-  - Razonamiento complejo
-
-- **Storage Service** (Puerto 8003)
-  - Operaciones con Google Cloud Storage
-  - Generación de URLs firmadas
-  - Gestión de uploads/downloads
-
-- **Ollama Service** (Puerto 8004)
-  - Hosting de LLMs locales
-  - Gestión de modelos
-  - Inferencia optimizada
-
-- **Gotenberg Service** (Puerto 8005)
-  - Generación de PDFs
-  - Conversión de documentos
-  - Creación de miniaturas
-
-- **LangGraph Service** (Puerto 8006)
-  - Flujos de agentes basados en grafos
-  - Creación visual de agentes
-  - Análisis documental complejo
+| Servicio | Puerto | Descripción |
+|----------|--------|-------------|
+| **Main API** | 8000 | FastAPI - Lógica de negocio principal |
+| **Storage Service** | 8003 | Operaciones GCS, URLs firmadas |
+| **Weaviate Service** | 8007 | Emma AI, RAG Pipeline, búsqueda vectorial |
+| **Elasticsearch Service** | 8008 | Búsqueda full-text, índices híbridos |
+| **LangExtract Service** | 8009 | Extracción estructurada con LLM |
+| **TTS Service** | 8010 | Text-to-Speech (VibeVoice/Google) |
+| **TextExtract Service** | 8011 | OCR con Apache Tika |
+| **Template Editor Service** | 8012 | Editor de plantillas colaborativo |
+| **Background Worker** | 8100 | Celery - Procesamiento asíncrono |
+| **Camunda BPM** | 8080 | Workflows BPMN de aprobación |
+| **vLLM Server** | interno | Inferencia GPU de alta velocidad |
+| **TEI Server** | interno | Generación de embeddings |
 
 ### 10. 💾 Almacenamiento e Infraestructura
 
@@ -212,23 +208,30 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 - **Respaldos automáticos** configurables
 
 #### Características de Base de Datos
-- **PostgreSQL** para datos relacionales
-- **Qdrant** para embeddings vectoriales
-- **Redis** para caché de alto rendimiento
+- **PostgreSQL 15** para datos relacionales
+- **Weaviate 1.28** para embeddings vectoriales (1024 dim)
+- **Elasticsearch 8.11** para búsqueda full-text
+- **Redis 7** para caché de alto rendimiento
 - **Índices optimizados** para consultas rápidas
-- **Replicación** para alta disponibilidad
+
+#### Infraestructura GPU
+- **vLLM** con Qwen3-4B para inferencia LLM
+- **TEI** con BAAI/bge-m3 para embeddings
+- **CrossEncoder** para reranking de resultados
+- **VibeVoice** para síntesis de voz
 
 ### 11. 🔌 API e Integraciones
 
 #### API RESTful
 - **API versionada** (v1) para estabilidad
 - **Documentación OpenAPI/Swagger** interactiva
-- **Autenticación JWT** segura
+- **Autenticación JWT** segura (Clerk)
 - **Rate limiting** configurable
 - **Soporte CORS** para aplicaciones web
 
 #### Soporte de Webhooks
 - **Webhooks de Stripe** para eventos de pago
+- **Webhooks de Clerk** para eventos de usuario
 - **Webhooks de firma digital** para estados
 - **Endpoints personalizables** para integraciones
 - **Reintentos automáticos** en caso de fallo
@@ -237,7 +240,9 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 ### 12. 💻 Características del Frontend
 
 #### UI/UX Moderno
-- **Next.js 15** con App Router para rendimiento
+- **Next.js 15** con App Router y Turbopack
+- **TypeScript 5.7** en modo estricto
+- **Tailwind CSS** con shadcn/ui components
 - **Diseño responsive** para todos los dispositivos
 - **Soporte de modo oscuro** nativo
 - **Actualizaciones en tiempo real** sin recargar
@@ -246,37 +251,40 @@ Nexus Document es una plataforma SaaS de gestión documental inteligente impulsa
 #### Páginas Principales
 - **Dashboard** con analíticas visuales
 - **Biblioteca de documentos** con filtros avanzados
-- **Interfaz de chat** conversacional
+- **Interfaz de chat** conversacional (Emma AI)
 - **Página de búsqueda** con resultados enriquecidos
 - **Configuración y preferencias** personalizables
 - **Gestión de facturación** integrada
 - **Administración de equipos** intuitiva
-- **Centro de ayuda** con documentación
+- **Portal de invitados** para acceso externo
 
 ## 🎯 Casos de Uso Principales
 
-1. **Empresas con alta carga documental** que necesitan organización automática
-2. **Despachos legales** para análisis rápido de contratos
-3. **Departamentos financieros** para procesamiento de facturas
-4. **Equipos de cumplimiento** para auditorías documentales
-5. **Organizaciones distribuidas** que requieren colaboración segura
+1. **Despachos legales** - Análisis de contratos, due diligence, gestión de casos
+2. **Healthcare** - Gestión de historiales, cumplimiento HIPAA, consentimientos
+3. **Consultorías** - Datarooms, informes ESG, colaboración con clientes
+4. **Departamentos financieros** - Procesamiento de facturas, auditoría
+5. **Equipos de cumplimiento** - Auditorías documentales, LGPD/GDPR
 
 ## 🔐 Seguridad y Cumplimiento
 
-- **Encriptación en tránsito y reposo**
-- **Aislamiento completo por tenant**
+- **Encriptación AES-256** en reposo
+- **TLS 1.3** en tránsito
+- **Aislamiento completo por tenant** en todas las capas
 - **Auditoría exhaustiva** de todas las acciones
-- **Cumplimiento GDPR** con exportación de datos
+- **Cumplimiento LGPD/GDPR** con flujos de eliminación
 - **Backups automáticos** y recuperación ante desastres
 
 ## 📈 Escalabilidad
 
 - **Arquitectura de microservicios** para escalar componentes individualmente
 - **Almacenamiento en la nube** sin límites físicos
-- **Base de datos vectorial** optimizada para millones de documentos
-- **CDN global** para acceso rápido mundial
+- **Base de datos vectorial Weaviate** optimizada para millones de documentos
+- **GPU dedicada** para inferencia de alta velocidad
 - **Auto-escalado** basado en demanda
 
 ---
 
-*Nexus Document - Transformando la gestión documental con inteligencia artificial*
+*NexusDocs360 - Transformando la gestión documental con inteligencia artificial*
+
+**Última actualización:** Enero 2026

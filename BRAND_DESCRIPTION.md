@@ -69,10 +69,10 @@ El "360" en NexusDocs360 representa la aplicación integral de IA:
 - **ML Personalizado**: Modelos que aprenden de tu organización
 
 ### 3. **Ecosistema de IA Integrado**
-- **Ollama**: LLMs locales para máxima privacidad
-- **LangChain**: Orquestación de cadenas de IA
-- **Langroid**: Agentes autónomos especializados
-- **Qdrant**: Búsqueda vectorial de alta precisión
+- **vLLM**: Inferencia GPU de alta velocidad (Qwen3-4B)
+- **Microsoft Agent Framework**: Orquestación multi-agente (Emma AI)
+- **Weaviate**: Base de datos vectorial con multi-tenancy
+- **TEI (Text Embeddings Inference)**: Embeddings BAAI/bge-m3 multilingüe
 
 ### 4. **Inteligencia Evolutiva**
 - **Aprendizaje Continuo**: La IA mejora con cada interacción
