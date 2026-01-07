@@ -23,39 +23,92 @@
 - **🌐 Capacidades Multimodales**: Procesa texto, PDFs con firmas digitales y metadatos complejos
 - **⚖️ Chain of Thought**: Visualización transparente del proceso de razonamiento de la IA (solo para administradores)
 
-### 🧠 AutoGen Multi-Agent Orchestration
+### 🧠 Microsoft Agent Framework + PlanningFlow (OpenManus Style)
 
-Emma AI está construida sobre **Microsoft AutoGen 0.4.8+**, un framework de agentes de última generación que proporciona:
+Emma AI está construida sobre **Microsoft Agent Framework**, un framework de agentes de última generación que proporciona:
 
-- **Multi-Agent Workflows**: Patrones Sequential, GroupChat y Swarm para orquestación avanzada
+- **PlanningFlow (OpenManus)**: Orquestador autónomo que genera planes dinámicos basados en el contenido del documento
 - **RAG Pipeline de 7 capas**: Búsqueda híbrida, reranking y generación validada
-- **5 Agentes Especializados**: Search, Analyst, Contract, Compliance, Summarizer
-- **Multi-Provider LLM**: Soporta Ollama (local), OpenAI, Anthropic (Claude), Google (Gemini)
+- **12 Agentes Especializados**: Search, Analyst, Contract, Compliance, Summarizer, Labor, Fiscal, Privacy, RealEstate, Education, Legal, TaxDeclaration
+- **Multi-Provider LLM**: vLLM (Qwen3) como primario, OpenAI, Anthropic (Claude), Google (Gemini) como fallback
+- **Base de Conocimiento Legal (BOE)**: Legislación española indexada para contexto legal automático
 
-La configuración se realiza vía las variables `LLM_PROVIDER`, `OLLAMA_MODEL`, `OPENAI_MODEL`, etc. El orquestador selecciona automáticamente el workflow óptimo según la consulta.
+La configuración se realiza vía las variables `LLM_PROVIDER`, `VLLM_MODEL`, `OPENAI_MODEL`, etc. El orquestador selecciona automáticamente el workflow óptimo según la consulta.
+
+### ⚖️ Base de Conocimiento Legal del BOE (NUEVO)
+
+NexusDocs360 incluye un sistema de conocimiento público con **legislación consolidada del BOE** que los agentes consultan automáticamente:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    FLUJO DE ANÁLISIS LEGAL                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Usuario sube documento (contrato, nómina, etc.)             │
+│                          ↓                                       │
+│  2. PlanningFlow detecta tipo de documento con LLM              │
+│                          ↓                                       │
+│  3. Genera plan dinámico con agentes especializados             │
+│                          ↓                                       │
+│  4. Cada agente legal consulta BOE (PublicKnowledge):           │
+│     • ContractAgent → Código Civil, Mercantil                   │
+│     • LaborAgent → Estatuto Trabajadores, PRL                   │
+│     • FiscalAgent → IRPF, IVA, IS                               │
+│     • PrivacyAgent → LOPDGDD, RGPD                              │
+│                          ↓                                       │
+│  5. Análisis con citas legales y referencias BOE                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Legislación Disponible (Presets)
+
+| Categoría | Leyes Incluidas |
+|-----------|-----------------|
+| **Laboral** | Estatuto de los Trabajadores, PRL, Ley de Igualdad, LISOS, LETA |
+| **Protección de Datos** | LOPDGDD (BOE-A-2018-16673) |
+| **Educación** | LOMLOE, LOE, LOU |
+| **Civil** | Código Civil, LEC |
+| **Mercantil** | Ley de Sociedades de Capital, Código de Comercio |
+| **Fiscal** | IRPF, Impuesto de Sociedades, IVA |
+| **Administrativo** | LPACAP, LRJSP, Contratos del Sector Público |
+
+#### Descarga de Legislación
+
+```bash
+# Descargar legislación laboral
+python backend/scripts/boe_legislation_downloader.py --preset laboral
+
+# Descargar todas las categorías
+python backend/scripts/boe_legislation_downloader.py --preset all
+
+# Descargar una ley específica
+python backend/scripts/boe_legislation_downloader.py --id BOE-A-2018-16673
+```
 
 ## 🤖 Emma AI: Asistente Inteligente de Nueva Generación
 
 ### Emma AI Assistant
-**Emma** es nuestro asistente de IA avanzado **construido sobre Microsoft AutoGen 0.4.8+**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma mediante orquestación multi-agente.
+**Emma** es nuestro asistente de IA avanzado **construido sobre Microsoft Agent Framework**, diseñado para proporcionar respuestas contextuales y ejecutar tareas complejas de forma autónoma mediante orquestación multi-agente estilo **OpenManus**.
 
 #### Capacidades Principales de Emma:
 - **🧠 Procesamiento Contextual**: Comprende el contexto completo de tus documentos
 - **🔍 Búsqueda Inteligente**: Encuentra información relevante usando RAG Pipeline con Weaviate vector search
-- **🌐 Información en Tiempo Real**: Accede a datos actualizados via búsqueda web
+- **⚖️ Análisis Legal Automático**: Consulta legislación del BOE para fundamentar análisis
 - **📄 Análisis de Documentos**: Extrae insights de contratos, facturas y reportes
 - **🏷️ Extracción de Entidades**: Identifica automáticamente personas, organizaciones, fechas e importes
 - **🔄 Comparación de Documentos**: Análisis comparativo inteligente entre documentos
-- **⚖️ Chain of Thought**: Transparencia completa del proceso de razonamiento (admin)
-- **✨ Respuestas Adaptativas**: Sistema de decisión que selecciona las mejores herramientas
+- **📋 Planificación Dinámica**: Genera planes de análisis basados en el tipo de documento (OpenManus)
+- **✨ Respuestas con Citas Legales**: Referencias a artículos específicos del BOE
 
 #### Tecnología Subyacente:
-- **AutoGen 0.4.8+**: Framework de Microsoft para orquestación multi-agente (core de Emma AI)
+- **Microsoft Agent Framework**: Framework para orquestación multi-agente (core de Emma AI)
+- **PlanningFlow (OpenManus)**: Orquestador autónomo con planificación dinámica
 - **RAG Pipeline 7-Layer**: Procesamiento completo con búsqueda híbrida, reranking y validación
-- **Weaviate**: Base de datos vectorial para búsqueda semántica avanzada
-- **Multi-Provider LLM**: Ollama (local), OpenAI, Anthropic (Claude), Google (Gemini)
+- **Weaviate + PublicKnowledge**: Base de datos vectorial con legislación del BOE indexada
+- **vLLM (Qwen3-4B)**: Inferencia GPU de alta velocidad como LLM primario
+- **Multi-Provider LLM**: OpenAI, Anthropic (Claude), Google (Gemini) como fallback
 - **LangExtract Integration**: Extracción automática de entidades en upload de documentos
-- **5 Agentes Especializados**: SearchAgent, AnalystAgent, ContractAgent, ComplianceAgent, SummarizerAgent
+- **12 Agentes Especializados**: Search, Analyst, Contract, Compliance, Summarizer, Labor, Fiscal, Privacy, RealEstate, Education, Legal, TaxDeclaration
 
 ### Casos de Uso con IA
 1. **Due Diligence Automático**: Analiza 1000+ documentos en minutos con extracción de entidades
