@@ -143,6 +143,124 @@ Margen %           44%          80%          81%          79%
 | Network/CDN | $30 | $100 | $300 | $650 |
 | **TOTAL** | **$1,030** | **$2,150** | **$4,000** | **$7,500** |
 
+### 4.3 Capacidad de Usuarios Concurrentes por Año
+
+Esta sección detalla cuántos usuarios simultáneos puede soportar la arquitectura en cada fase de crecimiento, identificando los cuellos de botella y las soluciones de escalado.
+
+#### Año 1: Infraestructura Base ($1,080/mes)
+
+| Componente | Configuración | Capacidad Concurrente | Cuello de Botella |
+|------------|---------------|----------------------|-------------------|
+| **Frontend** | e2-standard-2 | 500 conexiones | RAM/CPU |
+| **Backend API** | n2-standard-8 | 200 req/seg | Workers async |
+| **PostgreSQL** | db-standard-2 | 100 conexiones | Connection pool |
+| **Redis** | 2GB | 10,000 ops/seg | Memoria |
+| **Weaviate** | En VM | 50 búsquedas/seg | RAM vectores |
+| **GPU vLLM** | 1x L4 (24GB) | **8-12 req/seg** | **LIMITANTE** |
+
+**Capacidad Año 1:**
+| Métrica | Valor |
+|---------|-------|
+| Usuarios concurrentes activos | **50-80** |
+| Usuarios totales soportados | **150-200** |
+| Consultas IA simultáneas | 8-12 |
+| Búsquedas/segundo | 50 |
+| Factor de concurrencia típico | 10-15% de usuarios totales |
+
+> **Nota:** Con 140 usuarios registrados y 10-15% de concurrencia típica en SaaS B2B, se esperan 14-21 usuarios activos simultáneamente. La infra soporta holgadamente este escenario.
+
+#### Año 2: Infraestructura Escalada ($2,700/mes)
+
+| Componente | Configuración | Capacidad Concurrente | Mejora vs Año 1 |
+|------------|---------------|----------------------|-----------------|
+| **Frontend** | Cloud Run (auto-scale) | 2,000 conexiones | 4x |
+| **Backend API** | n2-standard-16 | 400 req/seg | 2x |
+| **PostgreSQL** | db-standard-4 + HA | 200 conexiones | 2x |
+| **Redis** | 5GB Standard | 15,000 ops/seg | 1.5x |
+| **Weaviate** | Dedicado 8GB | 100 búsquedas/seg | 2x |
+| **GPU vLLM** | 2x L4 (48GB total) | **20-25 req/seg** | **2.5x** |
+
+**Capacidad Año 2:**
+| Métrica | Valor |
+|---------|-------|
+| Usuarios concurrentes activos | **150-250** |
+| Usuarios totales soportados | **800-1,000** |
+| Consultas IA simultáneas | 20-25 |
+| Búsquedas/segundo | 100 |
+| Alta disponibilidad | Sí (failover automático) |
+
+> **Nota:** Con 650 usuarios y 15% concurrencia = ~100 usuarios simultáneos. Margen de seguridad del 50-100%.
+
+#### Año 3: Infraestructura de Escala ($9,000/mes)
+
+| Componente | Configuración | Capacidad Concurrente | Mejora vs Año 2 |
+|------------|---------------|----------------------|-----------------|
+| **Frontend** | Cloud Run + CDN global | 10,000 conexiones | 5x |
+| **Backend API** | GKE (3 pods n2-standard-8) | 1,000 req/seg | 2.5x |
+| **PostgreSQL** | db-standard-8 + Read replicas | 500 conexiones | 2.5x |
+| **Redis** | Cluster 10GB | 50,000 ops/seg | 3x |
+| **Weaviate** | Cluster 3 nodos | 300 búsquedas/seg | 3x |
+| **Elasticsearch** | 3 nodos dedicados | 200 búsquedas/seg | Nuevo |
+| **GPU vLLM** | 3x L4 + queue | **40-50 req/seg** | **2x** |
+
+**Capacidad Año 3:**
+| Métrica | Valor |
+|---------|-------|
+| Usuarios concurrentes activos | **400-600** |
+| Usuarios totales soportados | **2,500-3,000** |
+| Consultas IA simultáneas | 40-50 |
+| Búsquedas/segundo | 300 (híbrida) |
+| Multi-región | Sí (EU + US) |
+| SLA uptime | 99.9% |
+
+> **Nota:** Con 1,750 usuarios y 15% concurrencia = ~260 usuarios simultáneos. Capacidad para 2x crecimiento sin cambios.
+
+#### Resumen de Capacidad por Año
+
+```
+                          AÑO 1        AÑO 2        AÑO 3
+                          ─────────────────────────────────
+Usuarios registrados      140          650          1,750
+Concurrentes esperados    15-20        65-100       175-260
+Capacidad máxima          50-80        150-250      400-600
+────────────────────────────────────────────────────────────
+Margen de seguridad       3-4x         1.5-2.5x     1.5-2.3x
+Infra mensual             $1,080       $2,700       $9,000
+Coste/usuario concurrente $13-22       $11-18       $15-23
+```
+
+#### Análisis de Cuellos de Botella
+
+| Componente | Cuello de Botella Principal | Solución de Escalado |
+|------------|----------------------------|----------------------|
+| **vLLM/GPU** | Tokens/segundo de inferencia | Más GPUs, quantización, queue |
+| **PostgreSQL** | Conexiones y IOPS | Read replicas, connection pooling |
+| **Weaviate** | RAM para vectores | Cluster distribuido |
+| **Backend** | Workers por request | Horizontal scaling (K8s) |
+| **Network** | Latencia inter-servicio | Co-ubicación, service mesh |
+
+#### Optimizaciones para Mejorar Concurrencia
+
+| Optimización | Impacto | Implementación |
+|--------------|---------|----------------|
+| **Request queuing** para IA | +50% throughput | Celery + Redis |
+| **Streaming responses** | -40% latencia percibida | SSE/WebSocket |
+| **Caché de embeddings** | -30% carga Weaviate | Redis + TTL |
+| **Connection pooling** | +100% conexiones DB | PgBouncer |
+| **CDN para assets** | -70% carga frontend | Cloud CDN |
+| **Batch processing** | +200% para operaciones bulk | Background workers |
+
+#### Picos de Tráfico y Burst Capacity
+
+| Escenario | Año 1 | Año 2 | Año 3 |
+|-----------|-------|-------|-------|
+| **Tráfico normal** | 15-20 | 65-100 | 175-260 |
+| **Pico (2x)** | 30-40 | 130-200 | 350-520 |
+| **Burst máximo (3x)** | 50-60 | 200-300 | 500-780 |
+| **Degradación graceful** | Queue IA | Queue IA | Queue + scale-out |
+
+> **Estrategia de picos:** Las consultas de IA se encolan automáticamente. El usuario ve "Emma está pensando..." mientras espera en queue. Búsquedas y operaciones CRUD no se ven afectadas.
+
 ---
 
 ## 5. Análisis de Sensibilidad
