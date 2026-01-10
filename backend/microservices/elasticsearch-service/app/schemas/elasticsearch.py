@@ -90,16 +90,20 @@ class SearchResponse(BaseModel):
     took_ms: int
 
 class AnalyticsRequest(BaseModel):
-    """Request for analytics"""
+    """Request for analytics with optional ACL filtering"""
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    # ACL-based filtering (optional for backward compatibility)
+    user_context: Optional[SearchUserContext] = None
 
 class FacetRequest(BaseModel):
-    """Request for faceting"""
+    """Request for faceting with optional ACL filtering"""
     query: Optional[str] = None
     filters: Optional[SearchFilters] = None
     facet_fields: List[str] = ["file_type", "category", "tags"]
     max_facet_values: int = 10
+    # ACL-based filtering (optional for backward compatibility)
+    user_context: Optional[SearchUserContext] = None
 
 class FacetBucket(BaseModel):
     """Individual facet bucket"""

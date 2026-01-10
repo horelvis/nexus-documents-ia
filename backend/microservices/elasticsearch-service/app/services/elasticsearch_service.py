@@ -487,15 +487,29 @@ class ElasticsearchService:
         query: str = None,
         filters: Dict[str, Any] = None,
         facet_fields: List[str] = None,
-        max_facet_values: int = 10
+        max_facet_values: int = 10,
+        # ACL parameters
+        user_id: str = None,
+        role_ids: List[str] = None,
+        is_admin: bool = False
     ) -> Dict[str, Any]:
         """
-        Get facets for search results with optional query and filters
+        Get facets for search results with optional query and filters.
+
+        SECURITY: If user_id is provided, facets are filtered by ACL.
+        Only documents the user can access are counted in facet aggregations.
         """
         try:
             # Build base query
             must_clauses = []
             filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]
+
+            # Add ACL filter if user context is provided
+            if user_id:
+                acl_filter = self._build_acl_filter(user_id, role_ids, is_admin)
+                if acl_filter:
+                    filter_clauses.append(acl_filter)
+                logger.debug(f"🔐 ACL filter applied to facets: user={user_id}, roles={role_ids}, admin={is_admin}")
 
             # Add search query if provided
             if query:
@@ -600,28 +614,46 @@ class ElasticsearchService:
             logger.error(f"❌ Facets query failed: {e}")
             return {"facets": [], "total_documents": 0}
 
-    async def get_analytics(self, date_from: str = None, date_to: str = None) -> Dict[str, Any]:
+    async def get_analytics(
+        self,
+        date_from: str = None,
+        date_to: str = None,
+        # ACL parameters
+        user_id: str = None,
+        role_ids: List[str] = None,
+        is_admin: bool = False
+    ) -> Dict[str, Any]:
         """
-        Get search and document analytics
+        Get search and document analytics.
+
+        SECURITY: If user_id is provided, analytics are filtered by ACL.
+        Only documents the user can access are counted in analytics.
         """
         try:
+            # Build filter clauses
+            filter_clauses = [{"term": {"tenant_id": self.tenant_id}}]
+
+            # Add ACL filter if user context is provided
+            if user_id:
+                acl_filter = self._build_acl_filter(user_id, role_ids, is_admin)
+                if acl_filter:
+                    filter_clauses.append(acl_filter)
+                logger.debug(f"🔐 ACL filter applied to analytics: user={user_id}, roles={role_ids}, admin={is_admin}")
+
             # Build date filter
-            date_filter = {}
             if date_from or date_to:
                 date_filter = {"range": {"created_at": {}}}
                 if date_from:
                     date_filter["range"]["created_at"]["gte"] = date_from
                 if date_to:
                     date_filter["range"]["created_at"]["lte"] = date_to
+                filter_clauses.append(date_filter)
 
             # Aggregation query
             agg_body = {
                 "query": {
                     "bool": {
-                        "filter": [
-                            {"term": {"tenant_id": self.tenant_id}},
-                            date_filter
-                        ]
+                        "filter": filter_clauses
                     }
                 },
                 "size": 0,

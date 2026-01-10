@@ -177,6 +177,8 @@ class MultiStageRetriever:
         query_analysis: QueryAnalysis,
         tenant_id: str,
         user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         stage1_limit: int = 50,
@@ -189,6 +191,9 @@ class MultiStageRetriever:
         Args:
             query_analysis: Analyzed query from Layer 1
             tenant_id: Tenant identifier
+            user_id: User identifier for ACL filtering
+            user_role_ids: List of role IDs the user belongs to (for role-based ACL)
+            is_admin: Whether user is admin (bypasses ACL checks)
             collection_name: Optional specific collection (defaults to tenant collection)
             top_k: Final number of documents to return
             stage1_limit: Number of candidates from initial search
@@ -197,6 +202,10 @@ class MultiStageRetriever:
 
         Returns:
             Tuple of (List[RetrievedDocument], Dict[str, Any]) where dict contains selection_metadata
+
+        SECURITY: user_id and user_role_ids are passed to all search operations
+        for document-level ACL filtering. Only documents the user has permission
+        to view will be returned.
         """
         await self.initialize()
 
@@ -212,11 +221,13 @@ class MultiStageRetriever:
 
         logger.info(f"🔍 Starting 3-stage retrieval for: '{query_analysis.original_query}' (public_knowledge={use_public_knowledge}, soft_selection={self._soft_selection_enabled})")
 
-        # Stage 1: Filtered vector/hybrid search (tenant documents)
+        # Stage 1: Filtered vector/hybrid search (tenant documents) with ACL
         tenant_candidates = await self._stage1_filtered_search(
             query_analysis=query_analysis,
             tenant_id=tenant_id,
             user_id=user_id,
+            user_role_ids=user_role_ids,
+            is_admin=is_admin,
             collection_name=collection_name,
             limit=stage1_limit,
         )
@@ -364,16 +375,20 @@ class MultiStageRetriever:
         query_analysis: QueryAnalysis,
         tenant_id: str,
         user_id: Optional[str],
+        user_role_ids: Optional[List[str]],
+        is_admin: bool,
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
         """
-        Stage 1: Hybrid search with RRF fusion
+        Stage 1: Hybrid search with RRF fusion and ACL filtering
 
         Performs separate dense (vector) and sparse (BM25) searches,
         then combines them using Reciprocal Rank Fusion for better recall.
 
         Also searches multiple query variations and fuses all results.
+
+        SECURITY: All searches are filtered by user ACL permissions.
         """
         # Collect results from multiple query variations
         all_dense_results: List[List[RetrievedDocument]] = []
@@ -384,11 +399,13 @@ class MultiStageRetriever:
 
         for query_text in queries_to_search:
             try:
-                # Stage 1a: Dense vector search
+                # Stage 1a: Dense vector search with ACL
                 dense_results = await self._vector_search(
                     query=query_text,
                     tenant_id=tenant_id,
                     user_id=user_id,
+                    user_role_ids=user_role_ids,
+                    is_admin=is_admin,
                     collection_name=collection_name,
                     limit=limit,
                 )
@@ -396,11 +413,13 @@ class MultiStageRetriever:
                     all_dense_results.append(dense_results)
                     logger.debug(f"  Dense search returned {len(dense_results)} results")
 
-                # Stage 1b: Sparse BM25 search
+                # Stage 1b: Sparse BM25 search with ACL
                 sparse_results = await self._bm25_search(
                     query=query_text,
                     tenant_id=tenant_id,
                     user_id=user_id,
+                    user_role_ids=user_role_ids,
+                    is_admin=is_admin,
                     collection_name=collection_name,
                     limit=limit,
                 )
@@ -446,15 +465,19 @@ class MultiStageRetriever:
         query: str,
         tenant_id: str,
         user_id: Optional[str],
+        user_role_ids: Optional[List[str]],
+        is_admin: bool,
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
-        """Execute dense vector search with channel access filtering"""
+        """Execute dense vector search with ACL filtering"""
         try:
             search_request = SearchRequest(
                 query=query,
                 tenant_id=tenant_id,
-                user_id=user_id,  # For channel access control
+                user_id=user_id,  # ACL: user identification
+                user_role_ids=user_role_ids,  # ACL: role-based access
+                is_admin=is_admin,  # ACL: admin bypass
                 limit=limit,
                 search_type="vector",
                 filters=None,
@@ -488,15 +511,19 @@ class MultiStageRetriever:
         query: str,
         tenant_id: str,
         user_id: Optional[str],
+        user_role_ids: Optional[List[str]],
+        is_admin: bool,
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
-        """Execute sparse BM25 keyword search with channel access filtering"""
+        """Execute sparse BM25 keyword search with ACL filtering"""
         try:
             search_request = SearchRequest(
                 query=query,
                 tenant_id=tenant_id,
-                user_id=user_id,  # For channel access control
+                user_id=user_id,  # ACL: user identification
+                user_role_ids=user_role_ids,  # ACL: role-based access
+                is_admin=is_admin,  # ACL: admin bypass
                 limit=limit,
                 search_type="keyword",
                 filters=None,

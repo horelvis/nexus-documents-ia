@@ -273,9 +273,16 @@ class ElasticsearchClient(BaseHTTPClient):
         query: str = None,
         filters: Dict[str, Any] = None,
         facet_fields: List[str] = None,
-        max_facet_values: int = 10
+        max_facet_values: int = 10,
+        # ACL context
+        user_context: Optional[SearchUserContext] = None
     ) -> Dict[str, Any]:
-        """Get facets via microservice"""
+        """
+        Get facets via microservice with ACL filtering.
+
+        SECURITY: If user_context is provided, only documents the user
+        can access are counted in facet aggregations.
+        """
         try:
             payload = {
                 "query": query,
@@ -283,6 +290,11 @@ class ElasticsearchClient(BaseHTTPClient):
                 "facet_fields": facet_fields or ["file_type", "category", "tags"],
                 "max_facet_values": max_facet_values
             }
+
+            # Add user context for ACL filtering if provided
+            if user_context:
+                payload["user_context"] = user_context.to_dict()
+                logger.debug(f"🔐 Facets with ACL: user={user_context.user_id}, admin={user_context.is_admin}")
 
             response = await self._make_request(
                 "POST",
@@ -300,14 +312,26 @@ class ElasticsearchClient(BaseHTTPClient):
         self,
         tenant_id: str,
         date_from: str = None,
-        date_to: str = None
+        date_to: str = None,
+        # ACL context
+        user_context: Optional[SearchUserContext] = None
     ) -> Dict[str, Any]:
-        """Get analytics via microservice"""
+        """
+        Get analytics via microservice with ACL filtering.
+
+        SECURITY: If user_context is provided, only documents the user
+        can access are counted in analytics aggregations.
+        """
         try:
             payload = {
                 "date_from": date_from,
                 "date_to": date_to
             }
+
+            # Add user context for ACL filtering if provided
+            if user_context:
+                payload["user_context"] = user_context.to_dict()
+                logger.debug(f"🔐 Analytics with ACL: user={user_context.user_id}, admin={user_context.is_admin}")
 
             response = await self._make_request(
                 "POST",

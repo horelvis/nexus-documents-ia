@@ -18,7 +18,12 @@ from typing import Annotated, List, Dict, Any, Optional
 from pydantic import Field
 
 from app.core.security import get_tenant_collection_name, get_channel_collection_name
-from app.core.execution_context import resolve_tenant_id
+from app.core.execution_context import (
+    resolve_tenant_id,
+    get_user_id,
+    get_user_role_ids,
+    get_is_admin,
+)
 
 # Import ai_function from Agent Framework
 try:
@@ -142,6 +147,9 @@ async def semantic_search(
     - Uploaded documents
     - Information channels (Gmail, Google Drive, etc.)
 
+    SECURITY: Results are filtered by document-level ACL based on the user's
+    permissions from the execution context.
+
     Use this when:
     - Searching for concepts or ideas
     - Looking for related content
@@ -162,9 +170,12 @@ async def semantic_search(
         - source_type: "document" or "channel"
         - metadata: Additional document metadata
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
+    # Resolve tenant_id and ACL context from execution context
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Semantic search: query='{query[:50]}...', tenant={actual_tenant_id}, top_k={top_k}")
+    user_id = get_user_id()
+    user_role_ids = get_user_role_ids()
+    is_admin = get_is_admin()
+    logger.info(f"Semantic search: query='{query[:50]}...', tenant={actual_tenant_id}, user={user_id}, roles={len(user_role_ids or [])}, top_k={top_k}")
 
     try:
         service = _get_weaviate_service()
@@ -185,7 +196,7 @@ async def semantic_search(
                 })
             return _format_search_results(results, max_results=top_k)
 
-        # Search across ALL tenant collections (documents + channels)
+        # Search across ALL tenant collections (documents + channels) with ACL filtering
         all_collections = await _get_all_tenant_collections(actual_tenant_id)
         logger.info(f"Searching across {len(all_collections)} collections for tenant {actual_tenant_id}")
 
@@ -193,6 +204,9 @@ async def semantic_search(
             collections=all_collections,
             query=query,
             tenant_id=actual_tenant_id,
+            user_id=user_id,  # ACL: user identification
+            user_role_ids=user_role_ids,  # ACL: role-based access
+            is_admin=is_admin,  # ACL: admin bypass
             limit=min(top_k, 50),
             search_type="vector"
         )
@@ -231,6 +245,9 @@ async def hybrid_search(
     - Uploaded documents
     - Information channels (Gmail, Google Drive, etc.)
 
+    SECURITY: Results are filtered by document-level ACL based on the user's
+    permissions from the execution context.
+
     Use this for:
     - General document search (recommended default)
     - Queries mixing concepts and specific terms
@@ -246,15 +263,18 @@ async def hybrid_search(
     Returns:
         JSON string with ranked documents combining both search methods
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
+    # Resolve tenant_id and ACL context from execution context
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Hybrid search: query='{query[:50]}...', tenant={actual_tenant_id}, alpha={alpha}")
+    user_id = get_user_id()
+    user_role_ids = get_user_role_ids()
+    is_admin = get_is_admin()
+    logger.info(f"Hybrid search: query='{query[:50]}...', tenant={actual_tenant_id}, user={user_id}, alpha={alpha}")
 
     try:
         service = _get_weaviate_service()
         await service.initialize()
 
-        # Search across ALL tenant collections (documents + channels)
+        # Search across ALL tenant collections (documents + channels) with ACL filtering
         all_collections = await _get_all_tenant_collections(actual_tenant_id)
         logger.info(f"Hybrid searching across {len(all_collections)} collections for tenant {actual_tenant_id}")
 
@@ -262,6 +282,9 @@ async def hybrid_search(
             collections=all_collections,
             query=query,
             tenant_id=actual_tenant_id,
+            user_id=user_id,  # ACL: user identification
+            user_role_ids=user_role_ids,  # ACL: role-based access
+            is_admin=is_admin,  # ACL: admin bypass
             limit=min(top_k, 50),
             search_type="hybrid"
         )
@@ -299,6 +322,9 @@ async def keyword_search(
     - Uploaded documents
     - Information channels (Gmail, Google Drive, etc.)
 
+    SECURITY: Results are filtered by document-level ACL based on the user's
+    permissions from the execution context.
+
     Use this when:
     - Searching for specific terms, names, or codes
     - Looking for exact phrases
@@ -313,15 +339,18 @@ async def keyword_search(
     Returns:
         JSON string with documents containing the specified keywords
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
+    # Resolve tenant_id and ACL context from execution context
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Keyword search: query='{query[:50]}...', tenant={actual_tenant_id}")
+    user_id = get_user_id()
+    user_role_ids = get_user_role_ids()
+    is_admin = get_is_admin()
+    logger.info(f"Keyword search: query='{query[:50]}...', tenant={actual_tenant_id}, user={user_id}")
 
     try:
         service = _get_weaviate_service()
         await service.initialize()
 
-        # Search across ALL tenant collections (documents + channels)
+        # Search across ALL tenant collections (documents + channels) with ACL filtering
         all_collections = await _get_all_tenant_collections(actual_tenant_id)
         logger.info(f"Keyword searching across {len(all_collections)} collections for tenant {actual_tenant_id}")
 
@@ -329,6 +358,9 @@ async def keyword_search(
             collections=all_collections,
             query=query,
             tenant_id=actual_tenant_id,
+            user_id=user_id,  # ACL: user identification
+            user_role_ids=user_role_ids,  # ACL: role-based access
+            is_admin=is_admin,  # ACL: admin bypass
             limit=min(top_k, 50),
             search_type="keyword"
         )

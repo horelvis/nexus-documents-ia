@@ -51,12 +51,14 @@ class DocumentResponse(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    """Schema for search requests"""
+    """Schema for search requests with ACL support"""
     query: str
     limit: int = Field(default=10, ge=1, le=100)
     tenant_id: str
+    # ACL fields for document-level access control
     user_id: Optional[str] = Field(default=None, description="User ID for channel and ACL access filtering")
-    user_role_ids: Optional[List[str]] = Field(default=None, description="User's role IDs for ACL filtering")
+    user_role_ids: Optional[List[str]] = Field(default=None, description="User's role IDs for role-based ACL filtering")
+    is_admin: bool = Field(default=False, description="Admin users bypass ACL checks and see all tenant documents")
     filters: Optional[Dict[str, Any]] = None
     search_type: str = Field(default="hybrid", pattern="^(vector|keyword|hybrid)$")
     min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -72,6 +74,7 @@ class SearchRequest(BaseModel):
                 "tenant_id": "tenant-123",
                 "user_id": "user-456",
                 "user_role_ids": ["role-admin", "role-analyst"],
+                "is_admin": False,
                 "search_type": "hybrid",
                 "min_similarity": 0.5,
                 "include_channels": True

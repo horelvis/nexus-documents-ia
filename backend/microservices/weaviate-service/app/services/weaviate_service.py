@@ -947,7 +947,9 @@ class WeaviateService:
         self,
         tenant_id: str,
         document_id: str,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
         Get a document by ID, searching across all tenant collections in parallel.
@@ -956,8 +958,16 @@ class WeaviateService:
         - Main document collection (uploaded files)
         - All channel collections (Gmail, Google Drive, etc.)
 
-        SECURITY: When user_id is provided, applies channel access control:
-        - Regular uploads (no channel) are always accessible
+        SECURITY: When user_id is provided, applies document-level ACL verification:
+        - Admin users bypass ACL checks (see all documents)
+        - Owner (owner_user_id == user_id) always has access
+        - User explicitly in acl_user_ids has access
+        - User's role in acl_role_ids has access
+        - Document with acl_everyone=true is accessible to all
+        - Legacy documents without ACL (empty owner_user_id) are accessible
+
+        Additionally applies channel access control:
+        - Regular uploads (no channel) use ACL
         - Tenant-wide channels (visibility="tenant") are accessible to all tenant users
         - Personal channels (visibility="personal") are only accessible to the owner
 
@@ -967,7 +977,9 @@ class WeaviateService:
         Args:
             tenant_id: Tenant identifier
             document_id: Document ID to find
-            user_id: User ID for channel access control (required for personal channels)
+            user_id: User ID for ACL verification
+            user_role_ids: User's role IDs for role-based ACL
+            is_admin: Whether user is admin (bypasses ACL)
 
         Returns:
             Document dict if found and accessible, None otherwise
@@ -993,12 +1005,7 @@ class WeaviateService:
 
                     collection = self.client.collections.get(collection_name)
 
-                    # Build filter: document_id only
-                    # NOTE: Tenant isolation is already guaranteed by the collection name
-                    # (Nexus_{tenant_id}_documents). ACL filtering is skipped here because:
-                    # 1. Legacy collections don't have ACL properties in schema
-                    # 2. Document-specific lookups should succeed if user has tenant access
-                    # 3. ACL is enforced at search_documents() level for listing/searching
+                    # Build filter: document_id only (ACL verified after retrieval)
                     doc_filter = wq.Filter.by_property("document_id").equal(document_id)
 
                     response = collection.query.fetch_objects(
@@ -1018,6 +1025,10 @@ class WeaviateService:
                             "tags": item.properties.get("tags", []),
                             "channel_visibility": item.properties.get("channel_visibility", ""),
                             "owner_user_id": item.properties.get("owner_user_id", ""),
+                            # ACL properties
+                            "acl_user_ids": item.properties.get("acl_user_ids", []),
+                            "acl_role_ids": item.properties.get("acl_role_ids", []),
+                            "acl_everyone": item.properties.get("acl_everyone", False),
                             "_source_collection": collection_name,
                             "_is_channel": "_channel_" in collection_name.lower()
                         }
@@ -1026,16 +1037,70 @@ class WeaviateService:
                     logger.debug(f"Error searching in {collection_name}: {e}")
                     return None
 
+            # Helper function to verify ACL access
+            def has_acl_access(doc: Dict[str, Any]) -> bool:
+                """
+                Verify if the user has ACL access to the document.
+
+                SECURITY: Returns True if any of these conditions is met:
+                1. Admin user (bypasses all ACL)
+                2. No user_id provided (legacy behavior / internal calls)
+                3. User is the document owner
+                4. User is explicitly in acl_user_ids
+                5. User has a role in acl_role_ids
+                6. Document is shared with everyone (acl_everyone=true)
+                7. Legacy document (no owner set)
+                """
+                # Admin bypass
+                if is_admin:
+                    return True
+
+                # No user context = legacy/internal call
+                if not user_id:
+                    return True
+
+                # Check ownership
+                owner = doc.get("owner_user_id", "")
+                if owner and owner == user_id:
+                    return True
+
+                # Legacy document (no owner)
+                if not owner:
+                    return True
+
+                # Check explicit user ACL
+                acl_users = doc.get("acl_user_ids", []) or []
+                if user_id in acl_users:
+                    return True
+
+                # Check role-based ACL
+                acl_roles = doc.get("acl_role_ids", []) or []
+                if user_role_ids:
+                    for role_id in user_role_ids:
+                        if role_id in acl_roles:
+                            return True
+
+                # Check everyone flag
+                if doc.get("acl_everyone", False):
+                    return True
+
+                return False
+
             # Search all collections in parallel
             results = await asyncio.gather(*[search_in_collection(coll) for coll in collections])
 
-            # Return first non-None result
+            # Return first non-None result that passes ACL check
             for result in results:
                 if result:
-                    logger.info(f"✅ Found document {document_id} in collection {result['_source_collection']}")
-                    return result
+                    # Verify ACL access
+                    if has_acl_access(result):
+                        logger.info(f"✅ Found document {document_id} in collection {result['_source_collection']} (ACL verified)")
+                        return result
+                    else:
+                        logger.warning(f"🔐 Document {document_id} found but user {user_id[:8] if user_id else 'None'}... denied by ACL")
+                        return None  # Document exists but user doesn't have access
 
-            logger.warning(f"⚠️ Document {document_id} not found or not accessible for user in tenant {tenant_id}")
+            logger.warning(f"⚠️ Document {document_id} not found in tenant {tenant_id}")
             return None
 
         except Exception as e:

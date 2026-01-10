@@ -364,6 +364,82 @@ sequenceDiagram
 - **🔑 RBAC**: Control granular de permisos
 - **🛡️ CORS**: Configuración segura por entorno
 
+### 🔐 **Arquitectura ACL Defensiva en Profundidad**
+
+NexusDocs360 implementa un modelo de Access Control List (ACL) con **defensa en profundidad** que garantiza que cada capa del sistema verifique permisos de forma independiente. Esto previene fugas de datos incluso si una capa es comprometida.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FLUJO DE VERIFICACIÓN ACL                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │ CAPA 1: PostgreSQL (Fuente de Verdad)                                │   │
+│  │                                                                       │   │
+│  │  DocumentACL {                                                        │   │
+│  │    grantee_type: 'user' | 'role' | 'everyone'                        │   │
+│  │    permissions: can_view, can_edit, can_delete, can_share            │   │
+│  │    expires_at: optional expiration                                   │   │
+│  │  }                                                                    │   │
+│  └───────────────────────────┬──────────────────────────────────────────┘   │
+│                              │ Sync automático                               │
+│           ┌──────────────────┼──────────────────┐                           │
+│           ▼                  ▼                  ▼                           │
+│  ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐           │
+│  │ CAPA 2:        │ │ CAPA 3:        │ │ CAPA 4:                │           │
+│  │ Weaviate       │ │ Elasticsearch  │ │ Semantic Cache         │           │
+│  │                │ │                │ │                        │           │
+│  │ owner_user_id  │ │ created_by     │ │ Cache key includes     │           │
+│  │ acl_user_ids   │ │ acl_user_ids   │ │ user_id for isolation  │           │
+│  │ acl_role_ids   │ │ acl_role_ids   │ │                        │           │
+│  │ acl_everyone   │ │ acl_everyone   │ │ Invalidation on        │           │
+│  └────────────────┘ └────────────────┘ │ ACL change             │           │
+│           │                  │         └────────────────────────┘           │
+│           ▼                  ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ CAPA 5: Verificación en Tiempo de Ejecución                         │    │
+│  │                                                                      │    │
+│  │  Jerarquía de permisos:                                              │    │
+│  │  1. OWNER     → Creador tiene acceso completo                        │    │
+│  │  2. ADMIN     → Admins del tenant bypasan ACL                        │    │
+│  │  3. USER ACL  → user_id en acl_user_ids                              │    │
+│  │  4. ROLE ACL  → Cualquier role_id en acl_role_ids                    │    │
+│  │  5. EVERYONE  → acl_everyone = true                                  │    │
+│  │  6. DENY      → Sin match = acceso denegado                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Componentes de Seguridad ACL
+
+| Componente | Función de Seguridad |
+|------------|---------------------|
+| **DocumentACLService** | Gestiona permisos en PostgreSQL, sincroniza a todas las capas |
+| **Weaviate Filter** | `_build_document_access_filter()` aplica ACL en búsquedas vectoriales |
+| **Elasticsearch Filter** | `_build_acl_filter()` aplica ACL en búsquedas full-text |
+| **Semantic Cache** | Cache key incluye `user_id` para aislamiento, invalidación por documento |
+| **ExecutionContext** | Propaga `user_id`, `role_ids`, `is_admin` a todas las herramientas de agentes |
+| **RAG Pipeline** | Todos los retrievers verifican ACL antes de devolver chunks |
+
+#### Invalidación de Cache por Cambio de ACL
+
+Cuando cambian los permisos de un documento:
+
+1. **PostgreSQL**: Se actualiza la tabla `document_acls`
+2. **Weaviate**: Se sincronizan `acl_user_ids`, `acl_role_ids`, `acl_everyone`
+3. **Elasticsearch**: Se sincronizan los mismos campos
+4. **Semantic Cache**: Se invalidan todas las respuestas cacheadas que usaron ese documento
+
+```python
+# Flujo de invalidación automática
+await _sync_acl_to_weaviate(document_id, ...)
+await _sync_acl_to_elasticsearch(document_id, ...)
+await _invalidate_cache_for_document(document_id)  # SEGURIDAD CRÍTICA
+```
+
+> 📚 **Documentación completa**: Ver [ACL_ARCHITECTURE.md](backend/architecture/ACL_ARCHITECTURE.md) para diagramas de flujo, ejemplos de código y guía de implementación.
+
 ### 📈 **Escalabilidad y Rendimiento**
 
 - **🐳 Docker**: Contenerización completa con hot-reload

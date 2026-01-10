@@ -220,12 +220,32 @@ async def get_analytics(
     request: AnalyticsRequest,
     _: bool = Depends(verify_api_key)
 ):
-    """Get search and document analytics"""
+    """
+    Get search and document analytics with ACL filtering.
+
+    SECURITY: If user_context is provided, only documents the user
+    can access are counted in analytics aggregations.
+    """
     try:
+        # Extract user context for ACL filtering
+        user_id = None
+        role_ids = []
+        is_admin = False
+
+        if request.user_context:
+            user_id = request.user_context.user_id
+            role_ids = request.user_context.role_ids
+            is_admin = request.user_context.is_admin
+            logger.debug(f"🔐 Analytics with ACL context: user={user_id}, admin={is_admin}")
+
         async with ElasticsearchService(tenant_id) as service:
             analytics = await service.get_analytics(
                 date_from=request.date_from,
-                date_to=request.date_to
+                date_to=request.date_to,
+                # ACL parameters
+                user_id=user_id,
+                role_ids=role_ids,
+                is_admin=is_admin
             )
 
         return AnalyticsResponse(**analytics)
@@ -240,14 +260,34 @@ async def get_facets(
     request: FacetRequest,
     _: bool = Depends(verify_api_key)
 ):
-    """Get facets for search results"""
+    """
+    Get facets for search results with ACL filtering.
+
+    SECURITY: If user_context is provided, only documents the user
+    can access are counted in facet aggregations.
+    """
     try:
+        # Extract user context for ACL filtering
+        user_id = None
+        role_ids = []
+        is_admin = False
+
+        if request.user_context:
+            user_id = request.user_context.user_id
+            role_ids = request.user_context.role_ids
+            is_admin = request.user_context.is_admin
+            logger.debug(f"🔐 Facets with ACL context: user={user_id}, admin={is_admin}")
+
         async with ElasticsearchService(tenant_id) as service:
             facets = await service.get_facets(
                 query=request.query,
                 filters=request.filters.dict() if request.filters else None,
                 facet_fields=request.facet_fields,
-                max_facet_values=request.max_facet_values
+                max_facet_values=request.max_facet_values,
+                # ACL parameters
+                user_id=user_id,
+                role_ids=role_ids,
+                is_admin=is_admin
             )
 
         return FacetResponse(**facets)

@@ -1,6 +1,9 @@
 """Client for Weaviate microservice"""
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
+from contextlib import asynccontextmanager
+
+import httpx
 
 from app.core.config import settings
 from app.clients.base import BaseHTTPClient
@@ -298,6 +301,262 @@ class WeaviateClient(BaseHTTPClient):
         }
         result = await self.search_documents(collection_name, search_request)
         return result.get("results", [])
+
+    # =========================================================================
+    # EMMA AI OPERATIONS
+    # =========================================================================
+
+    async def emma_query(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute Emma AI query"""
+        try:
+            logger.debug("Calling Emma query | payload_keys=%s", list(query_data.keys()))
+            ctx = self._extract_context_headers(query_data)
+            return await self.post_json(
+                "/emma/query",
+                json=query_data,
+                tenant_id=ctx["tenant_id"],
+                user_id=ctx["user_id"],
+                request_id=ctx["request_id"],
+            )
+        except Exception as e:
+            logger.exception("❌ Emma query failed | error=%s", e)
+            raise
+
+    async def emma_health(self) -> Dict[str, Any]:
+        """Check Emma AI service health"""
+        try:
+            return await self.get_json("/emma/health")
+        except HTTPClientError as exc:
+            return {"status": "unhealthy", "service": "emma", "error": exc.message}
+        except Exception as exc:
+            return {"status": "unhealthy", "service": "emma", "error": str(exc)}
+
+    async def emma_list_tools(self) -> Dict[str, Any]:
+        """List available Emma AI tools"""
+        try:
+            return await self.get_json("/emma/tools")
+        except Exception as e:
+            logger.exception("❌ Failed to list Emma tools | error=%s", e)
+            raise
+
+    async def emma_feedback(self, feedback_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Submit feedback to Emma AI"""
+        try:
+            ctx = self._extract_context_headers(feedback_data)
+            return await self.post_json(
+                "/emma/feedback",
+                json=feedback_data,
+                tenant_id=ctx["tenant_id"],
+                user_id=ctx["user_id"],
+                request_id=ctx["request_id"],
+            )
+        except Exception as e:
+            logger.exception("❌ Emma feedback failed | error=%s", e)
+            raise
+
+    async def emma_get_analysis(self, job_id: str) -> Dict[str, Any]:
+        """Get stored analysis result by job ID"""
+        try:
+            return await self.get_json(f"/emma/analysis/{job_id}")
+        except Exception as e:
+            logger.exception("❌ Failed to get Emma analysis | job_id=%s error=%s", job_id, e)
+            raise
+
+    async def emma_document_markdown(
+        self,
+        document_id: str,
+        file_content: bytes,
+        filename: str,
+        content_type: str = "application/pdf"
+    ) -> Dict[str, Any]:
+        """Convert PDF document to Markdown format"""
+        try:
+            files = {"pdf_file": (filename, file_content, content_type)}
+            data = {"document_id": document_id}
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+                response = await client.post(
+                    f"{self.base_url}/emma/document/markdown",
+                    data=data,
+                    files=files,
+                    headers={"X-API-Key": self.api_key}
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.exception("❌ Emma document/markdown failed | error=%s", e)
+            raise
+
+    async def emma_analyze_with_annotations(
+        self,
+        document_id: str,
+        tenant_id: str,
+        analysis_type: str = "legal",
+        file_content: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        content_type: str = "application/pdf"
+    ) -> Dict[str, Any]:
+        """Analyze document and return annotated PDF with highlights"""
+        try:
+            data = {
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+                "analysis_type": analysis_type,
+            }
+            files = {}
+            if file_content and filename:
+                files["file"] = (filename, file_content, content_type)
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+                response = await client.post(
+                    f"{self.base_url}/emma/analyze-with-annotations",
+                    data=data,
+                    files=files if files else None,
+                    headers={"X-API-Key": self.api_key}
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.exception("❌ Emma analyze-with-annotations failed | error=%s", e)
+            raise
+
+    def get_stream_headers(self) -> Dict[str, str]:
+        """Get headers for streaming requests"""
+        return {
+            "X-API-Key": self.api_key,
+            "Accept": "text/event-stream",
+        }
+
+    @asynccontextmanager
+    async def stream_client(self, timeout: float = 300.0):
+        """Get an async client configured for streaming requests"""
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+            yield client
+
+    # =========================================================================
+    # PUBLIC KNOWLEDGE BASE OPERATIONS
+    # =========================================================================
+
+    async def public_knowledge_health(self) -> Dict[str, Any]:
+        """Check public knowledge base health"""
+        try:
+            return await self.get_json("/public-knowledge/health")
+        except HTTPClientError as exc:
+            return {"status": "unhealthy", "error": exc.message}
+        except Exception as exc:
+            return {"status": "unhealthy", "error": str(exc)}
+
+    async def public_knowledge_stats(self) -> Dict[str, Any]:
+        """Get public knowledge base statistics"""
+        try:
+            return await self.get_json("/public-knowledge/stats")
+        except Exception as e:
+            logger.exception("❌ Public knowledge stats failed | error=%s", e)
+            raise
+
+    async def public_knowledge_categories(self) -> Dict[str, Any]:
+        """Get available categories"""
+        try:
+            return await self.get_json("/public-knowledge/categories")
+        except Exception as e:
+            logger.exception("❌ Public knowledge categories failed | error=%s", e)
+            raise
+
+    async def public_knowledge_jurisdictions(self) -> Dict[str, Any]:
+        """Get available jurisdictions"""
+        try:
+            return await self.get_json("/public-knowledge/jurisdictions")
+        except Exception as e:
+            logger.exception("❌ Public knowledge jurisdictions failed | error=%s", e)
+            raise
+
+    async def public_knowledge_search(self, search_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Search public knowledge base"""
+        try:
+            return await self.post_json("/public-knowledge/search", json=search_data)
+        except Exception as e:
+            logger.exception("❌ Public knowledge search failed | error=%s", e)
+            raise
+
+    async def public_knowledge_get_document(self, doc_id: str) -> Dict[str, Any]:
+        """Get a specific document from public knowledge base"""
+        try:
+            return await self.get_json(f"/public-knowledge/documents/{doc_id}")
+        except Exception as e:
+            logger.exception("❌ Public knowledge get document failed | doc_id=%s error=%s", doc_id, e)
+            raise
+
+    # =========================================================================
+    # ACL & CACHE SECURITY OPERATIONS
+    # =========================================================================
+
+    async def update_document_acl(
+        self,
+        document_id: str,
+        collection_name: str,
+        acl_user_ids: List[str],
+        acl_role_ids: List[str],
+        acl_everyone: bool
+    ) -> Dict[str, Any]:
+        """
+        Update document ACL properties in Weaviate.
+
+        Called when ACL changes in PostgreSQL to sync to Weaviate for filtering.
+        """
+        try:
+            payload = {
+                "collection_name": collection_name,
+                "acl_user_ids": acl_user_ids,
+                "acl_role_ids": acl_role_ids,
+                "acl_everyone": acl_everyone
+            }
+            logger.debug(
+                "Updating document ACL in Weaviate | document_id=%s collection=%s",
+                document_id, collection_name
+            )
+            return await self.put_json(f"/weaviate/documents/{document_id}/acl", json=payload)
+        except Exception as e:
+            logger.exception(
+                "❌ Failed to update document ACL | document_id=%s error=%s",
+                document_id, e
+            )
+            raise
+
+    async def invalidate_cache_by_document(
+        self,
+        tenant_id: str,
+        document_id: str
+    ) -> Dict[str, Any]:
+        """
+        Invalidate semantic cache entries that reference a specific document.
+
+        SECURITY: Must be called when document ACL changes to prevent stale
+        cached responses from being returned to users who lost access.
+
+        Args:
+            tenant_id: Tenant identifier
+            document_id: Document whose ACL changed
+
+        Returns:
+            Dict with status and entries_invalidated count
+        """
+        try:
+            payload = {
+                "tenant_id": tenant_id,
+                "document_id": document_id
+            }
+            logger.info(
+                "🔄 Invalidating cache for document | tenant=%s document=%s",
+                tenant_id, document_id
+            )
+            return await self.post_json("/weaviate/cache/invalidate-by-document", json=payload)
+        except Exception as e:
+            logger.exception(
+                "❌ Failed to invalidate cache | tenant=%s document=%s error=%s",
+                tenant_id, document_id, e
+            )
+            # Don't raise - cache invalidation failure shouldn't block ACL updates
+            return {"status": "error", "error": str(e), "entries_invalidated": 0}
 
 
 # Global client instance

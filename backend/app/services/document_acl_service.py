@@ -676,7 +676,18 @@ class DocumentACLService:
             # Don't raise - ACL is source of truth, sync is async
 
     async def _sync_document_acl_to_weaviate_impl(self, document_id: UUID, db: AsyncSession):
-        """Internal implementation of Weaviate and Elasticsearch ACL sync."""
+        """
+        Internal implementation of ACL sync to Weaviate, Elasticsearch, and cache invalidation.
+
+        SECURITY: When document ACL changes, we must:
+        1. Update Weaviate document properties for vector search filtering
+        2. Update Elasticsearch document for full-text search filtering
+        3. Invalidate semantic cache entries that reference this document
+
+        Step 3 is critical: cached RAG responses may contain this document's content.
+        If a user loses access to the document, they should not receive cached responses
+        that include information from that document.
+        """
         import httpx
         from app.core.config import settings
 
@@ -721,15 +732,19 @@ class DocumentACLService:
         # Get tenant collection name
         collection_name = f"Nexus_{str(self.tenant_id).replace('-', '_')}_documents"
 
-        # Sync to Weaviate
+        # 1. Sync to Weaviate (vector search filter)
         await self._sync_acl_to_weaviate(
             document_id, collection_name, acl_user_ids, acl_role_ids, acl_everyone
         )
 
-        # Sync to Elasticsearch
+        # 2. Sync to Elasticsearch (full-text search filter)
         await self._sync_acl_to_elasticsearch(
             document_id, collection_name, acl_user_ids, acl_role_ids, acl_everyone, created_by
         )
+
+        # 3. SECURITY: Invalidate semantic cache entries referencing this document
+        # This prevents stale cached responses from being returned to users who lost access
+        await self._invalidate_cache_for_document(document_id)
 
     async def _sync_acl_to_weaviate(
         self,
@@ -808,6 +823,36 @@ class DocumentACLService:
 
         except Exception as e:
             logger.error(f"Error syncing ACL to Elasticsearch: {e}")
+
+    async def _invalidate_cache_for_document(self, document_id: UUID):
+        """
+        Invalidate semantic cache entries that reference this document.
+
+        SECURITY: When a document's ACL changes, any cached RAG response that
+        used this document as a source must be invalidated. This prevents:
+        - Users who lost access from seeing cached responses with that document's content
+        - Stale permission data from being returned via cached responses
+
+        This is an O(n) operation on the cache, but it's necessary for security
+        and only runs when ACL changes (infrequent operation).
+        """
+        from app.services.weaviate_client import weaviate_client
+
+        try:
+            result = await weaviate_client.invalidate_cache_by_document(
+                tenant_id=str(self.tenant_id),
+                document_id=str(document_id)
+            )
+
+            entries_invalidated = result.get("entries_invalidated", 0)
+            if entries_invalidated > 0:
+                logger.info(
+                    f"🔄 Invalidated {entries_invalidated} cache entries for document {document_id}"
+                )
+
+        except Exception as e:
+            # Log but don't raise - cache invalidation failure shouldn't block ACL updates
+            logger.warning(f"Failed to invalidate cache for document {document_id}: {e}")
 
     async def sync_all_documents_to_weaviate(self, db: AsyncSession):
         """

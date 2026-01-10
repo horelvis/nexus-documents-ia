@@ -111,6 +111,8 @@ class RAGPipeline:
         query: str,
         tenant_id: str,
         user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         validate_claims: bool = True,
@@ -125,7 +127,9 @@ class RAGPipeline:
         Args:
             query: User's query
             tenant_id: Tenant identifier for multi-tenant isolation
-            user_id: Optional user identifier
+            user_id: User identifier for ACL filtering (REQUIRED for document access control)
+            user_role_ids: List of role IDs the user belongs to (for role-based ACL)
+            is_admin: Whether user is admin (bypasses ACL checks)
             collection_name: Optional specific collection to search
             top_k: Number of documents to retrieve
             validate_claims: Whether to validate generated claims
@@ -136,6 +140,10 @@ class RAGPipeline:
 
         Returns:
             RAGResponse with answer, sources, and metadata
+
+        SECURITY: user_id and user_role_ids are used for:
+        1. ACL filtering in document retrieval (only returns accessible documents)
+        2. User-isolated semantic caching (prevents cross-user data exposure)
         """
         await self.initialize()
 
@@ -181,6 +189,7 @@ class RAGPipeline:
                         query=query,
                         query_embedding=query_embedding,
                         tenant_id=tenant_id,
+                        user_id=user_id,  # SECURITY: User-isolated cache
                         scope=cache_scope,
                     )
                     if cached:
@@ -233,6 +242,9 @@ class RAGPipeline:
             retrieved_docs, selection_metadata = await self.retriever.retrieve(
                 query_analysis=query_analysis,
                 tenant_id=tenant_id,
+                user_id=user_id,  # ACL: user identification
+                user_role_ids=user_role_ids,  # ACL: role-based access
+                is_admin=is_admin,  # ACL: admin bypass
                 collection_name=collection_name,
                 top_k=top_k,
                 include_public_knowledge=include_public_knowledge,
@@ -339,6 +351,7 @@ class RAGPipeline:
                             query=query,
                             query_embedding=query_embedding,
                             tenant_id=tenant_id,
+                            user_id=user_id,  # SECURITY: User-isolated cache
                             answer=validated_response.answer,
                             sources=[s.to_dict() for s in assembled_context.documents],
                             confidence_score=validated_response.confidence_score,

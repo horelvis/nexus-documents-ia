@@ -17,7 +17,12 @@ from typing import Annotated, Optional
 from pydantic import Field
 
 from app.core.security import get_tenant_collection_name
-from app.core.execution_context import resolve_tenant_id, get_user_id
+from app.core.execution_context import (
+    resolve_tenant_id,
+    get_user_id,
+    get_user_role_ids,
+    get_is_admin,
+)
 
 # Try to import ai_function from Agent Framework, fall back to identity decorator
 try:
@@ -177,24 +182,29 @@ async def get_document_content(
         - truncated: Whether content was truncated
         - is_channel: Whether document is from a channel or regular documents
     """
-    # Resolve tenant_id and user_id from execution context
+    # Resolve tenant_id and ACL context from execution context
     actual_tenant_id = resolve_tenant_id(tenant_id)
-    actual_user_id = get_user_id()  # For channel access control
+    actual_user_id = get_user_id()
+    actual_user_role_ids = get_user_role_ids()
+    actual_is_admin = get_is_admin()
     logger.info(f"Getting document: id={document_id}, tenant={actual_tenant_id}, user={actual_user_id[:8] if actual_user_id else 'None'}...")
 
     try:
         service = _get_weaviate_service()
 
-        # Always use cross-collection search with access control
-        # This ensures:
-        # 1. User can only access documents they have permission to see
-        # 2. Personal channels are filtered by user_id
-        # 3. Tenant channels are accessible to all tenant users
-        # 4. Regular uploads are always accessible
+        # Always use cross-collection search with ACL verification
+        # SECURITY: This ensures:
+        # 1. User can only access documents they have ACL permission to see
+        # 2. Owner always has access
+        # 3. Role-based ACL is checked
+        # 4. Documents shared with "everyone" are accessible
+        # 5. Admin users bypass ACL checks
         doc = await service.get_document_by_id_across_collections(
             tenant_id=actual_tenant_id,
             document_id=document_id,
-            user_id=actual_user_id,  # SECURITY: Apply channel access control
+            user_id=actual_user_id,
+            user_role_ids=actual_user_role_ids,
+            is_admin=actual_is_admin,
         )
 
         if not doc:

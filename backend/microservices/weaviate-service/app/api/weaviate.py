@@ -194,6 +194,78 @@ async def update_document_acl(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ========================================
+# CACHE INVALIDATION (Security)
+# ========================================
+
+class CacheInvalidationRequest(BaseModel):
+    """Request to invalidate cache entries for a document"""
+    tenant_id: str
+    document_id: str
+
+
+class CacheInvalidationResponse(BaseModel):
+    """Response from cache invalidation"""
+    status: str
+    document_id: str
+    tenant_id: str
+    entries_invalidated: int
+
+
+@router.post("/cache/invalidate-by-document", response_model=CacheInvalidationResponse)
+async def invalidate_cache_by_document(
+    request: CacheInvalidationRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Invalidate semantic cache entries that reference a specific document.
+
+    SECURITY: This endpoint must be called when a document's ACL changes to prevent
+    stale cached responses from being returned to users who no longer have access.
+
+    Called by the main API's DocumentACLService after updating ACL in:
+    - PostgreSQL (source of truth)
+    - Weaviate (vector search filter)
+    - Elasticsearch (full-text search filter)
+
+    The semantic cache stores complete RAG responses. When a document's permissions
+    change, any cached response that used that document as a source must be invalidated
+    to ensure users only see documents they're authorized to access.
+
+    Args:
+        request: Contains tenant_id and document_id
+
+    Returns:
+        Number of cache entries that were invalidated
+    """
+    try:
+        from app.services.rag.semantic_cache import semantic_cache
+
+        # Ensure cache is initialized
+        await semantic_cache.initialize()
+
+        # Invalidate all cache entries referencing this document
+        invalidated = await semantic_cache.invalidate_by_document(
+            tenant_id=request.tenant_id,
+            document_id=request.document_id
+        )
+
+        logger.info(
+            f"🔄 Cache invalidation: document={request.document_id}, "
+            f"tenant={request.tenant_id}, entries_invalidated={invalidated}"
+        )
+
+        return CacheInvalidationResponse(
+            status="success",
+            document_id=request.document_id,
+            tenant_id=request.tenant_id,
+            entries_invalidated=invalidated
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to invalidate cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Weaviate service health check"""

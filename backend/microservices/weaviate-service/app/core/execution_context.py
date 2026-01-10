@@ -61,6 +61,8 @@ logger = logging.getLogger(__name__)
 # Context variables for execution
 _tenant_id_var: ContextVar[Optional[str]] = ContextVar('tenant_id', default=None)
 _user_id_var: ContextVar[Optional[str]] = ContextVar('user_id', default=None)
+_user_role_ids_var: ContextVar[Optional[list]] = ContextVar('user_role_ids', default=None)
+_is_admin_var: ContextVar[bool] = ContextVar('is_admin', default=False)
 _session_id_var: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
 _extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context', default={})
 
@@ -68,6 +70,8 @@ _extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context', def
 def set_execution_context(
     tenant_id: str,
     user_id: Optional[str] = None,
+    user_role_ids: Optional[list] = None,
+    is_admin: bool = False,
     session_id: Optional[str] = None,
     **extra: Any
 ) -> None:
@@ -80,6 +84,8 @@ def set_execution_context(
     Args:
         tenant_id: Tenant identifier (REQUIRED)
         user_id: Optional user identifier
+        user_role_ids: Optional list of role IDs the user belongs to (for ACL filtering)
+        is_admin: Whether the user is an admin (bypasses ACL checks)
         session_id: Optional session identifier
         **extra: Additional context values
     """
@@ -88,13 +94,18 @@ def set_execution_context(
     if user_id:
         _user_id_var.set(user_id)
 
+    if user_role_ids:
+        _user_role_ids_var.set(user_role_ids)
+
+    _is_admin_var.set(is_admin)
+
     if session_id:
         _session_id_var.set(session_id)
 
     if extra:
         _extra_context_var.set(extra)
 
-    logger.debug(f"🔐 Execution context set: tenant={tenant_id}, user={user_id}")
+    logger.debug(f"🔐 Execution context set: tenant={tenant_id}, user={user_id}, roles={len(user_role_ids or [])}, admin={is_admin}")
 
 
 def clear_execution_context() -> None:
@@ -105,6 +116,8 @@ def clear_execution_context() -> None:
     """
     _tenant_id_var.set(None)
     _user_id_var.set(None)
+    _user_role_ids_var.set(None)
+    _is_admin_var.set(False)
     _session_id_var.set(None)
     _extra_context_var.set({})
 
@@ -129,6 +142,32 @@ def get_user_id() -> Optional[str]:
         User ID if set, None otherwise
     """
     return _user_id_var.get()
+
+
+def get_user_role_ids() -> Optional[list]:
+    """
+    Get the current user's role IDs from execution context.
+
+    These role IDs are used for ACL filtering - documents shared
+    with any of these roles will be accessible to the user.
+
+    Returns:
+        List of role IDs if set, None otherwise
+    """
+    return _user_role_ids_var.get()
+
+
+def get_is_admin() -> bool:
+    """
+    Get whether the current user is an admin.
+
+    Admin users bypass ACL checks and can see all documents
+    within their tenant.
+
+    Returns:
+        True if user is admin, False otherwise
+    """
+    return _is_admin_var.get()
 
 
 def get_session_id() -> Optional[str]:
