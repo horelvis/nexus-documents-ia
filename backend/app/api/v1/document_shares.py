@@ -54,8 +54,8 @@ async def create_document_share(
     - Optional recipient email notification
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+
         # Verify document exists and user has access
         result = await db.execute(
             select(Document).filter(
@@ -66,13 +66,12 @@ async def create_document_share(
             )
         )
         document = result.scalar_one_or_none()
-        
+
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         # Create share
         share = await share_service.create_share(
-            db=db,
             document_id=share_data.document_id,
             share_type=share_data.share_type,
             expires_at=share_data.expires_at,
@@ -84,7 +83,7 @@ async def create_document_share(
             permissions=share_data.permissions,
             recipients=share_data.recipients
         )
-        
+
         return share
         
     except ValueError as e:
@@ -108,8 +107,8 @@ async def create_bulk_shares(
         raise HTTPException(status_code=400, detail="Recipients list is required for bulk sharing")
     
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+
         # Verify document exists
         result = await db.execute(
             select(Document).filter(
@@ -120,13 +119,12 @@ async def create_bulk_shares(
             )
         )
         document = result.scalar_one_or_none()
-        
+
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         # Create shares for each recipient
         result = await share_service.create_bulk_shares(
-            db=db,
             document_id=share_data.document_id,
             recipients=share_data.recipients,
             share_type=share_data.share_type,
@@ -136,7 +134,7 @@ async def create_bulk_shares(
             share_message=share_data.share_message,
             permissions=share_data.permissions
         )
-        
+
         return result
         
     except Exception as e:
@@ -162,23 +160,22 @@ async def list_document_shares(
     - is_active: Filter by active/inactive shares
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+
         shares, total = await share_service.list_shares(
-            db=db,
             document_id=document_id,
             is_active=is_active,
             page=page,
             per_page=per_page
         )
-        
+
         return DocumentShareListResponse(
             shares=shares,
             total=total,
             page=page,
             per_page=per_page
         )
-        
+
     except Exception as e:
         logger.error(f"Error listing shares: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to list shares")
@@ -195,10 +192,10 @@ async def get_share_statistics(
     Get sharing statistics for the tenant or a specific document.
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        stats = await share_service.get_statistics(db=db, document_id=document_id)
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+        stats = await share_service.get_statistics(document_id=document_id)
         return stats
-        
+
     except Exception as e:
         logger.error(f"Error getting share statistics: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get statistics")
@@ -215,14 +212,14 @@ async def get_document_share(
     Get details of a specific document share.
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        share = await share_service.get_share(db=db, share_id=share_id)
-        
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+        share = await share_service.get_share(share_id=share_id)
+
         if not share:
             raise HTTPException(status_code=404, detail="Share not found")
-        
+
         return share
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -242,18 +239,17 @@ async def update_document_share(
     Update a document share's settings.
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
         share = await share_service.update_share(
-            db=db,
             share_id=share_id,
             update_data=update_data
         )
-        
+
         if not share:
             raise HTTPException(status_code=404, detail="Share not found")
-        
+
         return share
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -272,18 +268,17 @@ async def revoke_document_share(
     Revoke a document share link.
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
         success = await share_service.revoke_share(
-            db=db,
             share_id=share_id,
             revoked_by=current_user.id
         )
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Share not found")
-        
+
         return {"message": "Share revoked successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -304,8 +299,8 @@ async def get_share_access_logs(
     Get access logs for a specific share.
     """
     try:
-        share_service = DocumentShareService(tenant_id=tenant_id, user_id=str(current_user.id))
-        
+        share_service = DocumentShareService(db=db, tenant_id=tenant_id, user_id=str(current_user.id))
+
         # Verify share belongs to tenant
         result = await db.execute(
             select(DocumentShare).filter(
@@ -316,24 +311,23 @@ async def get_share_access_logs(
             )
         )
         share = result.scalar_one_or_none()
-        
+
         if not share:
             raise HTTPException(status_code=404, detail="Share not found")
-        
+
         logs, total = await share_service.get_access_logs(
-            db=db,
             share_id=share_id,
             page=page,
             per_page=per_page
         )
-        
+
         return ShareAccessLogListResponse(
             logs=logs,
             total=total,
             page=page,
             per_page=per_page
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

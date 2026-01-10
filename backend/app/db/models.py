@@ -1445,6 +1445,7 @@ class SiteGuest(Base):
     sessions = relationship("SiteGuestSession", back_populates="guest", cascade="all, delete-orphan")
     permissions = relationship("SiteGuestPermission", back_populates="guest", cascade="all, delete-orphan")
     access_logs = relationship("SiteGuestAccessLog", back_populates="guest", cascade="all, delete-orphan")
+    shares = relationship("SiteGuestShare", back_populates="guest", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint('tenant_id', 'email', name='uq_site_guest_tenant_email'),
@@ -1645,4 +1646,71 @@ class SiteGuestAccessLog(Base):
         Index('idx_site_guest_access_logs_guest_created', 'guest_id', 'created_at'),
         Index('idx_site_guest_access_logs_action', 'action', 'created_at'),
         Index('idx_site_guest_access_logs_document', 'document_id'),
+    )
+
+
+class SiteGuestShare(Base):
+    """
+    Virtual folder/collection that groups documents shared with a guest.
+
+    Each share represents one "share action" from the Documents page.
+    Documents stay in their original location - this is just a reference/alias.
+    Guests see shares as folders in the portal.
+    """
+    __tablename__ = "site_guest_shares"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    name = Column(String(255), nullable=False)  # "Proyecto ABC"
+    description = Column(Text, nullable=True)
+    permission_type = Column(String(20), nullable=False, default="view")  # view, download, upload
+
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant")
+    guest = relationship("SiteGuest", back_populates="shares")
+    documents = relationship("SiteGuestShareDocument", back_populates="share", cascade="all, delete-orphan")
+    creator = relationship("User", foreign_keys=[created_by_user_id])
+
+    __table_args__ = (
+        Index('idx_site_guest_shares_guest', 'guest_id'),
+        Index('idx_site_guest_shares_tenant', 'tenant_id'),
+    )
+
+    def is_expired(self) -> bool:
+        """Check if share has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+
+class SiteGuestShareDocument(Base):
+    """
+    Junction table linking shares to documents.
+
+    Documents stay in their original location - this is just a reference.
+    When a document is deleted, the reference is also deleted (CASCADE).
+    """
+    __tablename__ = "site_guest_share_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    share_id = Column(UUID(as_uuid=True), ForeignKey("site_guest_shares.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    share = relationship("SiteGuestShare", back_populates="documents")
+    document = relationship("Document")
+
+    __table_args__ = (
+        UniqueConstraint('share_id', 'document_id', name='uq_site_guest_share_document'),
+        Index('idx_site_guest_share_documents_share', 'share_id'),
+        Index('idx_site_guest_share_documents_document', 'document_id'),
     )

@@ -220,7 +220,8 @@
     "channels": {
       "title": "Canaux d'Info",
       "description": "Sources de données externes pour RAG"
-    }
+    },
+    "adminActions": "Actions Administrateur"
   },
   "documentPreview": {
     "backToSearch": "Retour à la recherche",

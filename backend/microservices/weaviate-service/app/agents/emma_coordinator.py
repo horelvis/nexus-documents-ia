@@ -85,7 +85,7 @@ def get_redis_pool() -> ConnectionPool:
 
 
 from app.agents.agents import (
-    create_search_agent,
+    create_search_agent_with_sharing,
     create_contract_agent,
     create_compliance_agent,
     create_summarizer_agent,
@@ -223,7 +223,7 @@ class EmmaCoordinator:
     def _create_subagents(self) -> None:
         """Create all specialist subagents."""
         self._subagents = {
-            "search_agent": create_search_agent(self._client),
+            "search_agent": create_search_agent_with_sharing(self._client),
             "contract_agent": create_contract_agent(self._client),
             "compliance_agent": create_compliance_agent(self._client),
             "analyst_agent": create_analyst_agent(self._client),
@@ -272,10 +272,22 @@ class EmmaCoordinator:
     def _get_agent_description(self, agent_name: str) -> str:
         """Get description for each subagent tool."""
         descriptions = {
-            "search_agent": "Busca documentos, archivos y correos electrónicos. Usa para: 'busca', 'encuentra', 'muéstrame documentos'",
+            # SearchAgent: handles document search AND sharing queries (site guests, document shares)
+            "search_agent": (
+                "Busca documentos y consulta información de COMPARTICIÓN. "
+                "OBLIGATORIO usar para: 'compartido', 'usuarios compartidos', 'con quién he compartido', "
+                "'qué he compartido', 'invitados', 'guests', 'portal', 'acceso externo', "
+                "'quién tiene acceso', 'estadísticas de compartir', 'documentos compartidos'. "
+                "También para: 'busca', 'encuentra documentos'"
+            ),
             "contract_agent": "Analiza contratos, cláusulas y obligaciones legales. Usa para: 'contrato', 'cláusula', 'términos'",
             "compliance_agent": "Verifica cumplimiento GDPR/RGPD y normativo. Usa para: 'gdpr', 'rgpd', 'cumplimiento'",
-            "analyst_agent": "Realiza análisis profundo de documentos. Usa para: 'analiza', 'evalúa', 'examina', 'riesgos'",
+            # AnalystAgent: deep document analysis (NOT for sharing queries)
+            "analyst_agent": (
+                "Realiza análisis profundo de CONTENIDO de documentos específicos. "
+                "Usa para: 'analiza este documento', 'evalúa el contenido', 'examina riesgos del documento'. "
+                "NO usar para consultas sobre compartición o usuarios."
+            ),
             "summarizer_agent": "Crea resúmenes ejecutivos. Usa para: 'resume', 'resumen', 'sintetiza', 'puntos clave'",
             "labor_agent": "Especialista en derecho laboral español. Usa para: 'laboral', 'despido', 'nómina', 'convenio'",
             "fiscal_agent": "Especialista en temas fiscales e impuestos. Usa para: 'impuesto', 'iva', 'irpf', 'fiscal'",

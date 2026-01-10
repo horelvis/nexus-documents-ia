@@ -16,6 +16,7 @@ import {
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
+import { useTranslation } from "@/lib/i18n/hooks"
 
 export function NavAdmin({
   items,
@@ -27,6 +28,7 @@ export function NavAdmin({
     color?: string
   }[]
 }) {
+  const { t } = useTranslation()
   const apiClient = useApiClient()
   const [loadingBilling, setLoadingBilling] = useState(false)
   
@@ -86,7 +88,7 @@ export function NavAdmin({
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Admin Actions</SidebarGroupLabel>
+      <SidebarGroupLabel>{t('sidebar.adminActions')}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.title}>

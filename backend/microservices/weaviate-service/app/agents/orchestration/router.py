@@ -411,6 +411,7 @@ class SemanticDomainRouter:
             search = Route(
                 name="search",
                 utterances=[
+                    # === Document Search ===
                     # English
                     "Find documents", "Search for files", "Look for emails",
                     "Show me contracts", "Where is the file", "Locate document",
@@ -423,6 +424,32 @@ class SemanticDomainRouter:
                     # French
                     "Chercher documents", "Trouver fichiers", "Rechercher emails",
                     "Montrer contrats", "Où est le fichier",
+
+                    # === SHARING & COLLABORATION QUERIES ===
+                    # English - sharing/sharing
+                    "Who have I shared documents with", "What documents have I shared",
+                    "Shared documents", "Document shares", "My shared files",
+                    "Who has access to my documents", "Sharing statistics",
+                    "Recent shares", "What did I share this week",
+                    # English - external guests/portal
+                    "External guests", "Site guests", "Portal users", "Guest access",
+                    "Who are my guests", "Guest permissions", "Invited users",
+                    "What can guests see", "Guest activity", "Guest statistics",
+                    # Spanish - compartición
+                    "Con quién he compartido documentos", "Qué documentos he compartido",
+                    "Documentos compartidos", "Mis archivos compartidos",
+                    "Quién tiene acceso a mis documentos", "Estadísticas de compartición",
+                    "Compartidos recientes", "Qué compartí esta semana",
+                    "He compartido", "Compartir documentos", "Usuarios compartidos",
+                    "Con qué usuarios he compartido",
+                    # Spanish - invitados/portal
+                    "Invitados externos", "Site guests", "Usuarios del portal",
+                    "Acceso de invitados", "Quiénes son mis invitados", "Permisos de invitados",
+                    "Usuarios invitados", "Qué pueden ver los invitados",
+                    "Actividad de invitados", "Estadísticas de invitados",
+                    # French - partage
+                    "Avec qui ai-je partagé", "Documents partagés", "Mes fichiers partagés",
+                    "Qui a accès", "Statistiques de partage", "Invités externes",
                 ]
             )
 

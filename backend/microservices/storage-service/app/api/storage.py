@@ -104,6 +104,75 @@ def clear_gcs_cache():
     _gcs_service_cache.clear()
     logger.info("GCS service cache cleared")
 
+
+@router.post("/signed-url/upload", response_model=SignedUrlResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def generate_upload_signed_url(
+    request: Request,
+    payload: SignedUrlRequest,
+    auth_context: dict = Depends(validate_tenant_access),
+    gcs_service: GCSService = Depends(get_gcs_service),
+):
+    """
+    Generate a signed URL for direct upload (PUT) to GCS.
+    """
+    tenant_id = auth_context.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required (X-Tenant-ID)")
+
+    object_name = get_object_path(tenant_id, auth_context.get("user_id"), payload.filename)
+    url, expires_at = gcs_service.generate_signed_url(
+        object_name=object_name,
+        method="PUT",
+        expiration=payload.expiration,
+        content_type=payload.content_type,
+    )
+
+    return SignedUrlResponse(
+        url=url,
+        expires_at=expires_at.isoformat(),
+        object_name=object_name,
+    )
+
+
+@router.post("/signed-url/download/{path:path}", response_model=SignedUrlResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def generate_download_signed_url(
+    request: Request,
+    path: str,
+    expiration: Optional[int] = Query(None),
+    auth_context: dict = Depends(validate_tenant_access),
+    gcs_service: GCSService = Depends(get_gcs_service),
+):
+    """
+    Generate a signed URL for direct download (GET) from GCS.
+
+    `path` can be either:
+      - a relative file path (will be namespaced with tenant/user), or
+      - a full object name starting with `tenant-.../` (used as-is).
+    """
+    tenant_id = auth_context.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required (X-Tenant-ID)")
+
+    normalized = path.lstrip("/")
+    if normalized.startswith("tenant-"):
+        object_name = normalized
+    else:
+        object_name = get_object_path(tenant_id, auth_context.get("user_id"), normalized)
+
+    url, expires_at = gcs_service.generate_signed_url(
+        object_name=object_name,
+        method="GET",
+        expiration=expiration,
+    )
+
+    return SignedUrlResponse(
+        url=url,
+        expires_at=expires_at.isoformat(),
+        object_name=object_name,
+    )
+
 @router.post("/upload", response_model=UploadResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def upload_file(

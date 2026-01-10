@@ -144,12 +144,6 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         icon: IconChartBar,
         color: "orange",
       },
-      {
-        title: t('sidebar.channels.title'),
-        url: "/channels",
-        icon: IconPlugConnected,
-        color: "teal",
-      },
     ],
     quickActions: [
       {
@@ -195,6 +189,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         url: "/settings/site",
         icon: IconUserShare,
         color: "cyan",
+      },
+      {
+        title: t('sidebar.channels.title'),
+        url: "/channels",
+        icon: IconPlugConnected,
+        color: "teal",
       },
       {
         title: t('sidebar.admin.providers'),

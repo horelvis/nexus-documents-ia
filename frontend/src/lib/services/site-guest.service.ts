@@ -135,6 +135,57 @@ export interface SiteGuestStatistics {
 }
 
 // =====================================
+// SHARE/COLLECTION TYPES (Virtual Folders)
+// =====================================
+
+export interface CreateGuestWithShareRequest {
+  email: string
+  name?: string
+  share_name: string
+  share_description?: string
+  document_ids: string[]
+  permission_type: 'view' | 'download' | 'upload'
+  expires_at?: string
+  send_invitation: boolean
+}
+
+export interface SiteGuestShare {
+  id: string
+  name: string
+  description: string | null
+  permission_type: string
+  document_count: number
+  created_at: string
+  expires_at: string | null
+}
+
+export interface SiteGuestShareDocument {
+  id: string
+  title: string
+  filename: string
+  file_type: string
+  file_size: number
+  mime_type: string | null
+  created_at: string
+}
+
+export interface SiteGuestShareDetail extends SiteGuestShare {
+  documents: SiteGuestShareDocument[]
+}
+
+export interface CreateGuestWithShareResponse {
+  guest: SiteGuest
+  share: SiteGuestShare
+  is_new_guest: boolean
+  message: string
+}
+
+export interface SiteGuestShareList {
+  shares: SiteGuestShare[]
+  total: number
+}
+
+// =====================================
 // ADMIN SERVICE CLASS
 // =====================================
 
@@ -228,6 +279,28 @@ export class SiteGuestService {
       `${API_CONFIG.ENDPOINTS.SITE_GUEST_ACCESS_LOGS(guestId)}${query}`
     )
   }
+
+  // --- Share/Collection Management ---
+
+  /**
+   * Create a new guest (or reuse existing by email) and share documents with them.
+   * This is the simplified flow from the Documents page.
+   */
+  async createGuestWithShare(data: CreateGuestWithShareRequest) {
+    return this.apiClient.post<CreateGuestWithShareResponse>(
+      API_CONFIG.ENDPOINTS.SITE_GUEST_WITH_SHARE,
+      data
+    )
+  }
+
+  /**
+   * List all shares/collections for a specific guest.
+   */
+  async listGuestShares(guestId: string) {
+    return this.apiClient.get<SiteGuestShareList>(
+      API_CONFIG.ENDPOINTS.SITE_GUEST_SHARES(guestId)
+    )
+  }
 }
 
 // =====================================
@@ -287,7 +360,25 @@ export interface PortalFolder {
   can_upload: boolean
 }
 
+export interface PortalShare {
+  id: string
+  name: string
+  description: string | null
+  permission_type: 'view' | 'download' | 'upload'
+  document_count: number
+  created_at: string
+  expires_at: string | null
+}
+
+export interface PortalShareDocumentsResponse {
+  share: PortalShare
+  documents: PortalDocument[]
+  total_documents: number
+}
+
 export interface PortalContentResponse {
+  shares: PortalShare[]
+  total_shares: number
   documents: PortalDocument[]
   folders: PortalFolder[]
   total_documents: number
@@ -376,6 +467,12 @@ export class SitePortalService {
 
   async getContent() {
     return this.request<PortalContentResponse>(API_CONFIG.ENDPOINTS.SITE_PORTAL_CONTENT)
+  }
+
+  async getShareDocuments(shareId: string) {
+    return this.request<PortalShareDocumentsResponse>(
+      API_CONFIG.ENDPOINTS.SITE_PORTAL_SHARE_DOCUMENTS(shareId)
+    )
   }
 
   async getDocument(documentId: string) {

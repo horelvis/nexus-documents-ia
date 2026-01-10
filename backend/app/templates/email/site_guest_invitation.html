@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if language == 'en' %}Portal Invitation{% elif language == 'fr' %}Invitation au Portail{% else %}Invitación al Portal{% endif %}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background-color: #F9FAFB;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 550px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+            border: 1px solid #E5E7EB;
+        }
+        .header {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 40px 32px;
+        }
+        .greeting {
+            font-size: 16px;
+            color: #374151;
+            margin-bottom: 16px;
+        }
+        .message {
+            color: #6B7280;
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .tenant-name {
+            color: #8B5CF6;
+            font-weight: 600;
+        }
+        .welcome-message-box {
+            background-color: #F9FAFB;
+            border-left: 4px solid #8B5CF6;
+            border-radius: 0 8px 8px 0;
+            padding: 16px 20px;
+            margin: 24px 0;
+        }
+        .welcome-message-label {
+            font-size: 11px;
+            color: #6B7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .welcome-message-text {
+            color: #4B5563;
+            font-size: 14px;
+            font-style: italic;
+            margin: 0;
+            line-height: 1.6;
+        }
+        .cta-container {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%);
+            color: white !important;
+            text-decoration: none;
+            padding: 14px 36px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+        }
+        .details-section {
+            background-color: #F9FAFB;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 28px 0;
+            border: 1px solid #E5E7EB;
+        }
+        .details-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 14px;
+        }
+        .details-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .details-list li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            font-size: 13px;
+            color: #6B7280;
+        }
+        .details-list li:not(:last-child) {
+            border-bottom: 1px solid #E5E7EB;
+        }
+        .detail-icon {
+            font-size: 16px;
+        }
+        .detail-label {
+            color: #6B7280;
+        }
+        .detail-value {
+            color: #374151;
+            font-weight: 500;
+            margin-left: auto;
+        }
+        .permissions-badges {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .permission-badge {
+            background-color: #EDE9FE;
+            color: #7C3AED;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .permission-badge.disabled {
+            background-color: #F3F4F6;
+            color: #9CA3AF;
+        }
+        .info-text {
+            color: #9CA3AF;
+            font-size: 12px;
+            margin-top: 24px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        .footer {
+            background-color: #F9FAFB;
+            padding: 20px 24px;
+            text-align: center;
+            border-top: 1px solid #E5E7EB;
+        }
+        .footer-text {
+            color: #9CA3AF;
+            font-size: 12px;
+            margin: 0;
+        }
+        .footer-brand {
+            color: #6B7280;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-icon">📋</div>
+            <h1>{% if language == 'en' %}Portal Invitation{% elif language == 'fr' %}Invitation au Portail{% else %}Invitación al Portal{% endif %}</h1>
+        </div>
+
+        <div class="content">
+            <p class="greeting">
+                {% if language == 'en' %}Hi {{ recipient_name }},{% elif language == 'fr' %}Bonjour {{ recipient_name }},{% else %}Hola {{ recipient_name }},{% endif %}
+            </p>
+
+            <p class="message">
+                {% if language == 'en' %}
+                    <span class="tenant-name">{{ tenant_name }}</span> has invited you to access their document portal.
+                    You can view and manage shared documents through a secure online interface.
+                {% elif language == 'fr' %}
+                    <span class="tenant-name">{{ tenant_name }}</span> vous a invité à accéder à leur portail de documents.
+                    Vous pouvez consulter et gérer les documents partagés via une interface en ligne sécurisée.
+                {% else %}
+                    <span class="tenant-name">{{ tenant_name }}</span> te ha invitado a acceder a su portal de documentos.
+                    Puedes ver y gestionar documentos compartidos a través de una interfaz online segura.
+                {% endif %}
+            </p>
+
+            {% if welcome_message %}
+            <div class="welcome-message-box">
+                <div class="welcome-message-label">
+                    {% if language == 'en' %}Message from {{ tenant_name }}{% elif language == 'fr' %}Message de {{ tenant_name }}{% else %}Mensaje de {{ tenant_name }}{% endif %}
+                </div>
+                <p class="welcome-message-text">"{{ welcome_message }}"</p>
+            </div>
+            {% endif %}
+
+            <div class="cta-container">
+                <a href="{{ portal_url }}" class="cta-button">
+                    {% if language == 'en' %}Access Portal &rarr;{% elif language == 'fr' %}Accéder au Portail &rarr;{% else %}Acceder al Portal &rarr;{% endif %}
+                </a>
+            </div>
+
+            <div class="details-section">
+                <div class="details-title">
+                    {% if language == 'en' %}Access Details{% elif language == 'fr' %}Détails d'Accès{% else %}Detalles de Acceso{% endif %}
+                </div>
+                <ul class="details-list">
+                    {% if expires_at %}
+                    <li>
+                        <span class="detail-icon">📅</span>
+                        <span class="detail-label">
+                            {% if language == 'en' %}Access expires{% elif language == 'fr' %}Accès expire{% else %}El acceso expira{% endif %}
+                        </span>
+                        <span class="detail-value">{{ expires_at }}</span>
+                    </li>
+                    {% endif %}
+                    <li>
+                        <span class="detail-icon">🔒</span>
+                        <span class="detail-label">
+                            {% if language == 'en' %}Permissions{% elif language == 'fr' %}Permissions{% else %}Permisos{% endif %}
+                        </span>
+                        <div class="permissions-badges">
+                            <span class="permission-badge {% if not can_view %}disabled{% endif %}">
+                                {% if can_view %}✓{% else %}✗{% endif %} {% if language == 'en' %}View{% elif language == 'fr' %}Voir{% else %}Ver{% endif %}
+                            </span>
+                            <span class="permission-badge {% if not can_download %}disabled{% endif %}">
+                                {% if can_download %}✓{% else %}✗{% endif %} {% if language == 'en' %}Download{% elif language == 'fr' %}Télécharger{% else %}Descargar{% endif %}
+                            </span>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <p class="info-text">
+                {% if language == 'en' %}
+                    If you didn't expect this invitation or have questions,<br>
+                    please contact {{ tenant_name }} directly.
+                {% elif language == 'fr' %}
+                    Si vous n'attendiez pas cette invitation ou avez des questions,<br>
+                    veuillez contacter {{ tenant_name }} directement.
+                {% else %}
+                    Si no esperabas esta invitación o tienes preguntas,<br>
+                    por favor contacta directamente con {{ tenant_name }}.
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="footer">
+            <p class="footer-text">
+                &copy; {{ current_year }} <span class="footer-brand">NexusDocs360</span>.
+                {% if language == 'en' %}All rights reserved.{% elif language == 'fr' %}Tous droits réservés.{% else %}Todos los derechos reservados.{% endif %}
+            </p>
+        </div>
+    </div>
+</body>
+</html>

@@ -264,42 +264,18 @@ function ChatPageContent({ params }: ChatPageProps) {
                           <SelectValue placeholder="Seleccionar voz" />
                         </SelectTrigger>
                         <SelectContent>
-                          {/* English voices */}
-                          <SelectItem value="en-Carter_man">Carter (EN - Hombre)</SelectItem>
-                          <SelectItem value="en-Davis_man">Davis (EN - Hombre)</SelectItem>
-                          <SelectItem value="en-Mike_man">Mike (EN - Hombre)</SelectItem>
-                          <SelectItem value="en-Frank_man">Frank (EN - Hombre)</SelectItem>
-                          <SelectItem value="en-Emma_woman">Emma (EN - Mujer)</SelectItem>
-                          <SelectItem value="en-Grace_woman">Grace (EN - Mujer)</SelectItem>
-                          {/* Spanish voices */}
-                          <SelectItem value="sp-Spk0_woman">Español (Mujer)</SelectItem>
-                          <SelectItem value="sp-Spk1_man">Español (Hombre)</SelectItem>
-                          {/* German voices */}
-                          <SelectItem value="de-Spk0_man">Alemán (Hombre)</SelectItem>
-                          <SelectItem value="de-Spk1_woman">Alemán (Mujer)</SelectItem>
-                          {/* French voices */}
-                          <SelectItem value="fr-Spk0_man">Francés (Hombre)</SelectItem>
-                          <SelectItem value="fr-Spk1_woman">Francés (Mujer)</SelectItem>
-                          {/* Italian voices */}
-                          <SelectItem value="it-Spk0_woman">Italiano (Mujer)</SelectItem>
-                          <SelectItem value="it-Spk1_man">Italiano (Hombre)</SelectItem>
-                          {/* Portuguese voices */}
-                          <SelectItem value="pt-Spk0_woman">Portugués (Mujer)</SelectItem>
-                          <SelectItem value="pt-Spk1_man">Portugués (Hombre)</SelectItem>
-                          {/* Dutch voices */}
-                          <SelectItem value="nl-Spk0_man">Holandés (Hombre)</SelectItem>
-                          <SelectItem value="nl-Spk1_woman">Holandés (Mujer)</SelectItem>
-                          {/* Polish voices */}
-                          <SelectItem value="pl-Spk0_man">Polaco (Hombre)</SelectItem>
-                          <SelectItem value="pl-Spk1_woman">Polaco (Mujer)</SelectItem>
-                          {/* Japanese voices */}
-                          <SelectItem value="jp-Spk0_man">Japonés (Hombre)</SelectItem>
-                          <SelectItem value="jp-Spk1_woman">Japonés (Mujer)</SelectItem>
-                          {/* Korean voices */}
-                          <SelectItem value="kr-Spk0_woman">Coreano (Mujer)</SelectItem>
-                          <SelectItem value="kr-Spk1_man">Coreano (Hombre)</SelectItem>
-                          {/* Indian voice */}
-                          <SelectItem value="in-Samuel_man">Samuel (IN - Hombre)</SelectItem>
+                          {/* Spanish voices (Spain) */}
+                          <SelectItem value="es-ES-Neural2-A">Español España (Mujer)</SelectItem>
+                          <SelectItem value="es-ES-Neural2-B">Español España (Hombre)</SelectItem>
+                          {/* Spanish voices (Mexico) */}
+                          <SelectItem value="es-MX-Neural2-A">Español México (Mujer)</SelectItem>
+                          <SelectItem value="es-MX-Neural2-B">Español México (Hombre)</SelectItem>
+                          {/* English voices (US) */}
+                          <SelectItem value="en-US-Neural2-A">English US (Male)</SelectItem>
+                          <SelectItem value="en-US-Neural2-C">English US (Female)</SelectItem>
+                          {/* English voices (UK) */}
+                          <SelectItem value="en-GB-Neural2-A">English UK (Female)</SelectItem>
+                          <SelectItem value="en-GB-Neural2-B">English UK (Male)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

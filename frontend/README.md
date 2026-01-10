@@ -104,7 +104,11 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
 
 # API Configuration
-NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+# Recommended (proxy through Next.js): keep browser calls on same-origin `/api/*`
+API_BASE_URL=http://localhost:8000
+
+# Optional (direct-from-browser calls): set an absolute backend base URL
+# NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # App Configuration
 NEXT_PUBLIC_APP_NAME="Nexus Document Management"

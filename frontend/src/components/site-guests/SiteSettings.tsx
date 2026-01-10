@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,6 +19,8 @@ interface SiteSettingsProps {
 
 export function SiteSettings({ onSettingsChange }: SiteSettingsProps) {
   const { t } = useTranslation()
+  const params = useParams()
+  const tenantId = params.tenantId as string | undefined
   const [settings, setSettings] = useState<SiteSiteSettings | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -85,10 +88,11 @@ export function SiteSettings({ onSettingsChange }: SiteSettingsProps) {
   }
 
   const getPortalUrl = () => {
-    if (!slug) return null
+    const portalKey = slug || tenantId
+    if (!portalKey) return null
     // Use window.location.origin for the frontend URL
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    return `${origin}/portal/${slug}`
+    return `${origin}/portal/${portalKey}`
   }
 
   const copyPortalUrl = () => {
@@ -152,7 +156,7 @@ export function SiteSettings({ onSettingsChange }: SiteSettingsProps) {
           </p>
         </div>
 
-        {slug && (
+        {(slug || tenantId) && (
           <div className="p-3 bg-muted rounded-md">
             <Label className="text-xs">{t('siteGuest.settings.portalUrl')}</Label>
             <div className="flex items-center gap-2 mt-1">
@@ -162,11 +166,17 @@ export function SiteSettings({ onSettingsChange }: SiteSettingsProps) {
               <Button variant="ghost" size="sm" onClick={copyPortalUrl} title={t('siteGuest.settings.copyUrl')}>
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
-              <Button variant="ghost" size="sm" asChild>
-                <a href={getPortalUrl() || '#'} target="_blank" rel="noopener noreferrer">
+              {siteEnabled ? (
+                <Button variant="ghost" size="sm" asChild>
+                  <a href={getPortalUrl() || '#'} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" disabled title="Habilita el Site para previsualizar">
                   <ExternalLink className="h-4 w-4" />
-                </a>
-              </Button>
+                </Button>
+              )}
             </div>
           </div>
         )}

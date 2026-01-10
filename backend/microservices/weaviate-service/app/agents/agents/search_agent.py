@@ -104,3 +104,87 @@ Use this when the user wants to browse documents by category or time period.
         instructions=extended_instructions,
         tools=[semantic_search, hybrid_search, keyword_search, search_by_metadata],
     )
+
+
+def create_search_agent_with_sharing(
+    chat_client: Any,
+    name: str = "SearchAgent",
+) -> ChatAgent:
+    """
+    Create a search agent with sharing insights capabilities.
+
+    Extended version that includes tools for querying document sharing
+    and site guest information from PostgreSQL via REST API.
+
+    Args:
+        chat_client: Agent Framework chat client (from get_chat_client())
+        name: Agent name for identification
+
+    Returns:
+        Configured ChatAgent with sharing insights tools
+    """
+    from ..tools.search_tools import (
+        semantic_search,
+        hybrid_search,
+        keyword_search,
+        search_by_metadata,
+    )
+    from ..tools.sharing_insights_tools import (
+        query_recent_shares,
+        query_shares_to_recipient,
+        query_sharing_statistics,
+        query_site_guests,
+        query_guest_documents,
+        query_guest_activity,
+        query_guest_statistics,
+        query_sharing_overview,
+    )
+
+    base_instructions = get_agent_system_message("SearchAgent", DEFAULT_SEARCH_MSG)
+    extended_instructions = base_instructions + """
+
+Additional capabilities:
+
+1. Metadata filtering:
+- search_by_metadata: Filter documents by type, date range, or tags
+
+2. Sharing insights (queries PostgreSQL via REST API):
+- query_recent_shares: Get recently shared documents
+- query_shares_to_recipient: Find shares to a specific email
+- query_sharing_statistics: Get sharing statistics
+- query_site_guests: List external portal guests
+- query_guest_documents: See what a guest can access
+- query_guest_activity: View guest activity logs
+- query_guest_statistics: Get guest statistics summary
+- query_sharing_overview: High-level sharing overview
+
+Use sharing tools when users ask about:
+- "What have I shared?"
+- "Who has access to...?"
+- "List my external guests"
+- "What can guest@example.com see?"
+"""
+
+    logger.debug(f"Creating SearchAgent with sharing insights: name={name}")
+
+    return ChatAgent(
+        name=name,
+        chat_client=chat_client,
+        instructions=extended_instructions,
+        tools=[
+            # Search tools
+            semantic_search,
+            hybrid_search,
+            keyword_search,
+            search_by_metadata,
+            # Sharing insights tools
+            query_recent_shares,
+            query_shares_to_recipient,
+            query_sharing_statistics,
+            query_site_guests,
+            query_guest_documents,
+            query_guest_activity,
+            query_guest_statistics,
+            query_sharing_overview,
+        ],
+    )

@@ -744,6 +744,7 @@
       "createWorkflow": "Crear Flujo",
       "sign": "Firmar Documento"
     },
+    "adminActions": "Acciones de Administrador",
     "nexusDocument": "Nexus Document"
   },
   "documentPreview": {

@@ -23,6 +23,7 @@ import {
   IconArrowRight,
   IconHome,
   IconFolder,
+  IconUserShare,
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -52,7 +53,8 @@ import {
   EditDocumentDialog,
   DeleteDocumentDialog,
   DeleteMultipleDocumentsDialog,
-  DocumentsDataTable
+  DocumentsDataTable,
+  ShareWithGuestDialog
 } from "@/components/documents"
 // AgentProcessDialog removed - using automatic mode now
 import { ShareDocumentDialog } from "@/components/documents/share-document-dialog"
@@ -225,6 +227,9 @@ export default function DocumentsPage() {
   // Folder dialog states
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false)
   const [moveToFolderDialogOpen, setMoveToFolderDialogOpen] = useState(false)
+
+  // Share with guest dialog state
+  const [shareWithGuestDialogOpen, setShareWithGuestDialogOpen] = useState(false)
 
   const { openUploadDialog } = useUpload()
   const { emitDocumentEvent } = useDocumentEvents()
@@ -995,6 +1000,15 @@ export default function DocumentsPage() {
                     variant="outline"
                     size="sm"
                     className="gap-2"
+                    onClick={() => setShareWithGuestDialogOpen(true)}
+                  >
+                    <IconUserShare className="h-4 w-4" />
+                    Invitado externo
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
                     onClick={() => {
                       // Download all selected documents
                       Array.from(selectedDocumentIds).forEach(id => {
@@ -1180,6 +1194,7 @@ export default function DocumentsPage() {
               showHighlights={true}
               useDetailedView={true}
               onDocumentClick={handleViewDocument}
+              onFolderClick={handleFolderClick}
               onDownload={handleDownloadDocument}
               onDelete={handleDeleteDocument}
               onShare={handleShareDocument}
@@ -1377,6 +1392,15 @@ export default function DocumentsPage() {
                 title: 'Documentos movidos',
                 message: `${selectedDocumentIds.size} documento(s) movido(s) correctamente`
               })
+            }}
+          />
+
+          <ShareWithGuestDialog
+            documents={filteredDocuments.filter(d => selectedDocumentIds.has(d.id) && !d.id.startsWith('folder-'))}
+            open={shareWithGuestDialogOpen}
+            onOpenChange={setShareWithGuestDialogOpen}
+            onSuccess={() => {
+              setSelectedDocumentIds(new Set())
             }}
           />
 

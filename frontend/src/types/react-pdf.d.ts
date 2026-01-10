@@ -1,13 +1,24 @@
 declare module 'react-pdf' {
-  import { ReactElement } from 'react'
+  import { ReactElement, ReactNode } from 'react'
+
+  export type PdfSource =
+    | string
+    | File
+    | Uint8Array
+    | {
+        url: string
+        httpHeaders?: Record<string, string>
+        withCredentials?: boolean
+      }
 
   export interface DocumentProps {
-    file: string | File | Uint8Array
+    file: PdfSource
+    options?: Record<string, any>
     onLoadSuccess?: (pdf: { numPages: number }) => void
     onLoadError?: (error: Error) => void
     loading?: ReactElement | string | null
     className?: string
-    children?: ReactElement | ReactElement[]
+    children?: ReactNode
   }
 
   export interface PageProps {

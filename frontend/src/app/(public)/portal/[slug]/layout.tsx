@@ -9,7 +9,7 @@ export default function PortalLayout({
 }) {
   return (
     <SiteGuestProvider>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-background dark">
         {children}
       </div>
     </SiteGuestProvider>

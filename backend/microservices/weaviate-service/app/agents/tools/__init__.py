@@ -44,6 +44,16 @@ from .planning_tool import (
     PlanStep,
     get_planning_tool,
 )
+from .sharing_insights_tools import (
+    query_recent_shares,
+    query_shares_to_recipient,
+    query_sharing_statistics,
+    query_site_guests,
+    query_guest_documents,
+    query_guest_activity,
+    query_guest_statistics,
+    query_sharing_overview,
+)
 
 __all__ = [
     # Search tools
@@ -63,4 +73,13 @@ __all__ = [
     "Plan",
     "PlanStep",
     "get_planning_tool",
+    # Sharing insights tools (Emma AI - PostgreSQL queries via REST)
+    "query_recent_shares",
+    "query_shares_to_recipient",
+    "query_sharing_statistics",
+    "query_site_guests",
+    "query_guest_documents",
+    "query_guest_activity",
+    "query_guest_statistics",
+    "query_sharing_overview",
 ]

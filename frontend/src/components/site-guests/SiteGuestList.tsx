@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   MoreHorizontal, Mail, Shield, History, UserX, Eye, Download, Upload,
-  Plus, RefreshCw
+  Plus, RefreshCw, FolderOpen
 } from 'lucide-react'
 import { useSiteGuestService, SiteGuest } from '@/lib/services/site-guest.service'
 import { formatDistanceToNow } from 'date-fns'
@@ -24,13 +24,15 @@ interface SiteGuestListProps {
   onAddGuest: () => void
   onManagePermissions: (guest: SiteGuest) => void
   onViewLogs: (guest: SiteGuest) => void
+  onViewShares?: (guest: SiteGuest) => void
 }
 
 export function SiteGuestList({
   onSelectGuest,
   onAddGuest,
   onManagePermissions,
-  onViewLogs
+  onViewLogs,
+  onViewShares
 }: SiteGuestListProps) {
   const { t, language } = useTranslation()
   const [guests, setGuests] = useState<SiteGuest[]>([])
@@ -224,6 +226,12 @@ export function SiteGuestList({
                           <Shield className="h-4 w-4 mr-2" />
                           {t('siteGuest.guests.actions.viewPermissions')}
                         </DropdownMenuItem>
+                        {onViewShares && (
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onViewShares(guest); }}>
+                            <FolderOpen className="h-4 w-4 mr-2" />
+                            Ver colecciones
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onViewLogs(guest); }}>
                           <History className="h-4 w-4 mr-2" />
                           {t('siteGuest.guests.actions.viewLogs')}

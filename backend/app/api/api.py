@@ -5,7 +5,7 @@ from app.api.v1 import (
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
     assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
-    document_acl, folders, classification, site_guests, site_portal,
+    document_acl, folders, classification, site_guests, site_portal, sharing_insights,
 )
 from fastapi import APIRouter
 
@@ -108,6 +108,9 @@ api_router.include_router(site_guests.router, prefix="/site-guests", tags=["site
 
 # Site Portal - External sharing (public guest access)
 api_router.include_router(site_portal.router, prefix="/site-portal", tags=["site-portal"])
+
+# Sharing Insights - Analytics for document sharing and site guests (Emma AI)
+api_router.include_router(sharing_insights.router, tags=["sharing-insights"])
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

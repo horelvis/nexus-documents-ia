@@ -252,8 +252,28 @@ class PortalFolderInfo(BaseModel):
     can_upload: bool = False
 
 
+class PortalShareInfo(BaseModel):
+    """Schema for share/collection info in guest portal."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    permission_type: str
+    document_count: int
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+
+
+class PortalShareDocumentsResponse(BaseModel):
+    """Schema for documents inside a specific share/collection."""
+    share: PortalShareInfo
+    documents: List[PortalDocumentInfo]
+    total_documents: int
+
+
 class PortalContentResponse(BaseModel):
     """Schema for guest portal content."""
+    shares: List[PortalShareInfo] = Field(default_factory=list)
+    total_shares: int = 0
     documents: List[PortalDocumentInfo]
     folders: List[PortalFolderInfo]
     total_documents: int
@@ -325,3 +345,105 @@ class SiteGuestStatistics(BaseModel):
     folders_shared: int
     access_by_action: Dict[str, int]
     access_by_date: Dict[str, int]
+
+
+# =====================================
+# SHARE/COLLECTION SCHEMAS
+# =====================================
+
+class CreateGuestWithShareRequest(BaseModel):
+    """
+    Combined request to create guest + share with documents.
+
+    This is the simplified flow from the Documents page:
+    - If guest exists by email, reuse them (don't create duplicate)
+    - Creates a new share/collection with the specified documents
+    - Optionally sends invitation email
+    """
+    # Guest info
+    email: EmailStr = Field(..., description="Guest email address")
+    name: Optional[str] = Field(None, max_length=255, description="Guest display name")
+
+    # Share info
+    share_name: str = Field(..., max_length=255, description="Name for the document collection")
+    share_description: Optional[str] = Field(None, description="Optional description")
+    document_ids: List[UUID] = Field(..., min_length=1, description="List of document IDs to share")
+    permission_type: str = Field(default="view", description="Permission type: view, download, upload")
+    expires_at: Optional[datetime] = Field(None, description="Share expiration date")
+    send_invitation: bool = Field(default=True, description="Send notification email")
+
+    @field_validator('permission_type')
+    @classmethod
+    def validate_permission_type(cls, v):
+        allowed_types = ['view', 'download', 'upload']
+        if v not in allowed_types:
+            raise ValueError(f'Permission type must be one of {allowed_types}')
+        return v
+
+
+class SiteGuestShareResponse(BaseModel):
+    """Response for a share/collection."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    permission_type: str
+    document_count: int
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SiteGuestShareDocumentResponse(BaseModel):
+    """Response for a document in a share."""
+    id: UUID
+    title: str
+    filename: str
+    file_type: str
+    file_size: int
+    mime_type: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SiteGuestShareDetailResponse(BaseModel):
+    """Detailed response for a share including documents."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    permission_type: str
+    documents: List[SiteGuestShareDocumentResponse]
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CreateGuestWithShareResponse(BaseModel):
+    """Response after creating guest + share."""
+    guest: SiteGuestResponse
+    share: SiteGuestShareResponse
+    is_new_guest: bool = Field(description="True if a new guest was created, False if existing")
+    message: str
+
+
+class SiteGuestShareListResponse(BaseModel):
+    """List of shares for a guest."""
+    shares: List[SiteGuestShareResponse]
+    total: int
+
+
+# =====================================
+# PORTAL SHARE SCHEMAS (for guest view)
+# =====================================
+class PortalShareContentResponse(BaseModel):
+    """Schema for guest portal content with shares."""
+    shares: List[PortalShareInfo]
+    total_shares: int
+    # Legacy support - individual documents without share
+    documents: List[PortalDocumentInfo] = Field(default_factory=list)
+    folders: List[PortalFolderInfo] = Field(default_factory=list)

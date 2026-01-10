@@ -3,6 +3,7 @@ Application middlewares configuration
 """
 import logging
 import time
+from urllib.parse import urlparse
 from typing import Callable
 
 from fastapi import Request, Response
@@ -178,8 +179,29 @@ async def security_headers_middleware(request: Request, call_next: Callable) -> 
 def configure_trusted_hosts(app) -> None:
     """Configure trusted hosts middleware for production"""
     if not settings.DEBUG:
-        # In production, only allow requests from trusted hosts
-        trusted_hosts = ["nexusdocs360.app", "www.nexusdocs360.app", "api.nexusdocs360.app"]
+        def _host_from_url(url: str) -> str | None:
+            try:
+                parsed = urlparse(url)
+                return parsed.hostname
+            except Exception:
+                return None
+
+        # In production, only allow requests from trusted hosts.
+        # Include configured frontend/backend hosts so deployments on custom domains don't break.
+        configured_hosts = [
+            _host_from_url(getattr(settings, "FRONTEND_URL", "") or ""),
+            _host_from_url(getattr(settings, "API_BASE_URL", "") or ""),
+            _host_from_url(str(getattr(settings, "SERVER_HOST", "") or "")),
+        ]
+        trusted_hosts = [
+            "nexusdocs360.app",
+            "www.nexusdocs360.app",
+            "api.nexusdocs360.app",
+            "nexus-docs360.es",
+            "www.nexus-docs360.es",
+            *[h for h in configured_hosts if h],
+        ]
+        trusted_hosts = sorted(set(trusted_hosts))
         app.add_middleware(
             TrustedHostMiddleware,
             allowed_hosts=trusted_hosts

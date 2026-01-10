@@ -298,6 +298,114 @@ class EmailService:
             return False
     
     @staticmethod
+    async def send_guest_otp(
+        to_email: str,
+        recipient_name: str,
+        otp_code: str,
+        expiry_minutes: int,
+        tenant_name: str,
+        language: str = "es"
+    ) -> bool:
+        """Send OTP code to site guest for portal authentication"""
+        try:
+            template = env.get_template("site_guest_otp.html")
+
+            html_content = template.render(
+                recipient_name=recipient_name,
+                otp_code=otp_code,
+                expiry_minutes=expiry_minutes,
+                tenant_name=tenant_name,
+                language=language,
+                current_year=datetime.now().year
+            )
+
+            # Translated subjects
+            subjects = {
+                "en": f"Your access code for {tenant_name}",
+                "fr": f"Votre code d'accès pour {tenant_name}",
+                "es": f"Tu código de acceso para {tenant_name}"
+            }
+            subject = subjects.get(language, subjects["es"])
+
+            message = MessageSchema(
+                subject=subject,
+                recipients=[to_email],
+                body=html_content,
+                subtype=MessageType.html
+            )
+
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
+            logger.info(f"Guest OTP email sent to {to_email}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send guest OTP email: {str(e)}")
+            return False
+
+    @staticmethod
+    async def send_guest_invitation(
+        to_email: str,
+        recipient_name: str,
+        tenant_name: str,
+        portal_url: str,
+        welcome_message: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        can_view: bool = True,
+        can_download: bool = False,
+        language: str = "es"
+    ) -> bool:
+        """Send invitation to site guest to access the document portal"""
+        try:
+            template = env.get_template("site_guest_invitation.html")
+
+            # Format expires_at based on language
+            expires_at_str = None
+            if expires_at:
+                if language == "es":
+                    expires_at_str = expires_at.strftime("%d de %B, %Y a las %H:%M")
+                elif language == "fr":
+                    expires_at_str = expires_at.strftime("%d %B %Y à %H:%M")
+                else:
+                    expires_at_str = expires_at.strftime("%B %d, %Y at %I:%M %p")
+
+            html_content = template.render(
+                recipient_name=recipient_name,
+                tenant_name=tenant_name,
+                portal_url=portal_url,
+                welcome_message=welcome_message,
+                expires_at=expires_at_str,
+                can_view=can_view,
+                can_download=can_download,
+                language=language,
+                current_year=datetime.now().year
+            )
+
+            # Translated subjects
+            subjects = {
+                "en": f"You've been invited to access {tenant_name}",
+                "fr": f"Vous êtes invité à accéder à {tenant_name}",
+                "es": f"Has sido invitado a acceder a {tenant_name}"
+            }
+            subject = subjects.get(language, subjects["es"])
+
+            message = MessageSchema(
+                subject=subject,
+                recipients=[to_email],
+                body=html_content,
+                subtype=MessageType.html
+            )
+
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
+            logger.info(f"Guest invitation email sent to {to_email}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send guest invitation email: {str(e)}")
+            return False
+
+    @staticmethod
     async def send_bulk_email(
         recipients: List[str],
         subject: str,

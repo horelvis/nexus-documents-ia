@@ -18,10 +18,11 @@ import { Badge } from '@/components/ui/badge'
 import {
   useSiteGuestService, SiteGuest, SiteGuestPermission
 } from '@/lib/services/site-guest.service'
-import { Loader2, Plus, Trash2, File, Folder, Eye, Download, Upload } from 'lucide-react'
+import { Loader2, Plus, Trash2, File, Folder, Eye, Download, Upload, FolderOpen } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { es, enUS, fr } from 'date-fns/locale'
 import { useTranslation } from '@/lib/i18n/hooks'
+import { DocumentPickerDialog, SelectedItem } from '@/components/documents/document-picker-dialog'
 
 interface SiteGuestPermissionsProps {
   guest: SiteGuest
@@ -30,7 +31,6 @@ interface SiteGuestPermissionsProps {
 }
 
 type PermissionType = 'view' | 'download' | 'upload'
-type TargetType = 'document' | 'folder'
 
 export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissionsProps) {
   const { t, language } = useTranslation()
@@ -38,10 +38,9 @@ export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissi
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // New permission form
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [targetType, setTargetType] = useState<TargetType>('document')
-  const [targetId, setTargetId] = useState('')
+  // Document picker
+  const [showDocumentPicker, setShowDocumentPicker] = useState(false)
+  const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([])
   const [permissionType, setPermissionType] = useState<PermissionType>('view')
   const [expiresAt, setExpiresAt] = useState('')
   const [isAdding, setIsAdding] = useState(false)
@@ -81,43 +80,63 @@ export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissi
     }
   }, [open, guest])
 
-  const handleAddPermission = async () => {
-    if (!targetId) return
+  const handleDocumentPickerConfirm = (items: SelectedItem[]) => {
+    setSelectedItems(items)
+    setShowDocumentPicker(false)
+  }
+
+  const handleAddPermissions = async () => {
+    if (selectedItems.length === 0) return
 
     setIsAdding(true)
     setError(null)
 
+    let successCount = 0
+    let errorCount = 0
+
     try {
-      let response
+      for (const item of selectedItems) {
+        let response
 
-      if (targetType === 'document') {
-        response = await siteGuestService.grantDocumentPermission(guest.id, {
-          document_id: targetId,
-          permission_type: permissionType,
-          expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined
-        })
-      } else {
-        response = await siteGuestService.grantFolderPermission(guest.id, {
-          folder_path: targetId,
-          permission_type: permissionType,
-          expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined
-        })
+        if (item.type === 'folder') {
+          response = await siteGuestService.grantFolderPermission(guest.id, {
+            folder_path: item.path || item.id,
+            permission_type: permissionType,
+            expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined
+          })
+        } else {
+          response = await siteGuestService.grantDocumentPermission(guest.id, {
+            document_id: item.id,
+            permission_type: permissionType,
+            expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined
+          })
+        }
+
+        if (response.error) {
+          errorCount++
+        } else {
+          successCount++
+        }
       }
 
-      if (response.error) {
-        setError(response.error)
-      } else {
-        setShowAddForm(false)
-        setTargetId('')
-        setPermissionType('view')
-        setExpiresAt('')
-        loadPermissions()
+      if (errorCount > 0) {
+        setError(`${successCount} permissions granted, ${errorCount} failed`)
       }
+
+      // Reset form
+      setSelectedItems([])
+      setPermissionType('view')
+      setExpiresAt('')
+      loadPermissions()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error adding permission')
+      setError(err instanceof Error ? err.message : 'Error adding permissions')
     } finally {
       setIsAdding(false)
     }
+  }
+
+  const removeSelectedItem = (index: number) => {
+    setSelectedItems(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleRevokePermission = async (permission: SiteGuestPermission) => {
@@ -175,59 +194,91 @@ export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissi
             </div>
           )}
 
-          {/* Add Permission Form */}
-          {showAddForm ? (
-            <div className="p-4 border rounded-lg space-y-4 bg-muted/50">
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <Label>{t('siteGuest.permissionsDialog.table.type')}</Label>
-                  <Select value={targetType} onValueChange={(v) => setTargetType(v as TargetType)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="document">
-                        <div className="flex items-center gap-2">
-                          <File className="h-4 w-4" />
-                          {t('siteGuest.permissionsDialog.resourceType.document')}
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="folder">
-                        <div className="flex items-center gap-2">
-                          <Folder className="h-4 w-4" />
-                          {t('siteGuest.permissionsDialog.resourceType.folder')}
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* Add Permission Form - Microsoft SharePoint Style */}
+          <div className="p-4 border rounded-lg space-y-4 bg-muted/50">
+            {/* Step 1: Select documents/folders */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">
+                {t('siteGuest.permissionsDialog.selectDocuments') || '1. Select documents or folders'}
+              </Label>
+              <Button
+                variant="outline"
+                onClick={() => setShowDocumentPicker(true)}
+                className="w-full justify-start"
+              >
+                <FolderOpen className="h-4 w-4 mr-2" />
+                {t('siteGuest.permissionsDialog.browseDocuments') || 'Browse Documents...'}
+              </Button>
 
-                <div className="flex-1">
-                  <Label>{t('siteGuest.permissionsDialog.permissionType')}</Label>
-                  <Select value={permissionType} onValueChange={(v) => setPermissionType(v as PermissionType)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="view">{t('siteGuest.guests.permissions.view')}</SelectItem>
-                      <SelectItem value="download">{t('siteGuest.guests.permissions.download')}</SelectItem>
-                      <SelectItem value="upload">{t('siteGuest.guests.permissions.upload')}</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {/* Selected items preview */}
+              {selectedItems.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedItems.length} {t('siteGuest.permissionsDialog.itemsSelected') || 'items selected'}:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedItems.map((item, index) => (
+                      <Badge
+                        key={`${item.type}:${item.id}`}
+                        variant="secondary"
+                        className="flex items-center gap-1 pr-1"
+                      >
+                        {item.type === 'folder' ? (
+                          <Folder className="h-3 w-3" />
+                        ) : (
+                          <File className="h-3 w-3" />
+                        )}
+                        <span className="max-w-[150px] truncate">{item.name}</span>
+                        <button
+                          onClick={() => removeSelectedItem(index)}
+                          className="ml-1 p-0.5 rounded hover:bg-muted"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {/* Step 2: Permission type */}
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <Label className="text-sm font-medium mb-2 block">
+                  {t('siteGuest.permissionsDialog.permissionTypeLabel') || '2. Permission type'}
+                </Label>
+                <Select value={permissionType} onValueChange={(v) => setPermissionType(v as PermissionType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="view">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-4 w-4" />
+                        {t('siteGuest.guests.permissions.view') || 'View only'}
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="download">
+                      <div className="flex items-center gap-2">
+                        <Download className="h-4 w-4" />
+                        {t('siteGuest.guests.permissions.download') || 'Download'}
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="upload">
+                      <div className="flex items-center gap-2">
+                        <Upload className="h-4 w-4" />
+                        {t('siteGuest.guests.permissions.upload') || 'Upload'}
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div>
-                <Label>{targetType === 'document' ? t('siteGuest.permissionsDialog.selectDocument') : t('siteGuest.permissionsDialog.selectFolder')}</Label>
-                <Input
-                  value={targetId}
-                  onChange={(e) => setTargetId(e.target.value)}
-                  placeholder={targetType === 'document' ? 'e.g., 550e8400-e29b-41d4-a716-446655440000' : 'e.g., /contracts/2024'}
-                />
-              </div>
-
-              <div>
-                <Label>{t('siteGuest.permissionsDialog.expiresAt')}</Label>
+              <div className="flex-1">
+                <Label className="text-sm font-medium mb-2 block">
+                  {t('siteGuest.permissionsDialog.expiresAtLabel') || '3. Expires (optional)'}
+                </Label>
                 <Input
                   type="date"
                   value={expiresAt}
@@ -235,23 +286,22 @@ export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissi
                   min={new Date().toISOString().split('T')[0]}
                 />
               </div>
-
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowAddForm(false)}>
-                  {t('common.cancel')}
-                </Button>
-                <Button onClick={handleAddPermission} disabled={isAdding || !targetId}>
-                  {isAdding && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {isAdding ? t('siteGuest.permissionsDialog.granting') : t('siteGuest.permissionsDialog.grant')}
-                </Button>
-              </div>
             </div>
-          ) : (
-            <Button variant="outline" onClick={() => setShowAddForm(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              {t('siteGuest.permissionsDialog.addPermission')}
-            </Button>
-          )}
+
+            {/* Grant button */}
+            <div className="flex justify-end">
+              <Button
+                onClick={handleAddPermissions}
+                disabled={isAdding || selectedItems.length === 0}
+              >
+                {isAdding && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isAdding
+                  ? t('siteGuest.permissionsDialog.granting') || 'Granting...'
+                  : `${t('siteGuest.permissionsDialog.grant') || 'Grant'} ${selectedItems.length > 0 ? `(${selectedItems.length})` : ''}`
+                }
+              </Button>
+            </div>
+          </div>
 
           {/* Permissions List */}
           {isLoading ? (
@@ -344,6 +394,18 @@ export function SiteGuestPermissions({ guest, open, onClose }: SiteGuestPermissi
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Document Picker Dialog */}
+      <DocumentPickerDialog
+        open={showDocumentPicker}
+        onClose={() => setShowDocumentPicker(false)}
+        onConfirm={handleDocumentPickerConfirm}
+        title={t('siteGuest.permissionsDialog.selectDocumentsTitle') || 'Select Documents'}
+        description={t('siteGuest.permissionsDialog.selectDocumentsDescription') || 'Browse and select documents or folders to share with this guest'}
+        multiSelect={true}
+        allowFolders={true}
+        allowDocuments={true}
+      />
     </Dialog>
   )
 }

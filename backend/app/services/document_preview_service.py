@@ -523,6 +523,27 @@ class DocumentPreviewService:
         }
         """
 
+    async def cleanup(self) -> None:
+        """
+        Best-effort cleanup for temporary preview artifacts.
+
+        Note: Previews are cached in storage; local temp files are only intermediate.
+        """
+        try:
+            if not self.temp_dir.exists():
+                return
+
+            cutoff_seconds = 24 * 60 * 60  # 24h
+            now = time.time()
+            for path in self.temp_dir.glob("*"):
+                try:
+                    if path.is_file() and (now - path.stat().st_mtime) > cutoff_seconds:
+                        path.unlink(missing_ok=True)
+                except Exception:
+                    continue
+        except Exception:
+            return
+
     async def cleanup_temp_files(self, document_id: str):
         """Clean up temporary files for a specific document"""
         try:

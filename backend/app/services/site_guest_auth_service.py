@@ -7,15 +7,14 @@ import logging
 import secrets
 import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
 
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db.models import (
     SiteGuest, SiteGuestOTP, SiteGuestSession, SiteGuestPermission,
-    SiteGuestAccessLog, Tenant, Document
+    SiteGuestAccessLog, Tenant, Document, SiteGuestShare, SiteGuestShareDocument
 )
 from app.services.email_service import EmailService
 from app.services.site_guest_service import SiteGuestService
@@ -32,7 +31,7 @@ class SiteGuestAuthService:
     OTP_LENGTH = 6
     SESSION_EXPIRY_HOURS = 8
     MAX_OTP_ATTEMPTS = 5
-    MAX_OTP_REQUESTS_PER_HOUR = 3
+    MAX_OTP_REQUESTS_PER_HOUR = 10  # Increased for development
 
     # =====================================
     # OTP MANAGEMENT
@@ -147,26 +146,23 @@ class SiteGuestAuthService:
         }
 
     @staticmethod
-    async def _send_otp_email(db: AsyncSession, guest: SiteGuest, otp_code: str) -> bool:
-        """Send OTP code via email."""
+    async def _send_otp_email(db: AsyncSession, guest: SiteGuest, otp_code: str, language: str = "es") -> bool:
+        """Send OTP code via email using dedicated OTP template."""
         # Get tenant info
         tenant = await db.execute(
             select(Tenant).where(Tenant.id == guest.tenant_id)
         )
         tenant = tenant.scalar_one_or_none()
+        tenant_name = tenant.name if tenant else "Site Portal"
 
         try:
-            success = await EmailService.send_share_notification(
+            success = await EmailService.send_guest_otp(
                 to_email=guest.email,
-                subject=f"Your access code for {tenant.name if tenant else 'Site Portal'}",
-                template_data={
-                    "recipient_name": guest.name or guest.email,
-                    "sender_name": tenant.name if tenant else "Site Portal",
-                    "document_name": "Access Code",
-                    "share_link": "",  # No link, just the code
-                    "message": f"Your access code is: <strong style='font-size: 24px; letter-spacing: 5px;'>{otp_code}</strong><br><br>This code expires in {SiteGuestAuthService.OTP_EXPIRY_MINUTES} minutes.",
-                    "expires_at": None
-                }
+                recipient_name=guest.name or guest.email,
+                otp_code=otp_code,
+                expiry_minutes=SiteGuestAuthService.OTP_EXPIRY_MINUTES,
+                tenant_name=tenant_name,
+                language=language
             )
             return success
         except Exception as e:
@@ -396,8 +392,62 @@ class SiteGuestAuthService:
         Get all content accessible to a guest.
 
         Returns: {documents: [], folders: [], total_documents, total_folders}
+
+        Includes documents from:
+        1. Explicit document permissions (SiteGuestPermission)
+        2. Folder permissions (SiteGuestPermission)
+        3. Shares/Collections (SiteGuestShare) - NEW
         """
-        # Get explicit document permissions
+        documents: List[Document] = []
+        doc_permission_map: Dict[UUID, Dict[str, Any]] = {}
+        existing_doc_ids: set[UUID] = set()
+
+        # =====================================
+        # 1. Get shares/collections summary (NEW)
+        # =====================================
+        shares_result = await db.execute(
+            select(SiteGuestShare).where(
+                and_(
+                    SiteGuestShare.guest_id == guest.id,
+                    SiteGuestShare.tenant_id == guest.tenant_id,
+                    or_(
+                        SiteGuestShare.expires_at.is_(None),
+                        SiteGuestShare.expires_at > datetime.now(timezone.utc)
+                    )
+                )
+            )
+        )
+        shares = shares_result.scalars().all()
+
+        share_ids = [s.id for s in shares]
+        share_counts: Dict[UUID, int] = {}
+        if share_ids:
+            counts_result = await db.execute(
+                select(
+                    SiteGuestShareDocument.share_id,
+                    func.count(SiteGuestShareDocument.document_id)
+                )
+                .where(SiteGuestShareDocument.share_id.in_(share_ids))
+                .group_by(SiteGuestShareDocument.share_id)
+            )
+            share_counts = {share_id: count for share_id, count in counts_result.all()}
+
+        formatted_shares = [
+            {
+                "id": share.id,
+                "name": share.name,
+                "description": share.description,
+                "permission_type": share.permission_type,
+                "document_count": share_counts.get(share.id, 0),
+                "created_at": share.created_at,
+                "expires_at": share.expires_at,
+            }
+            for share in shares
+        ]
+
+        # =====================================
+        # 2. Get explicit document permissions (Legacy)
+        # =====================================
         doc_perms = await db.execute(
             select(SiteGuestPermission).where(
                 and_(
@@ -420,16 +470,21 @@ class SiteGuestAuthService:
         folder_permissions = folder_perms.scalars().all()
 
         # Get documents from explicit permissions
-        document_ids = [p.document_id for p in doc_permissions if p.document_id]
-        documents = []
+        legacy_doc_ids = [p.document_id for p in doc_permissions if p.document_id and p.document_id not in existing_doc_ids]
 
-        if document_ids:
+        if legacy_doc_ids:
             result = await db.execute(
-                select(Document).where(Document.id.in_(document_ids))
+                select(Document).where(Document.id.in_(legacy_doc_ids))
             )
-            documents = result.scalars().all()
+            legacy_docs = result.scalars().all()
+            for doc in legacy_docs:
+                if doc.id not in existing_doc_ids:
+                    documents.append(doc)
+                    existing_doc_ids.add(doc.id)
 
-        # Get documents from folder permissions
+        # =====================================
+        # 3. Get documents from folder permissions (Legacy)
+        # =====================================
         folder_paths = [p.folder_path for p in folder_permissions if p.folder_path]
 
         for folder_path in folder_paths:
@@ -442,10 +497,12 @@ class SiteGuestAuthService:
                 )
             )
             folder_docs = result.scalars().all()
-            documents.extend([d for d in folder_docs if d.id not in [doc.id for doc in documents]])
+            for d in folder_docs:
+                if d.id not in existing_doc_ids:
+                    documents.append(d)
+                    existing_doc_ids.add(d.id)
 
-        # Build permission map for documents
-        doc_permission_map = {}
+        # Build permission map for legacy permissions
         for perm in doc_permissions:
             if perm.document_id not in doc_permission_map:
                 doc_permission_map[perm.document_id] = {"can_view": False, "can_download": False}
@@ -472,7 +529,7 @@ class SiteGuestAuthService:
                 "can_download": perms.get("can_download", guest.can_download)
             })
 
-        # Format folders
+        # Format folders (legacy only)
         formatted_folders = []
         for perm in folder_permissions:
             folder_name = perm.folder_path.split("/")[-1] if perm.folder_path else "Root"
@@ -486,11 +543,56 @@ class SiteGuestAuthService:
             })
 
         return {
+            "shares": formatted_shares,
+            "total_shares": len(formatted_shares),
             "documents": formatted_docs,
             "folders": formatted_folders,
             "total_documents": len(formatted_docs),
             "total_folders": len(formatted_folders)
         }
+
+    @staticmethod
+    async def get_share_documents(
+        db: AsyncSession,
+        guest: SiteGuest,
+        share_id: UUID
+    ) -> Tuple[SiteGuestShare, List[Document]]:
+        """
+        Get documents for a specific share/collection visible to the current guest.
+
+        The share must belong to the guest, be within the same tenant, and not be expired.
+        """
+        share_result = await db.execute(
+            select(SiteGuestShare)
+            .where(
+                and_(
+                    SiteGuestShare.id == share_id,
+                    SiteGuestShare.guest_id == guest.id,
+                    SiteGuestShare.tenant_id == guest.tenant_id,
+                    or_(
+                        SiteGuestShare.expires_at.is_(None),
+                        SiteGuestShare.expires_at > datetime.now(timezone.utc)
+                    )
+                )
+            )
+        )
+        share = share_result.scalar_one_or_none()
+        if not share:
+            raise ValueError("Share not found")
+
+        docs_result = await db.execute(
+            select(Document)
+            .join(SiteGuestShareDocument, SiteGuestShareDocument.document_id == Document.id)
+            .where(
+                and_(
+                    SiteGuestShareDocument.share_id == share_id,
+                    Document.tenant_id == guest.tenant_id
+                )
+            )
+            .order_by(Document.updated_at.desc())
+        )
+        documents = docs_result.scalars().all()
+        return share, documents
 
     @staticmethod
     async def check_document_permission(
@@ -503,8 +605,45 @@ class SiteGuestAuthService:
         Check if guest has specific permission for a document.
 
         permission_type: "view", "download", "upload"
+
+        Checks permissions from:
+        1. SiteGuestShares (collections) - NEW
+        2. Explicit document permissions (SiteGuestPermission)
+        3. Folder permissions (SiteGuestPermission)
         """
-        # Check explicit document permission
+        # =====================================
+        # 1. Check SiteGuestShares (NEW - Collections)
+        # =====================================
+        share_doc_result = await db.execute(
+            select(SiteGuestShare).join(
+                SiteGuestShareDocument,
+                SiteGuestShareDocument.share_id == SiteGuestShare.id
+            ).where(
+                and_(
+                    SiteGuestShare.guest_id == guest.id,
+                    SiteGuestShare.tenant_id == guest.tenant_id,
+                    SiteGuestShareDocument.document_id == document_id,
+                    or_(
+                        SiteGuestShare.expires_at.is_(None),
+                        SiteGuestShare.expires_at > datetime.now(timezone.utc)
+                    )
+                )
+            )
+        )
+        share = share_doc_result.scalar_one_or_none()
+
+        if share:
+            # Document is in a share - check permission type
+            if permission_type == "view":
+                return True  # All shares allow view
+            elif permission_type == "download":
+                return share.permission_type in ["download", "upload"]
+            elif permission_type == "upload":
+                return share.permission_type == "upload"
+
+        # =====================================
+        # 2. Check explicit document permission (Legacy)
+        # =====================================
         result = await db.execute(
             select(SiteGuestPermission).where(
                 and_(
@@ -517,7 +656,9 @@ class SiteGuestAuthService:
         if result.scalar_one_or_none():
             return True
 
-        # Check folder permission
+        # =====================================
+        # 3. Check folder permission (Legacy)
+        # =====================================
         doc_result = await db.execute(
             select(Document).where(Document.id == document_id)
         )
@@ -537,13 +678,6 @@ class SiteGuestAuthService:
             for perm in folder_perms.scalars():
                 if document.folder_path.startswith(perm.folder_path):
                     return True
-
-        # Check default guest permissions
-        if permission_type == "view" and guest.can_view:
-            # Only if document is in an allowed folder
-            pass  # Need explicit permission
-        elif permission_type == "download" and guest.can_download:
-            pass  # Need explicit permission
 
         return False
 

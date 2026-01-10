@@ -5,15 +5,19 @@ Provides OTP authentication, content access, and document operations for Site Gu
 These endpoints are PUBLIC (no Clerk auth) - authentication is via session token.
 """
 import logging
+import os
+import shutil
+import tempfile
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.async_database import get_async_db
 from app.db.models import SiteGuest, Document
+from app.services.document_preview_service import DocumentPreviewService
 from app.services.site_guest_service import SiteGuestService
 from app.services.site_guest_auth_service import SiteGuestAuthService
 from app.schemas.site_guest import (
@@ -22,6 +26,7 @@ from app.schemas.site_guest import (
     SiteGuestResponse,
     TenantSiteInfo, GuestMeResponse,
     PortalContentResponse, PortalDocumentInfo,
+    PortalShareInfo, PortalShareDocumentsResponse,
 )
 from app.schemas.general import SuccessResponse
 from app.services.async_storage_client import AsyncStorageClient
@@ -114,7 +119,7 @@ async def get_tenant_by_slug(
     return TenantSiteInfo(
         tenant_id=tenant.id,
         tenant_name=tenant.name,
-        slug=tenant.slug,
+        slug=tenant.slug or str(tenant.id),
         site_enabled=tenant.site_enabled,
         logo_url=tenant.site_logo_url,
         welcome_message=tenant.site_welcome_message
@@ -277,6 +282,19 @@ async def get_accessible_content(
     """
     content = await SiteGuestAuthService.get_accessible_content(db, guest)
 
+    shares = [
+        PortalShareInfo(
+            id=s["id"],
+            name=s["name"],
+            description=s.get("description"),
+            permission_type=s["permission_type"],
+            document_count=s["document_count"],
+            created_at=s["created_at"],
+            expires_at=s.get("expires_at"),
+        )
+        for s in content.get("shares", [])
+    ]
+
     documents = [
         PortalDocumentInfo(
             id=doc["id"],
@@ -308,10 +326,61 @@ async def get_accessible_content(
     ]
 
     return PortalContentResponse(
+        shares=shares,
+        total_shares=content.get("total_shares", len(shares)),
         documents=documents,
         folders=folders,
         total_documents=content["total_documents"],
         total_folders=content["total_folders"]
+    )
+
+
+@router.get("/shares/{share_id}/documents", response_model=PortalShareDocumentsResponse)
+async def get_share_documents(
+    share_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    guest: SiteGuest = Depends(get_current_guest)
+):
+    """
+    Get documents for a specific share/collection.
+
+    Used by the portal UI to load share contents on demand.
+    """
+    try:
+        share, documents = await SiteGuestAuthService.get_share_documents(db, guest, share_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    can_download = share.permission_type in ["download", "upload"]
+    formatted_docs = [
+        PortalDocumentInfo(
+            id=doc.id,
+            title=doc.title,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            file_size=doc.file_size,
+            mime_type=doc.mime_type,
+            folder_path=doc.folder_path,
+            created_at=doc.created_at,
+            updated_at=doc.updated_at,
+            can_view=True,
+            can_download=can_download,
+        )
+        for doc in documents
+    ]
+
+    return PortalShareDocumentsResponse(
+        share=PortalShareInfo(
+            id=share.id,
+            name=share.name,
+            description=share.description,
+            permission_type=share.permission_type,
+            document_count=len(formatted_docs),
+            created_at=share.created_at,
+            expires_at=share.expires_at,
+        ),
+        documents=formatted_docs,
+        total_documents=len(formatted_docs),
     )
 
 
@@ -423,10 +492,11 @@ async def download_document(
 
         storage_client = AsyncStorageClient(
             tenant_id=str(guest.tenant_id),
+            user_id=str(document.created_by),
             bucket_name=tenant.bucket_name
         )
         signed_url, expires_at = await storage_client.generate_download_signed_url(
-            document.gcs_path,
+            document.file_path,
             expiration=3600  # 1 hour
         )
 
@@ -449,7 +519,7 @@ async def view_document(
     """
     Get a view URL for a document.
 
-    Requires view permission. Returns a signed URL for inline viewing.
+    Requires view permission. Returns a URL to a PDF preview rendered in the frontend (not a direct download of the original file).
     """
     # Check permission
     has_permission = await SiteGuestAuthService.check_document_permission(
@@ -478,29 +548,116 @@ async def view_document(
         user_agent=user_agent
     )
 
-    # Generate signed URL for inline viewing
     try:
-        content_type = document.mime_type or "application/octet-stream"
-
         # Get tenant for bucket name
         tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
         if not tenant:
             raise HTTPException(status_code=500, detail="Tenant not found")
 
-        storage_client = AsyncStorageClient(
-            tenant_id=str(guest.tenant_id),
-            bucket_name=tenant.bucket_name
-        )
-        signed_url, expires_at = await storage_client.generate_download_signed_url(
-            document.gcs_path,
-            expiration=3600  # 1 hour
-        )
-
-        return {"view_url": signed_url, "content_type": content_type}
+        return {
+            "view_url": f"/api/v1/site-portal/documents/{document_id}/preview-pdf",
+            "content_type": "application/pdf",
+        }
 
     except Exception as e:
         logger.error(f"Failed to generate view URL: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate view link")
+
+
+@router.get("/documents/{document_id}/preview-pdf")
+async def view_document_preview_pdf(
+    document_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    guest: SiteGuest = Depends(get_current_guest),
+):
+    """
+    Stream a PDF preview for a document (Portal).
+
+    Requires view permission. Uses the existing preview pipeline (Gotenberg) and caches the generated PDF in storage.
+    """
+    has_permission = await SiteGuestAuthService.check_document_permission(
+        db, guest, document_id, "view"
+    )
+    if not has_permission:
+        raise HTTPException(status_code=403, detail="View not permitted for this document")
+
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=500, detail="Tenant not found")
+
+    storage_client = AsyncStorageClient(
+        tenant_id=str(guest.tenant_id),
+        user_id=str(document.created_by),
+        bucket_name=tenant.bucket_name,
+    )
+
+    preview_key = f"previews/{guest.tenant_id}/{document_id}/{document_id}_preview.pdf"
+
+    # Generate preview if missing
+    if not await storage_client.get_file_info(preview_key):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            temp_file_path = os.path.join(temp_dir, document.filename or "document")
+            file_content = await storage_client.download_file(document.file_path or "")
+            if not file_content:
+                raise HTTPException(status_code=500, detail="Could not download document for preview")
+
+            with open(temp_file_path, "wb") as f:
+                f.write(file_content)
+
+            preview_service = DocumentPreviewService(
+                tenant_id=str(guest.tenant_id),
+                user_id=str(document.created_by),
+            )
+            try:
+                preview_result = await preview_service.generate_preview(
+                    document_id=str(document_id),
+                    file_path=temp_file_path,
+                    filename=document.filename or "document",
+                    force_regenerate=False,
+                )
+                if not preview_result.get("pdf_available"):
+                    raise HTTPException(status_code=415, detail="Preview not available for this document type")
+
+                pdf_local_path = preview_result.get("pdf_local_path")
+                if not pdf_local_path or not os.path.exists(pdf_local_path):
+                    raise HTTPException(status_code=500, detail="Preview generation failed")
+
+                with open(pdf_local_path, "rb") as f:
+                    pdf_bytes = f.read()
+
+                await storage_client.upload_file(
+                    file=pdf_bytes,
+                    filename=preview_key,
+                    metadata={
+                        "document_id": str(document_id),
+                        "type": "site_portal_preview_pdf",
+                        "original_filename": document.filename,
+                    },
+                )
+            finally:
+                await preview_service.cleanup()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    pdf_bytes = await storage_client.download_file(preview_key)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="Could not retrieve preview PDF")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{document.filename or "preview.pdf"}"',
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 # =====================================

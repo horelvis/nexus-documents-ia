@@ -7,6 +7,7 @@ import { SiteGuestList } from '@/components/site-guests/SiteGuestList'
 import { SiteGuestForm } from '@/components/site-guests/SiteGuestForm'
 import { SiteGuestPermissions } from '@/components/site-guests/SiteGuestPermissions'
 import { SiteGuestAccessLogs } from '@/components/site-guests/SiteGuestAccessLogs'
+import { SiteGuestShares } from '@/components/site-guests/SiteGuestShares'
 import { SiteGuest, SiteSiteSettings } from '@/lib/services/site-guest.service'
 import { Settings, Users } from 'lucide-react'
 import { useTranslation } from '@/lib/i18n/hooks'
@@ -18,6 +19,7 @@ export default function SiteSettingsPage() {
   const [showGuestForm, setShowGuestForm] = useState(false)
   const [showPermissions, setShowPermissions] = useState(false)
   const [showAccessLogs, setShowAccessLogs] = useState(false)
+  const [showShares, setShowShares] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const handleAddGuest = () => {
@@ -38,6 +40,11 @@ export default function SiteSettingsPage() {
   const handleViewLogs = (guest: SiteGuest) => {
     setSelectedGuest(guest)
     setShowAccessLogs(true)
+  }
+
+  const handleViewShares = (guest: SiteGuest) => {
+    setSelectedGuest(guest)
+    setShowShares(true)
   }
 
   const handleGuestSaved = () => {
@@ -81,6 +88,7 @@ export default function SiteSettingsPage() {
             onAddGuest={handleAddGuest}
             onManagePermissions={handleManagePermissions}
             onViewLogs={handleViewLogs}
+            onViewShares={handleViewShares}
           />
         </TabsContent>
       </Tabs>
@@ -115,6 +123,18 @@ export default function SiteSettingsPage() {
           open={showAccessLogs}
           onClose={() => {
             setShowAccessLogs(false)
+            setSelectedGuest(null)
+          }}
+        />
+      )}
+
+      {/* Shares Dialog */}
+      {selectedGuest && (
+        <SiteGuestShares
+          guest={selectedGuest}
+          open={showShares}
+          onClose={() => {
+            setShowShares(false)
             setSelectedGuest(null)
           }}
         />

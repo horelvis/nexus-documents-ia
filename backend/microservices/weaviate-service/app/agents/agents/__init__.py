@@ -33,7 +33,7 @@ Usage:
 """
 
 # Core agents
-from .search_agent import create_search_agent, create_search_agent_with_metadata
+from .search_agent import create_search_agent, create_search_agent_with_metadata, create_search_agent_with_sharing
 from .analyst_agent import create_analyst_agent
 from .contract_agent import create_contract_agent
 from .compliance_agent import create_compliance_agent
@@ -52,6 +52,7 @@ __all__ = [
     # Core agents
     "create_search_agent",
     "create_search_agent_with_metadata",
+    "create_search_agent_with_sharing",
     "create_analyst_agent",
     "create_contract_agent",
     "create_compliance_agent",

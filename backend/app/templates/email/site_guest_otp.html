@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if language == 'en' %}Your Access Code{% elif language == 'fr' %}Votre Code d'Accès{% else %}Tu Código de Acceso{% endif %}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background-color: #F9FAFB;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+            border: 1px solid #E5E7EB;
+        }
+        .header {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 40px 32px;
+            text-align: center;
+        }
+        .greeting {
+            font-size: 16px;
+            color: #374151;
+            margin-bottom: 16px;
+        }
+        .message {
+            color: #6B7280;
+            margin-bottom: 32px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .tenant-name {
+            color: #8B5CF6;
+            font-weight: 600;
+        }
+        .otp-container {
+            background-color: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 28px 24px;
+            margin: 28px 0;
+        }
+        .otp-label {
+            font-size: 12px;
+            color: #6B7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+        .otp-code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 40px;
+            font-weight: 700;
+            letter-spacing: 10px;
+            color: #8B5CF6;
+            padding: 8px 0;
+            user-select: all;
+        }
+        .warning-box {
+            background-color: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin: 24px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .warning-icon {
+            font-size: 18px;
+        }
+        .warning-text {
+            color: #92400E;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .info-text {
+            color: #9CA3AF;
+            font-size: 12px;
+            margin-top: 28px;
+            line-height: 1.6;
+        }
+        .footer {
+            background-color: #F9FAFB;
+            padding: 20px 24px;
+            text-align: center;
+            border-top: 1px solid #E5E7EB;
+        }
+        .footer-text {
+            color: #9CA3AF;
+            font-size: 12px;
+            margin: 0;
+        }
+        .footer-brand {
+            color: #6B7280;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-icon">🔐</div>
+            <h1>{% if language == 'en' %}Access Code{% elif language == 'fr' %}Code d'Accès{% else %}Código de Acceso{% endif %}</h1>
+        </div>
+
+        <div class="content">
+            <p class="greeting">
+                {% if language == 'en' %}Hi {{ recipient_name }},{% elif language == 'fr' %}Bonjour {{ recipient_name }},{% else %}Hola {{ recipient_name }},{% endif %}
+            </p>
+
+            <p class="message">
+                {% if language == 'en' %}
+                    Use the following code to access the <span class="tenant-name">{{ tenant_name }}</span> portal.
+                    Enter this code on the verification page.
+                {% elif language == 'fr' %}
+                    Utilisez le code suivant pour accéder au portail <span class="tenant-name">{{ tenant_name }}</span>.
+                    Entrez ce code sur la page de vérification.
+                {% else %}
+                    Usa el siguiente código para acceder al portal de <span class="tenant-name">{{ tenant_name }}</span>.
+                    Introduce este código en la página de verificación.
+                {% endif %}
+            </p>
+
+            <div class="otp-container">
+                <div class="otp-label">
+                    {% if language == 'en' %}Your verification code{% elif language == 'fr' %}Votre code de vérification{% else %}Tu código de verificación{% endif %}
+                </div>
+                <div class="otp-code">{{ otp_code }}</div>
+            </div>
+
+            <div class="warning-box">
+                <span class="warning-icon">⏱️</span>
+                <span class="warning-text">
+                    {% if language == 'en' %}
+                        This code expires in {{ expiry_minutes }} minutes
+                    {% elif language == 'fr' %}
+                        Ce code expire dans {{ expiry_minutes }} minutes
+                    {% else %}
+                        Este código expira en {{ expiry_minutes }} minutos
+                    {% endif %}
+                </span>
+            </div>
+
+            <p class="info-text">
+                {% if language == 'en' %}
+                    If you didn't request this code, you can safely ignore this email.
+                    Someone may have entered your email address by mistake.
+                {% elif language == 'fr' %}
+                    Si vous n'avez pas demandé ce code, vous pouvez ignorer cet email.
+                    Quelqu'un a peut-être entré votre adresse email par erreur.
+                {% else %}
+                    Si no solicitaste este código, puedes ignorar este email.
+                    Alguien pudo haber introducido tu dirección de email por error.
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="footer">
+            <p class="footer-text">
+                &copy; {{ current_year }} <span class="footer-brand">NexusDocs360</span>.
+                {% if language == 'en' %}All rights reserved.{% elif language == 'fr' %}Tous droits réservés.{% else %}Todos los derechos reservados.{% endif %}
+            </p>
+        </div>
+    </div>
+</body>
+</html>

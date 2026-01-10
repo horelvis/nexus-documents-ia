@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentShareService:
-    def __init__(self, tenant_id: str, user_id: str):
+    def __init__(self, db: AsyncSession, tenant_id: str, user_id: str):
+        self.db = db
         self.tenant_id = UUID(tenant_id)
         self.user_id = UUID(user_id)
         self.email_service = EmailService()
@@ -40,7 +41,6 @@ class DocumentShareService:
     
     async def create_share(
         self,
-        db: AsyncSession,
         document_id: UUID,
         share_type: str = "view",
         expires_at: Optional[datetime] = None,
@@ -55,7 +55,7 @@ class DocumentShareService:
         """Create a new document share"""
         try:
             # Verify document exists and belongs to tenant
-            result = await db.execute(
+            result = await self.db.execute(
                 select(Document).filter(
                     and_(
                         Document.id == document_id,
@@ -64,18 +64,18 @@ class DocumentShareService:
                 )
             )
             document = result.scalar_one_or_none()
-            
+
             if not document:
                 raise ValueError("Document not found or access denied")
-            
+
             # Generate unique token
             share_token = self._generate_share_token()
-            
+
             # Hash password if provided
             password_hash = None
             if password:
                 password_hash = get_password_hash(password)
-            
+
             # Create share
             share = DocumentShare(
                 document_id=document_id,
@@ -91,10 +91,10 @@ class DocumentShareService:
                 share_message=share_message,
                 permissions=permissions or {}
             )
-            
-            db.add(share)
-            await db.flush()  # Get the share ID
-            
+
+            self.db.add(share)
+            await self.db.flush()  # Get the share ID
+
             # Create recipient records if provided
             if recipients:
                 for email in recipients:
@@ -104,7 +104,7 @@ class DocumentShareService:
                         email=email,
                         verification_code=secrets.token_urlsafe(16)
                     )
-                    db.add(recipient)
+                    self.db.add(recipient)
             elif recipient_email:
                 # Single recipient
                 recipient = DocumentShareRecipient(
@@ -114,8 +114,8 @@ class DocumentShareService:
                     name=recipient_name,
                     verification_code=secrets.token_urlsafe(16)
                 )
-                db.add(recipient)
-            
+                self.db.add(recipient)
+
             # Update document metrics
             if document.metrics:
                 document.metrics.share_count += 1
@@ -125,10 +125,10 @@ class DocumentShareService:
                     tenant_id=self.tenant_id,
                     share_count=1
                 )
-                db.add(metrics)
-            
-            await db.commit()
-            await db.refresh(share)
+                self.db.add(metrics)
+
+            await self.db.commit()
+            await self.db.refresh(share)
             
             # Send email notification if recipient email provided
             if recipient_email:
@@ -167,13 +167,12 @@ class DocumentShareService:
             return response
             
         except Exception as e:
-            await db.rollback()
+            await self.db.rollback()
             logger.error(f"Error creating share: {str(e)}")
             raise
-    
+
     async def create_bulk_shares(
         self,
-        db: AsyncSession,
         document_id: UUID,
         recipients: List[str],
         **kwargs
@@ -188,7 +187,6 @@ class DocumentShareService:
         for email in recipients:
             try:
                 share = await self.create_share(
-                    db=db,
                     document_id=document_id,
                     recipient_email=email,
                     **kwargs
@@ -207,7 +205,6 @@ class DocumentShareService:
     
     async def list_shares(
         self,
-        db: AsyncSession,
         document_id: Optional[UUID] = None,
         is_active: Optional[bool] = None,
         page: int = 1,
@@ -219,13 +216,13 @@ class DocumentShareService:
         ).filter(
             DocumentShare.tenant_id == self.tenant_id
         )
-        
+
         if document_id:
             query = query.filter(DocumentShare.document_id == document_id)
-        
+
         if is_active is not None:
             query = query.filter(DocumentShare.is_active == is_active)
-        
+
         # Get total count
         count_query = select(func.count()).select_from(DocumentShare).filter(
             DocumentShare.tenant_id == self.tenant_id
@@ -234,13 +231,13 @@ class DocumentShareService:
             count_query = count_query.filter(DocumentShare.document_id == document_id)
         if is_active is not None:
             count_query = count_query.filter(DocumentShare.is_active == is_active)
-        
-        total_result = await db.execute(count_query)
+
+        total_result = await self.db.execute(count_query)
         total = total_result.scalar()
-        
+
         # Apply pagination
         offset = (page - 1) * per_page
-        result = await db.execute(
+        result = await self.db.execute(
             query.order_by(
                 desc(DocumentShare.created_at)
             ).offset(offset).limit(per_page)
@@ -281,11 +278,10 @@ class DocumentShareService:
     
     async def get_share(
         self,
-        db: AsyncSession,
         share_id: UUID
     ) -> Optional[DocumentShareResponse]:
         """Get a specific share by ID"""
-        result = await db.execute(
+        result = await self.db.execute(
             select(DocumentShare).options(
                 joinedload(DocumentShare.document)
             ).filter(
@@ -328,12 +324,11 @@ class DocumentShareService:
     
     async def update_share(
         self,
-        db: AsyncSession,
         share_id: UUID,
         update_data: Dict[str, Any]
     ) -> Optional[DocumentShareResponse]:
         """Update share settings"""
-        result = await db.execute(
+        result = await self.db.execute(
             select(DocumentShare).filter(
                 and_(
                     DocumentShare.id == share_id,
@@ -342,29 +337,28 @@ class DocumentShareService:
             )
         )
         share = result.scalar_one_or_none()
-        
+
         if not share:
             return None
-        
+
         # Update fields
         for field, value in update_data.dict(exclude_unset=True).items():
             setattr(share, field, value)
-        
+
         share.updated_at = datetime.now(timezone.utc)
-        
-        await db.commit()
-        await db.refresh(share)
-        
-        return await self.get_share(db, share_id)
+
+        await self.db.commit()
+        await self.db.refresh(share)
+
+        return await self.get_share(share_id)
     
     async def revoke_share(
         self,
-        db: AsyncSession,
         share_id: UUID,
         revoked_by: UUID
     ) -> bool:
         """Revoke a share link"""
-        result = await db.execute(
+        result = await self.db.execute(
             select(DocumentShare).filter(
                 and_(
                     DocumentShare.id == share_id,
@@ -373,36 +367,35 @@ class DocumentShareService:
             )
         )
         share = result.scalar_one_or_none()
-        
+
         if not share:
             return False
-        
+
         share.is_active = False
         share.revoked_at = datetime.now(timezone.utc)
         share.revoked_by = revoked_by
-        
-        await db.commit()
+
+        await self.db.commit()
         return True
     
     async def get_access_logs(
         self,
-        db: AsyncSession,
         share_id: UUID,
         page: int = 1,
         per_page: int = 20
     ) -> Tuple[List[ShareAccessLogResponse], int]:
         """Get access logs for a share"""
         # Get total count
-        count_result = await db.execute(
+        count_result = await self.db.execute(
             select(func.count()).select_from(DocumentShareAccessLog).filter(
                 DocumentShareAccessLog.share_id == share_id
             )
         )
         total = count_result.scalar() or 0
-        
+
         # Get logs with pagination
         offset = (page - 1) * per_page
-        logs_result = await db.execute(
+        logs_result = await self.db.execute(
             select(DocumentShareAccessLog).filter(
                 DocumentShareAccessLog.share_id == share_id
             ).order_by(
@@ -436,29 +429,28 @@ class DocumentShareService:
     
     async def get_statistics(
         self,
-        db: AsyncSession,
         document_id: Optional[UUID] = None
     ) -> ShareStatistics:
         """Get sharing statistics"""
         base_filters = [DocumentShare.tenant_id == self.tenant_id]
         if document_id:
             base_filters.append(DocumentShare.document_id == document_id)
-        
+
         # Get counts
-        total_result = await db.execute(
+        total_result = await self.db.execute(
             select(func.count()).select_from(DocumentShare).filter(*base_filters)
         )
         total_shares = total_result.scalar() or 0
-        
-        active_result = await db.execute(
+
+        active_result = await self.db.execute(
             select(func.count()).select_from(DocumentShare).filter(
                 *base_filters,
                 DocumentShare.is_active == True
             )
         )
         active_shares = active_result.scalar() or 0
-        
-        expired_result = await db.execute(
+
+        expired_result = await self.db.execute(
             select(func.count()).select_from(DocumentShare).filter(
                 *base_filters,
                 DocumentShare.expires_at != None,
@@ -466,34 +458,34 @@ class DocumentShareService:
             )
         )
         expired_shares = expired_result.scalar() or 0
-        
-        revoked_result = await db.execute(
+
+        revoked_result = await self.db.execute(
             select(func.count()).select_from(DocumentShare).filter(
                 *base_filters,
                 DocumentShare.revoked_at != None
             )
         )
         revoked_shares = revoked_result.scalar() or 0
-        
+
         # Get total access count
-        access_result = await db.execute(
+        access_result = await self.db.execute(
             select(func.sum(DocumentShare.current_access_count)).filter(
                 *base_filters
             )
         )
         total_access_count = access_result.scalar() or 0
-        
+
         # Get unique recipients
-        recipients_result = await db.execute(
+        recipients_result = await self.db.execute(
             select(func.count(func.distinct(DocumentShare.recipient_email))).filter(
                 DocumentShare.tenant_id == self.tenant_id,
                 DocumentShare.recipient_email != None
             )
         )
         unique_recipients = recipients_result.scalar() or 0
-        
+
         # Get most accessed documents
-        most_accessed_result = await db.execute(
+        most_accessed_result = await self.db.execute(
             select(
                 Document.id,
                 Document.title,
@@ -509,7 +501,7 @@ class DocumentShareService:
             ).limit(10)
         )
         most_accessed = most_accessed_result.all()
-        
+
         most_accessed_documents = [
             {
                 "document_id": str(doc.id),
@@ -518,21 +510,21 @@ class DocumentShareService:
             }
             for doc in most_accessed
         ]
-        
+
         # Get recent shares
         recent_query = select(DocumentShare).filter(*base_filters).order_by(
             desc(DocumentShare.created_at)
         ).limit(10)
-        recent_result = await db.execute(recent_query)
+        recent_result = await self.db.execute(recent_query)
         recent_shares_list = recent_result.scalars().all()
-        
+
         recent_shares = []
         for share in recent_shares_list:
-            recent_shares.append(await self.get_share(db, share.id))
-        
+            recent_shares.append(await self.get_share(share.id))
+
         # Get access by date (last 30 days)
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-        access_by_date_result = await db.execute(
+        access_by_date_result = await self.db.execute(
             select(
                 func.date(DocumentShareAccessLog.accessed_at).label('date'),
                 func.count(DocumentShareAccessLog.id).label('count')
@@ -548,14 +540,14 @@ class DocumentShareService:
             )
         )
         access_by_date_query = access_by_date_result.all()
-        
+
         access_by_date = {
             str(row.date): row.count
             for row in access_by_date_query
         }
-        
+
         # Get access by hour
-        access_by_hour_result = await db.execute(
+        access_by_hour_result = await self.db.execute(
             select(
                 func.extract('hour', DocumentShareAccessLog.accessed_at).label('hour'),
                 func.count(DocumentShareAccessLog.id).label('count')
@@ -597,14 +589,19 @@ class DocumentShareService:
         """Send email notification to share recipient"""
         try:
             share_url = self._get_share_url(share.share_token)
-            
-            # Get creator info
-            creator = share.creator
-            creator_name = creator.full_name if creator and creator.full_name else creator.email if creator else "Someone"
-            
+
+            # Get creator info via explicit query (avoid lazy-loading)
+            creator_result = await self.db.execute(
+                select(User).filter(User.id == self.user_id)
+            )
+            creator = creator_result.scalar_one_or_none()
+            creator_name = "Someone"
+            if creator:
+                creator_name = creator.full_name or creator.email or "Someone"
+
             # Prepare email data
             subject = f"{creator_name} shared a document with you: {document.title}"
-            
+
             template_data = {
                 "recipient_name": recipient_name or "there",
                 "creator_name": creator_name,
@@ -615,22 +612,27 @@ class DocumentShareService:
                 "share_type": share.share_type,
                 "has_password": bool(share.password_hash)
             }
-            
+
             # Send email
             await self.email_service.send_share_notification(
                 to_email=recipient_email,
                 subject=subject,
                 template_data=template_data
             )
-            
-            # Mark recipient as notified
-            if share.recipients:
-                recipient = next(
-                    (r for r in share.recipients if r.email == recipient_email),
-                    None
+
+            # Mark recipient as notified via explicit query (avoid lazy-loading share.recipients)
+            recipient_result = await self.db.execute(
+                select(DocumentShareRecipient).filter(
+                    and_(
+                        DocumentShareRecipient.share_id == share.id,
+                        DocumentShareRecipient.email == recipient_email
+                    )
                 )
-                if recipient:
-                    recipient.notified_at = datetime.now(timezone.utc)
-                    
+            )
+            recipient = recipient_result.scalar_one_or_none()
+            if recipient:
+                recipient.notified_at = datetime.now(timezone.utc)
+                await self.db.commit()
+
         except Exception as e:
             logger.error(f"Failed to send share notification: {str(e)}")

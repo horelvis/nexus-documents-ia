@@ -64,11 +64,9 @@ services:
       - ../tests:/app/tests:ro
       # Montar credentials para desarrollo (ruta corrected a la carpeta raíz)
       - ../../credentials:/app/credentials:ro
-      # SSL certificates for HTTPS (enables Voice Mode getUserMedia)
-      - ./certificates:/app/certificates:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app", "--ssl-keyfile", "/app/certificates/localhost-key.pem", "--ssl-certfile", "/app/certificates/localhost.pem"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

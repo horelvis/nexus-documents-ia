@@ -76,7 +76,7 @@ class SearchService:
                     f"{WEAVIATE_SERVICE_URL}/emma/query",
                     json=payload,
                     headers={
-                        "Authorization": f"Bearer {settings.microservices_api_key}",
+                        "X-API-Key": settings.microservices_api_key,
                         "Content-Type": "application/json"
                     }
                 )

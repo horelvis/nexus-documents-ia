@@ -10,10 +10,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.db.async_database import get_async_db
 from app.api.async_dependencies import get_current_user_async
-from app.db.models import User
+from app.db.models import User, SiteGuestShareDocument
 from app.services.site_guest_service import SiteGuestService
 from app.schemas.site_guest import (
     SiteGuestCreate, SiteGuestUpdate, SiteGuestResponse, SiteGuestListResponse,
@@ -23,6 +24,8 @@ from app.schemas.site_guest import (
     SiteGuestAccessLogResponse, SiteGuestAccessLogListResponse,
     TenantSiteSettingsUpdate, TenantSiteSettingsResponse,
     SiteGuestStatistics,
+    CreateGuestWithShareRequest, CreateGuestWithShareResponse,
+    SiteGuestShareResponse, SiteGuestShareListResponse,
 )
 from app.schemas.general import SuccessResponse
 
@@ -245,6 +248,122 @@ async def resend_invitation(
         return SuccessResponse(message="Invitation email sent successfully")
     else:
         raise HTTPException(status_code=500, detail="Failed to send invitation email")
+
+
+# =====================================
+# SHARE/COLLECTION MANAGEMENT
+# =====================================
+
+@router.post("/with-share", response_model=CreateGuestWithShareResponse, status_code=status.HTTP_201_CREATED)
+async def create_guest_with_share(
+    request: CreateGuestWithShareRequest,
+    current_user: User = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Create a guest and share documents with them in one operation.
+
+    This is the simplified flow from the Documents page:
+    1. Creates guest if not exists (or reuses existing by email)
+    2. Creates a share/collection with the specified documents
+    3. Sends invitation email with portal link
+
+    The guest will see the shared documents as a virtual folder/collection
+    in the portal.
+    """
+    try:
+        # Get or create guest (doesn't create duplicates)
+        guest, is_new_guest = await SiteGuestService.get_or_create_guest(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            email=request.email,
+            name=request.name,
+            invited_by_user_id=current_user.id
+        )
+
+        # Create share with documents
+        share = await SiteGuestService.create_share(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            guest_id=guest.id,
+            name=request.share_name,
+            document_ids=request.document_ids,
+            permission_type=request.permission_type,
+            description=request.share_description,
+            expires_at=request.expires_at,
+            created_by_user_id=current_user.id
+        )
+
+        share_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(SiteGuestShareDocument)
+                .where(SiteGuestShareDocument.share_id == share.id)
+            )
+        ).scalar() or 0
+
+        # Send notification email
+        if request.send_invitation:
+            await SiteGuestService.send_share_notification(
+                db=db,
+                guest=guest,
+                share=share,
+                is_new_guest=is_new_guest
+            )
+
+        return CreateGuestWithShareResponse(
+            guest=_guest_to_response(guest),
+            share=SiteGuestShareResponse(
+                id=share.id,
+                name=share.name,
+                description=share.description,
+                permission_type=share.permission_type,
+                document_count=share_count,
+                created_at=share.created_at,
+                expires_at=share.expires_at
+            ),
+            is_new_guest=is_new_guest,
+            message=f"Shared {share_count} document(s) with {request.email}"
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating guest with share: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create share")
+
+
+@router.get("/{guest_id}/shares", response_model=SiteGuestShareListResponse)
+async def list_guest_shares(
+    guest_id: UUID,
+    current_user: User = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    List all shares/collections for a guest.
+    """
+    # Verify guest belongs to tenant
+    guest = await SiteGuestService.get_guest(db, guest_id)
+    if not guest or guest.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    shares = await SiteGuestService.list_guest_shares(db, guest_id)
+
+    return SiteGuestShareListResponse(
+        shares=[
+            SiteGuestShareResponse(
+                id=s.id,
+                name=s.name,
+                description=s.description,
+                permission_type=s.permission_type,
+                document_count=len(s.documents) if s.documents else 0,
+                created_at=s.created_at,
+                expires_at=s.expires_at
+            )
+            for s in shares
+        ],
+        total=len(shares)
+    )
 
 
 # =====================================

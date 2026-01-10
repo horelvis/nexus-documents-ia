@@ -109,9 +109,9 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
+    // Skip Next.js internals and all static files, unless found in search params.
+    // IMPORTANT: exclude `/api/v1/*` because that path is used as a rewrite proxy to the backend API,
+    // and Clerk middleware would otherwise intercept it before rewrites run (breaking the external Site Portal).
+    '/((?!_next|api/v1|[^?]*\\.(?:html?|css|mjs|js(?!on)|wasm|map|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
   ],
 }

@@ -15,12 +15,14 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     SiteGuest, SiteGuestOTP, SiteGuestSession, SiteGuestPermission,
-    SiteGuestAccessLog, Tenant, User, Document
+    SiteGuestAccessLog, SiteGuestShare, SiteGuestShareDocument,
+    Tenant, User, Document
 )
 from app.schemas.site_guest import (
     SiteGuestCreate, SiteGuestUpdate, SiteGuestResponse,
     SiteGuestPermissionResponse, SiteGuestAccessLogResponse,
-    TenantSiteSettingsUpdate, SiteGuestStatistics
+    TenantSiteSettingsUpdate, SiteGuestStatistics,
+    SiteGuestShareResponse
 )
 from app.services.email_service import EmailService
 from app.core.config import settings
@@ -181,6 +183,246 @@ class SiteGuestService:
 
         logger.info(f"Deactivated Site Guest: {guest.email}")
         return guest
+
+    # =====================================
+    # SHARE/COLLECTION MANAGEMENT
+    # =====================================
+
+    @staticmethod
+    async def get_or_create_guest(
+        db: AsyncSession,
+        tenant_id: UUID,
+        email: str,
+        name: Optional[str] = None,
+        invited_by_user_id: Optional[UUID] = None
+    ) -> Tuple[SiteGuest, bool]:
+        """
+        Get existing guest by email or create new one.
+        Returns (guest, is_new) tuple.
+
+        IMPORTANTE: No crear duplicados - un email = un guest por tenant.
+        """
+        # Search for existing guest (case-insensitive)
+        existing_guest = await SiteGuestService.get_guest_by_email(db, tenant_id, email)
+
+        if existing_guest:
+            # Reactivate if deactivated
+            if not existing_guest.is_active:
+                existing_guest.is_active = True
+                await db.commit()
+                await db.refresh(existing_guest)
+                logger.info(f"Reactivated existing guest: {email}")
+            return (existing_guest, False)  # False = not new
+
+        # Create new guest
+        new_guest = SiteGuest(
+            tenant_id=tenant_id,
+            email=email.lower(),
+            name=name,
+            invited_by_user_id=invited_by_user_id,
+            is_active=True,
+            can_view=True,
+            can_download=False,
+            can_upload=False
+        )
+        db.add(new_guest)
+        await db.commit()
+        await db.refresh(new_guest)
+
+        logger.info(f"Created new guest: {email}")
+        return (new_guest, True)  # True = is new
+
+    @staticmethod
+    async def create_share(
+        db: AsyncSession,
+        tenant_id: UUID,
+        guest_id: UUID,
+        name: str,
+        document_ids: List[UUID],
+        permission_type: str = "view",
+        description: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        created_by_user_id: Optional[UUID] = None
+    ) -> SiteGuestShare:
+        """
+        Create a share/collection with documents for a guest.
+
+        Documents stay in their original location - this is just a reference.
+        """
+        allowed_permission_types = {"view", "download", "upload"}
+        if permission_type not in allowed_permission_types:
+            raise ValueError(f"Invalid permission type: {permission_type}")
+
+        # Verify guest exists and belongs to tenant
+        result = await db.execute(
+            select(SiteGuest).where(
+                and_(
+                    SiteGuest.id == guest_id,
+                    SiteGuest.tenant_id == tenant_id
+                )
+            )
+        )
+        guest = result.scalar_one_or_none()
+        if not guest:
+            raise ValueError("Guest not found")
+
+        # Verify documents exist and belong to tenant (dedupe IDs)
+        unique_document_ids = list(dict.fromkeys(document_ids))
+        result = await db.execute(
+            select(Document.id).where(
+                and_(
+                    Document.tenant_id == tenant_id,
+                    Document.id.in_(unique_document_ids)
+                )
+            )
+        )
+        valid_doc_ids = list(result.scalars().all())
+
+        missing_doc_ids = set(unique_document_ids) - set(valid_doc_ids)
+        if missing_doc_ids:
+            logger.warning(
+                "Some documents were not found or don't belong to tenant %s: %s",
+                tenant_id,
+                list(missing_doc_ids)
+            )
+
+        if not valid_doc_ids:
+            raise ValueError("No valid documents found")
+
+        # Create share
+        share = SiteGuestShare(
+            tenant_id=tenant_id,
+            guest_id=guest_id,
+            name=name,
+            description=description,
+            permission_type=permission_type,
+            created_by_user_id=created_by_user_id,
+            expires_at=expires_at
+        )
+        db.add(share)
+        await db.flush()  # Get share ID
+
+        # Add documents to share
+        for doc_id in valid_doc_ids:
+            share_doc = SiteGuestShareDocument(
+                share_id=share.id,
+                document_id=doc_id
+            )
+            db.add(share_doc)
+
+        await db.commit()
+        await db.refresh(share)
+
+        logger.info(f"Created share '{name}' with {len(valid_doc_ids)} documents for guest {guest_id}")
+        return share
+
+    @staticmethod
+    async def get_share(db: AsyncSession, share_id: UUID) -> Optional[SiteGuestShare]:
+        """Get a share by ID with documents loaded."""
+        result = await db.execute(
+            select(SiteGuestShare)
+            .options(selectinload(SiteGuestShare.documents).selectinload(SiteGuestShareDocument.document))
+            .where(SiteGuestShare.id == share_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def list_guest_shares(
+        db: AsyncSession,
+        guest_id: UUID
+    ) -> List[SiteGuestShare]:
+        """List all shares for a guest."""
+        result = await db.execute(
+            select(SiteGuestShare)
+            .options(selectinload(SiteGuestShare.documents))
+            .where(SiteGuestShare.guest_id == guest_id)
+            .order_by(SiteGuestShare.created_at.desc())
+        )
+        return result.scalars().all()
+
+    @staticmethod
+    async def delete_share(db: AsyncSession, share_id: UUID) -> bool:
+        """Delete a share (documents are NOT deleted, only the reference)."""
+        result = await db.execute(
+            select(SiteGuestShare).where(SiteGuestShare.id == share_id)
+        )
+        share = result.scalar_one_or_none()
+
+        if not share:
+            return False
+
+        await db.delete(share)
+        await db.commit()
+
+        logger.info(f"Deleted share {share_id}")
+        return True
+
+    @staticmethod
+    async def send_share_notification(
+        db: AsyncSession,
+        guest: SiteGuest,
+        share: SiteGuestShare,
+        is_new_guest: bool = True,
+        language: str = "es"
+    ) -> bool:
+        """
+        Send notification email when documents are shared with a guest.
+
+        Different email for new guests vs existing guests with new share.
+        """
+        # Get tenant info
+        result = await db.execute(
+            select(Tenant).where(Tenant.id == guest.tenant_id)
+        )
+        tenant = result.scalar_one_or_none()
+        if not tenant:
+            logger.error(f"Tenant not found for guest {guest.id}")
+            return False
+
+        # Build portal URL
+        portal_url = f"{settings.FRONTEND_URL}/portal/{tenant.slug or tenant.id}"
+
+        # Get document count
+        result = await db.execute(
+            select(func.count()).where(SiteGuestShareDocument.share_id == share.id)
+        )
+        document_count = result.scalar() or 0
+
+        try:
+            if is_new_guest:
+                # New guest - send full invitation
+                success = await EmailService.send_guest_invitation(
+                    to_email=guest.email,
+                    recipient_name=guest.name or guest.email,
+                    tenant_name=tenant.name,
+                    portal_url=portal_url,
+                    welcome_message=f"Se han compartido {document_count} documento(s) contigo en la colección '{share.name}'.",
+                    expires_at=share.expires_at,
+                    can_view=share.permission_type in ["view", "download", "upload"],
+                    can_download=share.permission_type in ["download", "upload"],
+                    language=language
+                )
+            else:
+                # Existing guest - send notification about new share
+                success = await EmailService.send_guest_invitation(
+                    to_email=guest.email,
+                    recipient_name=guest.name or guest.email,
+                    tenant_name=tenant.name,
+                    portal_url=portal_url,
+                    welcome_message=f"Se han compartido {document_count} documento(s) adicionales contigo en la colección '{share.name}'.",
+                    expires_at=share.expires_at,
+                    can_view=share.permission_type in ["view", "download", "upload"],
+                    can_download=share.permission_type in ["download", "upload"],
+                    language=language
+                )
+
+            if success:
+                logger.info(f"Share notification sent to {guest.email} for share '{share.name}'")
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to send share notification: {e}")
+            return False
 
     # =====================================
     # PERMISSION MANAGEMENT
@@ -368,8 +610,8 @@ class SiteGuestService:
     # =====================================
 
     @staticmethod
-    async def send_invitation_email(db: AsyncSession, guest: SiteGuest) -> bool:
-        """Send invitation email to a guest."""
+    async def send_invitation_email(db: AsyncSession, guest: SiteGuest, language: str = "es") -> bool:
+        """Send invitation email to a guest using dedicated invitation template."""
         # Get tenant info
         tenant = await db.execute(
             select(Tenant).where(Tenant.id == guest.tenant_id)
@@ -380,21 +622,20 @@ class SiteGuestService:
             return False
 
         # Build portal URL
-        portal_url = f"{settings.FRONTEND_URL}/{tenant.slug or tenant.id}"
+        portal_url = f"{settings.FRONTEND_URL}/portal/{tenant.slug or tenant.id}"
 
         try:
-            # Use email service with custom template
-            success = await EmailService.send_share_notification(
+            # Use dedicated guest invitation template
+            success = await EmailService.send_guest_invitation(
                 to_email=guest.email,
-                subject=f"You've been invited to access {tenant.name}",
-                template_data={
-                    "recipient_name": guest.name or guest.email,
-                    "sender_name": tenant.name,
-                    "document_name": "Site Portal",
-                    "share_link": portal_url,
-                    "message": tenant.site_welcome_message or f"You have been invited to access documents from {tenant.name}. Click the link below to access the portal.",
-                    "expires_at": guest.expires_at
-                }
+                recipient_name=guest.name or guest.email,
+                tenant_name=tenant.name,
+                portal_url=portal_url,
+                welcome_message=tenant.site_welcome_message,
+                expires_at=guest.expires_at,
+                can_view=guest.can_view,
+                can_download=guest.can_download,
+                language=language
             )
 
             if success:
@@ -457,11 +698,38 @@ class SiteGuestService:
 
     @staticmethod
     async def get_tenant_by_slug(db: AsyncSession, slug: str) -> Optional[Tenant]:
-        """Get tenant by slug for public portal."""
+        """
+        Get tenant by slug for public portal.
+
+        Also supports resolving by tenant UUID string (used when no slug is configured).
+        """
+        key = (slug or "").strip()
+        if not key:
+            return None
+
+        # Try UUID first (fallback when tenant.slug is not set)
+        try:
+            tenant_id = UUID(key)
+        except Exception:
+            tenant_id = None
+
+        if tenant_id is not None:
+            result = await db.execute(
+                select(Tenant).where(
+                    and_(
+                        Tenant.id == tenant_id,
+                        Tenant.is_active == True
+                    )
+                )
+            )
+            tenant = result.scalar_one_or_none()
+            if tenant:
+                return tenant
+
         result = await db.execute(
             select(Tenant).where(
                 and_(
-                    Tenant.slug == slug.lower(),
+                    Tenant.slug == key.lower(),
                     Tenant.is_active == True
                 )
             )

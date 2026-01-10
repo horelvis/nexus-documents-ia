@@ -101,6 +101,8 @@ export const API_CONFIG = {
     SITE_GUEST_PERMISSION_FOLDER: (guestId: string) => `/site-guests/${guestId}/permissions/folder`,
     SITE_GUEST_REVOKE_PERMISSION: (guestId: string, permissionId: string) => `/site-guests/${guestId}/permissions/${permissionId}`,
     SITE_GUEST_ACCESS_LOGS: (guestId: string) => `/site-guests/${guestId}/access-logs`,
+    SITE_GUEST_WITH_SHARE: '/site-guests/with-share',
+    SITE_GUEST_SHARES: (guestId: string) => `/site-guests/${guestId}/shares`,
 
     // Site Portal (Public Guest Access)
     SITE_PORTAL_TENANT: (slug: string) => `/site-portal/t/${slug}`,
@@ -109,6 +111,7 @@ export const API_CONFIG = {
     SITE_PORTAL_LOGOUT: '/site-portal/logout',
     SITE_PORTAL_ME: '/site-portal/me',
     SITE_PORTAL_CONTENT: '/site-portal/content',
+    SITE_PORTAL_SHARE_DOCUMENTS: (shareId: string) => `/site-portal/shares/${shareId}/documents`,
     SITE_PORTAL_DOCUMENT: (documentId: string) => `/site-portal/documents/${documentId}`,
     SITE_PORTAL_DOCUMENT_DOWNLOAD: (documentId: string) => `/site-portal/documents/${documentId}/download`,
     SITE_PORTAL_DOCUMENT_VIEW: (documentId: string) => `/site-portal/documents/${documentId}/view`,

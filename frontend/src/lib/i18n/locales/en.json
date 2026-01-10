@@ -699,6 +699,7 @@
       "createWorkflow": "Create Workflow",
       "sign": "Sign Document"
     },
+    "adminActions": "Admin Actions",
     "nexusDocument": "Nexus Document"
   },
   "documentPreview": {
