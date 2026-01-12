@@ -13,6 +13,7 @@ dist/
 .next/
 out/
 .cache/
+*.tsbuildinfo
 
 # Python dependencias y entorno virtual
 venv/
@@ -73,6 +74,8 @@ coverage/
 # Archivos temporales
 *.tmp
 *.swp
+tmp/
+tmp_*
 
 videos/
 
@@ -104,3 +107,8 @@ backups/
 .pyarmor_pack/
 *.pyc
 *.pyo
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
