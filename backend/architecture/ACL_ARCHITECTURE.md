@@ -433,6 +433,10 @@ await self._log_acl_audit(
 - [x] **Agent Tools**: Uses ExecutionContext for ACL in search functions
 - [x] **SearchRequest Schema**: Added `is_admin` field
 - [x] **Elasticsearch Facets/Analytics**: Added `user_context` parameter for ACL filtering
+- [x] **EmmaQuery Schema**: Added `user_role_ids` and `is_admin` fields
+- [x] **Emma API Endpoints**: Extract ACL from authenticated user (`/emma/query`, `/emma/query/stream`)
+- [x] **EmmaCoordinator**: Propagates `user_role_ids` and `is_admin` to `set_execution_context()`
+- [x] **EmmaService**: Passes ACL context to coordinator for both sync and streaming queries
 
 ### Pending Improvements
 
@@ -455,3 +459,7 @@ await self._log_acl_audit(
 | Execution Context | `backend/microservices/weaviate-service/app/core/execution_context.py` |
 | Agent Search Tools | `backend/microservices/weaviate-service/app/agents/tools/search_tools.py` |
 | Search Request Schema | `backend/microservices/weaviate-service/app/schemas/weaviate.py` |
+| **Emma API Gateway** | `backend/app/api/v1/weaviate.py` (extracts ACL from user) |
+| **Emma Query Schema** | `backend/microservices/weaviate-service/app/schemas/emma.py` |
+| **Emma Coordinator** | `backend/microservices/weaviate-service/app/agents/emma_coordinator.py` |
+| **Emma Service** | `backend/microservices/weaviate-service/app/services/emma_service.py` |

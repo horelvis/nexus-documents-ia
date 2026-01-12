@@ -32,6 +32,8 @@ class EmmaQuery(BaseModel):
     query_type: Optional[QueryType] = QueryType.SEARCH
     tenant_id: str
     user_id: Optional[str] = Field(default=None, description="User ID for memory and personalization")
+    user_role_ids: Optional[List[str]] = Field(default=None, description="User role IDs for ACL filtering")
+    is_admin: bool = Field(default=False, description="Whether user is admin (bypasses ACL)")
     session_id: Optional[str] = None
     collections: List[str] = Field(default_factory=list)
     context: Optional[Dict[str, Any]] = Field(default_factory=dict)

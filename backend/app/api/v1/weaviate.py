@@ -4,10 +4,11 @@ Uses the normalized WeaviateClient with standardized X-API-Key authentication.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, Optional, AsyncGenerator, List
 import logging
 
-from app.api.async_dependencies import get_current_tenant_id_async
+from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
+from app.db.models import User
 from app.services.weaviate_client import weaviate_client
 from app.clients.exceptions import HTTPClientError, ServiceTimeoutError
 
@@ -22,12 +23,21 @@ router = APIRouter()
 @router.post("/emma/query")
 async def emma_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
 ):
-    """Proxy Emma AI queries to Weaviate service"""
+    """Proxy Emma AI queries to Weaviate service with ACL context"""
     try:
         body = await request.json()
         body["tenant_id"] = tenant_id
+
+        # Extract ACL context from authenticated user
+        body["user_id"] = str(current_user.id)
+        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        body["is_admin"] = current_user.is_admin
+
+        logger.debug(f"🔐 Emma query with ACL: user={current_user.id}, roles={len(body['user_role_ids'])}, admin={body['is_admin']}")
+
         return await weaviate_client.emma_query(body)
     except HTTPClientError as e:
         logger.error(f"❌ Emma AI service error: {e}")
@@ -43,16 +53,22 @@ async def emma_query(
 @router.post("/emma/query/stream")
 async def emma_query_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
 ):
     """
-    Proxy Emma AI streaming queries to Weaviate service.
+    Proxy Emma AI streaming queries to Weaviate service with ACL context.
 
     Returns Server-Sent Events (SSE) with progress updates during analysis.
     """
     try:
         body = await request.json()
         body["tenant_id"] = tenant_id
+
+        # Extract ACL context from authenticated user
+        body["user_id"] = str(current_user.id)
+        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        body["is_admin"] = current_user.is_admin
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Weaviate service to client."""

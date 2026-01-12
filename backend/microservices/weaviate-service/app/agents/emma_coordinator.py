@@ -367,6 +367,8 @@ class EmmaCoordinator:
         tenant_id: str,
         session_id: str,
         user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
         user_context: Optional[Dict[str, Any]] = None,
         orchestration_hint: Optional[str] = None
     ) -> EmmaCoordinatorResult:
@@ -386,6 +388,8 @@ class EmmaCoordinator:
             tenant_id: Tenant identifier
             session_id: Session identifier for thread persistence
             user_id: Optional user identifier
+            user_role_ids: Optional list of role IDs for ACL filtering
+            is_admin: Whether user is admin (bypasses ACL checks)
             user_context: Optional user context (name, preferences)
             orchestration_hint: Optional explicit pattern ("sequential", "concurrent", "handoff")
 
@@ -398,11 +402,13 @@ class EmmaCoordinator:
             await self.initialize()
 
         # Set execution context for @ai_function tools
-        # This ensures tenant_id is available via contextvars, eliminating
-        # dependency on LLM to extract it from the prompt correctly
+        # This ensures tenant_id and ACL context are available via contextvars,
+        # eliminating dependency on LLM to extract them correctly
         set_execution_context(
             tenant_id=tenant_id,
             user_id=user_id,
+            user_role_ids=user_role_ids,
+            is_admin=is_admin,
             session_id=session_id
         )
 
@@ -737,6 +743,8 @@ class EmmaCoordinator:
         tenant_id: str,
         session_id: str,
         user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
         user_context: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -754,10 +762,12 @@ class EmmaCoordinator:
         if not self._initialized:
             await self.initialize()
 
-        # Set execution context for @ai_function tools
+        # Set execution context for @ai_function tools (includes ACL context)
         set_execution_context(
             tenant_id=tenant_id,
             user_id=user_id,
+            user_role_ids=user_role_ids,
+            is_admin=is_admin,
             session_id=session_id
         )
 

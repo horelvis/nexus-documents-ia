@@ -402,8 +402,10 @@ Responde SOLO una palabra:"""
 
         EmmaCoordinator uses .as_tool() to delegate to specialized subagents.
         Context is maintained automatically via AgentThread + Redis persistence.
+        ACL context (user_role_ids, is_admin) is propagated for document filtering.
         """
-        user_id = query.context.get("user_id") if query.context else None
+        # Get user_id from query directly (set by API endpoint) or from context
+        user_id = query.user_id or (query.context.get("user_id") if query.context else None)
 
         # Get user context for personalization
         user_context = await self._get_enriched_user_context(
@@ -419,6 +421,7 @@ Responde SOLO una palabra:"""
             logger.info(f"🤖 Executing with EmmaCoordinator: {query.query[:50]}...")
             logger.info(f"📋 Query context: tenant={query.tenant_id}, session={session_id[:16]}...")
             logger.info(f"📋 User context: {user_context}")
+            logger.info(f"🔐 ACL context: user={user_id}, roles={len(query.user_role_ids or [])}, admin={query.is_admin}")
             logger.info(f"📋 Orchestration hint: {orchestration_hint}")
 
             result: EmmaCoordinatorResult = await self._coordinator.execute(
@@ -426,8 +429,10 @@ Responde SOLO una palabra:"""
                 tenant_id=query.tenant_id,
                 session_id=session_id,
                 user_id=user_id,
+                user_role_ids=query.user_role_ids,
+                is_admin=query.is_admin,
                 user_context=user_context,
-                orchestration_hint=orchestration_hint  # Pass orchestration hint
+                orchestration_hint=orchestration_hint
             )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -539,7 +544,8 @@ Responde SOLO una palabra:"""
             logger.warning(f"⚠️ Failed to load conversation history: {e}")
 
         try:
-            user_id = query.context.get("user_id") if query.context else None
+            # Get user_id from query directly (set by API endpoint) or from context
+            user_id = query.user_id or (query.context.get("user_id") if query.context else None)
             document_id = query.context.get("document_id") if query.context else None
 
             # AGGRESSIVE STREAMING: Show document loading progress
@@ -566,11 +572,15 @@ Responde SOLO una palabra:"""
                     }
                 }
 
+            logger.debug(f"🔐 Stream ACL context: user={user_id}, roles={len(query.user_role_ids or [])}, admin={query.is_admin}")
+
             async for event in self._coordinator.execute_stream(
                 query=query.query,
                 tenant_id=query.tenant_id,
                 session_id=session_id,
                 user_id=user_id,
+                user_role_ids=query.user_role_ids,
+                is_admin=query.is_admin,
                 user_context=user_context
             ):
                 if "data" not in event:
