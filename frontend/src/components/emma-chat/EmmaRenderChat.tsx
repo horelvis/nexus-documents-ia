@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
 import { DisplayRenderer } from "./displays/DisplayRenderer"
+import { EmmaClarificationUI } from "./EmmaClarificationUI"
 import { EmmaRenderChatProps, EmmaMessage } from "./types"
 import { useTranslation } from "@/lib/i18n/hooks"
 import { TTSControls } from "./TTSControls"
@@ -27,6 +28,7 @@ export function EmmaRenderChat(props: EmmaRenderChatProps) {
     onDocumentClick,
     onPreviewClick,
     onRetry,
+    onClarificationSubmit,
     currentView = "chat",
     onViewChange,
     className,
@@ -119,6 +121,7 @@ export function EmmaRenderChat(props: EmmaRenderChatProps) {
                 onDocumentClick={safeOnDocumentClick}
                 onPreviewClick={safeOnPreviewClick}
                 onRetry={onRetry}
+                onClarificationSubmit={onClarificationSubmit}
                 isAdmin={isAdmin}
                 isLatestResult={isLatestResult}
               />
@@ -147,6 +150,7 @@ interface MessageDisplayProps {
   onDocumentClick?: (doc: any) => void
   onPreviewClick?: (doc: any) => void
   onRetry?: (failedQuery: string) => void
+  onClarificationSubmit?: (messageId: string, selectedValues: string[]) => void
   isAdmin?: boolean
   isLatestResult?: boolean  // True if this is the latest result message (for auto-play)
 }
@@ -158,6 +162,7 @@ function MessageDisplay({
   onDocumentClick,
   onPreviewClick,
   onRetry,
+  onClarificationSubmit,
   isAdmin = false,
   isLatestResult = false
 }: MessageDisplayProps) {
@@ -174,6 +179,8 @@ function MessageDisplay({
       case "result":
       case "text":
         return <Bot className="h-4 w-4" />
+      case "clarification":
+        return <Info className="h-4 w-4" />
       case "error":
       case "self_healing_error":
         return <AlertCircle className="h-4 w-4" />
@@ -188,6 +195,8 @@ function MessageDisplay({
     switch (message.type) {
       case "user":
         return "bg-background border" // Same style as Emma's messages
+      case "clarification":
+        return "bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
       case "error":
       case "self_healing_error":
         return "bg-red-50 dark:bg-red-950/50 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800"
@@ -240,12 +249,26 @@ function MessageDisplay({
         <Card className={cn("p-4", getMessageColor())}>
           {/* Message Content */}
           <div className="space-y-3">
-            <DisplayRenderer
-              message={message}
-              onDocumentClick={onDocumentClick}
-              onPreviewClick={onPreviewClick}
-              isAdmin={isAdmin}
-            />
+            {/* Human-in-the-Loop Clarification UI */}
+            {message.type === "clarification" && message.metadata?.clarification ? (
+              <EmmaClarificationUI
+                question={message.metadata.clarification.question}
+                header={message.metadata.clarification.header}
+                options={message.metadata.clarification.options}
+                multiSelect={message.metadata.clarification.multi_select}
+                severity={message.metadata.clarification.severity}
+                type={message.metadata.clarification.type}
+                onSubmit={(selectedValues) => onClarificationSubmit?.(message.id, selectedValues)}
+                className="my-2"
+              />
+            ) : (
+              <DisplayRenderer
+                message={message}
+                onDocumentClick={onDocumentClick}
+                onPreviewClick={onPreviewClick}
+                isAdmin={isAdmin}
+              />
+            )}
 
               {/* Decision Path */}
               {message.metadata?.decision_path && (

@@ -60,6 +60,8 @@ from app.services.text_alignment_service import (
     AlignmentResult,
     text_alignment_service,
 )
+from app.services.knowledge import KnowledgeExtractionService, get_knowledge_service
+from app.services.knowledge.schemas import KnowledgeExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +82,15 @@ class IndexingResult:
     analysis: Optional[DocumentAnalysis] = None
     chunks: List[DocumentChunk] = field(default_factory=list)
 
+    # Knowledge extraction results
+    knowledge_result: Optional[KnowledgeExtractionResult] = None
+
     # Processing metadata
     processed_at: datetime = field(default_factory=datetime.now)
     extraction_time_ms: float = 0.0
     analysis_time_ms: float = 0.0
     chunking_time_ms: float = 0.0
+    knowledge_extraction_time_ms: float = 0.0
     total_time_ms: float = 0.0
 
     # Status
@@ -102,10 +108,16 @@ class IndexingResult:
             },
             "analysis": self.analysis.to_dict() if self.analysis else None,
             "chunk_count": len(self.chunks),
+            "knowledge": {
+                "entities_count": self.knowledge_result.entities_count if self.knowledge_result else 0,
+                "relationships_count": self.knowledge_result.relationships_count if self.knowledge_result else 0,
+                "domain": self.knowledge_result.domain.value if self.knowledge_result else None,
+            } if self.knowledge_result else None,
             "timing": {
                 "extraction_ms": self.extraction_time_ms,
                 "analysis_ms": self.analysis_time_ms,
                 "chunking_ms": self.chunking_time_ms,
+                "knowledge_extraction_ms": self.knowledge_extraction_time_ms,
                 "total_ms": self.total_time_ms,
             },
             "processed_at": self.processed_at.isoformat(),
@@ -124,7 +136,8 @@ class IndexingPipeline:
     2. Analyze quality (DocumentIntelligence)
     3. Clean text if needed
     4. Chunk document (SemanticChunker)
-    5. Enrich chunks with metadata
+    5. Extract knowledge entities (KnowledgeExtractionService)
+    6. Enrich chunks with metadata
     """
 
     def __init__(
@@ -132,10 +145,13 @@ class IndexingPipeline:
         extractor: Optional[TextExtractClient] = None,
         intelligence: Optional[DocumentIntelligence] = None,
         chunker: Optional[SemanticChunker] = None,
+        knowledge_extractor: Optional[KnowledgeExtractionService] = None,
     ):
         self.extractor = extractor or textextract_client
         self.intelligence = intelligence or document_intelligence
         self.chunker = chunker or semantic_chunker
+        self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
+        self._knowledge_extraction_enabled = True
 
     async def process_file(
         self,
@@ -373,13 +389,53 @@ class IndexingPipeline:
                 warnings=warnings,
             )
 
+        # === Stage 4: Knowledge Extraction ===
+        knowledge_result = None
+        knowledge_time = 0.0
+
+        if self._knowledge_extraction_enabled:
+            logger.info(f"[{document_id}] Extracting knowledge entities...")
+            knowledge_start = time.time()
+
+            try:
+                # Get ACL info from metadata if available
+                acl_user_ids = metadata.get("acl_user_ids", [])
+                acl_role_ids = metadata.get("acl_role_ids", [])
+                acl_everyone = metadata.get("acl_everyone", False)
+
+                knowledge_result = await self.knowledge_extractor.extract_from_document(
+                    document_id=document_id,
+                    tenant_id=tenant_id,
+                    extracted_entities=metadata.get("extracted_entities", []),
+                    content=text_for_chunking,
+                    document_type=metadata.get("document_type", "general"),
+                    acl_user_ids=acl_user_ids,
+                    acl_role_ids=acl_role_ids,
+                    acl_everyone=acl_everyone,
+                )
+
+                knowledge_time = (time.time() - knowledge_start) * 1000
+
+                logger.info(
+                    f"[{document_id}] Extracted {knowledge_result.entities_count} entities, "
+                    f"{knowledge_result.relationships_count} relationships, "
+                    f"domain: {knowledge_result.domain.value}"
+                )
+
+            except Exception as e:
+                logger.warning(f"[{document_id}] Knowledge extraction failed (non-blocking): {e}")
+                warnings.append(f"Knowledge extraction failed: {e}")
+                knowledge_time = (time.time() - knowledge_start) * 1000
+
         return IndexingResult(
             document_id=document_id,
             tenant_id=tenant_id,
             analysis=analysis,
             chunks=chunks,
+            knowledge_result=knowledge_result,
             analysis_time_ms=analysis_time,
             chunking_time_ms=chunking_time,
+            knowledge_extraction_time_ms=knowledge_time,
             success=True,
             errors=errors,
             warnings=warnings,

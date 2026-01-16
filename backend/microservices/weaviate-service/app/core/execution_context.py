@@ -64,6 +64,7 @@ _user_id_var: ContextVar[Optional[str]] = ContextVar('user_id', default=None)
 _user_role_ids_var: ContextVar[Optional[list]] = ContextVar('user_role_ids', default=None)
 _is_admin_var: ContextVar[bool] = ContextVar('is_admin', default=False)
 _session_id_var: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
+_document_id_var: ContextVar[Optional[str]] = ContextVar('document_id', default=None)
 _extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context', default={})
 
 
@@ -73,6 +74,7 @@ def set_execution_context(
     user_role_ids: Optional[list] = None,
     is_admin: bool = False,
     session_id: Optional[str] = None,
+    document_id: Optional[str] = None,
     **extra: Any
 ) -> None:
     """
@@ -87,6 +89,7 @@ def set_execution_context(
         user_role_ids: Optional list of role IDs the user belongs to (for ACL filtering)
         is_admin: Whether the user is an admin (bypasses ACL checks)
         session_id: Optional session identifier
+        document_id: Optional focus document ID (for document-specific queries)
         **extra: Additional context values
     """
     _tenant_id_var.set(tenant_id)
@@ -102,10 +105,13 @@ def set_execution_context(
     if session_id:
         _session_id_var.set(session_id)
 
+    if document_id:
+        _document_id_var.set(document_id)
+
     if extra:
         _extra_context_var.set(extra)
 
-    logger.debug(f"🔐 Execution context set: tenant={tenant_id}, user={user_id}, roles={len(user_role_ids or [])}, admin={is_admin}")
+    logger.debug(f"🔐 Execution context set: tenant={tenant_id}, user={user_id}, doc={document_id}, roles={len(user_role_ids or [])}, admin={is_admin}")
 
 
 def clear_execution_context() -> None:
@@ -119,6 +125,7 @@ def clear_execution_context() -> None:
     _user_role_ids_var.set(None)
     _is_admin_var.set(False)
     _session_id_var.set(None)
+    _document_id_var.set(None)
     _extra_context_var.set({})
 
     logger.debug("🔓 Execution context cleared")
@@ -178,6 +185,63 @@ def get_session_id() -> Optional[str]:
         Session ID if set, None otherwise
     """
     return _session_id_var.get()
+
+
+def get_document_id() -> Optional[str]:
+    """
+    Get the focus document_id from execution context.
+
+    This is set when the user is querying about a specific document.
+
+    Returns:
+        Document ID if set, None otherwise
+    """
+    return _document_id_var.get()
+
+
+def resolve_document_id(llm_provided: Optional[str] = None) -> Optional[str]:
+    """
+    Resolve document_id with priority: context > LLM provided.
+
+    Similar to resolve_tenant_id, this ensures the context-provided
+    document_id takes precedence over whatever the LLM might have passed.
+
+    Args:
+        llm_provided: The document_id the LLM passed (may be wrong/placeholder)
+
+    Returns:
+        The correct document_id from context, or llm_provided as fallback,
+        or None if no document_id is available
+
+    Example:
+        @ai_function
+        async def analyze_document(document_id: str, ...) -> str:
+            actual_doc_id = resolve_document_id(document_id)
+            # actual_doc_id is guaranteed to be from trusted context if available
+    """
+    context_doc_id = _document_id_var.get()
+
+    if context_doc_id:
+        # Log if LLM tried to use a different document_id
+        if llm_provided and llm_provided != context_doc_id:
+            logger.debug(
+                f"🔒 document_id resolved: LLM passed '{llm_provided}', "
+                f"using context '{context_doc_id}'"
+            )
+        return context_doc_id
+
+    if llm_provided:
+        # Check if it looks like a placeholder (common LLM hallucinations)
+        placeholders = ['contract_', 'doc_', 'document_', '12345', '67890', 'example', 'test']
+        is_placeholder = any(p in llm_provided.lower() for p in placeholders)
+        if is_placeholder:
+            logger.warning(
+                f"⚠️ LLM provided placeholder-like document_id: {llm_provided}, ignoring"
+            )
+            return None
+        return llm_provided
+
+    return None
 
 
 def get_extra_context() -> Dict[str, Any]:

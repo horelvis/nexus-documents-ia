@@ -1472,3 +1472,148 @@ async def analyze_document_with_markdown(
     except Exception as e:
         logger.error(f"Error in markdown analysis: {e}")
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+
+
+# ========================================================================
+# Human-in-the-Loop (HITL) / Clarification Endpoints
+# OpenCode-style permission resolution
+# ========================================================================
+
+from pydantic import BaseModel
+
+
+class ClarificationResolutionRequest(BaseModel):
+    """Request to resolve a clarification prompt."""
+    session_id: str
+    tenant_id: str
+    request_id: Optional[str] = None  # Optional: specific request ID
+    selected_values: List[str]  # User's selected option values
+    follow_up_query: Optional[str] = None  # Optional: continue with this query
+
+
+class ClarificationResolutionResponse(BaseModel):
+    """Response after resolving a clarification."""
+    success: bool
+    message: str
+    selected_document: Optional[Dict[str, Any]] = None
+    continue_analysis: bool = False
+
+
+@router.post("/clarification/resolve", response_model=ClarificationResolutionResponse)
+async def resolve_clarification(
+    request: ClarificationResolutionRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Resolve a pending clarification request with user's selection.
+
+    This endpoint is called when the user makes a selection in the
+    clarification UI (e.g., selecting which document to analyze).
+
+    The selection is stored in the session context so the next query
+    can continue with the selected document.
+
+    Args:
+        request: Contains session_id, selected_values, and optional follow_up_query
+
+    Returns:
+        ClarificationResolutionResponse with success status and next steps
+    """
+    from app.agents.tools.clarification_tools import extract_selected_document
+    from app.agents.permissions import get_tool_interceptor
+
+    try:
+        logger.info(
+            f"🔄 Resolving clarification: session={request.session_id[:16]}..., "
+            f"selected={request.selected_values}"
+        )
+
+        # If we have a request_id, resolve it in the interceptor
+        if request.request_id:
+            interceptor = get_tool_interceptor()
+            resolved = interceptor.resolve_request(
+                request.request_id,
+                request.selected_values
+            )
+            if resolved:
+                logger.info(f"✅ Resolved request {request.request_id}")
+
+        # Store the selection in session context for the next query
+        # This allows Emma to continue with the selected document
+        selected_doc = None
+        if request.selected_values:
+            selected_value = request.selected_values[0]  # Primary selection
+
+            # Store in Redis for session continuity
+            import redis.asyncio as redis
+            from app.agents.emma_coordinator import get_redis_pool
+
+            pool = get_redis_pool()
+            redis_client = redis.Redis(connection_pool=pool)
+
+            # Store clarification context
+            context_key = f"emma:clarification:{request.tenant_id}:{request.session_id}"
+            await redis_client.setex(
+                context_key,
+                3600,  # 1 hour TTL
+                json.dumps({
+                    "selected_values": request.selected_values,
+                    "selected_document_id": selected_value,
+                    "timestamp": asyncio.get_event_loop().time(),
+                })
+            )
+
+            logger.info(f"💾 Stored clarification context: {context_key}")
+
+            selected_doc = {
+                "id": selected_value,
+                "selected_values": request.selected_values,
+            }
+
+        return ClarificationResolutionResponse(
+            success=True,
+            message="Selección registrada. Puedes continuar con tu consulta.",
+            selected_document=selected_doc,
+            continue_analysis=request.follow_up_query is not None,
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Clarification resolution failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/clarification/pending/{session_id}")
+async def get_pending_clarification(
+    session_id: str,
+    tenant_id: str,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Check if there's a pending clarification for a session.
+
+    Returns any stored clarification context from a previous interaction.
+    """
+    try:
+        import redis.asyncio as redis
+        from app.agents.emma_coordinator import get_redis_pool
+
+        pool = get_redis_pool()
+        redis_client = redis.Redis(connection_pool=pool)
+
+        context_key = f"emma:clarification:{tenant_id}:{session_id}"
+        context_data = await redis_client.get(context_key)
+
+        if context_data:
+            return {
+                "has_pending": True,
+                "context": json.loads(context_data)
+            }
+
+        return {
+            "has_pending": False,
+            "context": None
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to get pending clarification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -46,7 +46,7 @@ import time
 
 from app.core.config import settings
 from app.core.security import verify_api_key
-from app.api import weaviate_router, emma_router, public_knowledge_router
+from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router
 from app.api.agents import router as agents_router
 from app.cag.api.cag import router as cag_router
 from app.cag.api.vector import router as cag_vector_router
@@ -168,6 +168,8 @@ app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
 app.include_router(emma_router, prefix="/emma", tags=["emma"])
 app.include_router(agents_router, tags=["agents"])  # OpenManus-style orchestration
 app.include_router(public_knowledge_router, tags=["public-knowledge"])
+app.include_router(knowledge_router, tags=["knowledge"])  # Knowledge graph API
+app.include_router(learning_router, tags=["learning"])  # User learning API
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
 
@@ -196,7 +198,9 @@ async def service_info():
             "Multi-agent orchestration (AutoGen)",
             "RAG Pipeline (7 layers)",
             "Dynamic data visualization",
-            "Multi-provider LLM support"
+            "Multi-provider LLM support",
+            "Knowledge extraction from documents",
+            "User preference learning"
         ],
         "agents": [
             "SearchAgent",
@@ -215,6 +219,8 @@ async def service_info():
             "weaviate": "/weaviate/*",
             "emma": "/emma/* (chatbot)",
             "agents": "/agents/* (orchestration)",
+            "knowledge": "/knowledge/* (knowledge graph)",
+            "learning": "/learning/* (user learning)",
             "cag": "/cag/*",
             "health": "/health",
             "docs": "/docs" if settings.debug else None

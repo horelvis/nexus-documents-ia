@@ -273,3 +273,39 @@ def get_analysis_prompt(analysis_type: str, filename: str = "emma_prompts.yaml")
 
     # Fallback to defaults
     return _DEFAULT_ANALYSIS_PROMPTS.get(analysis_type, _DEFAULT_ANALYSIS_PROMPTS["comprehensive"])
+
+
+def get_context_root(filename: str = "emma_prompts.yaml") -> str:
+    """
+    Get the global context root for Emma.
+
+    The context root establishes Emma's domain expertise in document management
+    (based on ISO 15489 Records Management principles) and is prepended to ALL
+    prompts - both for agents and the RAG pipeline.
+
+    This provides a consistent foundation that defines:
+    - What NexusDocs360 is (EDMS - Enterprise Document Management System)
+    - The discipline of Records Management (capture, classification, retention, etc.)
+    - ISO 15489 principles (authenticity, reliability, integrity, usability)
+    - Emma's role and the value she provides
+    - Base behavior rules (cite sources, same language, no hallucination)
+
+    Args:
+        filename: YAML file to load from
+
+    Returns:
+        Context root string, or empty string if not found
+
+    Example:
+        >>> context_root = get_context_root()
+        >>> full_prompt = f"{context_root}\\n\\n{agent_instructions}"
+    """
+    prompts = load_prompts(filename)
+    context_root = prompts.get("context_root", "")
+
+    if context_root:
+        logger.debug(f"Loaded context_root ({len(context_root)} chars)")
+    else:
+        logger.warning("No context_root found in prompts YAML")
+
+    return context_root

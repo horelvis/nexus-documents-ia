@@ -559,5 +559,184 @@ class WeaviateClient(BaseHTTPClient):
             return {"status": "error", "error": str(e), "entries_invalidated": 0}
 
 
+    # =========================================================================
+    # KNOWLEDGE GRAPH OPERATIONS
+    # =========================================================================
+
+    async def knowledge_search(self, search_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Search knowledge entities semantically"""
+        try:
+            ctx = self._extract_context_headers(search_data)
+            logger.debug("Searching knowledge entities | query=%s", search_data.get("query", "")[:50])
+            return await self.post_json(
+                "/knowledge/search",
+                json=search_data,
+                tenant_id=ctx["tenant_id"],
+                user_id=ctx["user_id"],
+                request_id=ctx["request_id"],
+            )
+        except Exception as e:
+            logger.exception("❌ Knowledge search failed | error=%s", e)
+            raise
+
+    async def knowledge_list_entities(
+        self,
+        tenant_id: str,
+        entity_type: Optional[str] = None,
+        domain: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """List knowledge entities for a tenant"""
+        try:
+            params = {
+                "tenant_id": tenant_id,
+                "limit": limit
+            }
+            if entity_type:
+                params["entity_type"] = entity_type
+            if domain:
+                params["domain"] = domain
+
+            logger.debug("Listing knowledge entities | tenant=%s type=%s", tenant_id, entity_type)
+            return await self.get_json("/knowledge/entities", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to list knowledge entities | error=%s", e)
+            raise
+
+    async def knowledge_get_entity(self, entity_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Get a specific knowledge entity"""
+        try:
+            params = {"tenant_id": tenant_id}
+            return await self.get_json(f"/knowledge/entities/{entity_id}", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get knowledge entity | entity_id=%s error=%s", entity_id, e)
+            raise
+
+    async def knowledge_delete_entity(self, entity_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Delete a knowledge entity"""
+        try:
+            params = {"tenant_id": tenant_id}
+            response = await self.delete(f"/knowledge/entities/{entity_id}", params=params)
+            if response.status_code < 400:
+                return {"status": "deleted", "entity_id": entity_id}
+            return {"status": "error", "entity_id": entity_id}
+        except Exception as e:
+            logger.exception("❌ Failed to delete knowledge entity | entity_id=%s error=%s", entity_id, e)
+            raise
+
+    async def knowledge_delete_by_document(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Delete all knowledge entities from a document"""
+        try:
+            params = {"tenant_id": tenant_id}
+            return await self.delete_json(f"/knowledge/documents/{document_id}/knowledge", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to delete document knowledge | document_id=%s error=%s", document_id, e)
+            raise
+
+    async def knowledge_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """Get knowledge graph statistics"""
+        try:
+            params = {"tenant_id": tenant_id}
+            return await self.get_json("/knowledge/stats", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get knowledge stats | error=%s", e)
+            raise
+
+    # =========================================================================
+    # USER LEARNING OPERATIONS
+    # =========================================================================
+
+    async def learning_get_profile(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+        """Get user learning profile"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            logger.debug("Getting learning profile | user=%s", user_id[:8] if user_id else "None")
+            return await self.get_json("/learning/profile", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get learning profile | error=%s", e)
+            raise
+
+    async def learning_update_profile(
+        self,
+        tenant_id: str,
+        user_id: str,
+        profile_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update user learning profile preferences"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            logger.debug("Updating learning profile | user=%s", user_id[:8] if user_id else "None")
+            return await self.put_json("/learning/profile", json=profile_data, params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to update learning profile | error=%s", e)
+            raise
+
+    async def learning_record_feedback(
+        self,
+        tenant_id: str,
+        user_id: str,
+        feedback_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Record user feedback for learning"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            logger.debug("Recording feedback | user=%s rating=%s", user_id[:8] if user_id else "None", feedback_data.get("rating"))
+            return await self.post_json("/learning/feedback", json=feedback_data, params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to record feedback | error=%s", e)
+            raise
+
+    async def learning_record_document_view(
+        self,
+        tenant_id: str,
+        user_id: str,
+        view_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Record document view for learning"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            logger.debug("Recording document view | user=%s document=%s", user_id[:8] if user_id else "None", view_data.get("document_id"))
+            return await self.post_json("/learning/document-view", json=view_data, params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to record document view | error=%s", e)
+            raise
+
+    async def learning_get_stats(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+        """Get learning statistics for a user"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            return await self.get_json("/learning/stats", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get learning stats | error=%s", e)
+            raise
+
+    async def learning_get_context(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+        """Get full user context for Emma"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            return await self.get_json("/learning/context", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get user context | error=%s", e)
+            raise
+
+    async def learning_get_ranking_weights(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+        """Get personalized ranking weights"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            return await self.get_json("/learning/ranking-weights", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get ranking weights | error=%s", e)
+            raise
+
+    async def learning_flush(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+        """Flush pending learning data"""
+        try:
+            params = {"tenant_id": tenant_id, "user_id": user_id}
+            return await self.post_json("/learning/flush", json={}, params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to flush learning data | error=%s", e)
+            raise
+
+
 # Global client instance
 weaviate_client = WeaviateClient()

@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Any
 from .conversation import ConversationMemory, get_conversation_memory
 from .preferences import PreferencesStore, get_preferences_store
 from .types import ConversationContext, UserPreferences, MessageRole
+from .learning_service import PreferenceLearningService, UserInteraction, get_learning_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ class MemoryService:
     def __init__(
         self,
         conversation_memory: Optional[ConversationMemory] = None,
-        preferences_store: Optional[PreferencesStore] = None
+        preferences_store: Optional[PreferencesStore] = None,
+        learning_service: Optional[PreferenceLearningService] = None
     ):
         """
         Initialize memory service.
@@ -42,10 +44,13 @@ class MemoryService:
         Args:
             conversation_memory: ConversationMemory instance (uses singleton if None)
             preferences_store: PreferencesStore instance (uses singleton if None)
+            learning_service: PreferenceLearningService instance (uses singleton if None)
         """
         self._conversation = conversation_memory or get_conversation_memory()
         self._preferences = preferences_store or get_preferences_store()
+        self._learning = learning_service or get_learning_service()
         self._initialized = False
+        self._learning_enabled = True  # Feature flag for learning
 
     async def initialize(self) -> None:
         """Initialize all memory stores."""
@@ -54,6 +59,16 @@ class MemoryService:
 
         await self._conversation.connect()
         await self._preferences.connect()
+
+        # Initialize learning service
+        if self._learning_enabled:
+            try:
+                await self._learning.initialize()
+                logger.info("✅ Learning service initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Learning service init failed (continuing without): {e}")
+                self._learning_enabled = False
+
         self._initialized = True
         logger.info("✅ MemoryService initialized")
 
@@ -141,6 +156,21 @@ class MemoryService:
         # Also record query for learning if user_id provided
         if user_id:
             await self._preferences.record_query(tenant_id, user_id, user_message)
+
+            # Record interaction for preference learning
+            if self._learning_enabled:
+                try:
+                    interaction = UserInteraction(
+                        interaction_type="query",
+                        query_text=user_message,
+                        intent_detected=metadata.get("intent"),
+                        session_id=session_id,
+                        results_shown=metadata.get("results_count"),
+                        selected_document_ids=metadata.get("source_document_ids", [])
+                    )
+                    await self._learning.record_interaction(user_id, tenant_id, interaction)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to record learning interaction: {e}")
 
         return context
 
@@ -262,9 +292,11 @@ class MemoryService:
             - frequent_queries: Recent queries
             - frequent_documents: Frequently accessed docs
             - custom_settings: Any custom settings
+            - learning: Learned preferences and ranking weights
         """
         prefs = await self._preferences.get_preferences(tenant_id, user_id)
-        return {
+
+        context = {
             # Personalization fields
             "name": prefs.display_name,
             "language": prefs.preferred_language or prefs.language,
@@ -279,8 +311,25 @@ class MemoryService:
             "frequent_queries": prefs.frequent_queries[:5],
             "frequent_documents": prefs.frequent_documents[:5],
             "favorite_tools": prefs.favorite_tools,
-            "custom_settings": prefs.custom_settings
+            "custom_settings": prefs.custom_settings,
+            # Learning flags
+            "learning_enabled": self._learning_enabled,
+            "learning_applied": False
         }
+
+        # Enrich with learning service data
+        if self._learning_enabled:
+            try:
+                learning_context = await self._learning.get_user_context_for_emma(
+                    user_id, tenant_id
+                )
+                context["learning"] = learning_context
+                context["ranking_weights"] = learning_context.get("ranking_weights", {})
+                context["learning_applied"] = True
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get learning context: {e}")
+
+        return context
 
     # =========================================================================
     # Combined Operations
@@ -323,6 +372,127 @@ class MemoryService:
             result["user_context"] = await self.get_user_context(tenant_id, user_id)
 
         return result
+
+    # =========================================================================
+    # Learning Operations
+    # =========================================================================
+
+    async def record_feedback(
+        self,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        rating: int,
+        feedback_text: Optional[str] = None
+    ) -> None:
+        """
+        Record user feedback for learning.
+
+        Args:
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            session_id: Session identifier
+            rating: Rating 1-5
+            feedback_text: Optional feedback comment
+        """
+        if not self._learning_enabled:
+            return
+
+        try:
+            interaction = UserInteraction(
+                interaction_type="feedback",
+                session_id=session_id,
+                feedback_rating=rating,
+                feedback_text=feedback_text
+            )
+            await self._learning.record_interaction(user_id, tenant_id, interaction)
+            logger.info(f"📊 Recorded feedback: {rating}/5 for user {user_id[:8]}...")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record feedback: {e}")
+
+    async def record_document_view(
+        self,
+        tenant_id: str,
+        user_id: str,
+        document_id: str,
+        dwell_time_seconds: Optional[int] = None,
+        scroll_depth: Optional[float] = None,
+        actions: Optional[List[str]] = None
+    ) -> None:
+        """
+        Record a document view for learning.
+
+        Args:
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            document_id: Document ID viewed
+            dwell_time_seconds: Time spent on document
+            scroll_depth: How far user scrolled (0-100)
+            actions: Actions taken (download, share, etc.)
+        """
+        # Record in preferences (existing behavior)
+        await self._preferences.record_document_access(tenant_id, user_id, document_id)
+
+        # Record for learning
+        if self._learning_enabled:
+            try:
+                interaction = UserInteraction(
+                    interaction_type="document_view",
+                    document_id=document_id,
+                    dwell_time_seconds=dwell_time_seconds,
+                    scroll_depth_percentage=scroll_depth,
+                    actions_taken=actions or []
+                )
+                await self._learning.record_interaction(user_id, tenant_id, interaction)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to record document view: {e}")
+
+    async def get_ranking_weights(
+        self,
+        tenant_id: str,
+        user_id: str
+    ) -> Dict[str, float]:
+        """
+        Get personalized ranking weights for RAG results.
+
+        Returns:
+            Dictionary with weights for recency, frequency, relevance
+        """
+        if not self._learning_enabled:
+            return {"recency": 0.3, "frequency": 0.3, "relevance": 0.4}
+
+        try:
+            return await self._learning.get_personalized_ranking_weights(user_id, tenant_id)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to get ranking weights: {e}")
+            return {"recency": 0.3, "frequency": 0.3, "relevance": 0.4}
+
+    async def get_learning_stats(
+        self,
+        tenant_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """Get learning statistics for a user."""
+        if not self._learning_enabled:
+            return {"learning_enabled": False}
+
+        try:
+            return await self._learning.get_learning_stats(user_id, tenant_id)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to get learning stats: {e}")
+            return {"learning_enabled": False, "error": str(e)}
+
+    async def flush_learning_data(
+        self,
+        tenant_id: str,
+        user_id: str
+    ) -> None:
+        """Flush pending learning data (call on session end)."""
+        if self._learning_enabled:
+            try:
+                await self._learning.flush_interactions(user_id, tenant_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to flush learning data: {e}")
 
 
 # Singleton instance

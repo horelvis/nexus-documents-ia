@@ -485,7 +485,7 @@ Responde SOLO una palabra:"""
                 confidence_score=0.9 if result.success else 0.5,
                 execution_time_ms=execution_time_ms,
                 iterations=len(result.agents_delegated) if result.agents_delegated else 1,
-                learning_applied=False,
+                learning_applied=user_context.get("learning_applied", False) if user_context else False,
                 suggestions=self._generate_suggestions(query.query),
                 available_tools=self._available_tools
             )
@@ -574,6 +574,10 @@ Responde SOLO una palabra:"""
 
             logger.debug(f"🔐 Stream ACL context: user={user_id}, roles={len(query.user_role_ids or [])}, admin={query.is_admin}")
 
+            # Collect response for learning/memory storage
+            full_response = []
+            tools_used = []
+
             async for event in self._coordinator.execute_stream(
                 query=query.query,
                 tenant_id=query.tenant_id,
@@ -586,7 +590,31 @@ Responde SOLO una palabra:"""
                 if "data" not in event:
                     event["data"] = {}
                 event["data"]["session_id"] = session_id
+
+                # Collect response text for memory storage
+                event_type = event.get("event", "")
+                if event_type == "answer":
+                    full_response.append(event["data"].get("content", ""))
+                elif event_type == "tool_use":
+                    tools_used.append(event["data"].get("tool", ""))
+
                 yield event
+
+            # Store conversation and record interaction for learning
+            if full_response:
+                response_text = "".join(full_response)
+                try:
+                    await self._store_conversation(
+                        tenant_id=query.tenant_id,
+                        session_id=session_id,
+                        user_query=query.query,
+                        assistant_response=response_text,
+                        user_id=user_id,
+                        tools_used=tools_used
+                    )
+                    logger.debug(f"💾 Stream conversation stored for learning")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to store stream conversation: {e}")
 
         except Exception as e:
             logger.error(f"❌ Emma stream failed: {e}")

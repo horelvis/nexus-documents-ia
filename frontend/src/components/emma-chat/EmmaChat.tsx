@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import { useBackendUser } from "@/contexts/user-context"
 import { useEmmaService, EmmaStreamEvent, classifyError } from "@/lib/services/emma.service"
 import { useDocumentService } from "@/lib/services/document.service"
+import { useLearningService } from "@/lib/services/learning.service"
 import { useTranslation } from "@/lib/i18n/hooks"
 import { useRouter } from "next/navigation"
 import { EmmaQueryInput } from "./EmmaQueryInput"
@@ -37,6 +38,7 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
   const { backendUser } = useBackendUser()
   const { sendMessage, queryEmmaStream } = useEmmaService()
   const documentService = useDocumentService()
+  const learningService = useLearningService()
   const router = useRouter()
   const { t } = useTranslation()
 
@@ -285,6 +287,38 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
             ))
           }
 
+          // Handle Human-in-the-Loop clarification requests
+          if (event.event === 'clarification_needed' || event.event === 'confirmation_needed' || event.event === 'suggestions_available') {
+            setStreamProgress(null)
+
+            // Replace progress message with clarification UI
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    type: "clarification" as const,
+                    content: data.question || "Emma necesita tu ayuda",
+                    metadata: {
+                      ...msg.metadata,
+                      clarification: {
+                        question: data.question || "",
+                        header: data.header || "Opción",
+                        options: data.options || [],
+                        multi_select: data.multi_select || false,
+                        severity: data.severity,
+                        type: event.event === 'confirmation_needed' ? 'confirmation'
+                            : event.event === 'suggestions_available' ? 'suggestion'
+                            : 'clarification'
+                      }
+                    }
+                  }
+                : msg
+            ))
+
+            // Keep loading state - waiting for user response
+            // setIsLoading will be set to false when user submits clarification
+          }
+
           // Handle completion
           if (event.event === 'complete') {
             setStreamProgress(null)
@@ -449,9 +483,26 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
     }
   }
 
-  const handleFeedback = (messageId: string, feedback: 'positive' | 'negative') => {
-    // TODO: Implement feedback system
-    console.log('Feedback:', messageId, feedback)
+  const handleFeedback = async (messageId: string, feedback: 'positive' | 'negative') => {
+    try {
+      // Record feedback for learning system
+      const result = await learningService.recordFeedback(
+        conversationId,
+        feedback
+      )
+
+      if (result.data) {
+        // Visual feedback to user
+        toast.success(
+          feedback === 'positive'
+            ? '¡Gracias por tu feedback!'
+            : 'Trabajaremos para mejorar.'
+        )
+      }
+    } catch (error) {
+      console.error('Failed to record feedback:', error)
+      // Don't show error to user - feedback is non-critical
+    }
   }
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -467,6 +518,50 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
     // Re-execute the query
     handleSendQuery(failedQuery)
   }
+
+  // Handle Human-in-the-Loop clarification response
+  const handleClarificationSubmit = useCallback((messageId: string, selectedValues: string[]) => {
+    // Find the clarification message to get context
+    const clarificationMsg = messages.find(m => m.id === messageId)
+    if (!clarificationMsg?.metadata?.clarification) return
+
+    const { question, options } = clarificationMsg.metadata.clarification
+
+    // Build response context
+    // If custom input (starts with "custom:"), use that text
+    const isCustom = selectedValues[0]?.startsWith("custom:")
+    let responseText: string
+
+    if (isCustom) {
+      responseText = selectedValues[0].replace("custom:", "").trim()
+    } else {
+      // Map selected values to labels for natural language
+      const selectedLabels = selectedValues
+        .map(v => options?.find((o: { value: string; label: string }) => o.value === v)?.label || v)
+        .join(", ")
+      responseText = selectedLabels
+    }
+
+    // Update the clarification message to show what was selected
+    setMessages(prev => prev.map(msg =>
+      msg.id === messageId
+        ? {
+            ...msg,
+            type: "result" as const,
+            content: `**${question}**\n\n✅ Seleccionaste: ${responseText}`,
+            metadata: {
+              ...msg.metadata,
+              clarification: undefined // Clear clarification data
+            }
+          }
+        : msg
+    ))
+
+    // Send the response as a continuation query with context
+    // The backend will receive this and continue the conversation
+    const continuationQuery = `[Respuesta a clarificación: ${responseText}]`
+    handleSendQuery(continuationQuery)
+  }, [messages, handleSendQuery])
 
   const hasMessages = messages.length > 0
 
@@ -485,6 +580,7 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
               onDocumentClick={handleDocumentClick}
               onPreviewClick={handlePreviewClick}
               onRetry={handleRetry}
+              onClarificationSubmit={handleClarificationSubmit}
               isAdmin={isAdmin}
             />
           </div>

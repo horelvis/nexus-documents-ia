@@ -599,7 +599,361 @@ class WeaviateService:
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection {collection_name} exists: {e}")
             return False
-    
+
+    # =========================================================================
+    # KNOWLEDGE GRAPH COLLECTION METHODS
+    # =========================================================================
+
+    def get_knowledge_collection_name(self, tenant_id: str) -> str:
+        """Get the knowledge collection name for a tenant"""
+        # Sanitize tenant_id for collection name (alphanumeric only)
+        safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
+        return f"Nexus_{safe_tenant}_knowledge"
+
+    async def create_knowledge_collection(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Create a knowledge collection for storing extracted entities.
+
+        This collection stores knowledge entities (persons, organizations, clauses, terms, etc.)
+        extracted from documents, enabling semantic search over the knowledge graph.
+        """
+        collection_name = self.get_knowledge_collection_name(tenant_id)
+
+        try:
+            # Check if already exists
+            collections = await self.list_collections()
+            if collection_name in collections or collection_name.capitalize() in collections:
+                logger.info(f"✅ Knowledge collection {collection_name} already exists")
+                return {"class": collection_name, "status": "exists"}
+
+            # Create knowledge collection with specific schema
+            collection = self.client.collections.create(
+                name=collection_name,
+                description=f"Knowledge entities for tenant {tenant_id}",
+                properties=[
+                    # Entity identification
+                    weaviate.classes.config.Property(
+                        name="entity_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="PostgreSQL entity UUID"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="entity_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Type: person, organization, clause, term, date, amount, location"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="entity_value",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Normalized entity value"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="entity_label",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Human-readable label"
+                    ),
+                    # Context for embedding
+                    weaviate.classes.config.Property(
+                        name="context_text",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Context text for semantic embedding"
+                    ),
+                    # Domain and source
+                    weaviate.classes.config.Property(
+                        name="domain",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Domain: legal, fiscal, hr, general"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="source_document_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Source document UUID"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="confidence",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Extraction confidence 0.0-1.0"
+                    ),
+                    # Related entities (denormalized for fast search)
+                    weaviate.classes.config.Property(
+                        name="related_entity_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Related entity UUIDs"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="related_document_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Related document UUIDs"
+                    ),
+                    # Metadata
+                    weaviate.classes.config.Property(
+                        name="tenant_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Tenant identifier"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="attributes",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="JSON-encoded additional attributes"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="created_at",
+                        data_type=weaviate.classes.config.DataType.DATE,
+                        description="Creation timestamp"
+                    ),
+                    # ACL (inherited from source document)
+                    weaviate.classes.config.Property(
+                        name="acl_user_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="User IDs with access"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_role_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Role IDs with access"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_everyone",
+                        data_type=weaviate.classes.config.DataType.BOOL,
+                        description="Public access flag"
+                    ),
+                ]
+            )
+
+            result = {"class": collection_name, "status": "created"}
+            logger.info(f"✅ Created knowledge collection: {collection_name}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Failed to create knowledge collection {collection_name}: {e}")
+            raise
+
+    async def add_knowledge_entity(
+        self,
+        tenant_id: str,
+        entity_id: str,
+        entity_type: str,
+        entity_value: str,
+        context_text: str,
+        entity_label: Optional[str] = None,
+        domain: Optional[str] = None,
+        source_document_id: Optional[str] = None,
+        confidence: float = 0.0,
+        related_entity_ids: Optional[List[str]] = None,
+        related_document_ids: Optional[List[str]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        acl_user_ids: Optional[List[str]] = None,
+        acl_role_ids: Optional[List[str]] = None,
+        acl_everyone: bool = False
+    ) -> str:
+        """
+        Add a knowledge entity to Weaviate for semantic search.
+
+        Returns the Weaviate object UUID (embedding_id to store in PostgreSQL).
+        """
+        collection_name = self.get_knowledge_collection_name(tenant_id)
+
+        # Ensure collection exists
+        await self.create_knowledge_collection(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Generate embedding from context text
+            embedding = await self.get_embedding(context_text)
+
+            # Prepare entity data
+            import json
+            entity_data = {
+                "entity_id": entity_id,
+                "entity_type": entity_type,
+                "entity_value": entity_value,
+                "entity_label": entity_label or entity_value,
+                "context_text": context_text,
+                "domain": domain or "general",
+                "source_document_id": source_document_id or "",
+                "confidence": confidence,
+                "related_entity_ids": related_entity_ids or [],
+                "related_document_ids": related_document_ids or [],
+                "tenant_id": tenant_id,
+                "attributes": json.dumps(attributes or {}),
+                "created_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                "acl_user_ids": acl_user_ids or [],
+                "acl_role_ids": acl_role_ids or [],
+                "acl_everyone": acl_everyone,
+            }
+
+            # Add to Weaviate with embedding
+            weaviate_uuid = collection.data.insert(
+                properties=entity_data,
+                vector=embedding
+            )
+
+            logger.info(f"✅ Added knowledge entity {entity_id} ({entity_type}) to Weaviate: {weaviate_uuid}")
+            return str(weaviate_uuid)
+
+        except Exception as e:
+            logger.error(f"❌ Failed to add knowledge entity: {e}")
+            raise
+
+    async def search_knowledge_entities(
+        self,
+        tenant_id: str,
+        query: str,
+        entity_types: Optional[List[str]] = None,
+        domain: Optional[str] = None,
+        limit: int = 10,
+        min_certainty: float = 0.5,
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Search knowledge entities semantically.
+
+        Supports filtering by entity_type, domain, and ACL.
+        """
+        collection_name = self.get_knowledge_collection_name(tenant_id)
+
+        try:
+            # Check collection exists
+            collections = await self.list_collections()
+            if collection_name not in collections and collection_name.capitalize() not in collections:
+                logger.warning(f"Knowledge collection {collection_name} does not exist")
+                return []
+
+            collection = self.client.collections.get(collection_name)
+
+            # Generate query embedding
+            query_embedding = await self.get_embedding(query)
+
+            # Build filters
+            filters = []
+
+            if entity_types:
+                type_filters = [
+                    weaviate.classes.query.Filter.by_property("entity_type").equal(et)
+                    for et in entity_types
+                ]
+                if len(type_filters) == 1:
+                    filters.append(type_filters[0])
+                else:
+                    filters.append(weaviate.classes.query.Filter.any_of(type_filters))
+
+            if domain:
+                filters.append(
+                    weaviate.classes.query.Filter.by_property("domain").equal(domain)
+                )
+
+            # ACL filtering (if not admin)
+            if not is_admin and (user_id or user_role_ids):
+                acl_filters = [
+                    weaviate.classes.query.Filter.by_property("acl_everyone").equal(True)
+                ]
+                if user_id:
+                    acl_filters.append(
+                        weaviate.classes.query.Filter.by_property("acl_user_ids").contains_any([user_id])
+                    )
+                if user_role_ids:
+                    acl_filters.append(
+                        weaviate.classes.query.Filter.by_property("acl_role_ids").contains_any(user_role_ids)
+                    )
+                filters.append(weaviate.classes.query.Filter.any_of(acl_filters))
+
+            # Combine filters
+            combined_filter = None
+            if filters:
+                combined_filter = filters[0]
+                for f in filters[1:]:
+                    combined_filter = combined_filter & f
+
+            # Execute search
+            response = collection.query.near_vector(
+                near_vector=query_embedding,
+                limit=limit,
+                certainty=min_certainty,
+                filters=combined_filter,
+                return_metadata=weaviate.classes.query.MetadataQuery(certainty=True, distance=True)
+            )
+
+            # Format results
+            results = []
+            for obj in response.objects:
+                import json
+                result = {
+                    "entity_id": obj.properties.get("entity_id"),
+                    "entity_type": obj.properties.get("entity_type"),
+                    "entity_value": obj.properties.get("entity_value"),
+                    "entity_label": obj.properties.get("entity_label"),
+                    "domain": obj.properties.get("domain"),
+                    "source_document_id": obj.properties.get("source_document_id"),
+                    "confidence": obj.properties.get("confidence"),
+                    "context_text": obj.properties.get("context_text"),
+                    "attributes": json.loads(obj.properties.get("attributes", "{}")),
+                    "related_entity_ids": obj.properties.get("related_entity_ids", []),
+                    "related_document_ids": obj.properties.get("related_document_ids", []),
+                    "similarity_score": obj.metadata.certainty if obj.metadata else None,
+                    "weaviate_id": str(obj.uuid),
+                }
+                results.append(result)
+
+            logger.info(f"🔍 Knowledge search returned {len(results)} entities for query: {query[:50]}...")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Failed to search knowledge entities: {e}")
+            return []
+
+    async def delete_knowledge_entity(self, tenant_id: str, entity_id: str) -> bool:
+        """Delete a knowledge entity from Weaviate by its PostgreSQL entity_id"""
+        collection_name = self.get_knowledge_collection_name(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Find and delete by entity_id
+            response = collection.query.fetch_objects(
+                filters=weaviate.classes.query.Filter.by_property("entity_id").equal(entity_id),
+                limit=1
+            )
+
+            if response.objects:
+                collection.data.delete_by_id(response.objects[0].uuid)
+                logger.info(f"✅ Deleted knowledge entity {entity_id} from Weaviate")
+                return True
+
+            logger.warning(f"⚠️ Knowledge entity {entity_id} not found in Weaviate")
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ Failed to delete knowledge entity {entity_id}: {e}")
+            return False
+
+    async def delete_knowledge_by_document(self, tenant_id: str, document_id: str) -> int:
+        """Delete all knowledge entities from a specific document"""
+        collection_name = self.get_knowledge_collection_name(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Find all entities from this document
+            response = collection.query.fetch_objects(
+                filters=weaviate.classes.query.Filter.by_property("source_document_id").equal(document_id),
+                limit=1000
+            )
+
+            deleted_count = 0
+            for obj in response.objects:
+                collection.data.delete_by_id(obj.uuid)
+                deleted_count += 1
+
+            logger.info(f"✅ Deleted {deleted_count} knowledge entities from document {document_id}")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"❌ Failed to delete knowledge entities for document {document_id}: {e}")
+            return 0
+
     async def add_document(self, collection_name: str, document: DocumentCreate) -> DocumentResponse:
         """Add a document to Weaviate"""
         try:
@@ -1375,7 +1729,10 @@ class WeaviateService:
         tenant_id: str,
         limit: int = 10,
         filters: Optional[Dict[str, Any]] = None,
-        search_type: str = "hybrid"
+        search_type: str = "hybrid",
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Search across multiple collections and aggregate results.
@@ -1387,6 +1744,9 @@ class WeaviateService:
             limit: Max results per collection
             filters: Optional filters (applied only if collection has the property)
             search_type: Type of search (hybrid, semantic, keyword)
+            user_id: User ID for ACL filtering
+            user_role_ids: Role IDs for ACL filtering
+            is_admin: If True, bypass ACL checks
 
         Returns:
             Combined list of results from all collections, sorted by score
@@ -1404,6 +1764,16 @@ class WeaviateService:
 
                 # Build base filter for tenant isolation
                 where_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id)
+
+                # Apply ACL filtering if not admin and collection has ACL properties
+                if not is_admin and user_id:
+                    collection_has_acl = "acl_user_ids" in prop_names
+                    acl_filter = self._build_acl_filter(
+                        user_id=user_id,
+                        user_role_ids=user_role_ids,
+                        collection_has_acl=collection_has_acl
+                    )
+                    where_filter = where_filter & acl_filter
 
                 # Only apply additional filters if the property exists
                 if filters:

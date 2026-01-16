@@ -54,6 +54,13 @@ from .sharing_insights_tools import (
     query_guest_statistics,
     query_sharing_overview,
 )
+from .clarification_tools import (
+    ask_user_clarification,
+    ask_confirmation,
+    suggest_follow_up,
+    is_clarification_response,
+    parse_clarification_response,
+)
 
 __all__ = [
     # Search tools
@@ -82,4 +89,10 @@ __all__ = [
     "query_guest_activity",
     "query_guest_statistics",
     "query_sharing_overview",
+    # Human-in-the-Loop clarification tools
+    "ask_user_clarification",
+    "ask_confirmation",
+    "suggest_follow_up",
+    "is_clarification_response",
+    "parse_clarification_response",
 ]

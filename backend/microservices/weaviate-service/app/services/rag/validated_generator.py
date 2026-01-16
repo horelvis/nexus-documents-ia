@@ -23,7 +23,7 @@ from .models import (
     ClaimValidation,
     QueryIntent,
 )
-from .prompt_loader import get_prompt, get_user_prompt_template, load_prompts
+from .prompt_loader import get_prompt, get_user_prompt_template, load_prompts, get_context_root
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,14 @@ class ValidatedGenerator:
         """
         # Select appropriate system prompt from YAML config
         intent = context.query_analysis.intent
-        system_prompt = get_prompt(intent) or DEFAULT_PROMPTS.get("base")
+        intent_prompt = get_prompt(intent) or DEFAULT_PROMPTS.get("base")
+
+        # Prepend context root (document management domain context based on ISO 15489)
+        context_root = get_context_root()
+        if context_root:
+            system_prompt = f"{context_root}\n\n{intent_prompt}"
+        else:
+            system_prompt = intent_prompt
 
         # Build user prompt
         user_prompt = self._build_user_prompt(query, context)
@@ -132,7 +139,14 @@ class ValidatedGenerator:
 
         # Select appropriate system prompt from YAML config
         intent = context.query_analysis.intent
-        system_prompt = get_prompt(intent) or DEFAULT_PROMPTS.get("base")
+        intent_prompt = get_prompt(intent) or DEFAULT_PROMPTS.get("base")
+
+        # Prepend context root (document management domain context based on ISO 15489)
+        context_root = get_context_root()
+        if context_root:
+            system_prompt = f"{context_root}\n\n{intent_prompt}"
+        else:
+            system_prompt = intent_prompt
 
         # Build user prompt
         user_prompt = self._build_user_prompt(query, context)

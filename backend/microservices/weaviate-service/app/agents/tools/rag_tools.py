@@ -294,29 +294,30 @@ async def summarize_documents(
 
         combined_context = "\n\n---\n\n".join(doc_contents)
 
-        # Generate summary
-        prompt = f"""Create a comprehensive summary on the topic: "{query}"
+        # Generate summary using RAG pipeline
+        # Build a summarization-focused query that will use the retrieved documents
+        summary_query = f"""Create a comprehensive summary on the topic: "{query}"
 
-Based on the following documents:
-
-{combined_context}
-
-Provide:
+Synthesize information from the available documents and provide:
 1. Overview of what the documents say about this topic
 2. Key points from each document
 3. Any contradictions or different perspectives
-4. Overall conclusion
-"""
+4. Overall conclusion"""
 
-        result = await pipeline.generate_response(
-            query=prompt,
-            context=combined_context,
-            system_prompt="You are a research analyst. Create comprehensive summaries that synthesize multiple sources."
+        # Use the RAG pipeline to generate a response
+        # Note: process_query will do its own retrieval, but we already have context
+        rag_result = await pipeline.process_query(
+            query=summary_query,
+            tenant_id=actual_tenant_id,
+            validate_claims=False,  # Skip validation for summaries
+            top_k=max_documents,
         )
+
+        summary = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
 
         return json.dumps({
             "topic": query,
-            "summary": result,
+            "summary": summary,
             "documents_used": [
                 {
                     "title": getattr(doc, "title", "Unknown"),
@@ -362,15 +363,27 @@ async def answer_with_context(
     try:
         pipeline = _get_rag_pipeline()
 
-        result = await pipeline.generate_response(
-            query=query,
-            context=context,
-            system_prompt="Answer the question based only on the provided context. If the context doesn't contain the answer, say so."
+        # Use process_query with the provided context embedded in the query
+        # This ensures the LLM focuses on answering based on the context
+        contextual_query = f"""Based on the following context, answer this question: {query}
+
+CONTEXT:
+{context[:6000]}  # Limit context size
+
+Answer based only on the provided context. If the context doesn't contain the answer, say so."""
+
+        rag_result = await pipeline.process_query(
+            query=contextual_query,
+            tenant_id=actual_tenant_id,
+            validate_claims=False,  # Skip validation for context-based answers
+            top_k=3,  # Minimal retrieval since we already have context
         )
+
+        answer = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
 
         return json.dumps({
             "query": query,
-            "answer": result,
+            "answer": answer,
             "context_used": True,
         }, ensure_ascii=False, indent=2)
 

@@ -68,8 +68,13 @@ def _get_public_knowledge_service():
     return _public_knowledge_service
 
 
-def _format_search_results(results: List[Any], max_results: int = 10) -> str:
-    """Format search results as JSON string for agent consumption."""
+def _format_search_results(results: List[Any], max_results: int = 10, query: str = "") -> str:
+    """
+    Format search results as JSON string for agent consumption.
+
+    OpenCode-style: When multiple results are found, includes a clarification
+    flag that signals the system to ask the user for selection.
+    """
     formatted = []
     for doc in results[:max_results]:
         formatted.append({
@@ -82,6 +87,29 @@ def _format_search_results(results: List[Any], max_results: int = 10) -> str:
             ),
             "metadata": getattr(doc, "metadata", {}),
         })
+
+    # OpenCode-style interception: If multiple results, signal clarification needed
+    if len(formatted) > 1:
+        return json.dumps({
+            "results": formatted,
+            "count": len(formatted),
+            "_clarification_needed": True,
+            "_clarification": {
+                "_type": "clarification_request",
+                "question": f"Encontré {len(formatted)} documentos para '{query[:50]}...'. ¿Cuál deseas analizar?",
+                "header": "Selecciona documento",
+                "options": [
+                    {
+                        "label": doc["title"][:40] + ("..." if len(doc["title"]) > 40 else ""),
+                        "value": doc["id"],
+                        "description": doc["snippet"][:80] + "..." if len(doc["snippet"]) > 80 else doc["snippet"]
+                    }
+                    for doc in formatted[:8]  # Max 8 options for UI
+                ],
+                "multi_select": False,
+            }
+        }, ensure_ascii=False, indent=2)
+
     return json.dumps(formatted, ensure_ascii=False, indent=2)
 
 
@@ -111,8 +139,13 @@ async def _get_all_tenant_collections(tenant_id: str) -> List[str]:
         return [get_tenant_collection_name(tenant_id)]
 
 
-def _format_cross_collection_results(results: List[Dict[str, Any]], max_results: int = 10) -> str:
-    """Format results from cross-collection search."""
+def _format_cross_collection_results(results: List[Dict[str, Any]], max_results: int = 10, query: str = "") -> str:
+    """
+    Format results from cross-collection search.
+
+    OpenCode-style: When multiple results are found, includes a clarification
+    flag that signals the system to ask the user for selection.
+    """
     formatted = []
     for doc in results[:max_results]:
         source_collection = doc.get("_source_collection", "")
@@ -126,6 +159,29 @@ def _format_cross_collection_results(results: List[Dict[str, Any]], max_results:
             "source_type": source_type,  # "channel" or "document"
             "metadata": doc.get("metadata", {}),
         })
+
+    # OpenCode-style interception: If multiple results, signal clarification needed
+    if len(formatted) > 1:
+        return json.dumps({
+            "results": formatted,
+            "count": len(formatted),
+            "_clarification_needed": True,
+            "_clarification": {
+                "_type": "clarification_request",
+                "question": f"Encontré {len(formatted)} documentos para '{query[:50]}...'. ¿Cuál deseas analizar?",
+                "header": "Selecciona documento",
+                "options": [
+                    {
+                        "label": doc["title"][:40] + ("..." if len(doc["title"]) > 40 else ""),
+                        "value": doc["id"],
+                        "description": f"[{doc['source_type']}] " + (doc["snippet"][:60] + "..." if len(doc["snippet"]) > 60 else doc["snippet"])
+                    }
+                    for doc in formatted[:8]  # Max 8 options for UI
+                ],
+                "multi_select": False,
+            }
+        }, ensure_ascii=False, indent=2)
+
     return json.dumps(formatted, ensure_ascii=False, indent=2)
 
 
@@ -194,7 +250,7 @@ async def semantic_search(
                     "results": [],
                     "message": "No documents found matching the query"
                 })
-            return _format_search_results(results, max_results=top_k)
+            return _format_search_results(results, max_results=top_k, query=query)
 
         # Search across ALL tenant collections (documents + channels) with ACL filtering
         all_collections = await _get_all_tenant_collections(actual_tenant_id)
@@ -217,7 +273,7 @@ async def semantic_search(
                 "message": "No documents found matching the query"
             })
 
-        return _format_cross_collection_results(results, max_results=top_k)
+        return _format_cross_collection_results(results, max_results=top_k, query=query)
 
     except Exception as e:
         logger.exception(f"Semantic search error: {e}")
@@ -295,7 +351,7 @@ async def hybrid_search(
                 "message": "No documents found"
             })
 
-        return _format_cross_collection_results(results, max_results=top_k)
+        return _format_cross_collection_results(results, max_results=top_k, query=query)
 
     except Exception as e:
         logger.exception(f"Hybrid search error: {e}")
@@ -371,7 +427,7 @@ async def keyword_search(
                 "message": "No documents found with those keywords"
             })
 
-        return _format_cross_collection_results(results, max_results=top_k)
+        return _format_cross_collection_results(results, max_results=top_k, query=query)
 
     except Exception as e:
         logger.exception(f"Keyword search error: {e}")

@@ -47,8 +47,13 @@ from redis.asyncio.connection import ConnectionPool
 
 from agent_framework import ChatAgent, AgentThread
 from agent_framework.openai import OpenAIChatClient
+from openai import AsyncOpenAI
 
 from app.agents.config import agent_config
+
+# Timeout for LLM inference (seconds)
+# vLLM can take 30-60s for complex analysis with tool calling
+LLM_TIMEOUT_SECONDS = 120.0
 from app.core.execution_context import set_execution_context, clear_execution_context
 
 
@@ -102,7 +107,7 @@ from app.agents.orchestration import (
     get_sequential_orchestration,
     get_concurrent_orchestration,
 )
-from app.services.rag.prompt_loader import get_agent_system_message
+from app.services.rag.prompt_loader import get_agent_system_message, get_context_root
 
 logger = logging.getLogger(__name__)
 
@@ -190,12 +195,18 @@ class EmmaCoordinator:
         if self._initialized:
             return
 
-        # Create OpenAI-compatible client pointing to vLLM
-        self._client = OpenAIChatClient(
+        # Create OpenAI-compatible client pointing to vLLM with proper timeout
+        # The timeout prevents httpx from aborting requests during complex analysis
+        async_client = AsyncOpenAI(
             api_key="dummy",  # vLLM doesn't need a real key
             base_url=agent_config.vllm_base_url,
-            model_id=agent_config.vllm_model
+            timeout=LLM_TIMEOUT_SECONDS,  # 2 minutes for complex analysis
         )
+        self._client = OpenAIChatClient(
+            model_id=agent_config.vllm_model,
+            async_client=async_client,
+        )
+        logger.info(f"✅ OpenAIChatClient created with {LLM_TIMEOUT_SECONDS}s timeout")
 
         # Initialize Redis using shared connection pool (not individual connection)
         # This prevents connection exhaustion under load
@@ -253,17 +264,41 @@ class EmmaCoordinator:
             subagent_tools.append(tool)
             logger.debug(f"Converted {name} to tool")
 
-        # Load Emma's instructions from YAML or use default
-        instructions = get_agent_system_message(
+        # Add Human-in-the-Loop clarification tools
+        # These allow Emma to ask users for clarification when needed
+        from app.agents.tools.clarification_tools import (
+            ask_user_clarification,
+            ask_confirmation,
+            suggest_follow_up,
+        )
+        subagent_tools.append(ask_user_clarification)
+        subagent_tools.append(ask_confirmation)
+        subagent_tools.append(suggest_follow_up)
+        logger.info("Added 3 HITL clarification tools (ask_user_clarification, ask_confirmation, suggest_follow_up)")
+
+        # Load context root (global document management context based on ISO 15489)
+        context_root = get_context_root()
+
+        # Load Emma's agent-specific instructions from YAML or use default
+        agent_instructions = get_agent_system_message(
             "EmmaCoordinator",
             DEFAULT_EMMA_INSTRUCTIONS
         )
+
+        # Combine context root with agent-specific instructions
+        # This ensures Emma always has the document management domain context
+        if context_root:
+            full_instructions = f"{context_root}\n\n{agent_instructions}"
+            logger.info(f"Loaded context_root ({len(context_root)} chars) + agent instructions")
+        else:
+            full_instructions = agent_instructions
+            logger.warning("No context_root found, using agent instructions only")
 
         # Create Emma coordinator with all subagent tools
         self._emma = ChatAgent(
             name="Emma",
             chat_client=self._client,
-            instructions=instructions,
+            instructions=full_instructions,
             tools=subagent_tools,
         )
 
@@ -401,15 +436,19 @@ class EmmaCoordinator:
         if not self._initialized:
             await self.initialize()
 
+        # Extract document_id from user_context if present
+        focus_document_id = user_context.get("document_id") if user_context else None
+
         # Set execution context for @ai_function tools
-        # This ensures tenant_id and ACL context are available via contextvars,
+        # This ensures tenant_id, ACL context, and document focus are available via contextvars,
         # eliminating dependency on LLM to extract them correctly
         set_execution_context(
             tenant_id=tenant_id,
             user_id=user_id,
             user_role_ids=user_role_ids,
             is_admin=is_admin,
-            session_id=session_id
+            session_id=session_id,
+            document_id=focus_document_id
         )
 
         try:
@@ -762,13 +801,17 @@ class EmmaCoordinator:
         if not self._initialized:
             await self.initialize()
 
-        # Set execution context for @ai_function tools (includes ACL context)
+        # Extract document_id from user_context if present
+        focus_document_id = user_context.get("document_id") if user_context else None
+
+        # Set execution context for @ai_function tools (includes ACL context and document focus)
         set_execution_context(
             tenant_id=tenant_id,
             user_id=user_id,
             user_role_ids=user_role_ids,
             is_admin=is_admin,
-            session_id=session_id
+            session_id=session_id,
+            document_id=focus_document_id
         )
 
         try:
@@ -909,6 +952,10 @@ class EmmaCoordinator:
                         "labor_agent": "Consultando normativa laboral...",
                         "fiscal_agent": "Consultando normativa fiscal...",
                         "privacy_agent": "Verificando protección de datos...",
+                        # Human-in-the-Loop tools
+                        "ask_user_clarification": "Necesito tu ayuda para aclarar algo...",
+                        "ask_confirmation": "Esperando confirmación...",
+                        "suggest_follow_up": "Preparando sugerencias...",
                     }
                     delegation_message = tool_descriptions.get(tool_name, f"Consultando {tool_name}...")
 
@@ -932,18 +979,51 @@ class EmmaCoordinator:
             logger.info(f"🎬 STREAM COMPLETE: tools_used={tools_used}, time={execution_time_ms}ms")
             logger.info(f"🎬 STREAM ANSWER preview: {final_answer[:200] if final_answer else 'EMPTY'}...")
 
-            # Send complete event with the accumulated answer
-            yield {
-                "event": "complete",
-                "data": {
-                    "success": True,
-                    "agent": "Emma",
-                    "answer": final_answer.strip(),
-                    "tools_used": tools_used,
-                    "session_id": session_id,
-                    "execution_time_ms": execution_time_ms
+            # Check if the answer contains a clarification request (Human-in-the-Loop)
+            # This happens when Emma called ask_user_clarification, ask_confirmation, etc.
+            from app.agents.tools.clarification_tools import parse_clarification_response
+            clarification_data = parse_clarification_response(final_answer.strip())
+
+            if clarification_data:
+                # This is a clarification request - emit special event
+                request_type = clarification_data.get("_type", "clarification_request")
+                event_name = {
+                    "clarification_request": "clarification_needed",
+                    "confirmation_request": "confirmation_needed",
+                    "follow_up_suggestions": "suggestions_available",
+                }.get(request_type, "clarification_needed")
+
+                logger.info(f"🤔 HITL: Emitting {event_name} event with options: {len(clarification_data.get('options', []))} options")
+
+                yield {
+                    "event": event_name,
+                    "data": {
+                        "question": clarification_data.get("question", ""),
+                        "header": clarification_data.get("header", "Opción"),
+                        "options": clarification_data.get("options", []),
+                        "multi_select": clarification_data.get("multi_select", False),
+                        "severity": clarification_data.get("severity"),
+                        "suggestions": clarification_data.get("suggestions"),
+                        "context": clarification_data.get("context"),
+                        "session_id": session_id,
+                        "execution_time_ms": execution_time_ms,
+                        # Include raw data for frontend flexibility
+                        "_raw": clarification_data,
+                    }
                 }
-            }
+            else:
+                # Normal completion - send complete event with the accumulated answer
+                yield {
+                    "event": "complete",
+                    "data": {
+                        "success": True,
+                        "agent": "Emma",
+                        "answer": final_answer.strip(),
+                        "tools_used": tools_used,
+                        "session_id": session_id,
+                        "execution_time_ms": execution_time_ms
+                    }
+                }
 
         except Exception as e:
             logger.error(f"❌ Emma stream failed: {e}")

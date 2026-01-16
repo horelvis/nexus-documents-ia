@@ -872,7 +872,12 @@ class AsyncDocumentService:
                 except Exception as e:
                     logger.error(f"Failed to prepare document {doc_id}: {e}")
                     raise Exception(f"Document preparation failed: {str(e)}")
-                
+
+                # Initialize variables that may be set in Weaviate block
+                metadata = {}
+                weaviate_success = False
+                weaviate_error = None
+
                 try:
                     # Get full document info for metadata before storing in vector DB
                     async with AsyncSessionLocal() as db:
@@ -915,7 +920,9 @@ class AsyncDocumentService:
                     }
                     await weaviate_client.add_document(self.collection_name, weaviate_document)
                     logger.info(f"✅ Document {doc_id} stored in Weaviate")
-                    
+                    weaviate_success = True
+                    weaviate_error = None
+
                     # Prepare tag information for downstream services
                     tags_list = metadata.get("tags") or []
                     metadata["tags"] = tags_list
@@ -927,7 +934,9 @@ class AsyncDocumentService:
                     }
                 except Exception as e:
                     logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
-                    raise Exception(f"Vector storage failed: {str(e)}")
+                    weaviate_success = False
+                    weaviate_error = str(e)
+                    # Continue processing - Elasticsearch indexing will still be attempted
                 
                 # Update document status and perform routing in single session
                 async with AsyncSessionLocal() as db:

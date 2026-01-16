@@ -17,7 +17,7 @@ from typing import Annotated, List, Dict, Any, Optional
 from pydantic import Field
 
 from app.core.security import get_tenant_collection_name
-from app.core.execution_context import resolve_tenant_id
+from app.core.execution_context import resolve_tenant_id, resolve_document_id
 
 # Try to import ai_function from Agent Framework, fall back to identity decorator
 try:
@@ -82,26 +82,38 @@ async def analyze_document(
         - entities: Extracted named entities
         - analysis_specific_data: Data specific to the analysis type
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
+    # Resolve tenant_id and document_id from execution context (overrides LLM-provided values)
     actual_tenant_id = resolve_tenant_id(tenant_id)
+    actual_document_id = resolve_document_id(document_id)
+
     logger.info(f"🔍 ANALYSIS_TOOL CALLED: analyze_document")
-    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}, actual_tenant_id={actual_tenant_id}, type={analysis_type}")
+    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}")
+    logger.info(f"🔍 Resolved: actual_document_id={actual_document_id}, actual_tenant_id={actual_tenant_id}, type={analysis_type}")
+
+    # If no valid document_id, return error
+    if not actual_document_id:
+        return json.dumps({
+            "error": "No valid document_id provided or found in context",
+            "llm_provided": document_id,
+            "hint": "The document may not have been loaded correctly. Try refreshing or selecting the document again."
+        })
 
     try:
         service = _get_weaviate_service()
         collection_name = get_tenant_collection_name(actual_tenant_id)
         logger.info(f"🔍 Collection name: {collection_name}")
 
-        # Get document content
+        # Get document content using resolved document_id
         doc = await service.get_document_by_id(
             collection_name=collection_name,
-            document_id=document_id,
+            document_id=actual_document_id,
         )
 
         if not doc:
             return json.dumps({
                 "error": "Document not found",
-                "document_id": document_id
+                "document_id": actual_document_id,
+                "llm_provided": document_id
             })
 
         content = doc.get("content", "")
@@ -111,20 +123,20 @@ async def analyze_document(
         pipeline = _get_rag_pipeline()
 
         if analysis_type == "comprehensive":
-            analysis = await _comprehensive_analysis(content, title, pipeline, document_id, actual_tenant_id)
+            analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
         elif analysis_type == "summary":
-            analysis = await _summary_analysis(content, title, pipeline, document_id, actual_tenant_id)
+            analysis = await _summary_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
         elif analysis_type == "structure":
             analysis = await _structure_analysis(content, title)
         elif analysis_type == "risks":
-            analysis = await _risk_analysis(content, title, pipeline, document_id, actual_tenant_id)
+            analysis = await _risk_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
         elif analysis_type == "obligations":
-            analysis = await _obligation_analysis(content, title, pipeline, document_id, actual_tenant_id)
+            analysis = await _obligation_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
         else:
-            analysis = await _comprehensive_analysis(content, title, pipeline, document_id, actual_tenant_id)
+            analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
 
         return json.dumps({
-            "document_id": document_id,
+            "document_id": actual_document_id,
             "document_title": title,
             "analysis_type": analysis_type,
             **analysis
@@ -134,7 +146,7 @@ async def analyze_document(
         logger.exception(f"Document analysis error: {e}")
         return json.dumps({
             "error": str(e),
-            "document_id": document_id
+            "document_id": actual_document_id
         })
 
 
@@ -351,12 +363,14 @@ Provide:
 """
 
         try:
-            result = await pipeline.generate_response(
+            # Use process_query which is the correct RAGPipeline method
+            rag_result = await pipeline.process_query(
                 query=prompt,
-                context=doc_summaries,
-                system_prompt="You are a document analyst. Compare documents objectively."
+                tenant_id=actual_tenant_id,
+                validate_claims=False,
+                top_k=3,
             )
-            comparison["analysis"] = result
+            comparison["analysis"] = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
         except Exception as e:
             comparison["analysis"] = f"Detailed comparison not available: {e}"
 
@@ -435,16 +449,19 @@ Format as structured lists for each entity type.
 """
 
         try:
-            result = await pipeline.generate_response(
+            # Use process_query which is the correct RAGPipeline method
+            rag_result = await pipeline.process_query(
                 query=prompt,
-                context=content[:6000],
-                system_prompt="You are a named entity recognition system. Extract entities precisely."
+                tenant_id=actual_tenant_id,
+                validate_claims=False,
+                top_k=3,
             )
+            entities = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
             return json.dumps({
                 "document_id": document_id,
                 "document_title": title,
                 "entity_types_requested": types_to_extract,
-                "entities": result,
+                "entities": entities,
             }, ensure_ascii=False, indent=2)
         except Exception as e:
             return json.dumps({

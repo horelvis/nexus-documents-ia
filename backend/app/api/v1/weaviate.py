@@ -366,6 +366,232 @@ async def public_knowledge_get_document(doc_id: str):
 
 
 # ============================================================================
+# KNOWLEDGE GRAPH ENDPOINTS
+# ============================================================================
+
+@router.post("/knowledge/search")
+async def knowledge_search(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Search knowledge entities semantically with ACL filtering"""
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        body["is_admin"] = current_user.is_admin
+
+        return await weaviate_client.knowledge_search(body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge search proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/knowledge/entities")
+async def knowledge_list_entities(
+    entity_type: Optional[str] = None,
+    domain: Optional[str] = None,
+    limit: int = 50,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """List knowledge entities for current tenant"""
+    try:
+        return await weaviate_client.knowledge_list_entities(
+            tenant_id=tenant_id,
+            entity_type=entity_type,
+            domain=domain,
+            limit=limit
+        )
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge list entities proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/knowledge/entities/{entity_id}")
+async def knowledge_get_entity(
+    entity_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get a specific knowledge entity"""
+    try:
+        return await weaviate_client.knowledge_get_entity(entity_id, tenant_id)
+    except HTTPClientError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge get entity proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/knowledge/entities/{entity_id}")
+async def knowledge_delete_entity(
+    entity_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Delete a knowledge entity"""
+    try:
+        return await weaviate_client.knowledge_delete_entity(entity_id, tenant_id)
+    except HTTPClientError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge delete entity proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/knowledge/documents/{document_id}")
+async def knowledge_delete_by_document(
+    document_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Delete all knowledge entities from a document"""
+    try:
+        return await weaviate_client.knowledge_delete_by_document(document_id, tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge delete by document proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/knowledge/stats")
+async def knowledge_stats(
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get knowledge graph statistics for current tenant"""
+    try:
+        return await weaviate_client.knowledge_stats(tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Knowledge stats proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# USER LEARNING ENDPOINTS
+# ============================================================================
+
+@router.get("/learning/profile")
+async def learning_get_profile(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get current user's learning profile"""
+    try:
+        return await weaviate_client.learning_get_profile(tenant_id, str(current_user.id))
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning get profile proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/learning/profile")
+async def learning_update_profile(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Update current user's learning profile preferences"""
+    try:
+        body = await request.json()
+        return await weaviate_client.learning_update_profile(tenant_id, str(current_user.id), body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning update profile proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/learning/feedback")
+async def learning_record_feedback(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Record user feedback for learning"""
+    try:
+        body = await request.json()
+        return await weaviate_client.learning_record_feedback(tenant_id, str(current_user.id), body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning record feedback proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/learning/document-view")
+async def learning_record_document_view(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Record document view for learning"""
+    try:
+        body = await request.json()
+        return await weaviate_client.learning_record_document_view(tenant_id, str(current_user.id), body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning record document view proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/learning/stats")
+async def learning_get_stats(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get learning statistics for current user"""
+    try:
+        return await weaviate_client.learning_get_stats(tenant_id, str(current_user.id))
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning get stats proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/learning/context")
+async def learning_get_context(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get full user context for Emma"""
+    try:
+        return await weaviate_client.learning_get_context(tenant_id, str(current_user.id))
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning get context proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/learning/ranking-weights")
+async def learning_get_ranking_weights(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get personalized ranking weights for RAG"""
+    try:
+        return await weaviate_client.learning_get_ranking_weights(tenant_id, str(current_user.id))
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Learning get ranking weights proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # WEAVIATE SERVICE HEALTH
 # ============================================================================
 

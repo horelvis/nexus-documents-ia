@@ -277,6 +277,8 @@ const EMMA_ANALYZE_WITH_ANNOTATIONS_PATH = '/weaviate/emma/analyze-with-annotati
 const EMMA_GET_ANALYSIS_PATH = '/weaviate/emma/analysis'  // GET /analysis/{job_id}
 const EMMA_DOCUMENT_MARKDOWN_PATH = '/weaviate/emma/document/markdown'
 const EMMA_ANALYZE_MARKDOWN_PATH = '/weaviate/emma/analyze/markdown'
+const EMMA_CLARIFICATION_RESOLVE_PATH = '/weaviate/emma/clarification/resolve'
+const EMMA_CLARIFICATION_PENDING_PATH = '/weaviate/emma/clarification/pending'
 
 // Stored analysis result (from database)
 export interface StoredAnalysisResult {
@@ -321,13 +323,27 @@ export interface StoredAnalysisResult {
   updated_at: string | null
 }
 
+// Clarification option for Human-in-the-Loop UI
+export interface ClarificationOption {
+  label: string
+  value: string
+  description?: string
+}
+
 // SSE Event types from backend
 export interface EmmaStreamEvent {
-  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error'
+  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available'
   data: {
     message?: string
     progress?: number
     step?: number
+    // Human-in-the-Loop clarification fields
+    question?: string
+    header?: string
+    options?: ClarificationOption[]
+    multi_select?: boolean
+    severity?: 'info' | 'warning' | 'critical'
+    suggestions?: Array<{ label: string; action: string; description?: string }>
     total_steps?: number
     agent?: string
     description?: string
@@ -927,6 +943,89 @@ IMPORTANTE: Responde en formato estructurado para análisis legal.`
     }
   }, [getToken, apiBase])
 
+  /**
+   * Resolve a Human-in-the-Loop clarification request.
+   * Called when user selects an option from the clarification UI.
+   *
+   * This is part of the OpenCode-style permission system where the system
+   * (not the LLM) decides when to ask for user input.
+   */
+  const resolveClarification = useCallback(async (
+    sessionId: string,
+    tenantId: string,
+    selectedValues: string[],
+    requestId?: string,
+    followUpQuery?: string
+  ): Promise<{ success: boolean; message: string; selectedDocument?: { id: string } }> => {
+    const token = await getToken()
+
+    try {
+      const response = await fetchWithTimeout(
+        `${apiBase}${EMMA_CLARIFICATION_RESOLVE_PATH}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token || ''}`
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            tenant_id: tenantId,
+            request_id: requestId,
+            selected_values: selectedValues,
+            follow_up_query: followUpQuery
+          })
+        }
+      )
+
+      return await parseResponse<{ success: boolean; message: string; selected_document?: { id: string } }>(
+        response,
+        'Failed to resolve clarification'
+      )
+    } catch (error) {
+      console.error('Clarification resolution failed:', error)
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error desconocido'
+      }
+    }
+  }, [getToken, apiBase])
+
+  /**
+   * Check if there's a pending clarification for a session.
+   */
+  const getPendingClarification = useCallback(async (
+    sessionId: string,
+    tenantId: string
+  ): Promise<{ hasPending: boolean; context?: Record<string, any> }> => {
+    const token = await getToken()
+
+    try {
+      const response = await fetchWithTimeout(
+        `${apiBase}${EMMA_CLARIFICATION_PENDING_PATH}/${sessionId}?tenant_id=${tenantId}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token || ''}`
+          }
+        }
+      )
+
+      const data = await parseResponse<{ has_pending: boolean; context?: Record<string, any> }>(
+        response,
+        'Failed to get pending clarification'
+      )
+
+      return {
+        hasPending: data.has_pending,
+        context: data.context
+      }
+    } catch (error) {
+      console.error('Failed to get pending clarification:', error)
+      return { hasPending: false }
+    }
+  }, [getToken, apiBase])
+
   return useMemo(() => ({
     queryEmma,
     queryEmmaStream,
@@ -938,8 +1037,11 @@ IMPORTANTE: Responde en formato estructurado para análisis legal.`
     analyzeDocumentWithAnnotationsStream,
     getDocumentMarkdown,
     analyzeDocumentWithMarkdown,
-    getStoredAnalysis
-  }), [queryEmma, queryEmmaStream, getAvailableAgents, sendMessage, getWelcomeMessage, analyzeDocument, analyzeDocumentWithAnnotations, analyzeDocumentWithAnnotationsStream, getDocumentMarkdown, analyzeDocumentWithMarkdown, getStoredAnalysis])
+    getStoredAnalysis,
+    // Human-in-the-Loop (HITL) clarification functions
+    resolveClarification,
+    getPendingClarification,
+  }), [queryEmma, queryEmmaStream, getAvailableAgents, sendMessage, getWelcomeMessage, analyzeDocument, analyzeDocumentWithAnnotations, analyzeDocumentWithAnnotationsStream, getDocumentMarkdown, analyzeDocumentWithMarkdown, getStoredAnalysis, resolveClarification, getPendingClarification])
 }
 
 /**

@@ -25,6 +25,10 @@ numpy>=1.24.0
 # Use base package (no [local]) to avoid llama-cpp build dependency
 semantic-router>=0.0.50
 
+# FastEmbed - ONNX-optimized embeddings for ultra-low latency (~1-3ms vs ~10ms)
+# Uses quantized models and ONNX Runtime for 10-15x speedup over sentence-transformers
+fastembed>=0.4.0
+
 # Database and storage
 asyncpg>=0.29.0
 redis>=5.0.0

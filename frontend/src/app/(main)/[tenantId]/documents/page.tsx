@@ -913,7 +913,7 @@ export default function DocumentsPage() {
               <IconFolderPlus className="mr-2 h-4 w-4" />
               Nueva carpeta
             </Button>
-            <Button onClick={() => openUploadDialog()}>
+            <Button onClick={() => openUploadDialog(currentFolder || undefined)}>
               <IconPlus className="mr-2 h-4 w-4" />
               {t('documentsPage.uploadButton')}
             </Button>
@@ -1240,7 +1240,7 @@ export default function DocumentsPage() {
                   }
                 </p>
                 {!searchQuery && selectedFilter === 'all' && (
-                  <Button onClick={() => openUploadDialog()}>
+                  <Button onClick={() => openUploadDialog(currentFolder || undefined)}>
                     <IconPlus className="mr-2 h-4 w-4" />
                     {t('documentsPage.uploadButton')}
                   </Button>

@@ -39,7 +39,24 @@ export interface EmmaMarkdownFormatProps {
   className?: string
 }
 
-export type EmmaMessageType = "user" | "query" | "result" | "text" | "error" | "warning" | "info" | "self_healing_error" | "system" | "progress"
+export type EmmaMessageType = "user" | "query" | "result" | "text" | "error" | "warning" | "info" | "self_healing_error" | "system" | "progress" | "clarification"
+
+// Human-in-the-Loop clarification option
+export interface ClarificationOption {
+  label: string
+  value: string
+  description?: string
+}
+
+// Clarification request data (from HITL tools)
+export interface ClarificationData {
+  question: string
+  header?: string
+  options: ClarificationOption[]
+  multi_select?: boolean
+  severity?: 'info' | 'warning' | 'critical'
+  type?: 'clarification' | 'confirmation' | 'suggestion'
+}
 
 export interface ChainOfThoughtData {
   decision_trace: Array<{
@@ -102,6 +119,8 @@ export interface EmmaMessage {
     errorMessageKey?: string
     canRetry?: boolean
     failedQuery?: string
+    // Human-in-the-Loop clarification fields
+    clarification?: ClarificationData
   }
   suggestions?: string[]
   isStreaming?: boolean
@@ -118,6 +137,8 @@ export interface EmmaRenderChatProps {
   onDocumentClick?: (doc: DocumentInfo) => void
   onPreviewClick?: (doc: DocumentInfo) => void
   onRetry?: (failedQuery: string) => void
+  // Human-in-the-Loop clarification handler
+  onClarificationSubmit?: (messageId: string, selectedValues: string[]) => void
   currentView?: "chat" | "code" | "result"
   onViewChange?: (view: "chat" | "code" | "result") => void
   className?: string

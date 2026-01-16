@@ -1714,3 +1714,225 @@ class SiteGuestShareDocument(Base):
         Index('idx_site_guest_share_documents_share', 'share_id'),
         Index('idx_site_guest_share_documents_document', 'document_id'),
     )
+
+
+# =====================================
+# SISTEMA DE APRENDIZAJE DE EMMA AI
+# =====================================
+
+class UserLearningProfile(Base):
+    """
+    Perfil de aprendizaje del usuario - preferencias persistentes para Emma.
+
+    Almacena preferencias aprendidas de las interacciones del usuario:
+    - Estilo de respuesta preferido
+    - Tipos de documentos frecuentes
+    - Pesos personalizados para ranking de resultados
+    """
+    __tablename__ = "user_learning_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Preferencias explícitas (migradas de Redis)
+    response_style = Column(String(50), default='balanced', nullable=False)  # concise, balanced, detailed
+    expertise_level = Column(String(50), default='general', nullable=False)  # beginner, general, expert
+    preferred_language = Column(String(10), default='es', nullable=False)
+
+    # Preferencias aprendidas de uso
+    preferred_document_types = Column(JSONB, default=list, nullable=False)  # ['contract', 'invoice', ...]
+    preferred_topics = Column(JSONB, default=list, nullable=False)  # ['legal', 'fiscal', ...]
+    search_patterns = Column(JSONB, default=dict, nullable=False)  # Patrones de búsqueda detectados
+
+    # Métricas de engagement
+    total_queries = Column(Integer, default=0, nullable=False)
+    total_document_views = Column(Integer, default=0, nullable=False)
+    avg_session_duration_seconds = Column(Integer, default=0, nullable=False)
+
+    # Pesos personalizados para ranking de resultados
+    ranking_weights = Column(JSONB, default=lambda: {"recency": 0.3, "frequency": 0.3, "relevance": 0.4}, nullable=False)
+
+    # Documentos y queries frecuentes (para acceso rápido)
+    frequent_document_ids = Column(JSONB, default=list, nullable=False)  # Top 20 document UUIDs
+    frequent_queries = Column(JSONB, default=list, nullable=False)  # Last 50 queries
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'tenant_id', name='uq_user_learning_profile'),
+        Index('idx_user_learning_profiles_user', 'user_id'),
+        Index('idx_user_learning_profiles_tenant', 'tenant_id'),
+    )
+
+
+class UserInteractionHistory(Base):
+    """
+    Historial de interacciones del usuario con Emma para aprendizaje.
+
+    Registra cada interacción significativa:
+    - Queries realizadas
+    - Documentos vistos/descargados
+    - Feedback explícito
+    - Resultados seleccionados
+    """
+    __tablename__ = "user_interaction_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Tipo de interacción
+    interaction_type = Column(String(50), nullable=False, index=True)  # query, document_view, document_download, feedback
+
+    # Documento relacionado (si aplica)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+
+    # Contexto de la interacción
+    query_text = Column(Text, nullable=True)  # Query del usuario si aplica
+    intent_detected = Column(String(50), nullable=True)  # search, analyze, compare, summarize, extract
+
+    # Feedback implícito (comportamiento)
+    dwell_time_seconds = Column(Integer, nullable=True)  # Tiempo en documento
+    scroll_depth_percentage = Column(Float, nullable=True)  # Profundidad de scroll (0-100)
+    actions_taken = Column(JSONB, default=list, nullable=False)  # ['download', 'share', 'annotate']
+
+    # Para queries: métricas de resultados
+    results_shown = Column(Integer, nullable=True)  # Número de resultados mostrados
+    results_clicked = Column(Integer, nullable=True)  # Número de resultados clickeados
+    selected_document_ids = Column(JSONB, default=list, nullable=False)  # Documentos seleccionados de resultados
+
+    # Feedback explícito
+    feedback_rating = Column(Integer, nullable=True)  # 1-5 rating
+    feedback_text = Column(Text, nullable=True)  # Comentario de feedback
+
+    # Contexto de sesión
+    session_id = Column(String(255), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User")
+    tenant = relationship("Tenant")
+    document = relationship("Document")
+
+    __table_args__ = (
+        Index('idx_user_interactions_user_type', 'user_id', 'interaction_type'),
+        Index('idx_user_interactions_tenant_date', 'tenant_id', 'created_at'),
+        Index('idx_user_interactions_session', 'session_id'),
+    )
+
+
+class KnowledgeEntity(Base):
+    """
+    Entidad de conocimiento extraída de documentos.
+
+    Representa conceptos, personas, organizaciones, cláusulas, términos, etc.
+    extraídos de los documentos para formar un grafo de conocimiento.
+    """
+    __tablename__ = "knowledge_entities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Identificación de la entidad
+    entity_type = Column(String(100), nullable=False, index=True)  # person, organization, clause, term, date, amount, location
+    entity_value = Column(Text, nullable=False)  # Valor normalizado (ej: "Juan García López")
+    entity_label = Column(String(500), nullable=True)  # Etiqueta legible (ej: "Representante Legal")
+
+    # Origen
+    source_document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    extraction_confidence = Column(Float, default=0.0, nullable=False)  # 0.0 - 1.0
+
+    # Embedding para búsqueda semántica en Weaviate
+    embedding_id = Column(String(100), nullable=True)  # ID del vector en Weaviate
+
+    # Metadatos adicionales específicos del tipo
+    attributes = Column(JSONB, default=dict, nullable=False)  # Atributos específicos del tipo de entidad
+
+    # Dominio/categoría
+    domain = Column(String(100), nullable=True, index=True)  # legal, fiscal, hr, general
+
+    # ACL heredado del documento fuente
+    acl_user_ids = Column(JSONB, default=list, nullable=False)
+    acl_role_ids = Column(JSONB, default=list, nullable=False)
+    acl_everyone = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant")
+    source_document = relationship("Document")
+
+    # Relaciones con otras entidades
+    outgoing_relationships = relationship(
+        "KnowledgeRelationship",
+        foreign_keys="KnowledgeRelationship.source_entity_id",
+        back_populates="source_entity",
+        cascade="all, delete-orphan"
+    )
+    incoming_relationships = relationship(
+        "KnowledgeRelationship",
+        foreign_keys="KnowledgeRelationship.target_entity_id",
+        back_populates="target_entity",
+        cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index('idx_knowledge_entities_tenant_type', 'tenant_id', 'entity_type'),
+        Index('idx_knowledge_entities_tenant_domain', 'tenant_id', 'domain'),
+        Index('idx_knowledge_entities_source_doc', 'source_document_id'),
+    )
+
+
+class KnowledgeRelationship(Base):
+    """
+    Relación entre entidades de conocimiento.
+
+    Representa conexiones semánticas entre entidades:
+    - mentions: Una entidad menciona a otra
+    - defines: Una entidad define a otra
+    - relates_to: Relación genérica
+    - contradicts: Una entidad contradice a otra
+    - supersedes: Una entidad reemplaza a otra
+    """
+    __tablename__ = "knowledge_relationships"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Entidades conectadas
+    source_entity_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False)
+    target_entity_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False)
+
+    # Tipo y fuerza de la relación
+    relationship_type = Column(String(100), nullable=False, index=True)  # mentions, defines, relates_to, contradicts, supersedes
+    relationship_strength = Column(Float, default=0.5, nullable=False)  # 0.0 - 1.0
+
+    # Contexto de la relación
+    context_snippet = Column(Text, nullable=True)  # Fragmento de texto donde se detectó la relación
+    source_document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+
+    # Metadatos adicionales (renamed from 'metadata' which is reserved in SQLAlchemy)
+    extra_data = Column(JSONB, default=dict, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant")
+    source_entity = relationship("KnowledgeEntity", foreign_keys=[source_entity_id], back_populates="outgoing_relationships")
+    target_entity = relationship("KnowledgeEntity", foreign_keys=[target_entity_id], back_populates="incoming_relationships")
+    source_document = relationship("Document")
+
+    __table_args__ = (
+        Index('idx_knowledge_rels_source', 'source_entity_id'),
+        Index('idx_knowledge_rels_target', 'target_entity_id'),
+        Index('idx_knowledge_rels_type', 'relationship_type'),
+        Index('idx_knowledge_rels_tenant', 'tenant_id'),
+    )
