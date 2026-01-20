@@ -9,16 +9,16 @@
 
 import { useState, useEffect } from 'react'
 import {
-  Check,
-  ChevronRight,
-  Cloud,
-  Database,
-  ExternalLink,
-  FolderSync,
-  Loader2,
-  RefreshCw,
-  Server,
-} from 'lucide-react'
+  IconCheck,
+  IconChevronRight,
+  IconCloud,
+  IconDatabase,
+  IconExternalLink,
+  IconFolderShare,
+  IconLoader2,
+  IconRefresh,
+  IconServer,
+} from '@tabler/icons-react'
 import {
   Button,
   Card,
@@ -44,17 +44,17 @@ const ConnectorIcon = ({ type }: { type: ConnectorType }) => {
   switch (type) {
     case 'sharepoint':
     case 'onedrive':
-      return <Cloud className={iconClass} />
+      return <IconCloud className={iconClass} />
     case 'google_drive':
     case 'google_workspace':
-      return <FolderSync className={iconClass} />
+      return <IconFolderShare className={iconClass} />
     case 's3':
     case 'azure_blob':
-      return <Database className={iconClass} />
+      return <IconDatabase className={iconClass} />
     case 'network_share':
-      return <Server className={iconClass} />
+      return <IconServer className={iconClass} />
     default:
-      return <Cloud className={iconClass} />
+      return <IconCloud className={iconClass} />
   }
 }
 
@@ -114,7 +114,7 @@ function ConnectorCard({
           </div>
           {status === 'syncing' && (
             <Badge variant="default" className="bg-green-600">
-              <Check className="h-3 w-3 mr-1" />
+              <IconCheck className="h-3 w-3 mr-1" />
               Sincronizando
             </Badge>
           )}
@@ -149,9 +149,9 @@ function ConnectorCard({
               className="flex-1"
             >
               {isLoading ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <ExternalLink className="h-4 w-4 mr-2" />
+                <IconExternalLink className="h-4 w-4 mr-2" />
               )}
               Conectar
             </Button>
@@ -164,9 +164,9 @@ function ConnectorCard({
               className="flex-1"
             >
               {isLoading ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <FolderSync className="h-4 w-4 mr-2" />
+                <IconFolderShare className="h-4 w-4 mr-2" />
               )}
               Activar sincronización
             </Button>
@@ -174,7 +174,7 @@ function ConnectorCard({
 
           {status === 'syncing' && (
             <Button variant="outline" className="flex-1" disabled>
-              <Check className="h-4 w-4 mr-2" />
+              <IconCheck className="h-4 w-4 mr-2" />
               Configurado
             </Button>
           )}
@@ -258,7 +258,7 @@ export function ConnectorOnboarding({
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="text-muted-foreground">Cargando conectores disponibles...</p>
       </div>
     )
@@ -270,7 +270,7 @@ export function ConnectorOnboarding({
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <p className="text-destructive">{error}</p>
         <Button onClick={loadStatus} variant="outline">
-          <RefreshCw className="h-4 w-4 mr-2" />
+          <IconRefresh className="h-4 w-4 mr-2" />
           Reintentar
         </Button>
       </div>
@@ -281,7 +281,7 @@ export function ConnectorOnboarding({
   if (!status || status.total_connectors === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4 text-center">
-        <Database className="h-16 w-16 text-muted-foreground" />
+        <IconDatabase className="h-16 w-16 text-muted-foreground" />
         <h3 className="text-xl font-semibold">No hay conectores disponibles</h3>
         <p className="text-muted-foreground max-w-md">
           El administrador aún no ha configurado ningún conector de datos.
@@ -349,7 +349,7 @@ export function ConnectorOnboarding({
         {status.syncing_count > 0 && (
           <Button onClick={onComplete} size="lg">
             Continuar a Emma
-            <ChevronRight className="h-4 w-4 ml-2" />
+            <IconChevronRight className="h-4 w-4 ml-2" />
           </Button>
         )}
         {status.syncing_count === 0 && onSkip && (

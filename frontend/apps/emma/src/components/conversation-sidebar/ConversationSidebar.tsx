@@ -9,18 +9,18 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Plus,
-  Search,
-  MessageSquare,
-  Pin,
-  PinOff,
-  Trash2,
-  MoreHorizontal,
-  Pencil,
-  X,
-  Clock,
-  ChevronLeft,
-} from 'lucide-react'
+  IconPlus,
+  IconSearch,
+  IconMessage,
+  IconPin,
+  IconPinnedOff,
+  IconTrash,
+  IconDotsVertical,
+  IconPencil,
+  IconX,
+  IconClock,
+  IconChevronLeft,
+} from '@tabler/icons-react'
 import {
   Sheet,
   SheetContent,
@@ -178,7 +178,7 @@ export function ConversationSidebar({
                     onOpenChange(false)
                   }}
                 >
-                  <Plus className="h-4 w-4" />
+                  <IconPlus className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Nueva conversación</TooltipContent>
@@ -189,14 +189,14 @@ export function ConversationSidebar({
               className="h-8 w-8 md:hidden"
               onClick={() => onOpenChange(false)}
             >
-              <X className="h-4 w-4" />
+              <IconX className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
         {/* Search */}
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar conversaciones..."
             value={searchQuery}
@@ -210,7 +210,7 @@ export function ConversationSidebar({
               className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
               onClick={() => setSearchQuery('')}
             >
-              <X className="h-3 w-3" />
+              <IconX className="h-3 w-3" />
             </Button>
           )}
         </div>
@@ -221,7 +221,7 @@ export function ConversationSidebar({
         <div className="p-2 space-y-1">
           {conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-              <MessageSquare className="h-12 w-12 text-muted-foreground/30 mb-3" />
+              <IconMessage className="h-12 w-12 text-muted-foreground/30 mb-3" />
               <p className="text-sm text-muted-foreground">
                 {searchQuery ? 'No se encontraron conversaciones' : 'Aún no tienes conversaciones'}
               </p>
@@ -235,7 +235,7 @@ export function ConversationSidebar({
                     onOpenChange(false)
                   }}
                 >
-                  <Plus className="h-4 w-4 mr-2" />
+                  <IconPlus className="h-4 w-4 mr-2" />
                   Nueva conversación
                 </Button>
               )}
@@ -272,7 +272,7 @@ export function ConversationSidebar({
                   ) : (
                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       {conv.pinned && (
-                        <Pin className="h-3 w-3 text-primary shrink-0" />
+                        <IconPin className="h-3 w-3 text-primary shrink-0" />
                       )}
                       <span className="text-sm font-medium truncate">{conv.title}</span>
                     </div>
@@ -287,19 +287,19 @@ export function ConversationSidebar({
                         className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
+                        <IconDotsVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
                       <DropdownMenuItem onClick={(e) => handleTogglePin(conv.id, e)}>
                         {conv.pinned ? (
                           <>
-                            <PinOff className="h-4 w-4 mr-2" />
+                            <IconPinnedOff className="h-4 w-4 mr-2" />
                             Desfijar
                           </>
                         ) : (
                           <>
-                            <Pin className="h-4 w-4 mr-2" />
+                            <IconPin className="h-4 w-4 mr-2" />
                             Fijar
                           </>
                         )}
@@ -307,7 +307,7 @@ export function ConversationSidebar({
                       <DropdownMenuItem
                         onClick={(e) => handleStartRename(conv.id, conv.title, e)}
                       >
-                        <Pencil className="h-4 w-4 mr-2" />
+                        <IconPencil className="h-4 w-4 mr-2" />
                         Renombrar
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -315,7 +315,7 @@ export function ConversationSidebar({
                         onClick={(e) => handleDeleteClick(conv.id, e)}
                         className="text-destructive focus:text-destructive"
                       >
-                        <Trash2 className="h-4 w-4 mr-2" />
+                        <IconTrash className="h-4 w-4 mr-2" />
                         Eliminar
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -332,11 +332,11 @@ export function ConversationSidebar({
                 {/* Metadata row */}
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
+                    <IconClock className="h-3 w-3" />
                     {formatRelativeTime(conv.updatedAt)}
                   </span>
                   <span className="flex items-center gap-1">
-                    <MessageSquare className="h-3 w-3" />
+                    <IconMessage className="h-3 w-3" />
                     {conv.messageCount}
                   </span>
                 </div>

@@ -1938,6 +1938,88 @@ class WeaviateService:
             logger.error(f"❌ Failed to get document by title '{title}': {e}")
             return None
 
+    async def get_document_full_content(
+        self,
+        tenant_id: str,
+        document_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the full content of a document by fetching and concatenating all its chunks.
+
+        Used by NexusLM for podcast generation - retrieves all chunks of a document,
+        sorts them by chunk_index, and returns the concatenated content.
+
+        Args:
+            tenant_id: Tenant identifier
+            document_id: Document ID to retrieve
+
+        Returns:
+            Dict with document_id, title, content (concatenated), chunk_count, word_count
+        """
+        try:
+            await self.initialize()
+            import weaviate.classes.query as wq
+
+            # Get the main documents collection for this tenant
+            from app.core.security import get_tenant_collection_name
+            collection_name = get_tenant_collection_name(tenant_id, "documents")
+
+            if not self.client.collections.exists(collection_name):
+                logger.warning(f"⚠️ Collection {collection_name} does not exist")
+                return None
+
+            collection = self.client.collections.get(collection_name)
+
+            # Fetch all chunks for this document
+            doc_filter = wq.Filter.by_property("document_id").equal(document_id)
+
+            response = collection.query.fetch_objects(
+                filters=doc_filter,
+                limit=500,  # Max chunks to retrieve
+                return_properties=["content", "chunk_index", "document_id", "title", "document_type"],
+            )
+
+            if not response.objects:
+                logger.warning(f"⚠️ No chunks found for document {document_id}")
+                return None
+
+            # Sort chunks by chunk_index
+            chunks = sorted(
+                response.objects,
+                key=lambda x: x.properties.get("chunk_index", 0) or 0
+            )
+
+            # Get document info from first chunk
+            first_chunk = chunks[0]
+            title = first_chunk.properties.get("title", "Untitled")
+            source_type = first_chunk.properties.get("document_type", "")
+
+            # Concatenate all chunk contents
+            full_content = "\n\n".join(
+                chunk.properties.get("content", "") for chunk in chunks
+            )
+
+            # Count words
+            word_count = len(full_content.split())
+
+            logger.info(
+                f"✅ Retrieved full content for document {document_id}: "
+                f"{len(chunks)} chunks, {word_count} words"
+            )
+
+            return {
+                "document_id": document_id,
+                "title": title,
+                "content": full_content,
+                "chunk_count": len(chunks),
+                "word_count": word_count,
+                "source_type": source_type,
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get full content for document {document_id}: {e}")
+            return None
+
     async def update_document_acl(
         self,
         collection_name: str,

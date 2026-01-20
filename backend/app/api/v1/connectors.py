@@ -113,11 +113,11 @@ async def _connector_to_response(
         updated_at=connector.updated_at,
         users_connected=users_connected,
         users_syncing=users_syncing,
-        # NEW: Document processing counts
-        documents_total=doc_row.total if doc_row else 0,
-        documents_pending=doc_row.pending if doc_row else 0,
-        documents_indexed=doc_row.indexed if doc_row else 0,
-        documents_failed=doc_row.failed if doc_row else 0,
+        # NEW: Document processing counts (use 'or 0' to handle NULL from SQL SUM)
+        documents_total=(doc_row.total or 0) if doc_row else 0,
+        documents_pending=(doc_row.pending or 0) if doc_row else 0,
+        documents_indexed=(doc_row.indexed or 0) if doc_row else 0,
+        documents_failed=(doc_row.failed or 0) if doc_row else 0,
     )
 
 
@@ -488,21 +488,21 @@ async def get_connector_stats(
             "valid": auth_row.valid if auth_row else 0,
         },
         "syncs": {
-            "total_users": sync_row.total if sync_row else 0,
-            "users_enabled": sync_row.enabled if sync_row else 0,
-            "documents_total": sync_row.documents_total if sync_row else 0,
-            "documents_indexed": sync_row.documents_indexed if sync_row else 0,
-            "documents_failed": sync_row.documents_failed if sync_row else 0,
-            "total_size_bytes": sync_row.total_size_bytes if sync_row else 0,
+            "total_users": (sync_row.total or 0) if sync_row else 0,
+            "users_enabled": (sync_row.enabled or 0) if sync_row else 0,
+            "documents_total": (sync_row.documents_total or 0) if sync_row else 0,
+            "documents_indexed": (sync_row.documents_indexed or 0) if sync_row else 0,
+            "documents_failed": (sync_row.documents_failed or 0) if sync_row else 0,
+            "total_size_bytes": (sync_row.total_size_bytes or 0) if sync_row else 0,
         },
         # NEW: Real document processing stats
         "documents": {
-            "total": doc_row.total if doc_row else 0,
-            "pending": doc_row.pending if doc_row else 0,
-            "processing": doc_row.processing if doc_row else 0,
-            "indexed": doc_row.indexed if doc_row else 0,
-            "failed": doc_row.failed if doc_row else 0,
-            "total_size_bytes": doc_row.total_size_bytes if doc_row else 0,
+            "total": (doc_row.total or 0) if doc_row else 0,
+            "pending": (doc_row.pending or 0) if doc_row else 0,
+            "processing": (doc_row.processing or 0) if doc_row else 0,
+            "indexed": (doc_row.indexed or 0) if doc_row else 0,
+            "failed": (doc_row.failed or 0) if doc_row else 0,
+            "total_size_bytes": (doc_row.total_size_bytes or 0) if doc_row else 0,
             "last_indexed_at": last_indexed_at.isoformat() if last_indexed_at else None,
         },
     }

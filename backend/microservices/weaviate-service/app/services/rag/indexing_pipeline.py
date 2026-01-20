@@ -234,6 +234,7 @@ class IndexingPipeline:
         user_id: Optional[str] = None,
         extraction_strategy: str = "auto",
         extract_visuals: Optional[bool] = None,
+        indexing_strategy: Optional[Dict[str, Any]] = None,
     ) -> IndexingResult:
         """
         Process a document file through the complete pipeline.
@@ -248,6 +249,11 @@ class IndexingPipeline:
             extraction_strategy: Text extraction strategy (auto, fast, hi_res)
             extract_visuals: If True, extract visual content for multimodal embedding.
                            Defaults to config setting (MULTIMODAL_EMBEDDING_ENABLED).
+            indexing_strategy: Optional strategy from Data Learning System:
+                - chunking_type: semantic, legal_sections, markdown_headers, paragraph
+                - chunking_config: {target_chunk_size, overlap, ...}
+                - embedding_fields: Fields to prioritize in embedding
+                - extract_entities: Whether to extract named entities
 
         Returns:
             IndexingResult with chunks ready for embedding
@@ -306,7 +312,7 @@ class IndexingPipeline:
             **extract_result.metadata,
         }
 
-        # Continue with text processing
+        # Continue with text processing (pass indexing strategy for adaptive chunking)
         result = await self._process_text_internal(
             document_id=document_id,
             text=extract_result.text,
@@ -314,6 +320,7 @@ class IndexingPipeline:
             tenant_id=tenant_id,
             errors=errors,
             warnings=warnings,
+            indexing_strategy=indexing_strategy,
         )
 
         # Update timing
@@ -395,8 +402,9 @@ class IndexingPipeline:
         tenant_id: str,
         errors: List[str],
         warnings: List[str],
+        indexing_strategy: Optional[Dict[str, Any]] = None,
     ) -> IndexingResult:
-        """Internal text processing (analysis + chunking)"""
+        """Internal text processing (analysis + chunking with adaptive strategy)"""
 
         # === Stage 2: Document Intelligence ===
         logger.info(f"[{document_id}] Analyzing document quality...")
@@ -437,13 +445,28 @@ class IndexingPipeline:
         else:
             text_for_chunking = text
 
-        # === Stage 3: Semantic Chunking ===
+        # === Stage 3: Semantic Chunking (with adaptive strategy) ===
         logger.info(f"[{document_id}] Starting semantic chunking...")
         chunking_start = time.time()
 
         try:
-            # Detect document type
-            doc_type = self._detect_document_type(metadata, analysis)
+            # Determine document type: use strategy if provided, otherwise detect
+            doc_type = self._get_document_type_from_strategy(
+                indexing_strategy=indexing_strategy,
+                metadata=metadata,
+                analysis=analysis,
+            )
+
+            # Log the chunking strategy being applied
+            if indexing_strategy:
+                chunking_type = indexing_strategy.get("chunking_type", "semantic")
+                chunking_config = indexing_strategy.get("chunking_config", {})
+                logger.info(
+                    f"[{document_id}] Applying learned strategy: "
+                    f"chunking_type={chunking_type}, config={chunking_config}"
+                )
+            else:
+                logger.info(f"[{document_id}] Using default strategy for type={doc_type}")
 
             # Prepare metadata for chunks
             chunk_metadata = {
@@ -454,23 +477,39 @@ class IndexingPipeline:
                 "confidence": analysis.confidence,
             }
 
-            # Chunk the document
+            # Apply chunking config from strategy if available
+            chunking_kwargs = {}
+            if indexing_strategy and indexing_strategy.get("chunking_config"):
+                config = indexing_strategy["chunking_config"]
+                if "target_chunk_size" in config:
+                    chunking_kwargs["target_chunk_size"] = config["target_chunk_size"]
+                if "max_chunk_size" in config:
+                    chunking_kwargs["max_chunk_size"] = config["max_chunk_size"]
+                if "overlap" in config:
+                    chunking_kwargs["overlap"] = config["overlap"]
+
+            # Chunk the document with strategy-aware parameters
             chunks = self.chunker.chunk_document(
                 text=text_for_chunking,
                 metadata=chunk_metadata,
                 document_type=doc_type,
+                **chunking_kwargs,
             )
 
             chunking_time = (time.time() - chunking_start) * 1000
 
-            logger.info(f"[{document_id}] Created {len(chunks)} chunks")
+            logger.info(f"[{document_id}] Created {len(chunks)} chunks (type={doc_type})")
 
-            # Enrich chunks with analysis metadata
+            # Enrich chunks with analysis metadata and strategy info
             for i, chunk in enumerate(chunks):
                 chunk.metadata["chunk_index"] = i
                 chunk.metadata["total_chunks"] = len(chunks)
                 chunk.metadata["has_tables"] = analysis.has_tables
                 chunk.metadata["has_headers"] = analysis.has_headers
+                # Add strategy info for retrieval debugging
+                if indexing_strategy:
+                    chunk.metadata["chunking_type"] = indexing_strategy.get("chunking_type")
+                    chunk.metadata["strategy_applied"] = True
 
         except Exception as e:
             logger.error(f"[{document_id}] Chunking failed: {e}")
@@ -609,6 +648,48 @@ class IndexingPipeline:
             return DocumentType.FINANCIAL_REPORT
 
         return DocumentType.GENERAL
+
+    def _get_document_type_from_strategy(
+        self,
+        indexing_strategy: Optional[Dict[str, Any]],
+        metadata: Dict[str, Any],
+        analysis: DocumentAnalysis,
+    ) -> Optional[DocumentType]:
+        """
+        Get document type from indexing strategy, falling back to detection.
+
+        The Data Learning System provides optimized chunking types based on
+        learned patterns from the connector's content model.
+
+        Strategy chunking_type mapping:
+        - legal_sections → LEGAL_CONTRACT (clause-aware chunking)
+        - legal_brief → LEGAL_BRIEF
+        - technical → TECHNICAL_MANUAL (header-aware)
+        - markdown_headers → TECHNICAL_MANUAL
+        - financial → FINANCIAL_REPORT (table-preserving)
+        - medical → MEDICAL_RECORD
+        - semantic → GENERAL (default semantic chunking)
+        - paragraph → GENERAL (simple paragraph splitting)
+        """
+        if indexing_strategy:
+            chunking_type = indexing_strategy.get("chunking_type", "").lower()
+
+            # Map strategy chunking types to DocumentType
+            strategy_type_mapping = {
+                "legal_sections": DocumentType.LEGAL_CONTRACT,
+                "legal_contract": DocumentType.LEGAL_CONTRACT,
+                "legal_brief": DocumentType.LEGAL_BRIEF,
+                "technical": DocumentType.TECHNICAL_MANUAL,
+                "markdown_headers": DocumentType.TECHNICAL_MANUAL,
+                "financial": DocumentType.FINANCIAL_REPORT,
+                "medical": DocumentType.MEDICAL_RECORD,
+            }
+
+            if chunking_type in strategy_type_mapping:
+                return strategy_type_mapping[chunking_type]
+
+        # Fall back to metadata/analysis detection
+        return self._detect_document_type(metadata, analysis)
 
     async def process_file_from_url(
         self,

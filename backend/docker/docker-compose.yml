@@ -21,6 +21,8 @@ services:
         condition: service_healthy
       background-worker:
         condition: service_started
+      podcast-service:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -36,6 +38,7 @@ services:
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - LANGEXTRACT_SERVICE_URL=${LANGEXTRACT_SERVICE_URL:-http://langextract-service:8000}
+      - PODCAST_SERVICE_URL=${PODCAST_SERVICE_URL:-http://podcast-service:8000}
       # MCP Configuration (NEW - replaces direct storage-service calls)
       - MCP_ENABLED=${MCP_ENABLED:-true}
       - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
@@ -488,13 +491,10 @@ services:
       - "--max-model-len"
       - "${VLLM_MAX_MODEL_LEN:-32768}"
       - "--gpu-memory-utilization"
-      - "0.45"
+      - "0.70"
       - "--trust-remote-code"
-      - "--enforce-eager"
-      # Reasoning parser separates <think>...</think> into reasoning_content field
-      # This prevents thinking content from appearing in the main response
-      - "--reasoning-parser"
-      - "deepseek_r1"
+      # Removed --enforce-eager to allow cudagraph optimization
+      # Note: reasoning-parser removed since Qwen3-4B base doesn't use thinking mode
     deploy:
       resources:
         reservations:
@@ -572,6 +572,65 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # NexusLM Podcast Service - AI Podcast Generation
+  # =============================================================================
+  # Generates AI podcasts from document notebooks (NotebookLM alternative)
+  # Pipeline: Analyze sources → Generate script → Synthesize audio → Stitch
+  # Uses:
+  #   - vLLM (Qwen3-4B-Thinking) for script generation
+  #   - TTS Service (VibeVoice) for voice synthesis
+  #   - pydub/ffmpeg for audio stitching
+  podcast-service:
+    build:
+      context: ../microservices/podcast-service
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      tts-service:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # vLLM for script generation
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}
+      # TTS Service for audio synthesis
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
+      # Main API for status updates
+      - MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
+      # Redis for job queue
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Audio output settings
+      - AUDIO_OUTPUT_FORMAT=${PODCAST_AUDIO_FORMAT:-mp3}
+      - AUDIO_BITRATE=${PODCAST_AUDIO_BITRATE:-192k}
+      - AUDIO_SAMPLE_RATE=${PODCAST_AUDIO_SAMPLE_RATE:-24000}
+      # Default podcast settings
+      - DEFAULT_LANGUAGE=${PODCAST_DEFAULT_LANGUAGE:-es-ES}
+      - DEFAULT_TONE=${PODCAST_DEFAULT_TONE:-conversational}
+      - DEFAULT_LENGTH=${PODCAST_DEFAULT_LENGTH:-standard}
+    volumes:
+      # Mount source code for development
+      - ../microservices/podcast-service/app:/app/app:ro
+      - ../microservices/podcast-service/config:/app/config:ro
+      # Temporary audio files (cleaned after upload)
+      - podcast_temp:/app/temp
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # =============================================================================
   # KeyCloak - OAuth/OIDC Server for SSO
   # =============================================================================
   # Admin Console: http://localhost:8080
@@ -641,3 +700,4 @@ volumes:
   embedding_cache:  # Cache for embedding model (multimodal embeddings service)
   tts_model_cache:  # Cache for VibeVoice TTS models
   keycloak_data:  # KeyCloak PostgreSQL data
+  podcast_temp:  # Temporary audio files for podcast generation

@@ -9,7 +9,7 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Brain, Loader2 } from 'lucide-react'
+import { IconBrain, IconLoader2 } from '@tabler/icons-react'
 import { useAuth } from '@/contexts/auth-context'
 import { ConnectorOnboarding } from '@/components/onboarding/ConnectorOnboarding'
 
@@ -35,7 +35,7 @@ export default function OnboardingPage() {
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
   }
@@ -61,7 +61,7 @@ export default function OnboardingPage() {
       <header className="h-14 border-b flex items-center justify-center px-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-            <Brain className="h-5 w-5 text-primary" />
+            <IconBrain className="h-5 w-5 text-primary" />
           </div>
           <span className="font-semibold text-lg">Emma</span>
         </div>

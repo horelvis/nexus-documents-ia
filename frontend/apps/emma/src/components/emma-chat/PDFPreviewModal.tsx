@@ -11,14 +11,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
-  X,
-  Loader2,
-  Download,
-  ExternalLink,
-  FileText,
-  AlertCircle,
-  Eye,
-} from 'lucide-react'
+  IconX,
+  IconLoader2,
+  IconDownload,
+  IconExternalLink,
+  IconFileText,
+  IconAlertCircle,
+  IconEye,
+} from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { useDocumentService } from '@/lib/services/document.service'
 import { DocumentInfo } from '@/lib/types/emma'
@@ -31,7 +31,7 @@ const PDFViewer = dynamic(
     loading: () => (
       <div className="flex items-center justify-center h-96 bg-muted/30 rounded-lg">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+          <IconLoader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
           <p className="text-sm text-muted-foreground">Cargando visor PDF...</p>
         </div>
       </div>
@@ -142,7 +142,7 @@ export function PDFPreviewModal({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10">
-                <FileText className="h-5 w-5 text-primary" />
+                <IconFileText className="h-5 w-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <DialogTitle className="text-base font-semibold truncate">
@@ -172,7 +172,7 @@ export function PDFPreviewModal({
                     onClick={handleDownload}
                     className="hidden sm:flex"
                   >
-                    <Download className="h-4 w-4 mr-2" />
+                    <IconDownload className="h-4 w-4 mr-2" />
                     Descargar
                   </Button>
                   <Button
@@ -180,7 +180,7 @@ export function PDFPreviewModal({
                     size="sm"
                     onClick={handleOpenExternal}
                   >
-                    <ExternalLink className="h-4 w-4 mr-2" />
+                    <IconExternalLink className="h-4 w-4 mr-2" />
                     <span className="hidden sm:inline">Abrir completo</span>
                   </Button>
                 </>
@@ -191,7 +191,7 @@ export function PDFPreviewModal({
                 onClick={handleClose}
                 className="h-8 w-8"
               >
-                <X className="h-4 w-4" />
+                <IconX className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -202,7 +202,7 @@ export function PDFPreviewModal({
           {isLoading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-primary" />
+                <IconLoader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-primary" />
                 <p className="text-muted-foreground">Cargando documento...</p>
               </div>
             </div>
@@ -212,7 +212,7 @@ export function PDFPreviewModal({
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md mx-auto p-6">
                 <div className="flex items-center justify-center h-16 w-16 rounded-full bg-destructive/10 mx-auto mb-4">
-                  <AlertCircle className="h-8 w-8 text-destructive" />
+                  <IconAlertCircle className="h-8 w-8 text-destructive" />
                 </div>
                 <h3 className="font-semibold mb-2">Error al cargar documento</h3>
                 <p className="text-sm text-muted-foreground mb-4">{error}</p>
@@ -237,7 +237,7 @@ export function PDFPreviewModal({
                 // For non-PDF files, show a message
                 <div className="flex flex-col items-center justify-center h-full p-6">
                   <div className="flex items-center justify-center h-20 w-20 rounded-full bg-muted mb-4">
-                    <Eye className="h-10 w-10 text-muted-foreground" />
+                    <IconEye className="h-10 w-10 text-muted-foreground" />
                   </div>
                   <h3 className="font-semibold mb-2">Vista previa no disponible</h3>
                   <p className="text-sm text-muted-foreground text-center mb-4">
@@ -245,11 +245,11 @@ export function PDFPreviewModal({
                   </p>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={handleDownload}>
-                      <Download className="h-4 w-4 mr-2" />
+                      <IconDownload className="h-4 w-4 mr-2" />
                       Descargar archivo
                     </Button>
                     <Button onClick={handleOpenExternal}>
-                      <ExternalLink className="h-4 w-4 mr-2" />
+                      <IconExternalLink className="h-4 w-4 mr-2" />
                       Abrir en nueva pestaña
                     </Button>
                   </div>

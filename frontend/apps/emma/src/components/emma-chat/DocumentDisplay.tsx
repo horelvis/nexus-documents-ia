@@ -3,7 +3,7 @@
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { File, ExternalLink, Calendar, User, Eye } from 'lucide-react'
+import { IconFile, IconExternalLink, IconCalendar, IconUser, IconEye } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { DocumentInfo } from '@/lib/types/emma'
 
@@ -25,7 +25,7 @@ export function DocumentDisplay({
   return (
     <div className={cn('w-full space-y-2', className)}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-        <File className="h-3 w-3" />
+        <IconFile className="h-3 w-3" />
         <span>Documentos relacionados ({documents.length})</span>
       </div>
 
@@ -42,7 +42,7 @@ export function DocumentDisplay({
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <File className="h-4 w-4 text-blue-500 shrink-0" />
+                  <IconFile className="h-4 w-4 text-blue-500 shrink-0" />
                   <span className="text-sm font-medium truncate">{doc.name}</span>
                   {doc.relevanceScore && (
                     <Badge variant="secondary" className="text-[10px] shrink-0">
@@ -65,13 +65,13 @@ export function DocumentDisplay({
                 <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
                   {doc.createdAt && (
                     <div className="flex items-center gap-1">
-                      <Calendar className="h-2.5 w-2.5" />
+                      <IconCalendar className="h-2.5 w-2.5" />
                       <span>{doc.createdAt}</span>
                     </div>
                   )}
                   {doc.author && (
                     <div className="flex items-center gap-1">
-                      <User className="h-2.5 w-2.5" />
+                      <IconUser className="h-2.5 w-2.5" />
                       <span>{doc.author}</span>
                     </div>
                   )}
@@ -89,7 +89,7 @@ export function DocumentDisplay({
                   }}
                   title="Vista previa"
                 >
-                  <Eye className="h-3.5 w-3.5" />
+                  <IconEye className="h-3.5 w-3.5" />
                 </Button>
                 {doc.url && (
                   <Button
@@ -102,7 +102,7 @@ export function DocumentDisplay({
                     }}
                     title="Abrir en nueva pestaña"
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
+                    <IconExternalLink className="h-3.5 w-3.5" />
                   </Button>
                 )}
               </div>

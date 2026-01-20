@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useEffect } from 'react'
-import { User, Bot, AlertCircle, ThumbsUp, ThumbsDown, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { IconUser, IconRobot, IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleCheck } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -116,7 +116,7 @@ function MessageBubble({
               : 'bg-gradient-to-br from-primary to-primary/70 text-primary-foreground'
           )}
         >
-          {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+          {isUser ? <IconUser className="h-4 w-4" /> : <IconRobot className="h-4 w-4" />}
         </AvatarFallback>
       </Avatar>
 
@@ -138,7 +138,7 @@ function MessageBubble({
                 onClick={() => onRetry(message.metadata!.failedQuery!)}
                 className="mt-2"
               >
-                <RotateCcw className="h-3 w-3 mr-1" />
+                <IconRotate className="h-3 w-3 mr-1" />
                 Reintentar
               </Button>
             )}
@@ -209,7 +209,7 @@ function MessageBubble({
                     onClick={() => onFeedback(message.id, 'positive')}
                     title="Respuesta útil"
                   >
-                    <ThumbsUp className="h-3 w-3" />
+                    <IconThumbUp className="h-3 w-3" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -218,7 +218,7 @@ function MessageBubble({
                     onClick={() => onFeedback(message.id, 'negative')}
                     title="Respuesta no útil"
                   >
-                    <ThumbsDown className="h-3 w-3" />
+                    <IconThumbDown className="h-3 w-3" />
                   </Button>
                 </div>
               )}
@@ -243,7 +243,7 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
     <div className="flex gap-3">
       <Avatar className="h-8 w-8 shrink-0">
         <AvatarFallback className="bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
-          <Bot className="h-4 w-4" />
+          <IconRobot className="h-4 w-4" />
         </AvatarFallback>
       </Avatar>
 
@@ -299,13 +299,13 @@ function WorkflowStepItem({ step }: { step: WorkflowStep }) {
   const getStatusIcon = () => {
     switch (step.status) {
       case 'completed':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />
+        return <IconCircleCheck className="h-4 w-4 text-green-500" />
       case 'in_progress':
         return (
           <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         )
       case 'error':
-        return <AlertCircle className="h-4 w-4 text-destructive" />
+        return <IconAlertCircle className="h-4 w-4 text-destructive" />
       default:
         return <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />
     }
@@ -358,7 +358,7 @@ function LoadingBubble() {
     <div className="flex gap-3">
       <Avatar className="h-8 w-8 shrink-0">
         <AvatarFallback className="bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
-          <Bot className="h-4 w-4" />
+          <IconRobot className="h-4 w-4" />
         </AvatarFallback>
       </Avatar>
 
@@ -380,13 +380,13 @@ function ErrorBubble({ error }: { error: string }) {
     <div className="flex gap-3">
       <Avatar className="h-8 w-8 shrink-0">
         <AvatarFallback className="bg-destructive text-destructive-foreground">
-          <AlertCircle className="h-4 w-4" />
+          <IconAlertCircle className="h-4 w-4" />
         </AvatarFallback>
       </Avatar>
 
       <Card className="p-4 bg-destructive/10 border-destructive/20 max-w-[85%]">
         <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-4 w-4" />
+          <IconAlertCircle className="h-4 w-4" />
           <span className="font-medium text-sm">Error</span>
         </div>
         <p className="text-sm mt-2 text-destructive/80">{error}</p>

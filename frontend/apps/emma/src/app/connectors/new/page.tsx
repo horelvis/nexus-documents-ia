@@ -12,16 +12,16 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Brain,
-  Loader2,
-  Plug,
-  ChevronLeft,
-  ChevronRight,
-  ArrowLeft,
-  XCircle,
-  Check,
-  Search,
-} from 'lucide-react'
+  IconBrain,
+  IconLoader2,
+  IconPlug,
+  IconChevronLeft,
+  IconChevronRight,
+  IconArrowLeft,
+  IconCircleX,
+  IconCheck,
+  IconSearch,
+} from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -160,7 +160,7 @@ export default function NewConnectorPage() {
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
   }
@@ -179,8 +179,8 @@ export default function NewConnectorPage() {
           <SidebarTrigger className="-ml-1" />
           <div className="h-4 w-px bg-border" />
           <Link href="/connectors" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-            <ChevronLeft className="h-4 w-4" />
-            <Plug className="h-4 w-4" />
+            <IconChevronLeft className="h-4 w-4" />
+            <IconPlug className="h-4 w-4" />
             <span>Conectores</span>
           </Link>
           <div className="h-4 w-px bg-border" />
@@ -195,7 +195,7 @@ export default function NewConnectorPage() {
               <span className="font-medium">1</span>
               <span className="hidden sm:inline">Seleccionar</span>
             </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <IconChevronRight className="h-4 w-4 text-muted-foreground" />
             <div className={cn(
               "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm",
               step === 'configure' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
@@ -221,7 +221,7 @@ export default function NewConnectorPage() {
 
               {/* Search */}
               <div className="relative max-w-md mx-auto mb-8">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Buscar conectores..."
                   value={searchQuery}
@@ -267,7 +267,7 @@ export default function NewConnectorPage() {
                           </div>
 
                           {/* Hover Arrow */}
-                          <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          <IconChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                         </button>
                       ))}
                     </div>
@@ -276,7 +276,7 @@ export default function NewConnectorPage() {
 
                 {filteredCategories.length === 0 && (
                   <div className="text-center py-12">
-                    <Plug className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-30" />
+                    <IconPlug className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-30" />
                     <h3 className="font-medium mb-1">No se encontraron conectores</h3>
                     <p className="text-sm text-muted-foreground">
                       No hay conectores que coincidan con "{searchQuery}"
@@ -314,7 +314,7 @@ export default function NewConnectorPage() {
               {/* Error Alert */}
               {error && (
                 <Alert variant="destructive" className="mb-6">
-                  <XCircle className="h-4 w-4" />
+                  <IconCircleX className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
@@ -445,7 +445,7 @@ export default function NewConnectorPage() {
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between pt-4">
                   <Button variant="ghost" onClick={handleBack} disabled={isLoading}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    <IconArrowLeft className="h-4 w-4 mr-2" />
                     Volver
                   </Button>
                   <div className="flex gap-3">
@@ -463,12 +463,12 @@ export default function NewConnectorPage() {
                     >
                       {isLoading ? (
                         <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
                           Creando...
                         </>
                       ) : (
                         <>
-                          <Check className="h-4 w-4 mr-2" />
+                          <IconCheck className="h-4 w-4 mr-2" />
                           Crear Conector
                         </>
                       )}

@@ -8,18 +8,18 @@
 
 import { useState, useEffect } from 'react'
 import {
-  Heart,
-  Loader2,
-  AlertCircle,
-  Check,
-  X,
-  Clock,
-  User,
-  Server,
-  Search,
-  Folder,
-  RefreshCw,
-} from 'lucide-react'
+  IconHeart,
+  IconLoader2,
+  IconAlertCircle,
+  IconCheck,
+  IconX,
+  IconClock,
+  IconUser,
+  IconServer,
+  IconSearch,
+  IconFolder,
+  IconRefresh,
+} from '@tabler/icons-react'
 import {
   Dialog,
   DialogContent,
@@ -62,13 +62,13 @@ function formatResponseTime(ms: number): string {
 function getStatusIcon(status: string) {
   switch (status) {
     case 'healthy':
-      return <Check className="h-5 w-5 text-green-500" />
+      return <IconCheck className="h-5 w-5 text-green-500" />
     case 'degraded':
-      return <AlertCircle className="h-5 w-5 text-yellow-500" />
+      return <IconAlertCircle className="h-5 w-5 text-yellow-500" />
     case 'unhealthy':
-      return <X className="h-5 w-5 text-red-500" />
+      return <IconX className="h-5 w-5 text-red-500" />
     default:
-      return <AlertCircle className="h-5 w-5 text-gray-400" />
+      return <IconAlertCircle className="h-5 w-5 text-gray-400" />
   }
 }
 
@@ -145,7 +145,7 @@ export function HealthCheckDialog({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Heart className="h-5 w-5" />
+            <IconHeart className="h-5 w-5" />
             Resultado del Health Check
           </DialogTitle>
           <DialogDescription>
@@ -156,7 +156,7 @@ export function HealthCheckDialog({
         <div className="py-4 space-y-4">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+              <IconLoader2 className="h-8 w-8 animate-spin text-primary mb-4" />
               <p className="text-muted-foreground">Ejecutando health check...</p>
               <p className="text-xs text-muted-foreground mt-2">
                 Probando autenticación, API y servicios
@@ -164,7 +164,7 @@ export function HealthCheckDialog({
             </div>
           ) : error ? (
             <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
+              <IconAlertCircle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : result ? (
@@ -180,7 +180,7 @@ export function HealthCheckDialog({
                     </div>
                   </div>
                   <Badge variant="outline" className="bg-white/50 dark:bg-black/20">
-                    <Clock className="h-3 w-3 mr-1" />
+                    <IconClock className="h-3 w-3 mr-1" />
                     {details.response_time_ms
                       ? formatResponseTime(details.response_time_ms)
                       : 'N/A'}
@@ -195,7 +195,7 @@ export function HealthCheckDialog({
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <User className="h-4 w-4 text-muted-foreground" />
+                        <IconUser className="h-4 w-4 text-muted-foreground" />
                         Autenticación
                       </CardTitle>
                     </CardHeader>
@@ -221,7 +221,7 @@ export function HealthCheckDialog({
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Server className="h-4 w-4 text-muted-foreground" />
+                        <IconServer className="h-4 w-4 text-muted-foreground" />
                         Información del Servidor
                       </CardTitle>
                     </CardHeader>
@@ -254,7 +254,7 @@ export function HealthCheckDialog({
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Search className="h-4 w-4 text-muted-foreground" />
+                        <IconSearch className="h-4 w-4 text-muted-foreground" />
                         Search API (AFTS)
                       </CardTitle>
                     </CardHeader>
@@ -262,7 +262,7 @@ export function HealthCheckDialog({
                       {details.search_api === 'working' ? (
                         <div>
                           <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                            <Check className="h-4 w-4" />
+                            <IconCheck className="h-4 w-4" />
                             <span className="font-semibold">Funcionando</span>
                           </div>
                           {details.total_folders !== undefined && (
@@ -273,7 +273,7 @@ export function HealthCheckDialog({
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                          <X className="h-4 w-4" />
+                          <IconX className="h-4 w-4" />
                           <span>{details.search_api || 'No funciona'}</span>
                         </div>
                       )}
@@ -284,7 +284,7 @@ export function HealthCheckDialog({
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Folder className="h-4 w-4 text-muted-foreground" />
+                        <IconFolder className="h-4 w-4 text-muted-foreground" />
                         Acceso a Sites
                       </CardTitle>
                     </CardHeader>
@@ -333,7 +333,7 @@ export function HealthCheckDialog({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <Server className="h-4 w-4 text-muted-foreground" />
+                      <IconServer className="h-4 w-4 text-muted-foreground" />
                       Estado de Configuración
                     </CardTitle>
                   </CardHeader>
@@ -368,7 +368,7 @@ export function HealthCheckDialog({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <Server className="h-4 w-4 text-muted-foreground" />
+                      <IconServer className="h-4 w-4 text-muted-foreground" />
                       Configuración de Almacenamiento
                     </CardTitle>
                   </CardHeader>
@@ -428,12 +428,12 @@ export function HealthCheckDialog({
           <Button onClick={runHealthCheck} disabled={isLoading}>
             {isLoading ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                 Probando...
               </>
             ) : (
               <>
-                <RefreshCw className="mr-2 h-4 w-4" />
+                <IconRefresh className="mr-2 h-4 w-4" />
                 Volver a Probar
               </>
             )}

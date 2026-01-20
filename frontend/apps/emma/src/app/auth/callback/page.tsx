@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Loader2, CheckCircle, AlertCircle, Brain } from 'lucide-react'
+import { IconLoader2, IconCircleCheck, IconAlertCircle, IconBrain } from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 
@@ -62,12 +62,12 @@ export default function AuthCallbackPage() {
         <div className="flex flex-col items-center gap-6 text-center text-white">
           {/* Logo */}
           <div className="rounded-xl bg-primary/10 p-3">
-            <Brain className="h-8 w-8 text-cyan-400" />
+            <IconBrain className="h-8 w-8 text-cyan-400" />
           </div>
 
           {status === 'processing' && (
             <>
-              <Loader2 className="h-10 w-10 animate-spin text-cyan-400" />
+              <IconLoader2 className="h-10 w-10 animate-spin text-cyan-400" />
               <div>
                 <h2 className="text-xl font-semibold mb-2">
                   Procesando autenticación
@@ -81,7 +81,7 @@ export default function AuthCallbackPage() {
 
           {status === 'success' && (
             <>
-              <CheckCircle className="h-10 w-10 text-emerald-400" />
+              <IconCircleCheck className="h-10 w-10 text-emerald-400" />
               <div>
                 <h2 className="text-xl font-semibold mb-2">
                   ¡Autenticación exitosa!
@@ -95,7 +95,7 @@ export default function AuthCallbackPage() {
 
           {status === 'error' && (
             <>
-              <AlertCircle className="h-10 w-10 text-red-400" />
+              <IconAlertCircle className="h-10 w-10 text-red-400" />
               <div>
                 <h2 className="text-xl font-semibold mb-2">
                   Error de autenticación

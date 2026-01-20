@@ -5,11 +5,12 @@
  *
  * Full-screen Emma chat interface for on-premise deployment.
  * Uses shadcn sidebar layout matching the SaaS version design.
+ * Includes NexusLM notebook panel on the right (NotebookLM-style).
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Brain, Loader2 } from 'lucide-react'
+import { IconBrain, IconLoader2 } from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -19,6 +20,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { EmmaChat } from '@/components/emma-chat'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { ConversationSidebar } from '@/components/conversation-sidebar'
+import { NotebookPanel } from '@/components/notebook-panel'
 import { conversationService } from '@/lib/services/conversation.service'
 import { EmmaMessage } from '@/lib/types/emma'
 
@@ -28,6 +30,7 @@ export default function EmmaPage() {
 
   // Sidebar and conversation state
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [notebookPanelOpen, setNotebookPanelOpen] = useState(true) // Open by default
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [conversationMessages, setConversationMessages] = useState<EmmaMessage[]>([])
 
@@ -99,9 +102,9 @@ export default function EmmaPage() {
         <div className="flex flex-col items-center gap-4">
           <div className="relative">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
-              <Brain className="h-8 w-8 text-primary-foreground" />
+              <IconBrain className="h-8 w-8 text-primary-foreground" />
             </div>
-            <Loader2 className="absolute -bottom-1 -right-1 h-5 w-5 animate-spin text-primary" />
+            <IconLoader2 className="absolute -bottom-1 -right-1 h-5 w-5 animate-spin text-primary" />
           </div>
           <p className="text-sm text-muted-foreground">Cargando Emma...</p>
         </div>
@@ -126,22 +129,33 @@ export default function EmmaPage() {
       {/* Main Content */}
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <header className="h-14 border-b flex items-center px-4 shrink-0">
           <div className="flex items-center gap-2">
-            <Brain className="h-5 w-5 text-primary" />
-            <span className="font-semibold">Emma</span>
+            <SidebarTrigger className="-ml-1" />
+            <div className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-2">
+              <IconBrain className="h-5 w-5 text-primary" />
+              <span className="font-semibold">Emma</span>
+            </div>
           </div>
         </header>
 
-        {/* Main Content - Emma Chat */}
-        <main className="flex-1 min-h-0 overflow-hidden">
-          <EmmaChat
-            className="h-full"
-            messages={conversationMessages}
-            onMessagesChange={handleMessagesChange}
-            conversationId={activeConversationId}
+        {/* Main Content Area - Chat + Notebook Panel */}
+        <main className="flex-1 min-h-0 overflow-hidden flex">
+          {/* Emma Chat - takes remaining space */}
+          <div className="flex-1 min-w-0">
+            <EmmaChat
+              className="h-full"
+              messages={conversationMessages}
+              onMessagesChange={handleMessagesChange}
+              conversationId={activeConversationId}
+            />
+          </div>
+
+          {/* NexusLM Notebook Panel - inline on the right */}
+          <NotebookPanel
+            isOpen={notebookPanelOpen}
+            onOpenChange={setNotebookPanelOpen}
           />
         </main>
       </SidebarInset>

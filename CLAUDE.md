@@ -185,6 +185,70 @@ interface LoginResponse {
 - **Agent system**: AI agents with conversation history and execution tracking
 - **Digital signatures**: Complete workflow with provider integrations
 
+#### Structural Intelligence Layer (SIL) - Pre-LLM Reasoning
+
+> **📖 Full Documentation**: [`backend/architecture/SIL-structural-intelligence-layer.md`](backend/architecture/SIL-structural-intelligence-layer.md)
+
+The SIL represents a paradigm shift in RAG architecture - **learning document STRUCTURE instead of CONTENT**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  TRADITIONAL RAG                    →    SIL APPROACH                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ❌ Embed full document content     →    ✅ Embed structural descriptions    │
+│  ❌ Always invoke LLM + RAG         →    ✅ Answer structurally when possible│
+│  ❌ 10K+ tokens per query           →    ✅ 500-1000 tokens (70-90% savings) │
+│  ❌ No temporal awareness           →    ✅ Full history & evolution         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**5-Layer Architecture:**
+1. **Structural Metadata Extraction** - Extract location, type, relationships (not content)
+2. **Structural Graph (Apache AGE)** - Cypher-queryable graph of document structure
+3. **Structural Embeddings** - Embeddings of structural descriptions only
+4. **Pre-LLM Reasoning Engine** - Answer structural queries without invoking RAG
+5. **LLM as Interpreter** - LLM receives structural context, not full documents
+
+**Query Flow:**
+```
+User: "¿Cuántos contratos tiene ACME?"
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ SIL Pre-LLM Reasoning                                                        │
+│ Intent: STRUCTURAL_COUNT → No RAG needed                                     │
+│ Cypher: MATCH (d:structural_document {client:'ACME', type:'contract'})       │
+│         RETURN count(d) → 5                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+LLM interprets structural context → "ACME tiene 5 contratos..."
+         │
+         ▼
+🎯 NO DOCUMENT CONTENT READ - 70% token savings
+```
+
+**Key Components:**
+- `weaviate-service/app/services/sil/` - SIL package (10+ modules)
+- `weaviate-service/app/api/sil.py` - REST endpoints (`/sil/*`)
+- `backend/alembic/versions/20260120_add_sil_graph_schema.py` - Apache AGE migration
+
+**API Endpoints:**
+| Endpoint | Description |
+|----------|-------------|
+| `POST /sil/query` | Structural query with Pre-LLM reasoning |
+| `POST /sil/index-structural` | Index structural metadata |
+| `GET /sil/structure/{doc_id}` | Get structural metadata |
+| `GET /sil/graph/stats` | Graph statistics |
+| `POST /sil/search-structural` | Search by structural similarity |
+
+**Reasoning Types:**
+- `STRUCTURAL` - Direct answer from graph (count, exists, location)
+- `TEMPORAL` - Time-based queries (what changed, when, evolution)
+- `MULTIHOP` - Traverse relationships (related documents, paths)
+- `FOCUSED_RAG` - RAG on specific documents only
+- `FULL_RAG` - Traditional full-corpus RAG (fallback)
+
 ### File Structure Conventions
 
 #### Backend (`/backend/app/`)
@@ -209,6 +273,7 @@ interface LoginResponse {
 - **Clerk**: Authentication and user management
 - **Stripe**: Payment processing integration
 - **Weaviate**: Vector database for semantic search
+- **Apache AGE**: PostgreSQL graph extension for Structural Intelligence Layer (SIL)
 - **Microsoft Agent Framework**: Multi-agent orchestration with ChatAgent, @ai_function decorators
 - **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing

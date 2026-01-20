@@ -8,7 +8,7 @@
  */
 
 import { useRouter } from 'next/navigation'
-import { User, Settings, Plug } from 'lucide-react'
+import { IconUser, IconSettings, IconPlug } from '@tabler/icons-react'
 import { UserMenu as SharedUserMenu, type UserMenuNavItem } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 
@@ -25,18 +25,18 @@ export function UserMenu({ className }: UserMenuProps) {
     {
       label: 'Mi perfil',
       href: '/profile',
-      icon: <User className="mr-3 h-4 w-4 text-muted-foreground" />,
+      icon: <IconUser className="mr-3 h-4 w-4 text-muted-foreground" />,
       shortcut: '⇧P',
     },
     {
       label: 'Conectores',
       href: '/connectors',
-      icon: <Plug className="mr-3 h-4 w-4 text-muted-foreground" />,
+      icon: <IconPlug className="mr-3 h-4 w-4 text-muted-foreground" />,
     },
     {
       label: 'Configuración',
       href: '/settings',
-      icon: <Settings className="mr-3 h-4 w-4 text-muted-foreground" />,
+      icon: <IconSettings className="mr-3 h-4 w-4 text-muted-foreground" />,
       shortcut: '⇧S',
     },
   ]

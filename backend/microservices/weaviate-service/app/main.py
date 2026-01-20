@@ -46,7 +46,7 @@ import time
 
 from app.core.config import settings
 from app.core.security import verify_api_key
-from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router
+from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router, sil_router
 from app.api.agents import router as agents_router
 from app.cag.api.cag import router as cag_router
 from app.cag.api.vector import router as cag_vector_router
@@ -170,6 +170,7 @@ app.include_router(agents_router, tags=["agents"])  # OpenManus-style orchestrat
 app.include_router(public_knowledge_router, tags=["public-knowledge"])
 app.include_router(knowledge_router, tags=["knowledge"])  # Knowledge graph API
 app.include_router(learning_router, tags=["learning"])  # User learning API
+app.include_router(sil_router, tags=["structural-intelligence"])  # SIL API
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
 

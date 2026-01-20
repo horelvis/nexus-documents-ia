@@ -174,7 +174,10 @@ class User(Base):
     connector_auths = relationship("UserConnectorAuth", back_populates="user", cascade="all, delete-orphan")
     document_syncs = relationship("UserDocumentSync", back_populates="user", cascade="all, delete-orphan")
     indexed_documents = relationship("IndexedDocument", back_populates="owner", cascade="all, delete-orphan")
-    
+
+    # NexusLM relationships
+    notebooks = relationship("Notebook", back_populates="user", cascade="all, delete-orphan")
+
     __table_args__ = (
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
         Index('idx_users_email_active', 'email', 'is_active'),
@@ -2233,9 +2236,13 @@ class IndexedDocument(Base):
     
     # Source information
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="SET NULL"), nullable=True, index=True)
+    connector_type = Column(String(50), nullable=True, index=True)  # alfresco, sharepoint, etc. (denormalized for fast queries)
     external_id = Column(String(512), nullable=False)  # ID in source system (driveItem id, etc.)
     external_url = Column(Text, nullable=True)  # URL to open document in source
     external_path = Column(Text, nullable=True)  # Path in source (/Documents/Project/file.docx)
+
+    # Native metadata from source connector (preserved for re-learning)
+    source_metadata = Column(JSONB, nullable=True)  # {"nodeType": "gdapm:expediente", "aspects": [...], "properties": {...}}
     
     # Ownership
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -2262,6 +2269,24 @@ class IndexedDocument(Base):
     # Processing status
     indexing_status = Column(String(20), default="pending")  # pending, processing, indexed, failed
     indexing_error = Column(Text, nullable=True)
+
+    # Data Learning - Learned context (cached for efficient RAG)
+    learned_context = Column(JSONB, nullable=True)
+    # {
+    #   "semantic_type": "administrative_file",
+    #   "domain": "hr",
+    #   "folder_semantics": {"department": "RRHH", "year": "2024"},
+    #   "property_weights": {"identifier": 2.0, "title": 1.5},
+    #   "relationships": [{"type": "references", "target_id": "...", "strength": 0.8}]
+    # }
+
+    # Reference to indexing strategy used (for intelligent re-indexing)
+    indexing_strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connector_indexing_strategies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     
     # Timestamps from source
     source_created_at = Column(DateTime(timezone=True), nullable=True)
@@ -2278,6 +2303,7 @@ class IndexedDocument(Base):
     tenant = relationship("Tenant")
     connector = relationship("Connector", back_populates="indexed_documents")
     owner = relationship("User", back_populates="indexed_documents")
+    indexing_strategy = relationship("ConnectorIndexingStrategy")
     
     __table_args__ = (
         UniqueConstraint('connector_id', 'external_id', name='uq_indexed_doc_connector_external'),
@@ -2288,5 +2314,586 @@ class IndexedDocument(Base):
     )
 
 
+# =====================================
+# NEXUSLM - NOTEBOOK MODELS
+# =====================================
+
+class Notebook(Base):
+    """
+    NexusLM Notebook - A collection of documents for Q&A and podcast generation.
+    Similar to Google NotebookLM but on-premise with Qwen3-4B-Thinking.
+    """
+    __tablename__ = "notebooks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Notebook info
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    emoji = Column(String(10), nullable=True, default="📓")  # Emoji icon for the notebook
+
+    # Settings
+    settings = Column(JSONB, nullable=False, default={})  # {language: "es-ES", default_voice_a: "...", default_voice_b: "..."}
+
+    # Statistics
+    source_count = Column(Integer, default=0, nullable=False)
+    total_words = Column(Integer, default=0, nullable=False)
+    chat_count = Column(Integer, default=0, nullable=False)
+    audio_count = Column(Integer, default=0, nullable=False)
+
+    # Status
+    is_archived = Column(Boolean, default=False, nullable=False)
+
+    # Timestamps
+    last_activity_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant")
+    user = relationship("User", back_populates="notebooks")
+    sources = relationship("NotebookSource", back_populates="notebook", cascade="all, delete-orphan")
+    audios = relationship("NotebookAudio", back_populates="notebook", cascade="all, delete-orphan")
+    chats = relationship("NotebookChat", back_populates="notebook", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_notebooks_tenant_user', 'tenant_id', 'user_id'),
+        Index('idx_notebooks_user_activity', 'user_id', 'last_activity_at'),
+        Index('idx_notebooks_archived', 'is_archived'),
+    )
+
+
+class NotebookSource(Base):
+    """
+    Documents added to a notebook as sources for Q&A and podcast generation.
+    """
+    __tablename__ = "notebook_sources"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notebook_id = Column(UUID(as_uuid=True), ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Can reference either an internal document or an external indexed document
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True)
+    indexed_document_id = Column(UUID(as_uuid=True), ForeignKey("indexed_documents.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # Cached source info (for quick display without joins)
+    title = Column(String(512), nullable=False)
+    source_type = Column(String(50), nullable=False)  # pdf, docx, txt, web, etc.
+    word_count = Column(Integer, default=0, nullable=False)
+
+    # Processing status
+    is_processed = Column(Boolean, default=False, nullable=False)
+    processing_error = Column(Text, nullable=True)
+
+    # Extracted key points (cached from LLM analysis)
+    key_points = Column(JSONB, nullable=True)  # [{point: "...", importance: 0.9}, ...]
+    summary = Column(Text, nullable=True)
+
+    # Timestamps
+    added_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    notebook = relationship("Notebook", back_populates="sources")
+    document = relationship("Document")
+    indexed_document = relationship("IndexedDocument")
+
+    __table_args__ = (
+        # Ensure either document_id or indexed_document_id is set, but not both
+        CheckConstraint(
+            "(document_id IS NOT NULL AND indexed_document_id IS NULL) OR "
+            "(document_id IS NULL AND indexed_document_id IS NOT NULL)",
+            name="ck_notebook_source_single_ref"
+        ),
+        Index('idx_notebook_sources_notebook', 'notebook_id'),
+        Index('idx_notebook_sources_processed', 'is_processed'),
+    )
+
+
+class NotebookAudio(Base):
+    """
+    Generated podcast audio for a notebook.
+    Stores the podcast file, transcript, and generation configuration.
+    """
+    __tablename__ = "notebook_audios"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notebook_id = Column(UUID(as_uuid=True), ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Generation configuration
+    config = Column(JSONB, nullable=False, default={})
+    # {
+    #   tone: "conversational" | "formal" | "educational",
+    #   length: "short" (3-5min) | "standard" (5-10min) | "long" (10-15min),
+    #   language: "es-ES" | "en-US",
+    #   focus_topics: ["topic1", "topic2"],
+    #   voice_a: {id: "Spk0", name: "Emma"},
+    #   voice_b: {id: "Spk1", name: "Alex"}
+    # }
+
+    # Status
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # pending, generating_script, generating_audio, stitching, completed, failed
+    status_message = Column(Text, nullable=True)
+    progress_percent = Column(Integer, default=0, nullable=False)
+
+    # Generated content
+    script = Column(JSONB, nullable=True)
+    # [{speaker: "A", text: "...", segment_id: 1}, {speaker: "B", text: "...", segment_id: 2}, ...]
+
+    # Audio file
+    audio_url = Column(String(1000), nullable=True)  # GCS URL
+    audio_format = Column(String(10), default="mp3", nullable=False)
+    duration_ms = Column(Integer, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+
+    # Transcript with timestamps (for synced playback)
+    transcript = Column(JSONB, nullable=True)
+    # [{speaker: "A", text: "...", start_ms: 0, end_ms: 5000}, ...]
+
+    # Error tracking
+    error_message = Column(Text, nullable=True)
+    error_details = Column(JSONB, nullable=True)
+
+    # Processing metadata
+    generation_started_at = Column(DateTime(timezone=True), nullable=True)
+    generation_completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    notebook = relationship("Notebook", back_populates="audios")
+
+    __table_args__ = (
+        Index('idx_notebook_audios_notebook', 'notebook_id'),
+        Index('idx_notebook_audios_status', 'status'),
+        Index('idx_notebook_audios_created', 'created_at'),
+    )
+
+
+class NotebookChat(Base):
+    """
+    Chat conversations within a notebook for Q&A with sources.
+    Uses Emma Service + RAG pipeline with notebook sources as context.
+    """
+    __tablename__ = "notebook_chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notebook_id = Column(UUID(as_uuid=True), ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Chat session info
+    title = Column(String(255), nullable=True)  # Auto-generated from first message
+
+    # Messages stored as JSONB array
+    messages = Column(JSONB, nullable=False, default=[])
+    # [
+    #   {role: "user", content: "...", timestamp: "..."},
+    #   {role: "assistant", content: "...", timestamp: "...", citations: [{source_id, text, page}]}
+    # ]
+
+    # Statistics
+    message_count = Column(Integer, default=0, nullable=False)
+
+    # Status
+    is_archived = Column(Boolean, default=False, nullable=False)
+
+    # Timestamps
+    last_message_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    notebook = relationship("Notebook", back_populates="chats")
+    user = relationship("User")
+
+    __table_args__ = (
+        Index('idx_notebook_chats_notebook', 'notebook_id'),
+        Index('idx_notebook_chats_user', 'user_id'),
+        Index('idx_notebook_chats_last_message', 'last_message_at'),
+    )
+
+
 # Add relationships to existing models
 # These will be added via backref or need manual addition to User and Tenant classes
+
+
+# =====================================
+# DATA LEARNING SYSTEM
+# =====================================
+
+class ConnectorContentModel(Base):
+    """
+    Discovered content model from a connector (Alfresco, SharePoint, etc.).
+
+    Stores the raw content model (types, aspects, properties) and LLM-enriched
+    semantic information used to intelligently index and search documents.
+
+    The content model is connector-agnostic at storage but enriched with
+    semantic information that normalizes across different systems.
+    """
+    __tablename__ = "connector_content_models"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Raw discovered model (connector-specific format)
+    content_types = Column(JSONB, nullable=False, default=dict)
+    # Example: {"gdapm:expediente": {"title": "Expediente", "parent": "cm:content", "properties": [...]}}
+
+    aspects = Column(JSONB, nullable=False, default=dict)
+    # Example: {"cm:titled": {"properties": ["cm:title", "cm:description"]}}
+
+    property_definitions = Column(JSONB, nullable=True)
+    # Example: {"cm:title": {"type": "d:text", "mandatory": false}}
+
+    association_types = Column(JSONB, nullable=True)
+    # Example: {"cm:references": {"source": "cm:content", "target": "cm:content"}}
+
+    # LLM-enriched semantics (normalized)
+    type_semantics = Column(JSONB, nullable=True)
+    # Example: {"gdapm:expediente": {"semantic_type": "administrative_file", "domain": "legal", "chunking_strategy": "legal_sections"}}
+
+    property_semantics = Column(JSONB, nullable=True)
+    # Example: {"gdapm:numExpediente": {"search_weight": 2.0, "is_identifier": true}}
+
+    # Discovery metadata
+    discovery_method = Column(String(50), nullable=False, default="api")
+    # api (Dictionary API), sampling (inferred), manual
+
+    discovered_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connector = relationship("Connector", backref="content_model")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        Index('idx_ccm_connector', 'connector_id', unique=True),
+        Index('idx_ccm_tenant', 'tenant_id'),
+    )
+
+
+class LearnedFolderPattern(Base):
+    """
+    Learned semantic patterns from folder hierarchies.
+
+    Maps folder path levels to semantic meaning:
+    - Level 0: Site root
+    - Level 1: Department (RRHH, Legal, Finance)
+    - Level 2: Year (2024, 2025)
+    - Level 3: Document type (Expedientes, Contratos)
+
+    This allows Emma to understand that a document in
+    /Sites/gdapm/RRHH/2024/Expedientes belongs to HR department.
+    """
+    __tablename__ = "learned_folder_patterns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Pattern definition
+    path_pattern = Column(String(1000), nullable=False)
+    # Example: "/Sites/{site}/documentLibrary/{department}/{year}/*"
+
+    level_semantics = Column(JSONB, nullable=False)
+    # Example: {
+    #   "3": {"name": "department", "type": "classification", "values": ["RRHH", "Legal"]},
+    #   "4": {"name": "year", "type": "temporal", "format": "YYYY"}
+    # }
+
+    # Example paths that match this pattern
+    example_paths = Column(JSONB, nullable=True)
+
+    # Statistics
+    match_count = Column(Integer, nullable=False, default=0)
+    confidence = Column(Float, nullable=False, default=0.0)
+
+    # Learning metadata
+    learned_from_sample_size = Column(Integer, nullable=True)
+    is_verified = Column(Boolean, nullable=False, default=False)
+    # Verified = admin confirmed this pattern
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connector = relationship("Connector", backref="folder_patterns")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        Index('idx_lfp_connector', 'connector_id'),
+        Index('idx_lfp_tenant', 'tenant_id'),
+        Index('idx_lfp_confidence', 'confidence'),
+    )
+
+
+class LearnedPropertyMapping(Base):
+    """
+    Mapping from connector-specific properties to normalized semantic fields.
+
+    Example mappings:
+    - gdapm:numExpediente → identifier (weight: 2.0)
+    - cm:title → title (weight: 1.0)
+    - cm:creator → author (weight: 0.5)
+
+    Weights are used for search ranking - higher weight = more important.
+    Weights can be adjusted based on user search patterns (learned_from_usage).
+    """
+    __tablename__ = "learned_property_mappings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Source property (connector-specific)
+    source_property = Column(String(255), nullable=False)
+    # Example: "gdapm:numExpediente", "cm:title"
+
+    source_type = Column(String(100), nullable=True)
+    # Example: "gdapm:expediente" - Only applies to this type (null = all types)
+
+    # Target normalized field
+    target_field = Column(String(100), nullable=False)
+    # Example: "identifier", "title", "author", "date"
+
+    # Mapping configuration
+    search_weight = Column(Float, nullable=False, default=1.0)
+    include_in_embedding = Column(Boolean, nullable=False, default=True)
+    is_filterable = Column(Boolean, nullable=False, default=False)
+    is_facetable = Column(Boolean, nullable=False, default=False)
+
+    # Value transformation
+    transformation = Column(String(50), nullable=True)
+    # none, lowercase, uppercase, date_normalize, numeric
+
+    default_value = Column(String(500), nullable=True)
+
+    # Learning metadata
+    learned_from_usage = Column(Boolean, nullable=False, default=False)
+    usage_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connector = relationship("Connector", backref="property_mappings")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        UniqueConstraint('connector_id', 'source_property', 'source_type', name='uq_lpm_connector_source_type'),
+        Index('idx_lpm_connector', 'connector_id'),
+        Index('idx_lpm_tenant', 'tenant_id'),
+        Index('idx_lpm_source', 'source_property'),
+        Index('idx_lpm_target', 'target_field'),
+    )
+
+
+class LearnedRelationshipType(Base):
+    """
+    Mapping from connector-specific relationships to Knowledge Graph edges.
+
+    Example mappings:
+    - cm:references → references (include in retrieval, depth 1)
+    - gdapm:expedienteDocumento → contains (hierarchical)
+
+    Used to expand queries with related documents via the Knowledge Graph.
+    """
+    __tablename__ = "learned_relationship_types"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Source relationship type (connector-specific)
+    source_relationship = Column(String(255), nullable=False)
+    # Example: "cm:references", "peer:related"
+
+    relationship_category = Column(String(50), nullable=False)
+    # peer (bidirectional), child (hierarchical), reference (unidirectional)
+
+    # Target Knowledge Graph edge type
+    kg_edge_type = Column(String(100), nullable=False)
+    # Example: "references", "version_of", "relates_to", "contains"
+
+    # Semantic description
+    description = Column(Text, nullable=True)
+
+    # Graph expansion settings
+    include_in_retrieval = Column(Boolean, nullable=False, default=True)
+    expansion_depth = Column(Integer, nullable=False, default=1)
+    weight = Column(Float, nullable=False, default=1.0)
+
+    # Statistics
+    instance_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connector = relationship("Connector", backref="relationship_types")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        UniqueConstraint('connector_id', 'source_relationship', name='uq_lrt_connector_source'),
+        Index('idx_lrt_connector', 'connector_id'),
+        Index('idx_lrt_tenant', 'tenant_id'),
+        Index('idx_lrt_kg_edge', 'kg_edge_type'),
+    )
+
+
+class ConnectorIndexingStrategy(Base):
+    """
+    Indexing strategy configuration per connector and document type.
+
+    Defines how documents should be chunked, embedded, and indexed
+    based on their type and source connector.
+
+    Example: Legal contracts from Alfresco use "legal_sections" chunking
+    while general PDFs use "semantic" chunking.
+    """
+    __tablename__ = "connector_indexing_strategies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Scope - which documents this strategy applies to
+    document_type = Column(String(255), nullable=True)
+    # Example: "gdapm:expediente" - null = default for connector
+
+    mime_type_pattern = Column(String(100), nullable=True)
+    # Example: "application/pdf" - null = all types
+
+    # Chunking strategy
+    chunking_type = Column(String(50), nullable=False, default="semantic")
+    # semantic, fixed_size, legal_sections, markdown_headers, page_based
+
+    chunking_config = Column(JSONB, nullable=False, default=dict)
+    # Example: {"target_chunk_size": 512, "overlap": 50}
+
+    # Embedding strategy
+    embedding_fields = Column(JSONB, nullable=False, default=list)
+    # Fields to include: ["content", "title", "department"]
+
+    embedding_weights = Column(JSONB, nullable=True)
+    # Weights: {"content": 1.0, "title": 1.5}
+
+    # Metadata extraction
+    extract_entities = Column(Boolean, nullable=False, default=True)
+    entity_types = Column(JSONB, nullable=True)
+    # ["PERSON", "ORG", "DATE", "MONEY"]
+
+    extract_to_knowledge_graph = Column(Boolean, nullable=False, default=True)
+
+    # Priority and status
+    priority = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connector = relationship("Connector", backref="indexing_strategies")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        Index('idx_cis_connector', 'connector_id'),
+        Index('idx_cis_tenant', 'tenant_id'),
+        Index('idx_cis_doc_type', 'document_type'),
+        Index('idx_cis_priority', 'priority'),
+    )
+
+
+class DataLearningJobType:
+    """Job types for data learning."""
+    CONTENT_MODEL_DISCOVERY = "content_model_discovery"
+    FOLDER_ANALYSIS = "folder_analysis"
+    PROPERTY_MAPPING = "property_mapping"
+    RELATIONSHIP_LEARNING = "relationship_learning"
+    STRATEGY_OPTIMIZATION = "strategy_optimization"
+    FULL_LEARNING = "full_learning"
+
+
+class DataLearningJobStatus:
+    """Status values for data learning jobs."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class DataLearningJob(Base):
+    """
+    Tracks learning job execution for a connector.
+
+    Learning jobs discover and learn from connector data:
+    - Content model discovery (types, aspects, properties)
+    - Folder structure analysis
+    - Property mapping generation
+    - Relationship type learning
+    - Indexing strategy optimization
+
+    Jobs can be triggered manually or automatically when a connector is created.
+    """
+    __tablename__ = "data_learning_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+
+    # Job type
+    job_type = Column(String(50), nullable=False)
+    # content_model_discovery, folder_analysis, property_mapping,
+    # relationship_learning, strategy_optimization, full_learning
+
+    # Status
+    status = Column(String(20), nullable=False, default="pending")
+    status_message = Column(Text, nullable=True)
+
+    # Progress tracking
+    progress_percent = Column(Integer, nullable=False, default=0)
+    current_phase = Column(String(100), nullable=True)
+
+    # Results
+    results_summary = Column(JSONB, nullable=True)
+    # {"types_discovered": 15, "folder_patterns_learned": 3, ...}
+
+    errors = Column(JSONB, nullable=True)
+    # List of non-fatal errors encountered
+
+    # Configuration
+    config = Column(JSONB, nullable=True)
+
+    # Trigger info
+    triggered_by = Column(String(50), nullable=False, default="manual")
+    # manual, scheduled, connector_created, connector_updated
+
+    triggered_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    connector = relationship("Connector", backref="learning_jobs")
+    tenant = relationship("Tenant")
+    triggered_by_user = relationship("User")
+
+    __table_args__ = (
+        Index('idx_dlj_connector', 'connector_id'),
+        Index('idx_dlj_tenant', 'tenant_id'),
+        Index('idx_dlj_status', 'status'),
+        Index('idx_dlj_job_type', 'job_type'),
+        Index('idx_dlj_created', 'created_at'),
+    )

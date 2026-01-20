@@ -56,6 +56,14 @@ from app.services.connectors import (
     ConnectorConnectionError,
 )
 
+# Data Learning imports for intelligent context enrichment
+from app.services.data_learning import (
+    FolderStructureAnalyzer,
+    MetadataIntelligenceService,
+    RelationshipLearner,
+    IndexingStrategyOptimizer,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -401,7 +409,13 @@ class UnifiedIndexingService:
         db: AsyncSession,
     ) -> bool:
         """
-        Index a single document through the Weaviate pipeline.
+        Index a single document through the Weaviate pipeline with learned context.
+
+        This method integrates the Data Learning System to provide:
+        1. Folder context: Semantic meaning of the document's folder path
+        2. Property mappings: Normalized metadata with search weights
+        3. Indexing strategy: Optimal chunking and embedding configuration
+        4. Relationships: Associations to other documents for KG expansion
 
         Args:
             adapter: Connector adapter for downloading
@@ -457,7 +471,23 @@ class UnifiedIndexingService:
             if not content:
                 raise ValueError("Failed to download content after retries")
 
-            # Step 2: Send to Weaviate Service for indexing
+            # Step 2: Get learned context from Data Learning System
+            learned_context = await self._get_learned_context(
+                db=db,
+                connector_id=connector.id,
+                indexed_doc=indexed_doc,
+                adapter=adapter,
+            )
+
+            # Step 3: Get indexing strategy for this document type
+            indexing_strategy = await self._get_indexing_strategy(
+                db=db,
+                connector_id=connector.id,
+                document_type=indexed_doc.custom_metadata.get("alfresco_node_type") if indexed_doc.custom_metadata else None,
+                mime_type=indexed_doc.mime_type,
+            )
+
+            # Step 4: Send to Weaviate Service for indexing
             logger.debug(f"Sending to Weaviate pipeline ({len(content)} bytes)")
 
             weaviate_result = await self._send_to_weaviate_pipeline(
@@ -481,15 +511,20 @@ class UnifiedIndexingService:
                     "shared_with_users": indexed_doc.shared_with_users or [],
                     "shared_with_groups": indexed_doc.shared_with_groups or [],
                 },
+                learned_context=learned_context,
+                indexing_strategy=indexing_strategy,
             )
 
-            # Step 3: Update IndexedDocument with results
+            # Step 5: Update IndexedDocument with results and learned context
             if weaviate_result.get("success"):
                 indexed_doc.indexing_status = "indexed"
                 indexed_doc.weaviate_id = weaviate_result.get("weaviate_id")
                 indexed_doc.weaviate_collection = weaviate_result.get("collection")
                 indexed_doc.indexed_at = datetime.now(timezone.utc)
                 indexed_doc.indexing_error = None
+
+                # Store learned context for future retrieval expansion
+                indexed_doc.learned_context = learned_context
 
                 # Compute content hash
                 import hashlib
@@ -516,6 +551,147 @@ class UnifiedIndexingService:
             await db.commit()
             raise
 
+    async def _get_learned_context(
+        self,
+        db: AsyncSession,
+        connector_id: UUID,
+        indexed_doc: IndexedDocument,
+        adapter: ConnectorAdapter,
+    ) -> Dict[str, Any]:
+        """
+        Get learned context for a document from Data Learning services.
+
+        Combines:
+        - Folder semantics: department, year, classification from path
+        - Property mappings: normalized metadata with search weights
+        - Relationships: associations to other documents
+
+        Args:
+            db: Database session
+            connector_id: Connector UUID
+            indexed_doc: IndexedDocument record
+            adapter: Connector adapter for fetching associations
+
+        Returns:
+            Dict with learned context for Weaviate indexing
+        """
+        learned_context = {
+            "folder_semantics": {},
+            "property_weights": {},
+            "relationships": [],
+            "semantic_type": None,
+            "domain": None,
+        }
+
+        try:
+            # 1. Get folder context from path
+            if indexed_doc.external_path:
+                folder_analyzer = FolderStructureAnalyzer(db)
+                folder_context = await folder_analyzer.get_folder_context(
+                    connector_id=connector_id,
+                    path=indexed_doc.external_path,
+                )
+                if folder_context and folder_context.semantics:
+                    learned_context["folder_semantics"] = folder_context.semantics
+                    learned_context["folder_pattern_id"] = str(folder_context.pattern_id) if folder_context.pattern_id else None
+                    learned_context["folder_confidence"] = folder_context.confidence
+
+            # 2. Get normalized metadata with property weights
+            if indexed_doc.custom_metadata:
+                metadata_service = MetadataIntelligenceService(db)
+                normalized = await metadata_service.get_normalized_metadata(
+                    connector_id=connector_id,
+                    raw_metadata=indexed_doc.custom_metadata,
+                    document_type=indexed_doc.custom_metadata.get("alfresco_node_type"),
+                )
+                learned_context["property_weights"] = normalized.get("weights", {})
+                learned_context["normalized_properties"] = normalized.get("properties", {})
+
+            # 3. Get relationships (if adapter supports it and has associations)
+            if hasattr(adapter, 'fetch_node_associations'):
+                try:
+                    associations = await adapter.fetch_node_associations(indexed_doc.external_id)
+                    if associations:
+                        relationship_learner = RelationshipLearner(db)
+                        relationships = await relationship_learner.extract_document_relationships(
+                            connector_id=connector_id,
+                            document_external_id=indexed_doc.external_id,
+                            associations=associations,
+                        )
+                        learned_context["relationships"] = relationships
+                except Exception as e:
+                    logger.warning(f"Failed to fetch associations for {indexed_doc.external_id}: {e}")
+
+            # 4. Get semantic type from content model
+            if indexed_doc.custom_metadata and indexed_doc.custom_metadata.get("alfresco_node_type"):
+                from app.db.models import ConnectorContentModel
+                cm_result = await db.execute(
+                    select(ConnectorContentModel).where(ConnectorContentModel.connector_id == connector_id)
+                )
+                content_model = cm_result.scalar_one_or_none()
+                if content_model and content_model.type_semantics:
+                    node_type = indexed_doc.custom_metadata.get("alfresco_node_type")
+                    type_semantics = content_model.type_semantics.get(node_type, {})
+                    learned_context["semantic_type"] = type_semantics.get("semantic_type")
+                    learned_context["domain"] = type_semantics.get("domain")
+
+        except Exception as e:
+            logger.warning(f"Failed to get learned context for {indexed_doc.id}: {e}")
+
+        return learned_context
+
+    async def _get_indexing_strategy(
+        self,
+        db: AsyncSession,
+        connector_id: UUID,
+        document_type: Optional[str],
+        mime_type: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Get the best indexing strategy for a document.
+
+        Args:
+            db: Database session
+            connector_id: Connector UUID
+            document_type: Document type (e.g., gdapm:expediente)
+            mime_type: MIME type (e.g., application/pdf)
+
+        Returns:
+            Dict with indexing strategy configuration
+        """
+        strategy_dict = {
+            "chunking_type": "semantic",  # Default
+            "chunking_config": {"target_chunk_size": 512, "overlap": 50},
+            "embedding_fields": ["content", "title"],
+            "extract_entities": True,
+            "entity_types": ["PERSON", "ORG", "DATE", "MONEY"],
+            "extract_to_knowledge_graph": True,
+        }
+
+        try:
+            optimizer = IndexingStrategyOptimizer(db)
+            strategy = await optimizer.get_strategy_for_document(
+                connector_id=connector_id,
+                document_type=document_type,
+                mime_type=mime_type,
+            )
+
+            if strategy:
+                strategy_dict = {
+                    "chunking_type": strategy.chunking_type,
+                    "chunking_config": strategy.chunking_config or {},
+                    "embedding_fields": strategy.embedding_fields or ["content", "title"],
+                    "embedding_weights": strategy.embedding_weights,
+                    "extract_entities": strategy.extract_entities,
+                    "entity_types": strategy.entity_types,
+                    "extract_to_knowledge_graph": strategy.extract_to_knowledge_graph,
+                }
+
+        except Exception as e:
+            logger.warning(f"Failed to get indexing strategy: {e}")
+
+        return strategy_dict
+
     async def _send_to_weaviate_pipeline(
         self,
         document_id: str,
@@ -526,11 +702,14 @@ class UnifiedIndexingService:
         owner_id: str,
         metadata: Dict[str, Any],
         acl: Dict[str, Any],
+        learned_context: Optional[Dict[str, Any]] = None,
+        indexing_strategy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Send document to Weaviate Service for indexing.
+        Send document to Weaviate Service for indexing with learned context.
 
-        Calls POST /index/from-connector endpoint.
+        Calls POST /index/from-connector endpoint with enriched payload
+        including learned context from the Data Learning System.
 
         Args:
             document_id: PostgreSQL document UUID
@@ -541,6 +720,18 @@ class UnifiedIndexingService:
             owner_id: Owner UUID
             metadata: Additional metadata
             acl: Access control list
+            learned_context: Learned context from Data Learning System
+                - folder_semantics: {department, year, classification, ...}
+                - property_weights: {field: weight}
+                - relationships: [{type, target_id, strength}, ...]
+                - semantic_type: Document semantic type
+                - domain: Document domain (legal, hr, finance, ...)
+            indexing_strategy: Indexing strategy configuration
+                - chunking_type: semantic, legal_sections, markdown_headers, ...
+                - chunking_config: {target_chunk_size, overlap, ...}
+                - embedding_fields: Fields to include in embedding
+                - extract_entities: Whether to extract named entities
+                - entity_types: Types of entities to extract
 
         Returns:
             Dict with success status and weaviate_id
@@ -564,6 +755,14 @@ class UnifiedIndexingService:
             "metadata": metadata,
             "acl": acl,
         }
+
+        # Add learned context if available
+        if learned_context:
+            payload["learned_context"] = learned_context
+
+        # Add indexing strategy if available
+        if indexing_strategy:
+            payload["indexing_strategy"] = indexing_strategy
 
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)

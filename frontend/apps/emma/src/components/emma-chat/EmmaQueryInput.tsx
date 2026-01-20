@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { IconSend, IconLoader2 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -82,9 +82,9 @@ export function EmmaQueryInput({
           className="absolute right-2 bottom-2 h-9 w-9 rounded-lg"
         >
           {isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <IconLoader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Send className="h-4 w-4" />
+            <IconSend className="h-4 w-4" />
           )}
         </Button>
       </div>

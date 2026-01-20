@@ -455,12 +455,54 @@ async def delete_visual_by_document(
 # Connector Ingestion Endpoints
 # ========================================
 
+class LearnedContextSchema(BaseModel):
+    """
+    Learned context from Data Learning System.
+
+    This context is used to enrich documents during indexing and retrieval:
+    - folder_semantics: What the folder structure means (department, year, classification)
+    - property_weights: Which properties are important for search (boost values)
+    - relationships: Document relationships from source system
+    - semantic_type: Inferred document type (contract, invoice, etc.)
+    - domain: Business domain (legal, hr, finance, etc.)
+    """
+    folder_semantics: Dict[str, Any] = {}
+    property_weights: Dict[str, float] = {}
+    normalized_properties: Dict[str, Any] = {}
+    relationships: List[Dict[str, Any]] = []
+    semantic_type: Optional[str] = None
+    domain: Optional[str] = None
+    folder_pattern_id: Optional[str] = None
+    folder_confidence: Optional[float] = None
+
+
+class IndexingStrategySchema(BaseModel):
+    """
+    Indexing strategy from Data Learning System.
+
+    Configures how documents should be processed based on learned patterns:
+    - chunking_type: semantic, legal_sections, markdown_headers, etc.
+    - chunking_config: Target chunk size, overlap, etc.
+    - embedding_fields: Which fields to include in embedding
+    - extract_entities: Whether to extract named entities
+    """
+    chunking_type: str = "semantic"  # semantic, legal_sections, markdown_headers, paragraph
+    chunking_config: Dict[str, Any] = {}  # target_chunk_size, overlap, etc.
+    embedding_fields: List[str] = []  # Fields to prioritize in embedding
+    extract_entities: bool = True
+    entity_types: List[str] = []  # person, organization, date, etc.
+    priority_score: float = 1.0
+
+
 class ConnectorIndexRequest(BaseModel):
     """
     Request to index a document from an external connector.
 
     This endpoint receives documents from the UnifiedIndexingService
     which downloads content from Alfresco, SharePoint, etc.
+
+    NEW: Includes learned_context and indexing_strategy from Data Learning System
+    for adaptive, intelligent indexing based on connector-specific knowledge.
     """
     document_id: str
     file_bytes_base64: str  # Base64 encoded file content
@@ -470,6 +512,9 @@ class ConnectorIndexRequest(BaseModel):
     owner_id: str
     metadata: Dict[str, Any] = {}
     acl: Dict[str, Any] = {}
+    # NEW: Data Learning System integration
+    learned_context: Optional[LearnedContextSchema] = None
+    indexing_strategy: Optional[IndexingStrategySchema] = None
 
 
 class ConnectorIndexResponse(BaseModel):
@@ -522,9 +567,13 @@ async def index_from_connector(
                 error=f"Invalid base64 content: {e}",
             )
 
+        # Log with learned context info
+        has_learned_context = request.learned_context is not None
+        has_strategy = request.indexing_strategy is not None
         logger.info(
             f"📥 Indexing connector document: {request.filename} "
-            f"({len(file_bytes)} bytes) for tenant {request.tenant_id}"
+            f"({len(file_bytes)} bytes) for tenant {request.tenant_id} "
+            f"[learned_context={has_learned_context}, strategy={has_strategy}]"
         )
 
         # Import indexing pipeline
@@ -544,13 +593,23 @@ async def index_from_connector(
             "acl_role_ids": request.acl.get("shared_with_groups", []),
         }
 
-        # Run indexing pipeline
+        # Convert indexing strategy to dict for pipeline
+        strategy_config = None
+        if request.indexing_strategy:
+            strategy_config = request.indexing_strategy.model_dump()
+            logger.info(
+                f"📋 Using indexing strategy: chunking_type={request.indexing_strategy.chunking_type}, "
+                f"extract_entities={request.indexing_strategy.extract_entities}"
+            )
+
+        # Run indexing pipeline with strategy
         result = await pipeline.process_file(
             document_id=request.document_id,
             file_bytes=file_bytes,
             filename=request.filename,
             metadata=metadata,
             tenant_id=request.tenant_id,
+            indexing_strategy=strategy_config,  # NEW: Pass strategy to pipeline
         )
 
         if not result.success:
@@ -571,7 +630,17 @@ async def index_from_connector(
         # Ensure collection exists
         await weaviate_service.ensure_collection_exists(collection_name)
 
-        # Create document with chunks
+        # Build learned context for storage (enriches retrieval)
+        learned_context_dict = None
+        if request.learned_context:
+            learned_context_dict = request.learned_context.model_dump()
+            logger.info(
+                f"🧠 Storing learned context: semantic_type={request.learned_context.semantic_type}, "
+                f"domain={request.learned_context.domain}, "
+                f"folder_semantics={list(request.learned_context.folder_semantics.keys())}"
+            )
+
+        # Create document with chunks and learned context
         doc_create = DocumentCreate(
             document_id=request.document_id,
             content=result.extracted_text[:10000] if result.extracted_text else "",  # First 10k chars
@@ -582,11 +651,22 @@ async def index_from_connector(
                 "quality": result.analysis.quality.value if result.analysis else "unknown",
                 "language": result.extraction_language,
                 "entities_count": result.knowledge_result.entities_count if result.knowledge_result else 0,
+                # NEW: Data Learning enrichment
+                "learned_context": learned_context_dict,
+                "semantic_type": request.learned_context.semantic_type if request.learned_context else None,
+                "domain": request.learned_context.domain if request.learned_context else None,
+                "folder_semantics": request.learned_context.folder_semantics if request.learned_context else {},
+                "property_weights": request.learned_context.property_weights if request.learned_context else {},
             },
             chunks=[
                 {
                     "content": chunk.content,
-                    "metadata": chunk.metadata,
+                    "metadata": {
+                        **chunk.metadata,
+                        # Enrich each chunk with learned context for retrieval
+                        "semantic_type": request.learned_context.semantic_type if request.learned_context else None,
+                        "domain": request.learned_context.domain if request.learned_context else None,
+                    },
                     "chunk_index": i,
                 }
                 for i, chunk in enumerate(result.chunks)
@@ -622,3 +702,57 @@ async def index_from_connector(
             error=str(e),
             processing_time_ms=(time.time() - start_time) * 1000,
         )
+
+
+# ========================================
+# Document Content Retrieval (for NexusLM)
+# ========================================
+
+class DocumentContentResponse(BaseModel):
+    """Response with full document content from all chunks"""
+    document_id: str
+    title: str
+    content: str
+    chunk_count: int
+    word_count: int
+    source_type: Optional[str] = None
+
+
+@router.get("/documents/{tenant_id}/{document_id}/content", response_model=DocumentContentResponse)
+async def get_document_full_content(
+    tenant_id: str,
+    document_id: str,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Get the full content of a document by concatenating all its chunks.
+
+    This endpoint is used by NexusLM to retrieve document content for podcast generation.
+    Chunks are sorted by chunk_index and concatenated with newlines.
+
+    Args:
+        tenant_id: Tenant identifier
+        document_id: Document ID (from IndexedDocument or Document table)
+
+    Returns:
+        DocumentContentResponse with full concatenated content
+    """
+    try:
+        result = await weaviate_service.get_document_full_content(
+            tenant_id=tenant_id,
+            document_id=document_id,
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document {document_id} not found in tenant {tenant_id}"
+            )
+
+        return DocumentContentResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to get document content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

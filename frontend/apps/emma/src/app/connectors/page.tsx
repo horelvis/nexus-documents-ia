@@ -10,17 +10,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Brain,
-  Loader2,
-  Plug,
-  RefreshCw,
-  CheckCircle2,
-  XCircle,
-  ChevronLeft,
-  Trash2,
-  Plus,
-  TestTube,
-} from 'lucide-react'
+  IconBrain,
+  IconLoader2,
+  IconPlug,
+  IconRefresh,
+  IconCircleCheck,
+  IconCircleX,
+  IconChevronLeft,
+  IconTrash,
+  IconPlus,
+  IconTestPipe,
+} from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -34,10 +34,22 @@ import {
   Badge,
   Alert,
   AlertDescription,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
@@ -81,6 +93,10 @@ export default function ConnectorsPage() {
   const [healthCheckDialogOpen, setHealthCheckDialogOpen] = useState(false)
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null)
 
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null)
+
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
@@ -120,14 +136,19 @@ export default function ConnectorsPage() {
     loadData()
   }
 
-  const handleDeleteConnector = async (connectorId: string) => {
-    if (!confirm('¿Estás seguro de eliminar este conector? Esta acción no se puede deshacer.')) {
-      return
-    }
+  const handleDeleteClick = (connector: Connector) => {
+    setConnectorToDelete(connector)
+    setDeleteDialogOpen(true)
+  }
 
-    setDeletingId(connectorId)
+  const handleDeleteConfirm = async () => {
+    if (!connectorToDelete) return
+
+    setDeleteDialogOpen(false)
+    setDeletingId(connectorToDelete.id)
+
     try {
-      const result = await connectorService.deleteConnector(connectorId)
+      const result = await connectorService.deleteConnector(connectorToDelete.id)
       if (result.error) {
         setError(result.error)
       } else {
@@ -137,13 +158,14 @@ export default function ConnectorsPage() {
       setError(err.message || 'Error al eliminar conector')
     } finally {
       setDeletingId(null)
+      setConnectorToDelete(null)
     }
   }
 
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
   }
@@ -162,12 +184,12 @@ export default function ConnectorsPage() {
           <SidebarTrigger className="-ml-1" />
           <div className="h-4 w-px bg-border" />
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-            <ChevronLeft className="h-4 w-4" />
-            <Brain className="h-5 w-5 text-primary" />
+            <IconChevronLeft className="h-4 w-4" />
+            <IconBrain className="h-5 w-5 text-primary" />
             <span className="font-semibold text-foreground">Emma</span>
           </Link>
           <div className="h-4 w-px bg-border" />
-          <Plug className="h-4 w-4 text-muted-foreground" />
+          <IconPlug className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Conectores</span>
         </header>
 
@@ -184,12 +206,12 @@ export default function ConnectorsPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={loadData} disabled={isLoading}>
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  <IconRefresh className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
                   Actualizar
                 </Button>
                 <Button asChild>
                   <Link href="/connectors/new">
-                    <Plus className="h-4 w-4 mr-2" />
+                    <IconPlus className="h-4 w-4 mr-2" />
                     Añadir Conector
                   </Link>
                 </Button>
@@ -199,7 +221,7 @@ export default function ConnectorsPage() {
             {/* Error Alert */}
             {error && (
               <Alert variant="destructive">
-                <XCircle className="h-4 w-4" />
+                <IconCircleX className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -215,17 +237,17 @@ export default function ConnectorsPage() {
               <TabsContent value="admin" className="space-y-4">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
                 ) : connectors.length === 0 ? (
                   <Card>
                     <CardContent className="py-12">
                       <div className="text-center">
-                        <Plug className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                        <IconPlug className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                         <p className="text-muted-foreground mb-4">No hay conectores configurados</p>
                         <Button asChild>
                           <Link href="/connectors/new">
-                            <Plus className="h-4 w-4 mr-2" />
+                            <IconPlus className="h-4 w-4 mr-2" />
                             Crear Primer Conector
                           </Link>
                         </Button>
@@ -264,28 +286,44 @@ export default function ConnectorsPage() {
                                 </div>
                               </div>
                             </div>
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleTestConnector(connector)}
-                              >
-                                <TestTube className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteConnector(connector.id)}
-                                disabled={deletingId === connector.id}
-                                className="text-destructive hover:text-destructive"
-                              >
-                                {deletingId === connector.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
+                            <TooltipProvider>
+                              <div className="flex gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleTestConnector(connector)}
+                                    >
+                                      <IconTestPipe className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Probar conexión</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteClick(connector)}
+                                      disabled={deletingId === connector.id}
+                                      className="text-destructive hover:text-destructive"
+                                    >
+                                      {deletingId === connector.id ? (
+                                        <IconLoader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <IconTrash className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Eliminar conector</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </TooltipProvider>
                           </div>
                         </CardContent>
                       </Card>
@@ -298,13 +336,13 @@ export default function ConnectorsPage() {
               <TabsContent value="user" className="space-y-4">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
                 ) : connectors.filter(c => c.is_active && c.sync_enabled).length === 0 ? (
                   <Card>
                     <CardContent className="py-12">
                       <div className="text-center">
-                        <Plug className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                        <IconPlug className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                         <p className="text-muted-foreground mb-2">No hay fuentes de datos activas</p>
                         <p className="text-sm text-muted-foreground">
                           Contacta a tu administrador para configurar conectores
@@ -336,11 +374,11 @@ export default function ConnectorsPage() {
                                   {connectorNames[connector.connector_type]}
                                 </div>
                                 <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                                  <RefreshCw className="h-3 w-3" />
+                                  <IconRefresh className="h-3 w-3" />
                                   <span>Sincroniza cada {connector.sync_interval_hours}h</span>
                                 </div>
                               </div>
-                              <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                              <IconCircleCheck className="h-5 w-5 text-green-500 flex-shrink-0" />
                             </div>
                           ))}
                       </div>
@@ -360,6 +398,36 @@ export default function ConnectorsPage() {
         connector={selectedConnector}
         onHealthCheckComplete={handleHealthCheckComplete}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar conector?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {connectorToDelete && (
+                <>
+                  Estás a punto de eliminar el conector <strong>{connectorToDelete.name}</strong>.
+                  <br />
+                  <br />
+                  Esta acción no se puede deshacer. Se eliminarán todas las configuraciones
+                  y credenciales asociadas a este conector.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <IconTrash className="h-4 w-4 mr-2" />
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SidebarProvider>
   )
 }

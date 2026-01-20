@@ -13,15 +13,15 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Card } from '@/components/ui/card'
 import {
-  ChevronLeft,
-  ChevronRight,
-  ZoomIn,
-  ZoomOut,
-  RotateCw,
-  Download,
-  Maximize2,
-  Loader2,
-} from 'lucide-react'
+  IconChevronLeft,
+  IconChevronRight,
+  IconZoomIn,
+  IconZoomOut,
+  IconRotateClockwise,
+  IconDownload,
+  IconMaximize,
+  IconLoader2,
+} from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 
 // Configure PDF.js worker from CDN (matches react-pdf version)
@@ -167,7 +167,7 @@ export default function PDFViewer({
         <div className="flex items-center justify-between p-4 border-b bg-card">
           <div className="flex items-center space-x-2">
             <Button variant="outline" size="sm" onClick={goToPrevPage} disabled={pageNumber <= 1}>
-              <ChevronLeft className="h-4 w-4" />
+              <IconChevronLeft className="h-4 w-4" />
             </Button>
 
             <div className="flex items-center space-x-2">
@@ -188,13 +188,13 @@ export default function PDFViewer({
               onClick={goToNextPage}
               disabled={pageNumber >= numPages}
             >
-              <ChevronRight className="h-4 w-4" />
+              <IconChevronRight className="h-4 w-4" />
             </Button>
           </div>
 
           <div className="flex items-center space-x-2">
             <Button variant="outline" size="sm" onClick={zoomOut} disabled={scale <= 0.5}>
-              <ZoomOut className="h-4 w-4" />
+              <IconZoomOut className="h-4 w-4" />
             </Button>
 
             <Badge variant="secondary" className="cursor-pointer px-3" onClick={resetZoom}>
@@ -202,21 +202,21 @@ export default function PDFViewer({
             </Badge>
 
             <Button variant="outline" size="sm" onClick={zoomIn} disabled={scale >= 3.0}>
-              <ZoomIn className="h-4 w-4" />
+              <IconZoomIn className="h-4 w-4" />
             </Button>
 
             <Separator orientation="vertical" className="h-6" />
 
             <Button variant="outline" size="sm" onClick={rotate}>
-              <RotateCw className="h-4 w-4" />
+              <IconRotateClockwise className="h-4 w-4" />
             </Button>
 
             <Button variant="outline" size="sm" onClick={downloadPDF}>
-              <Download className="h-4 w-4" />
+              <IconDownload className="h-4 w-4" />
             </Button>
 
             <Button variant="outline" size="sm" onClick={openFullscreen}>
-              <Maximize2 className="h-4 w-4" />
+              <IconMaximize className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -225,7 +225,7 @@ export default function PDFViewer({
       <div className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 flex justify-center p-4">
         {isLoading && (
           <div className="flex items-center justify-center h-96">
-            <Loader2 className="h-8 w-8 animate-spin" />
+            <IconLoader2 className="h-8 w-8 animate-spin" />
             <span className="ml-2">Cargando PDF...</span>
           </div>
         )}
@@ -246,7 +246,7 @@ export default function PDFViewer({
               className="shadow-lg max-w-full"
               loading={
                 <div className="flex items-center justify-center h-96 bg-white border">
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <IconLoader2 className="h-6 w-6 animate-spin" />
                 </div>
               }
             />

@@ -10,7 +10,7 @@ import { PDFPreviewModal } from './PDFPreviewModal'
 import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo } from '@/lib/types/emma'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { Brain, Zap } from 'lucide-react'
+import { IconBrain, IconBolt } from '@tabler/icons-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
@@ -539,7 +539,7 @@ export function EmmaChat({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
-                  <Zap className={cn(
+                  <IconBolt className={cn(
                     "h-4 w-4 transition-colors",
                     !deepReasoning ? "text-yellow-500" : "text-muted-foreground"
                   )} />
@@ -568,7 +568,7 @@ export function EmmaChat({
                   >
                     Profundo
                   </Label>
-                  <Brain className={cn(
+                  <IconBrain className={cn(
                     "h-4 w-4 transition-colors",
                     deepReasoning ? "text-purple-500" : "text-muted-foreground"
                   )} />

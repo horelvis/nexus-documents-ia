@@ -123,6 +123,10 @@ api_router.include_router(gemini_voice.router, prefix="/gemini", tags=["gemini-v
 from app.api.v1 import tts
 api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
 
+# NexusLM - NotebookLM-style document notebooks with podcast generation
+from app.api.v1 import notebooks
+api_router.include_router(notebooks.router, prefix="/notebooks", tags=["notebooks"])
+
 # Information Channels - Gmail, Google Drive, External DB for RAG
 api_router.include_router(channels.router, prefix="/channels", tags=["channels"])
 
@@ -151,10 +155,18 @@ api_router.include_router(features.router)
 
 # === CONNECTORS (On-premise data source management) ===
 # These are always enabled as they're core to Emma's data access
-from app.api.v1 import connectors, user_sync
+from app.api.v1 import connectors, user_sync, data_learning
 api_router.include_router(connectors.router, prefix="/connectors", tags=["connectors"])
 api_router.include_router(user_sync.router, prefix="/user-sync", tags=["user-sync"])
 logger.debug("Connector routes enabled")
+
+# Data Learning System - Learn connector data nature for intelligent RAG
+api_router.include_router(
+    data_learning.router,
+    prefix="/connectors",
+    tags=["data-learning"]
+)
+logger.debug("Data Learning routes enabled")
 
 # Document Analyzer - CAG-based document analysis
 # api_router.include_router(document_analyzer.router, prefix="/analyzer", tags=["document-analyzer"])

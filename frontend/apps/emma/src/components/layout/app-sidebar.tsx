@@ -12,13 +12,14 @@ import * as React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Brain,
-  Plug,
-  Settings,
-  HelpCircle,
-  History,
-  Plus,
-} from 'lucide-react'
+  IconBrain,
+  IconPlug,
+  IconSettings,
+  IconHelp,
+  IconHistory,
+  IconPlus,
+  IconSchool,
+} from '@tabler/icons-react'
 import {
   Sidebar,
   SidebarContent,
@@ -44,13 +45,13 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
   const mainNavItems = [
     {
       title: 'Nueva consulta',
-      icon: Plus,
+      icon: IconPlus,
       onClick: onNewConversation,
       isActive: false,
     },
     {
       title: 'Historial',
-      icon: History,
+      icon: IconHistory,
       onClick: onOpenHistory,
       isActive: false,
     },
@@ -60,12 +61,17 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
     {
       title: 'Conectores',
       href: '/connectors',
-      icon: Plug,
+      icon: IconPlug,
+    },
+    {
+      title: 'Data Learning',
+      href: '/data-learning',
+      icon: IconSchool,
     },
     {
       title: 'Configuración',
       href: '/settings',
-      icon: Settings,
+      icon: IconSettings,
     },
   ]
 
@@ -73,7 +79,7 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
     {
       title: 'Ayuda',
       href: '/help',
-      icon: HelpCircle,
+      icon: IconHelp,
     },
   ]
 
@@ -89,7 +95,7 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
             >
               <Link href="/">
                 <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-                  <Brain className="h-5 w-5 text-primary" />
+                  <IconBrain className="h-5 w-5 text-primary" />
                 </div>
                 <div className="flex flex-col gap-0.5 leading-none">
                   <span className="font-semibold">Emma</span>

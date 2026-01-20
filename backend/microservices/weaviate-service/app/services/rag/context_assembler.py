@@ -25,6 +25,10 @@ from ...core.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Token allocation for structural context (SIL)
+STRUCTURAL_CONTEXT_MAX_TOKENS = 500  # Reserve for structural context header
+
+
 # Token budgets per model type
 # RLM Long Context: vLLM expanded from 12K to 28K to utilize Qwen3-VL's 32K window
 # Remaining 4K reserved for system prompt, query, and response generation
@@ -78,6 +82,7 @@ class ContextAssembler:
         model_type: str = "vllm",
         soft_weights: Optional[Dict[str, float]] = None,
         selection_metadata: Optional[Dict[str, Any]] = None,
+        structural_context: Optional[str] = None,
     ) -> AssembledContext:
         """
         Assemble documents into structured context with proportional token allocation.
@@ -89,6 +94,7 @@ class ContextAssembler:
             model_type: Type of model (vllm, openai, anthropic)
             soft_weights: Soft selection weights for proportional allocation
             selection_metadata: Metadata from soft selection (diversity, coverage)
+            structural_context: Optional pre-computed structural context from SIL
 
         Returns:
             AssembledContext with formatted context string
@@ -99,6 +105,16 @@ class ContextAssembler:
 
         # Reserve tokens for query and response
         context_budget = int(max_tokens * settings.rag_context_budget_fraction)
+
+        # If structural context provided, reserve tokens for it
+        structural_tokens_used = 0
+        if structural_context:
+            structural_tokens_used = min(
+                len(structural_context) // self._chars_per_token,
+                STRUCTURAL_CONTEXT_MAX_TOKENS
+            )
+            context_budget -= structural_tokens_used
+            logger.info(f"📊 SIL structural context: {structural_tokens_used} tokens reserved")
 
         # Calculate token allocations
         if soft_weights:
@@ -126,6 +142,12 @@ class ContextAssembler:
         document_headers = []
         included_docs = []
         total_chars = 0
+
+        # Add structural context from SIL (if provided) - FIRST for priority
+        if structural_context:
+            structural_section = self._build_structural_context_section(structural_context)
+            context_parts.append(structural_section)
+            total_chars += len(structural_section)
 
         # Add query metadata header
         query_header = self._build_query_header(query_analysis)
@@ -221,6 +243,23 @@ Idioma: {'Español' if query_analysis.language == 'es' else 'Inglés'}"""
                 header += f"\nFiltros Detectados: {'; '.join(filter_info)}"
 
         return header
+
+    def _build_structural_context_section(self, structural_context: str) -> str:
+        """
+        Build the structural context section from SIL.
+
+        This section provides pre-computed structural information about
+        relevant documents without their full content. It helps the LLM
+        understand document relationships, locations, and metadata.
+        """
+        # Truncate if too long
+        max_chars = STRUCTURAL_CONTEXT_MAX_TOKENS * self._chars_per_token
+        if len(structural_context) > max_chars:
+            structural_context = structural_context[:max_chars] + "\n[... contexto estructural truncado]"
+
+        return f"""=== CONTEXTO ESTRUCTURAL (SIL) ===
+{structural_context}
+=== FIN CONTEXTO ESTRUCTURAL ==="""
 
     def _build_document_section_proportional(
         self,

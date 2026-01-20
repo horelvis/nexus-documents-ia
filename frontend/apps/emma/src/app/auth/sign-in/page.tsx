@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Brain, Loader2, Shield, CheckCircle } from 'lucide-react'
+import { IconBrain, IconLoader2, IconShield, IconCircleCheck } from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { OIDC_CONFIG } from '@/lib/oidc-config'
@@ -88,7 +88,7 @@ export default function SignInPage() {
                 key={item}
                 className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2"
               >
-                <CheckCircle className="mt-0.5 h-4 w-4 text-emerald-400" />
+                <IconCircleCheck className="mt-0.5 h-4 w-4 text-emerald-400" />
                 <span className="text-sm text-slate-200">{item}</span>
               </div>
             ))}
@@ -96,7 +96,7 @@ export default function SignInPage() {
 
           <div className="flex items-center gap-2 text-sm text-slate-300">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 ring-1 ring-white/10">
-              <Shield className="h-4 w-4 text-cyan-300" />
+              <IconShield className="h-4 w-4 text-cyan-300" />
               Autenticación empresarial
             </span>
           </div>
@@ -108,7 +108,7 @@ export default function SignInPage() {
             <div className="flex flex-col items-center gap-6">
               {/* Logo */}
               <div className="rounded-xl bg-primary/10 p-4">
-                <Brain className="h-10 w-10 text-cyan-400" />
+                <IconBrain className="h-10 w-10 text-cyan-400" />
               </div>
 
               {error ? (
@@ -126,7 +126,7 @@ export default function SignInPage() {
                   >
                     {isRedirecting ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                         Conectando...
                       </>
                     ) : (
@@ -136,7 +136,7 @@ export default function SignInPage() {
                 </>
               ) : isRedirecting ? (
                 <>
-                  <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
+                  <IconLoader2 className="h-8 w-8 animate-spin text-cyan-400" />
                   <div className="text-center">
                     <h2 className="text-xl font-semibold mb-2">
                       Conectando con KeyCloak
@@ -163,12 +163,12 @@ export default function SignInPage() {
                   >
                     {!isLoaded ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                         Cargando...
                       </>
                     ) : (
                       <>
-                        <Shield className="mr-2 h-4 w-4" />
+                        <IconShield className="mr-2 h-4 w-4" />
                         Continuar con SSO
                       </>
                     )}
