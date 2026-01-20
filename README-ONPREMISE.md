@@ -409,6 +409,236 @@ CONNECTOR_HEALTH_CHECK_INTERVAL=300
 
 ---
 
+## Knowledge Graph: Entity & Document Relationships
+
+NexusDocs360 includes a **Knowledge Graph** powered by **Apache AGE** (A Graph Extension for PostgreSQL). This enables entity-based document discovery, relationship traversal, and intelligent query expansion.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    KNOWLEDGE GRAPH ARCHITECTURE                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     PostgreSQL + Apache AGE                          │    │
+│  │                                                                      │    │
+│  │  Graph: knowledge_graph (shared, tenant-isolated via properties)    │    │
+│  │                                                                      │    │
+│  │  ┌────────────────────────────────────────────────────────────┐     │    │
+│  │  │  NODES (Vertices)                                          │     │    │
+│  │  │                                                            │     │    │
+│  │  │  ┌─────────┐    ┌──────────┐    ┌─────────┐              │     │    │
+│  │  │  │ Entity  │    │ Document │    │  Chunk  │              │     │    │
+│  │  │  │         │    │          │    │         │              │     │    │
+│  │  │  │ PERSON  │    │ contract │    │ chunk_1 │              │     │    │
+│  │  │  │ ORG     │    │ invoice  │    │ chunk_2 │              │     │    │
+│  │  │  │ DATE    │    │ report   │    │ ...     │              │     │    │
+│  │  │  │ AMOUNT  │    │          │    │         │              │     │    │
+│  │  │  └─────────┘    └──────────┘    └─────────┘              │     │    │
+│  │  │                                                            │     │    │
+│  │  └────────────────────────────────────────────────────────────┘     │    │
+│  │                                                                      │    │
+│  │  ┌────────────────────────────────────────────────────────────┐     │    │
+│  │  │  EDGES (Relationships)                                     │     │    │
+│  │  │                                                            │     │    │
+│  │  │  • APPEARS_IN:  Entity → Document (strength, context)     │     │    │
+│  │  │  • RELATED_TO:  Entity → Entity (type, strength)          │     │    │
+│  │  │  • REFERENCES:  Document → Document (type, strength)      │     │    │
+│  │  │  • CONTAINS:    Document → Chunk (sequence)               │     │    │
+│  │  │  • DEPENDS_ON:  Chunk → Chunk (semantic|structural)       │     │    │
+│  │  │                                                            │     │    │
+│  │  └────────────────────────────────────────────────────────────┘     │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  INDEX TABLES (PostgreSQL - for fast lookups)                        │    │
+│  │                                                                      │    │
+│  │  • kg_entity_index:   normalized_value → vertex_id                  │    │
+│  │  • kg_document_index: document_id → vertex_id                       │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+When documents are indexed, the system:
+
+1. **Extracts Entities**: Uses LLM to identify PERSON, ORGANIZATION, DATE, AMOUNT, etc.
+2. **Normalizes Values**: Deduplicates entities (e.g., "Juan García" = "juan garcia")
+3. **Creates Graph Nodes**: Stores entities and documents as vertices in AGE
+4. **Establishes Relationships**: Links entities to documents (APPEARS_IN) and entities to each other (RELATED_TO)
+
+During queries:
+
+1. **Entity Detection**: Identifies entities mentioned in the user query
+2. **Graph Traversal**: Uses Cypher to find related entities and documents
+3. **Query Expansion**: Adds related terms to improve retrieval
+4. **Context Enrichment**: Provides document relationships to the LLM
+
+### Entity Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `PERSON` | Individual names | "Juan García Pérez" |
+| `ORGANIZATION` | Companies, institutions | "Acme Corp", "Ministerio de Hacienda" |
+| `DATE` | Dates and periods | "15 de enero de 2024" |
+| `AMOUNT` | Monetary values | "15.000 €", "$50,000" |
+| `LOCATION` | Places, addresses | "Madrid", "C/ Gran Vía 25" |
+| `CONTRACT_ID` | Contract identifiers | "CNT-2024-001" |
+| `LAW_REFERENCE` | Legal citations | "Art. 1 LOPDGDD" |
+| `DOCUMENT_REF` | Document references | "Anexo A", "Cláusula 5.2" |
+
+### Cypher Query Examples
+
+```cypher
+-- Find all entities in a specific document
+MATCH (e:Entity)-[:APPEARS_IN]->(d:Document {id: 'doc-456'})
+RETURN e.entity_value, e.entity_type
+
+-- Find related entities (for query expansion)
+MATCH (e:Entity {value: 'Juan García', tenant_id: 'tenant-123'})
+      -[:RELATED_TO*1..2]-(related)
+RETURN related.value, related.type
+
+-- Find documents containing a specific person
+MATCH (e:Entity {entity_type: 'PERSON', normalized_value: 'juan garcia'})
+      -[:APPEARS_IN]->(d:Document)
+WHERE d.tenant_id = 'tenant-123'
+RETURN d.id, d.title
+
+-- Find document dependencies/references
+MATCH (d1:Document)-[r:REFERENCES]->(d2:Document)
+WHERE d1.tenant_id = 'tenant-123'
+RETURN d1.title AS source, d2.title AS target, r.type
+
+-- Find co-occurring entities (entities that appear together)
+MATCH (e1:Entity)-[:APPEARS_IN]->(d:Document)<-[:APPEARS_IN]-(e2:Entity)
+WHERE e1.entity_id <> e2.entity_id
+  AND e1.tenant_id = 'tenant-123'
+RETURN e1.value, e2.value, count(d) AS co_occurrences
+ORDER BY co_occurrences DESC
+LIMIT 10
+```
+
+### Graph Service API
+
+The Knowledge Graph is accessible through the Weaviate Service API:
+
+```bash
+# Get graph statistics for a tenant
+curl http://localhost:8007/api/v1/graph/stats \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
+
+# Response:
+{
+  "enabled": true,
+  "backend": "apache_age",
+  "graph_name": "knowledge_graph",
+  "tenant_id": "tenant-123",
+  "node_count": 1542,
+  "edge_count": 3891,
+  "entity_types": {
+    "PERSON": 234,
+    "ORGANIZATION": 156,
+    "DATE": 412,
+    "AMOUNT": 289,
+    "LOCATION": 98
+  }
+}
+
+# Find entity neighbors (related entities)
+curl "http://localhost:8007/api/v1/graph/neighbors?entity=Juan%20García&depth=2" \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
+
+# Response:
+[
+  {
+    "entity_value": "Acme Corp",
+    "entity_type": "ORGANIZATION",
+    "relationship_type": "RELATED_TO",
+    "relationship_strength": 0.85,
+    "depth": 1
+  },
+  {
+    "entity_value": "María López",
+    "entity_type": "PERSON",
+    "relationship_type": "RELATED_TO",
+    "relationship_strength": 0.72,
+    "depth": 2
+  }
+]
+```
+
+### Configuration
+
+```bash
+# backend/docker/.env
+
+# =============================================================================
+# Knowledge Graph Configuration (Apache AGE)
+# =============================================================================
+# Enable/disable knowledge graph
+RAG_KNOWLEDGE_GRAPH_ENABLED=true
+
+# Graph traversal settings
+RAG_GRAPH_TRAVERSAL_DEPTH=2          # Max hops for neighbor queries
+RAG_GRAPH_MAX_NEIGHBORS=50           # Max neighbors to return
+RAG_GRAPH_MIN_RELATIONSHIP_STRENGTH=0.3  # Filter weak relationships
+
+# Entity extraction (during indexing)
+ENTITY_EXTRACTION_ENABLED=true
+ENTITY_EXTRACTION_MODEL=vllm         # Use local vLLM for extraction
+ENTITY_TYPES=PERSON,ORGANIZATION,DATE,AMOUNT,LOCATION,CONTRACT_ID
+
+# Index optimization
+KG_ENTITY_DEDUP_ENABLED=true         # Deduplicate similar entities
+KG_RELATIONSHIP_INFERENCE=true       # Infer relationships from context
+```
+
+### Database Setup
+
+The Knowledge Graph is automatically initialized when PostgreSQL starts. The initialization script (`backend/docker/init-scripts/01-init-age.sql`) creates:
+
+1. **Apache AGE Extension**: Graph database functionality
+2. **Knowledge Graph**: Default graph for all tenants
+3. **Index Tables**: Fast lookup tables for entities and documents
+4. **Helper Functions**: Tenant graph management functions
+
+```bash
+# Verify AGE installation
+docker compose exec db psql -U nexusdocs -d nexusdocs -c "
+  SELECT extname, extversion FROM pg_extension WHERE extname = 'age';
+"
+
+# Check graph exists
+docker compose exec db psql -U nexusdocs -d nexusdocs -c "
+  LOAD 'age';
+  SET search_path = ag_catalog, public;
+  SELECT name FROM ag_catalog.ag_graph;
+"
+
+# View entity index
+docker compose exec db psql -U nexusdocs -d nexusdocs -c "
+  SELECT entity_type, count(*) FROM kg_entity_index GROUP BY entity_type;
+"
+```
+
+### Use Cases
+
+| Use Case | How Graph Helps |
+|----------|-----------------|
+| **"Find contracts with Juan García"** | Entity lookup → APPEARS_IN → Documents |
+| **"Show related people"** | Entity → RELATED_TO traversal |
+| **"Documents referencing this one"** | Document → REFERENCES → Documents |
+| **"Find all invoices > €10,000"** | AMOUNT entities + APPEARS_IN |
+| **Query expansion** | Automatically adds related terms from graph |
+
+---
+
 ## RAG Pipeline: Query Flow
 
 When a user asks Emma a question, the query flows through a sophisticated 7-layer RAG pipeline:
