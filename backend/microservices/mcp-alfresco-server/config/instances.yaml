@@ -1,0 +1,57 @@
+# Alfresco Instances Configuration
+# This file configures multiple Alfresco instances for multi-tenant access.
+#
+# Environment variables can be used with ${VAR_NAME} syntax.
+# Example: password: ${ALFRESCO_PROD_PASSWORD}
+#
+# For single instance setup, use environment variables instead:
+#   ALFRESCO_URL, ALFRESCO_USERNAME, ALFRESCO_PASSWORD, ALFRESCO_SITE_ID
+
+instances:
+  # Production Alfresco instance
+  # Uncomment and configure for your environment
+  #
+  # - name: production
+  #   description: "Production Alfresco 7.x"
+  #   url: https://alfresco.company.com
+  #   username: service_account
+  #   password: ${ALFRESCO_PROD_PASSWORD}
+  #
+  #   # API paths (defaults for Alfresco 7.x)
+  #   api_path: /alfresco/api/-default-/public/alfresco/versions/1
+  #   search_api_path: /alfresco/api/-default-/public/search/versions/1
+  #
+  #   # Default site/folder for operations
+  #   default_site_id: main-site
+  #   default_folder_id: null  # Use site's document library
+  #
+  #   # Request timeouts (seconds)
+  #   timeout_seconds: 60
+  #   download_timeout_seconds: 300
+  #
+  #   # Multi-tenant access control
+  #   # Only these tenants can access this instance
+  #   tenant_whitelist:
+  #     - tenant-enterprise
+  #     - tenant-premium
+  #
+  #   # Limits
+  #   max_results: 100
+  #   max_upload_size_mb: 100
+
+  # Development/Test instance
+  # - name: development
+  #   description: "Development Alfresco"
+  #   url: https://alfresco-dev.company.com
+  #   username: admin
+  #   password: ${ALFRESCO_DEV_PASSWORD}
+  #   tenant_whitelist: null  # All tenants can access
+  #   tenant_blacklist: []
+
+  # Example: Alfresco Community Edition (local)
+  # - name: local
+  #   description: "Local Alfresco Community"
+  #   url: http://localhost:8080
+  #   username: admin
+  #   password: admin
+  #   default_site_id: swsdp  # Sample: Web Site Design Project

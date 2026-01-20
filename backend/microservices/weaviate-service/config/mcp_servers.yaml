@@ -1,0 +1,187 @@
+# MCP Servers Configuration
+# ============================
+# This file configures MCP (Model Context Protocol) servers that provide
+# external data source access to the agent framework.
+#
+# Each server provides a set of tools that agents can use to interact with
+# external systems (storage, databases, APIs, etc.).
+#
+# Environment variables can be used with ${VAR_NAME} syntax.
+
+# Global settings
+enabled: true
+connection_timeout: 30
+max_connections_per_server: 10
+
+# MCP Server definitions
+servers:
+  # ============================================================================
+  # Storage Server (replaces storage-service microservice)
+  # ============================================================================
+  # Provides tools for file operations on GCS, NFS, SMB, etc.
+  - name: storage
+    description: "MCP Storage Server - File operations (GCS/NFS/SMB)"
+    transport: http
+    url: ${MCP_STORAGE_URL}
+    enabled: true
+    timeout: 60
+    tool_prefix: "storage_"  # Tools will be: storage_upload, storage_download, etc.
+
+    # Health check
+    health_check_enabled: true
+    health_check_interval: 60
+
+    # Access control (empty = all tenants allowed)
+    # tenant_whitelist: []
+    # tenant_blacklist: []
+
+    # Tools provided by this server:
+    # - storage_upload: Upload a file to tenant's bucket
+    # - storage_download: Download a file from bucket
+    # - storage_list: List files in a directory
+    # - storage_delete: Delete a file
+    # - storage_signed_url: Generate signed URL for direct access
+    # - storage_move: Move/rename a file
+    # - storage_info: Get file metadata
+
+  # ============================================================================
+  # Alfresco Server (Alfresco 7.x ECM)
+  # ============================================================================
+  # Provides tools for document management operations on Alfresco Content Services.
+  # Supports multi-instance configuration for different Alfresco deployments.
+  # Enable with: docker compose --profile alfresco up
+  - name: alfresco
+    description: "MCP Alfresco Server - Alfresco 7.x ECM document management"
+    transport: http
+    url: ${MCP_ALFRESCO_URL}
+    enabled: false  # Enable when Alfresco instance is configured
+    timeout: 60
+    tool_prefix: "alfresco_"
+
+    # Health check
+    health_check_enabled: true
+    health_check_interval: 60
+
+    # Access control - restrict to specific tenants
+    # tenant_whitelist:
+    #   - tenant-enterprise
+    #   - tenant-legal
+
+    # Tools provided by this server:
+    # - alfresco_search: Search documents using AFTS (full-text search)
+    # - alfresco_download: Download document content
+    # - alfresco_upload: Upload new document
+    # - alfresco_list: List folder contents
+    # - alfresco_get_metadata: Get node metadata and properties
+    # - alfresco_get_versions: Get version history
+    # - alfresco_move: Move node to different folder
+    # - alfresco_copy: Copy node to folder
+    # - alfresco_delete: Delete node (to trash or permanent)
+    # - alfresco_update_metadata: Update node properties
+    # - alfresco_create_folder: Create new folder
+    # - alfresco_get_sites: List available sites
+
+  # ============================================================================
+  # REST API Server (External APIs)
+  # ============================================================================
+  # Provides tools for interacting with external REST APIs (ERP, CRM, etc.)
+  # Disabled by default - configure per tenant requirements
+  - name: rest_api
+    description: "MCP REST API Server - External API integrations"
+    transport: http
+    url: ${MCP_REST_API_URL}
+    enabled: false
+    timeout: 30
+    tool_prefix: "api_"
+
+    # Authentication for external APIs
+    auth:
+      type: bearer
+      api_key: ${EXTERNAL_API_KEY}
+
+    # Example tenant restrictions
+    # tenant_whitelist:
+    #   - tenant-enterprise-123
+    #   - tenant-enterprise-456
+
+    # Tools provided:
+    # - api_get: GET request to external API
+    # - api_post: POST request to external API
+    # - api_query: Query with pagination support
+
+  # ============================================================================
+  # Database Server (External Databases)
+  # ============================================================================
+  # Provides read-only query tools for external databases
+  # SECURITY: Only read-only operations are exposed
+  - name: database
+    description: "MCP Database Server - External database queries (read-only)"
+    transport: http
+    url: ${MCP_DATABASE_URL}
+    enabled: false
+    timeout: 60
+    tool_prefix: "db_"
+
+    # Restrict to specific tenants with database access
+    # tenant_whitelist:
+    #   - tenant-data-integration
+
+    # Tools blacklist (restrict dangerous operations)
+    tool_blacklist:
+      - db_execute  # Never allow raw SQL execution
+      - db_modify   # No data modification
+
+    # Tools provided:
+    # - db_query: Execute read-only SQL query
+    # - db_list_tables: List available tables
+    # - db_describe_table: Get table schema
+    # - db_search: Full-text search in database
+
+  # ============================================================================
+  # Filesystem Server (NFS/SMB/FTP)
+  # ============================================================================
+  # Provides access to mounted filesystems (network shares, FTP, etc.)
+  # Uses STDIO transport (subprocess)
+  - name: filesystem
+    description: "MCP Filesystem Server - NFS/SMB/FTP access"
+    transport: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_filesystem_server"
+    env:
+      NFS_MOUNT_PATH: ${NFS_MOUNT_PATH}
+      SMB_USERNAME: ${SMB_USERNAME}
+      SMB_PASSWORD: ${SMB_PASSWORD}
+    enabled: false
+    timeout: 30
+    tool_prefix: "fs_"
+
+    # Tools provided:
+    # - fs_read: Read file content
+    # - fs_write: Write file content
+    # - fs_list: List directory contents
+    # - fs_delete: Delete file
+    # - fs_mkdir: Create directory
+    # - fs_stat: Get file metadata
+
+# ============================================================================
+# Example: Custom tenant-specific server
+# ============================================================================
+# You can add tenant-specific servers that only certain tenants can access.
+#
+# - name: tenant_erp
+#   description: "Tenant-specific ERP integration"
+#   transport: http
+#   url: https://erp.client-company.com/mcp
+#   enabled: true
+#   tenant_whitelist:
+#     - tenant-client-company
+#   auth:
+#     type: oauth2
+#     client_id: ${ERP_CLIENT_ID}
+#     client_secret: ${ERP_CLIENT_SECRET}
+#     token_url: https://erp.client-company.com/oauth/token
+#     scopes:
+#       - read:documents
+#       - read:invoices

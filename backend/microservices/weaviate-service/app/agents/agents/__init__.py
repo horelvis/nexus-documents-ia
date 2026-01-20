@@ -4,8 +4,10 @@ Specialized Agents for Document Intelligence
 This module contains specialized agents, each designed for
 specific document processing tasks.
 
-FRAMEWORK: Microsoft Agent Framework
-All agents use ChatAgent from agent-framework package.
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+All agents use Assistant from qwen-agent package.
 
 CORE AGENTS:
 - SearchAgent: Document search and retrieval
@@ -26,10 +28,10 @@ SPECIALIZED AGENTS (Spanish Legal Domain):
 
 Usage:
     from app.agents.agents import create_search_agent
-    from app.agents.model_client import get_chat_client
+    from app.agents.model_client import get_llm_config
 
-    client = get_chat_client()
-    search = create_search_agent(client)
+    llm_cfg = get_llm_config()
+    search = create_search_agent(llm_cfg)
 """
 
 # Core agents

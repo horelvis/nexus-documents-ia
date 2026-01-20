@@ -274,3 +274,351 @@ async def health_check():
         return status
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
+
+
+# ========================================
+# Multimodal Embedding Endpoints
+# ========================================
+
+class MultimodalHealthResponse(BaseModel):
+    """Response model for multimodal health check"""
+    tei: Dict[str, Any]
+    multimodal: Dict[str, Any]
+
+
+class VisualSearchRequest(BaseModel):
+    """Request model for visual content search"""
+    query: str
+    tenant_id: str
+    user_id: Optional[str] = None
+    user_role_ids: Optional[List[str]] = None
+    content_types: Optional[List[str]] = None  # image, table_image, diagram
+    document_ids: Optional[List[str]] = None
+    limit: int = 10
+
+
+class VisualSearchResult(BaseModel):
+    """Single visual search result"""
+    visual_id: str
+    content_type: str
+    caption: Optional[str]
+    document_id: str
+    page_number: int
+    bbox: Optional[tuple]
+    width: Optional[int]
+    height: Optional[int]
+    certainty: Optional[float]
+
+
+class VisualSearchResponse(BaseModel):
+    """Response model for visual content search"""
+    results: List[Dict[str, Any]]
+    total: int
+    query: str
+    multimodal_enabled: bool
+
+
+@router.get("/multimodal/health", response_model=MultimodalHealthResponse)
+async def multimodal_health_check(
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Check health of multimodal embedding services.
+
+    Returns status of:
+    - TEI (text embeddings) - bge-m3
+    - Multimodal (visual embeddings) - Qwen3-VL-Embedding-2B
+    """
+    try:
+        from app.services.multimodal_embedding_service import multimodal_embedding_service
+        status = await multimodal_embedding_service.health_check()
+        return status
+    except ImportError:
+        return {
+            "tei": {"healthy": False, "error": "Multimodal service not available"},
+            "multimodal": {"enabled": False, "healthy": False},
+        }
+    except Exception as e:
+        logger.error(f"❌ Multimodal health check failed: {e}")
+        return {
+            "tei": {"healthy": False, "error": str(e)},
+            "multimodal": {"enabled": False, "healthy": False, "error": str(e)},
+        }
+
+
+@router.post("/multimodal/search", response_model=VisualSearchResponse)
+async def search_visual_content(
+    request: VisualSearchRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Search for visual content (images, tables, diagrams) using text query.
+
+    This endpoint uses Qwen3-VL-Embedding-2B to generate a query embedding
+    and searches the visual content collection for matching images/tables.
+
+    Supports cross-modal search: text queries find relevant visual content.
+    """
+    try:
+        from app.core.config import settings
+        from app.services.multimodal_embedding_service import multimodal_embedding_service
+
+        if not settings.multimodal_embedding_enabled:
+            return VisualSearchResponse(
+                results=[],
+                total=0,
+                query=request.query,
+                multimodal_enabled=False,
+            )
+
+        # Generate query embedding with Qwen3-VL for cross-modal compatibility
+        embedding_result = await multimodal_embedding_service.embed_texts(
+            texts=[request.query],
+            use_multimodal=True,
+        )
+
+        if not embedding_result.success or not embedding_result.vectors:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate query embedding: {embedding_result.error}"
+            )
+
+        # Search visual content
+        results = await weaviate_service.search_visual_content(
+            tenant_id=request.tenant_id,
+            query_vector=embedding_result.vectors[0],
+            user_id=request.user_id,
+            user_role_ids=request.user_role_ids,
+            content_types=request.content_types,
+            document_ids=request.document_ids,
+            limit=request.limit,
+        )
+
+        return VisualSearchResponse(
+            results=results,
+            total=len(results),
+            query=request.query,
+            multimodal_enabled=True,
+        )
+
+    except ImportError:
+        return VisualSearchResponse(
+            results=[],
+            total=0,
+            query=request.query,
+            multimodal_enabled=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Visual search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/visual/{tenant_id}/create-collection")
+async def create_visual_collection(
+    tenant_id: str,
+    _: bool = Depends(verify_api_key)
+):
+    """Create visual content collection for a tenant"""
+    try:
+        result = await weaviate_service.create_visual_collection(tenant_id)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.error(f"❌ Failed to create visual collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/visual/{tenant_id}/documents/{document_id}")
+async def delete_visual_by_document(
+    tenant_id: str,
+    document_id: str,
+    _: bool = Depends(verify_api_key)
+):
+    """Delete all visual content from a specific document"""
+    try:
+        deleted_count = await weaviate_service.delete_visual_by_document(
+            tenant_id=tenant_id,
+            document_id=document_id,
+        )
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "document_id": document_id,
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to delete visual content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
+# Connector Ingestion Endpoints
+# ========================================
+
+class ConnectorIndexRequest(BaseModel):
+    """
+    Request to index a document from an external connector.
+
+    This endpoint receives documents from the UnifiedIndexingService
+    which downloads content from Alfresco, SharePoint, etc.
+    """
+    document_id: str
+    file_bytes_base64: str  # Base64 encoded file content
+    filename: str
+    mime_type: Optional[str] = None
+    tenant_id: str
+    owner_id: str
+    metadata: Dict[str, Any] = {}
+    acl: Dict[str, Any] = {}
+
+
+class ConnectorIndexResponse(BaseModel):
+    """Response from connector document indexing"""
+    success: bool
+    document_id: str
+    weaviate_id: Optional[str] = None
+    collection: Optional[str] = None
+    chunk_count: int = 0
+    entities_count: int = 0
+    error: Optional[str] = None
+    processing_time_ms: float = 0.0
+
+
+@router.post("/index/from-connector", response_model=ConnectorIndexResponse)
+async def index_from_connector(
+    request: ConnectorIndexRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Index a document from an external connector.
+
+    This is the endpoint called by UnifiedIndexingService when processing
+    documents synced from Alfresco, SharePoint, Google Drive, etc.
+
+    The flow is:
+    1. Background worker discovers documents via connector sync
+    2. Background worker downloads content from source
+    3. Background worker POSTs to this endpoint with base64 content
+    4. This endpoint runs the full IndexingPipeline
+    5. Returns weaviate_id for background worker to store
+
+    This enables the same IndexingPipeline used for manual uploads
+    to be used for connector-sourced documents.
+    """
+    import base64
+    import time
+
+    start_time = time.time()
+
+    try:
+        # Decode base64 content
+        try:
+            file_bytes = base64.b64decode(request.file_bytes_base64)
+        except Exception as e:
+            logger.error(f"Failed to decode base64 content: {e}")
+            return ConnectorIndexResponse(
+                success=False,
+                document_id=request.document_id,
+                error=f"Invalid base64 content: {e}",
+            )
+
+        logger.info(
+            f"📥 Indexing connector document: {request.filename} "
+            f"({len(file_bytes)} bytes) for tenant {request.tenant_id}"
+        )
+
+        # Import indexing pipeline
+        from app.services.rag.indexing_pipeline import IndexingPipeline
+
+        pipeline = IndexingPipeline()
+
+        # Build metadata from request
+        metadata = {
+            **request.metadata,
+            "source": "connector",
+            "owner_id": request.owner_id,
+            "mime_type": request.mime_type,
+            # ACL fields for search filtering
+            "is_tenant_public": request.acl.get("is_tenant_public", False),
+            "acl_user_ids": request.acl.get("shared_with_users", []),
+            "acl_role_ids": request.acl.get("shared_with_groups", []),
+        }
+
+        # Run indexing pipeline
+        result = await pipeline.process_file(
+            document_id=request.document_id,
+            file_bytes=file_bytes,
+            filename=request.filename,
+            metadata=metadata,
+            tenant_id=request.tenant_id,
+        )
+
+        if not result.success:
+            error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
+            logger.error(f"❌ Pipeline failed for {request.filename}: {error_msg}")
+            return ConnectorIndexResponse(
+                success=False,
+                document_id=request.document_id,
+                error=error_msg,
+                processing_time_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Store chunks in Weaviate
+        from app.schemas.weaviate import DocumentCreate
+
+        collection_name = f"Nexus_{request.tenant_id.replace('-', '_')}_documents"
+
+        # Ensure collection exists
+        await weaviate_service.ensure_collection_exists(collection_name)
+
+        # Create document with chunks
+        doc_create = DocumentCreate(
+            document_id=request.document_id,
+            content=result.extracted_text[:10000] if result.extracted_text else "",  # First 10k chars
+            metadata={
+                **metadata,
+                "filename": request.filename,
+                "chunk_count": len(result.chunks),
+                "quality": result.analysis.quality.value if result.analysis else "unknown",
+                "language": result.extraction_language,
+                "entities_count": result.knowledge_result.entities_count if result.knowledge_result else 0,
+            },
+            chunks=[
+                {
+                    "content": chunk.content,
+                    "metadata": chunk.metadata,
+                    "chunk_index": i,
+                }
+                for i, chunk in enumerate(result.chunks)
+            ],
+        )
+
+        # Add to Weaviate
+        weaviate_result = await weaviate_service.add_document(collection_name, doc_create)
+
+        processing_time = (time.time() - start_time) * 1000
+
+        logger.info(
+            f"✅ Indexed connector document: {request.filename} → "
+            f"Weaviate ID: {weaviate_result.weaviate_id}, "
+            f"{len(result.chunks)} chunks, {processing_time:.0f}ms"
+        )
+
+        return ConnectorIndexResponse(
+            success=True,
+            document_id=request.document_id,
+            weaviate_id=str(weaviate_result.weaviate_id) if weaviate_result.weaviate_id else None,
+            collection=collection_name,
+            chunk_count=len(result.chunks),
+            entities_count=result.knowledge_result.entities_count if result.knowledge_result else 0,
+            processing_time_ms=processing_time,
+        )
+
+    except Exception as e:
+        logger.exception(f"❌ Failed to index connector document: {e}")
+        return ConnectorIndexResponse(
+            success=False,
+            document_id=request.document_id,
+            error=str(e),
+            processing_time_ms=(time.time() - start_time) * 1000,
+        )

@@ -10,13 +10,18 @@ Specialized agent for analyzing income tax declarations including:
 
 System message is loaded from YAML configuration (emma_prompts.yaml).
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with function_list (tool names as strings)
 """
 
 import logging
 from typing import Any
 
-from agent_framework import ChatAgent
+from qwen_agent.agents import Assistant
 
 from app.services.rag.prompt_loader import get_agent_system_message
 
@@ -85,39 +90,35 @@ Finaliza con "TASK_COMPLETE" cuando termines."""
 
 
 def create_tax_declaration_agent(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "TaxDeclarationAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
-    Create a Spanish income tax (IRPF) specialist agent using Agent Framework.
+    Create a Spanish income tax (IRPF) specialist agent using Qwen-Agent.
 
     This agent excels at analyzing Modelo 100, tax certificates,
     draft declarations, and identifying optimization opportunities.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent for tax declaration analysis
+        Configured Assistant for tax declaration analysis
     """
-    from ..tools.analysis_tools import analyze_document, extract_entities
-    from ..tools.search_tools import hybrid_search, keyword_search
-    from ..tools.rag_tools import get_document_content, rag_answer
-
-    instructions = get_agent_system_message("TaxDeclarationAgent", DEFAULT_TAX_DECLARATION_MSG)
+    system_message = get_agent_system_message("TaxDeclarationAgent", DEFAULT_TAX_DECLARATION_MSG)
     logger.debug(f"Creating TaxDeclarationAgent: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=instructions,
-        tools=[
-            analyze_document,
-            extract_entities,
-            hybrid_search,
-            keyword_search,
-            get_document_content,
-            rag_answer,
+        system_message=system_message,
+        function_list=[
+            'analyze_document',
+            'extract_entities',
+            'hybrid_search',
+            'keyword_search',
+            'get_document_content',
+            'rag_answer',
         ],
     )

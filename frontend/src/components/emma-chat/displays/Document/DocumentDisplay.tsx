@@ -100,20 +100,18 @@ export function DocumentDisplay({
                 </div>
 
                 <div className="flex items-center gap-1">
-                  {doc.previewUrl && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onPreviewClick?.(doc)
-                      }}
-                    >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      Vista previa
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onPreviewClick?.(doc)
+                    }}
+                  >
+                    <ExternalLink className="h-3 w-3 mr-1" />
+                    Vista previa
+                  </Button>
                 </div>
               </div>
             </CardContent>

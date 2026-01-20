@@ -17,8 +17,8 @@ ENV PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=5 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONWARNINGS="ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic"
-# --pre allows installing beta versions (agent-framework is in preview)
-RUN pip install --prefer-binary --pre -r requirements.txt
+# Install dependencies (qwen-agent is stable, no --pre needed)
+RUN pip install --prefer-binary -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/

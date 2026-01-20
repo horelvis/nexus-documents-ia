@@ -191,6 +191,8 @@ class Settings(BaseSettings):
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
 
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
+    # NOTE: Elasticsearch service was removed from architecture - Weaviate handles all search
+    ENABLE_ELASTICSEARCH: bool = os.getenv("ENABLE_ELASTICSEARCH", "false").lower() == "true"
     ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
     ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
     

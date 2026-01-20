@@ -954,6 +954,442 @@ class WeaviateService:
             logger.error(f"❌ Failed to delete knowledge entities for document {document_id}: {e}")
             return 0
 
+    # =========================================================================
+    # VISUAL CONTENT COLLECTION METHODS (Multimodal Embedding Support)
+    # =========================================================================
+
+    def get_visual_collection_name(self, tenant_id: str) -> str:
+        """Get the visual content collection name for a tenant"""
+        safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
+        return f"Nexus_{safe_tenant}_visual"
+
+    async def create_visual_collection(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Create a visual content collection for storing multimodal embeddings.
+
+        This collection stores visual elements (images, tables, diagrams) extracted
+        from documents, enabling cross-modal search (text-to-image, image-to-text).
+
+        Schema includes:
+        - Visual content metadata (type, page, bbox)
+        - Caption/description for multimodal context
+        - ACL properties inherited from source document
+        """
+        collection_name = self.get_visual_collection_name(tenant_id)
+
+        try:
+            # Check if already exists
+            collections = await self.list_collections()
+            if collection_name in collections or collection_name.capitalize() in collections:
+                logger.info(f"✅ Visual collection {collection_name} already exists")
+                return {"class": collection_name, "status": "exists"}
+
+            # Create visual collection with multimodal-specific schema
+            collection = self.client.collections.create(
+                name=collection_name,
+                description=f"Visual content embeddings for tenant {tenant_id}",
+                properties=[
+                    # Visual content identification
+                    weaviate.classes.config.Property(
+                        name="visual_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Unique visual content identifier"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="content_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Type: image, table_image, diagram, page_thumbnail"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="caption",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Text caption/description for multimodal context"
+                    ),
+                    # Source document reference
+                    weaviate.classes.config.Property(
+                        name="document_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Source document UUID"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="tenant_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Tenant identifier"
+                    ),
+                    # Position in document
+                    weaviate.classes.config.Property(
+                        name="page_number",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Page number (0-indexed)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_x0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Bounding box x0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_y0",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Bounding box y0 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_x1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Bounding box x1 coordinate"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="bbox_y1",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Bounding box y1 coordinate"
+                    ),
+                    # Visual dimensions
+                    weaviate.classes.config.Property(
+                        name="width",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Image width in pixels"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="height",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Image height in pixels"
+                    ),
+                    # Embedding metadata
+                    weaviate.classes.config.Property(
+                        name="embedding_model",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Model used for embedding: bge-m3, Qwen3-VL-2B, etc."
+                    ),
+                    weaviate.classes.config.Property(
+                        name="detection_method",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="How visual was detected: embedded, ruled, shapes, etc."
+                    ),
+                    # Timestamps
+                    weaviate.classes.config.Property(
+                        name="created_at",
+                        data_type=weaviate.classes.config.DataType.DATE,
+                        description="Creation timestamp"
+                    ),
+                    # ACL (inherited from source document)
+                    weaviate.classes.config.Property(
+                        name="acl_user_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="User IDs with access"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_role_ids",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Role IDs with access"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="acl_everyone",
+                        data_type=weaviate.classes.config.DataType.BOOL,
+                        description="Public access flag"
+                    ),
+                    # Channel access (inherited from source document)
+                    weaviate.classes.config.Property(
+                        name="channel_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Information channel ID"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="channel_visibility",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Channel visibility: personal, tenant"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="owner_user_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Owner user ID"
+                    ),
+                ]
+            )
+
+            result = {"class": collection_name, "status": "created"}
+            logger.info(f"✅ Created visual collection: {collection_name}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Failed to create visual collection {collection_name}: {e}")
+            raise
+
+    async def add_visual_content(
+        self,
+        tenant_id: str,
+        document_id: str,
+        visual_id: str,
+        content_type: str,
+        embedding: List[float],
+        page_number: int = 0,
+        bbox: Optional[tuple] = None,
+        caption: Optional[str] = None,
+        width: int = 0,
+        height: int = 0,
+        embedding_model: str = "Qwen/Qwen3-VL-Embedding-2B",
+        detection_method: Optional[str] = None,
+        acl_user_ids: Optional[List[str]] = None,
+        acl_role_ids: Optional[List[str]] = None,
+        acl_everyone: bool = True,
+        channel_id: str = "",
+        channel_visibility: str = "",
+        owner_user_id: str = "",
+    ) -> str:
+        """
+        Add a visual content embedding to Weaviate.
+
+        Args:
+            tenant_id: Tenant identifier
+            document_id: Source document UUID
+            visual_id: Unique identifier for this visual
+            content_type: Type of visual (image, table_image, diagram, page_thumbnail)
+            embedding: Pre-computed embedding vector (1024 dims from Qwen3-VL)
+            page_number: Page number in source document (0-indexed)
+            bbox: Bounding box (x0, y0, x1, y1) in PDF coordinates
+            caption: Text caption/description for multimodal context
+            width: Image width in pixels
+            height: Image height in pixels
+            embedding_model: Model used for embedding
+            detection_method: How the visual was detected
+            acl_*: Access control lists (inherited from source document)
+            channel_*: Channel access (inherited from source document)
+
+        Returns:
+            Weaviate object UUID
+        """
+        collection_name = self.get_visual_collection_name(tenant_id)
+
+        # Ensure collection exists
+        await self.create_visual_collection(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Prepare visual data
+            visual_data = {
+                "visual_id": visual_id,
+                "content_type": content_type,
+                "caption": caption or "",
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+                "page_number": page_number,
+                "bbox_x0": bbox[0] if bbox else 0.0,
+                "bbox_y0": bbox[1] if bbox else 0.0,
+                "bbox_x1": bbox[2] if bbox else 0.0,
+                "bbox_y1": bbox[3] if bbox else 0.0,
+                "width": width,
+                "height": height,
+                "embedding_model": embedding_model,
+                "detection_method": detection_method or "",
+                "created_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                "acl_user_ids": acl_user_ids or [],
+                "acl_role_ids": acl_role_ids or [],
+                "acl_everyone": acl_everyone,
+                "channel_id": channel_id,
+                "channel_visibility": channel_visibility,
+                "owner_user_id": owner_user_id,
+            }
+
+            # Insert with pre-computed embedding
+            result = collection.data.insert(
+                properties=visual_data,
+                uuid=visual_id,
+                vector=embedding
+            )
+
+            logger.debug(f"✅ Added visual content {visual_id} ({content_type}) to {collection_name}")
+            return visual_id
+
+        except Exception as e:
+            logger.error(f"❌ Failed to add visual content {visual_id}: {e}")
+            raise
+
+    async def search_visual_content(
+        self,
+        tenant_id: str,
+        query_vector: List[float],
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        content_types: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None,
+        limit: int = 10,
+        certainty: float = 0.7,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for visual content using vector similarity.
+
+        Supports cross-modal search: query with text embedding to find images,
+        or query with image embedding to find related visuals.
+
+        Args:
+            tenant_id: Tenant identifier
+            query_vector: Query embedding (1024 dims)
+            user_id: Current user ID for ACL filtering
+            user_role_ids: User's role IDs for ACL filtering
+            content_types: Filter by content types (image, table_image, diagram)
+            document_ids: Filter by specific documents
+            limit: Maximum results
+            certainty: Minimum similarity threshold
+
+        Returns:
+            List of visual content results with metadata
+        """
+        collection_name = self.get_visual_collection_name(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Build filters
+            filters = weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id)
+
+            # Add ACL filter if user_id provided
+            if user_id:
+                acl_filter = self._build_document_access_filter(user_id, user_role_ids)
+                filters = filters & acl_filter
+
+            # Add content type filter
+            if content_types:
+                type_filter = None
+                for ct in content_types:
+                    cf = weaviate.classes.query.Filter.by_property("content_type").equal(ct)
+                    type_filter = cf if type_filter is None else type_filter | cf
+                filters = filters & type_filter
+
+            # Add document filter
+            if document_ids:
+                doc_filter = None
+                for doc_id in document_ids:
+                    df = weaviate.classes.query.Filter.by_property("document_id").equal(doc_id)
+                    doc_filter = df if doc_filter is None else doc_filter | df
+                filters = filters & doc_filter
+
+            # Execute vector search
+            response = collection.query.near_vector(
+                near_vector=query_vector,
+                filters=filters,
+                limit=limit,
+                certainty=certainty,
+                return_metadata=weaviate.classes.query.MetadataQuery(
+                    certainty=True,
+                    distance=True
+                )
+            )
+
+            results = []
+            for obj in response.objects:
+                results.append({
+                    "visual_id": obj.properties.get("visual_id"),
+                    "content_type": obj.properties.get("content_type"),
+                    "caption": obj.properties.get("caption"),
+                    "document_id": obj.properties.get("document_id"),
+                    "page_number": obj.properties.get("page_number"),
+                    "bbox": (
+                        obj.properties.get("bbox_x0"),
+                        obj.properties.get("bbox_y0"),
+                        obj.properties.get("bbox_x1"),
+                        obj.properties.get("bbox_y1"),
+                    ),
+                    "width": obj.properties.get("width"),
+                    "height": obj.properties.get("height"),
+                    "embedding_model": obj.properties.get("embedding_model"),
+                    "certainty": obj.metadata.certainty if obj.metadata else None,
+                    "distance": obj.metadata.distance if obj.metadata else None,
+                })
+
+            logger.info(f"✅ Found {len(results)} visual results for tenant {tenant_id}")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Visual search failed for tenant {tenant_id}: {e}")
+            return []
+
+    async def delete_visual_by_document(self, tenant_id: str, document_id: str) -> int:
+        """Delete all visual content from a specific document"""
+        collection_name = self.get_visual_collection_name(tenant_id)
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Find all visuals from this document
+            response = collection.query.fetch_objects(
+                filters=weaviate.classes.query.Filter.by_property("document_id").equal(document_id),
+                limit=1000
+            )
+
+            deleted_count = 0
+            for obj in response.objects:
+                collection.data.delete_by_id(obj.uuid)
+                deleted_count += 1
+
+            logger.info(f"✅ Deleted {deleted_count} visual embeddings from document {document_id}")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"❌ Failed to delete visual content for document {document_id}: {e}")
+            return 0
+
+    # =========================================================================
+    # CHUNK EXPANSION METHODS (Long Context RAG)
+    # =========================================================================
+
+    async def fetch_chunks_by_indices(
+        self,
+        collection_name: str,
+        document_id: str,
+        chunk_indices: List[int],
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch specific chunks by document_id and chunk_indices.
+
+        Used for chunk expansion in Long Context RAG to retrieve
+        adjacent chunks and preserve context across boundaries.
+
+        Args:
+            collection_name: Weaviate collection name
+            document_id: Parent document ID
+            chunk_indices: List of chunk indices to fetch
+
+        Returns:
+            List of chunk dictionaries with content and metadata
+        """
+        if not chunk_indices:
+            return []
+
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Build filter for document_id
+            doc_filter = weaviate.classes.query.Filter.by_property("document_id").equal(document_id)
+
+            # Fetch all chunks for this document (we'll filter by index in Python)
+            # This is more efficient than multiple Weaviate queries for small expand_size
+            response = collection.query.fetch_objects(
+                filters=doc_filter,
+                limit=100,  # Max chunks per document we'll scan
+                return_properties=["content", "chunk_index", "document_id", "title"],
+            )
+
+            # Filter to requested indices
+            results = []
+            for obj in response.objects:
+                chunk_idx = obj.properties.get("chunk_index")
+                if chunk_idx is not None and chunk_idx in chunk_indices:
+                    results.append({
+                        "chunk_index": chunk_idx,
+                        "content": obj.properties.get("content", ""),
+                        "document_id": obj.properties.get("document_id"),
+                        "title": obj.properties.get("title"),
+                        "uuid": str(obj.uuid),
+                    })
+
+            logger.debug(
+                f"  Fetched {len(results)} adjacent chunks for document {document_id}"
+            )
+            return results
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to fetch chunks by indices: {e}")
+            return []
+
     async def add_document(self, collection_name: str, document: DocumentCreate) -> DocumentResponse:
         """Add a document to Weaviate"""
         try:

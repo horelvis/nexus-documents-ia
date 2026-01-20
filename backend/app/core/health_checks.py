@@ -437,7 +437,8 @@ class HealthCheckManager:
                 f"{settings.WEAVIATE_SERVICE_URL}/health"
             ))
 
-        if hasattr(settings, 'ELASTICSEARCH_URL'):
+        # Only check Elasticsearch if explicitly enabled (service was removed from architecture)
+        if getattr(settings, 'ENABLE_ELASTICSEARCH', False):
             self.add_check(ExternalServiceHealthCheck(
                 "elasticsearch",
                 f"{settings.ELASTICSEARCH_URL}/_cluster/health"

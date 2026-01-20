@@ -1,0 +1,23 @@
+# MCP Storage Server
+# Provides file storage operations via MCP protocol
+# Replaces: storage-service microservice
+
+# MCP SDK - FastMCP for easy server creation
+mcp>=1.8.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Google Cloud Storage
+google-cloud-storage>=2.10.0
+
+# HTTP Server (for SSE transport)
+uvicorn[standard]>=0.24.0
+starlette>=0.27.0
+httpx>=0.25.0
+
+# Async support
+aiofiles>=23.0.0
+
+# Logging
+structlog>=23.2.0
+loguru>=0.7.0

@@ -1,13 +1,20 @@
 """
-PlanningTool - Gestión de planes con pasos y estados.
+PlanningTool - Gestion de planes con pasos y estados.
 
-Basado en el patrón OpenManus:
+Basado en el patron OpenManus:
 https://github.com/FoundationAgents/OpenManus/blob/main/app/tool/planning.py
 
-Este módulo implementa la gestión de planes de ejecución con:
+Este modulo implementa la gestion de planes de ejecucion con:
 - Estados de pasos (NOT_STARTED, IN_PROGRESS, COMPLETED, BLOCKED)
-- Asignación de agentes a pasos
+- Asignacion de agentes a pasos
 - Seguimiento de progreso
+
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Updated internal ChatAgent usage to Qwen-Agent's Assistant pattern
+- This is a utility class, not a tool that needs @register_tool
 """
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -30,8 +37,8 @@ class PlanStepStatus(str, Enum):
         """Obtiene el marcador visual para un estado."""
         markers = {
             cls.NOT_STARTED.value: "[ ]",
-            cls.IN_PROGRESS.value: "[→]",
-            cls.COMPLETED.value: "[✓]",
+            cls.IN_PROGRESS.value: "[->]",
+            cls.COMPLETED.value: "[v]",
             cls.BLOCKED.value: "[!]",
         }
         return markers.get(status, "[ ]")
@@ -40,12 +47,12 @@ class PlanStepStatus(str, Enum):
     def get_emoji(cls, status: str) -> str:
         """Obtiene el emoji para un estado."""
         emojis = {
-            cls.NOT_STARTED.value: "⏳",
-            cls.IN_PROGRESS.value: "▶️",
-            cls.COMPLETED.value: "✅",
-            cls.BLOCKED.value: "❌",
+            cls.NOT_STARTED.value: "pending",
+            cls.IN_PROGRESS.value: "running",
+            cls.COMPLETED.value: "done",
+            cls.BLOCKED.value: "error",
         }
-        return emojis.get(status, "⏳")
+        return emojis.get(status, "pending")
 
 
 @dataclass
@@ -74,7 +81,7 @@ class PlanStep:
 
 @dataclass
 class Plan:
-    """Un plan de ejecución con múltiples pasos."""
+    """Un plan de ejecucion con multiples pasos."""
     plan_id: str
     title: str
     steps: List[PlanStep] = field(default_factory=list)
@@ -84,7 +91,7 @@ class Plan:
     created_at: str = ""
 
     def __post_init__(self):
-        """Inicialización post-creación."""
+        """Inicializacion post-creacion."""
         if not self.created_at:
             from datetime import datetime
             self.created_at = datetime.utcnow().isoformat()
@@ -108,7 +115,7 @@ class Plan:
 
     @property
     def is_complete(self) -> bool:
-        """Indica si el plan está completado."""
+        """Indica si el plan esta completado."""
         return self.completed_steps == self.total_steps and self.total_steps > 0
 
     @property
@@ -138,32 +145,32 @@ class Plan:
 
 class PlanningTool:
     """
-    Herramienta para crear y gestionar planes de ejecución.
+    Herramienta para crear y gestionar planes de ejecucion.
 
-    Basado en el patrón OpenManus, permite:
+    Basado en el patron OpenManus, permite:
     - Crear planes con pasos y agentes asignados
     - Actualizar estados de pasos
     - Monitorear progreso
     - Obtener el paso actual
     """
 
-    # Planes predefinidos por tipo de análisis
+    # Planes predefinidos por tipo de analisis
     PREDEFINED_PLANS = {
         "legal": [
             ("Analizar estructura y partes del contrato", "ContractAgent"),
-            ("Revisar aspectos laborales (período de prueba, jornada, vacaciones)", "LaborAgent"),
-            ("Verificar cumplimiento normativo (RGPD, protección datos)", "ComplianceAgent"),
+            ("Revisar aspectos laborales (periodo de prueba, jornada, vacaciones)", "LaborAgent"),
+            ("Verificar cumplimiento normativo (RGPD, proteccion datos)", "ComplianceAgent"),
             ("Generar resumen ejecutivo con recomendaciones", "SummarizerAgent"),
         ],
         "contract": [
             ("Analizar estructura y partes del contrato", "ContractAgent"),
-            ("Revisar aspectos laborales según Estatuto de los Trabajadores", "LaborAgent"),
+            ("Revisar aspectos laborales segun Estatuto de los Trabajadores", "LaborAgent"),
             ("Verificar cumplimiento normativo", "ComplianceAgent"),
             ("Generar resumen ejecutivo con recomendaciones", "SummarizerAgent"),
         ],
         "labor": [
             ("Analizar tipo de contrato y modalidad contractual", "LaborAgent"),
-            ("Verificar período de prueba según Art. 14 ET", "LaborAgent"),
+            ("Verificar periodo de prueba segun Art. 14 ET", "LaborAgent"),
             ("Revisar jornada laboral, salario y vacaciones", "LaborAgent"),
             ("Verificar cumplimiento del Estatuto de los Trabajadores", "ComplianceAgent"),
             ("Generar resumen con hallazgos laborales", "SummarizerAgent"),
@@ -175,7 +182,7 @@ class PlanningTool:
             ("Generar informe de cumplimiento", "SummarizerAgent"),
         ],
         "financial": [
-            ("Analizar términos financieros y montos", "ContractAgent"),
+            ("Analizar terminos financieros y montos", "ContractAgent"),
             ("Verificar obligaciones de pago", "ContractAgent"),
             ("Identificar riesgos financieros", "ContractAgent"),
             ("Generar resumen financiero", "SummarizerAgent"),
@@ -204,9 +211,9 @@ class PlanningTool:
         Crea un nuevo plan con pasos y agentes asignados.
 
         Args:
-            title: Título del plan
-            steps: Lista de tuplas (descripción, agente)
-            analysis_type: Tipo de análisis
+            title: Titulo del plan
+            steps: Lista de tuplas (descripcion, agente)
+            analysis_type: Tipo de analisis
             tenant_id: ID del tenant
             document_id: ID del documento
 
@@ -230,7 +237,7 @@ class PlanningTool:
         )
 
         self._current_plan_id = plan_id
-        logger.info(f"📋 Plan creado: {plan_id} con {len(steps)} pasos")
+        logger.info(f"Plan creado: {plan_id} con {len(steps)} pasos")
 
         return plan_id
 
@@ -242,24 +249,23 @@ class PlanningTool:
         task_description: str = "",
     ) -> str:
         """
-        Crea un plan predefinido según el tipo de análisis.
+        Crea un plan predefinido segun el tipo de analisis.
 
         Args:
-            analysis_type: Tipo de análisis (legal, compliance, financial, general)
+            analysis_type: Tipo de analisis (legal, compliance, financial, general)
             tenant_id: ID del tenant
             document_id: ID del documento
-            task_description: Descripción adicional de la tarea
+            task_description: Descripcion adicional de la tarea
 
         Returns:
             ID del plan creado
         """
-        # Obtener pasos predefinidos o usar general
         steps = self.PREDEFINED_PLANS.get(
             analysis_type,
             self.PREDEFINED_PLANS["general"]
         )
 
-        title = f"Análisis {analysis_type}"
+        title = f"Analisis {analysis_type}"
         if task_description:
             title += f": {task_description[:50]}"
 
@@ -292,7 +298,7 @@ class PlanningTool:
             plan_id: ID del plan (usa el actual si None)
 
         Returns:
-            Tupla (índice, descripción, agente) o None si todos completados
+            Tupla (indice, descripcion, agente) o None si todos completados
         """
         plan = self.get_plan(plan_id)
         if not plan:
@@ -315,14 +321,14 @@ class PlanningTool:
         Actualiza el estado de un paso.
 
         Args:
-            step_index: Índice del paso
+            step_index: Indice del paso
             status: Nuevo estado
             note: Nota opcional
             result: Resultado opcional
             plan_id: ID del plan (usa el actual si None)
 
         Returns:
-            True si se actualizó correctamente
+            True si se actualizo correctamente
         """
         plan = self.get_plan(plan_id)
         if not plan:
@@ -384,7 +390,7 @@ class PlanningTool:
             plan_id: ID del plan (usa el actual si None)
 
         Returns:
-            Diccionario con información de progreso
+            Diccionario con informacion de progreso
         """
         plan = self.get_plan(plan_id)
         if not plan:
@@ -427,7 +433,7 @@ class PlanningTool:
             return "Plan no encontrado"
 
         lines = [
-            f"📋 {plan.title}",
+            f"Plan: {plan.title}",
             f"Progreso: {plan.completed_steps}/{plan.total_steps} ({plan.progress_percentage}%)",
             "",
         ]
@@ -436,11 +442,11 @@ class PlanningTool:
             marker = PlanStepStatus.get_marker(step.status)
             lines.append(f"  {marker} {step.index + 1}. {step.description}")
             if step.note:
-                lines.append(f"      └─ {step.note}")
+                lines.append(f"      -> {step.note}")
 
         return "\n".join(lines)
 
-    # Mapeo de tipos de documento a análisis predefinidos
+    # Mapeo de tipos de documento a analisis predefinidos
     DOCUMENT_TYPE_TO_ANALYSIS = {
         "contrato_laboral": "labor",
         "contrato_trabajo": "labor",
@@ -469,44 +475,43 @@ class PlanningTool:
     async def detect_document_type(
         self,
         document_content: str,
-        chat_client,
+        llm_cfg: dict,
     ) -> dict:
         """
-        Detecta el tipo de documento usando LLM.
+        Detecta el tipo de documento usando LLM (Qwen-Agent).
 
         Analiza la estructura y contenido del documento para clasificarlo
-        y determinar qué agentes especializados son más relevantes.
+        y determinar que agentes especializados son mas relevantes.
 
         Args:
             document_content: Contenido completo del documento
-            chat_client: Cliente LLM para clasificación
+            llm_cfg: LLM configuration dict for Qwen-Agent
 
         Returns:
             {
                 "document_type": "contrato_laboral",
                 "document_type_display": "Contrato de Trabajo Temporal",
                 "confidence": 0.95,
-                "key_sections": ["objeto", "duración", "salario", "período de prueba"],
+                "key_sections": ["objeto", "duracion", "salario", "periodo de prueba"],
                 "suggested_agents": ["LaborAgent", "ComplianceAgent", "SummarizerAgent"],
                 "analysis_type": "labor"
             }
         """
-        from agent_framework import ChatAgent
+        from qwen_agent.agents import Assistant
 
-        # Usar primeros 5000 chars para detección (más contexto que antes)
         content_preview = document_content[:5000] if document_content else ""
 
         if not content_preview:
             return self._default_detection_result()
 
-        detection_prompt = f"""Analiza el siguiente documento y clasifícalo.
+        detection_prompt = f"""Analiza el siguiente documento y clasificalo.
 
 DOCUMENTO (primeros 5000 caracteres):
 ---
 {content_preview}
 ---
 
-RESPONDE ÚNICAMENTE en formato JSON con esta estructura exacta:
+RESPONDE UNICAMENTE en formato JSON con esta estructura exacta:
 ```json
 {{
   "document_type": "tipo_interno (ej: contrato_laboral, arrendamiento, nda, factura, contrato_servicios...)",
@@ -518,61 +523,56 @@ RESPONDE ÚNICAMENTE en formato JSON con esta estructura exacta:
 ```
 
 AGENTES DISPONIBLES para suggested_agents:
-- ContractAgent: Contratos generales, cláusulas, obligaciones
+- ContractAgent: Contratos generales, clausulas, obligaciones
 - LaborAgent: Contratos laborales, Art. 14 ET, jornada, vacaciones
-- ComplianceAgent: RGPD, cumplimiento normativo, protección datos
+- ComplianceAgent: RGPD, cumplimiento normativo, proteccion datos
 - FiscalAgent: IVA, retenciones, aspectos tributarios
 - RealEstateAgent: Arrendamientos, compraventa inmuebles
-- PrivacyAgent: Políticas privacidad, cookies, consentimientos
-- EducationAgent: Normativa educativa, becas, matrículas
-- SummarizerAgent: Resúmenes (SIEMPRE incluir)
+- PrivacyAgent: Politicas privacidad, cookies, consentimientos
+- EducationAgent: Normativa educativa, becas, matriculas
+- SummarizerAgent: Resumenes (SIEMPRE incluir)
 
 REGLAS:
 1. Analiza el contenido real, no inventes
 2. confidence debe reflejar certeza real (0.5 si dudas)
 3. key_sections solo secciones que REALMENTE existen en el documento
-4. suggested_agents: 2-4 agentes máximo, ordenados por relevancia
+4. suggested_agents: 2-4 agentes maximo, ordenados por relevancia
 5. Responde SOLO con el JSON, sin texto adicional"""
 
         try:
-            detector = ChatAgent(
+            detector = Assistant(
+                llm=llm_cfg,
                 name="DocumentDetector",
-                chat_client=chat_client,
-                instructions="Eres un clasificador de documentos legales experto. Analizas estructura y contenido para determinar el tipo exacto de documento. Responde SOLO con JSON valido.",
+                description="Clasificador de documentos legales experto.",
+                system_message="Eres un clasificador de documentos legales experto. Analizas estructura y contenido para determinar el tipo exacto de documento. Responde SOLO con JSON valido.",
             )
 
-            logger.info("🔍 Detectando tipo de documento con LLM...")
-            response = await detector.run(detection_prompt)
+            logger.info("Detectando tipo de documento con LLM...")
+            response = detector.run([{"role": "user", "content": detection_prompt}])
 
-            # Extraer respuesta usando .text (Agent Framework API)
+            # Extract response from Qwen-Agent
             response_text = ""
-            if hasattr(response, 'text') and response.text:
-                response_text = response.text
-            elif hasattr(response, 'messages'):
-                for msg in response.messages:
-                    if hasattr(msg, 'content'):
-                        response_text = msg.content
-                        break
-            elif hasattr(response, 'content'):
-                response_text = response.content
-            else:
-                response_text = str(response)
+            for chunk in response:
+                if hasattr(chunk, 'content'):
+                    response_text += chunk.content
+                elif isinstance(chunk, dict) and 'content' in chunk:
+                    response_text += chunk['content']
+                elif isinstance(chunk, str):
+                    response_text += chunk
 
-            # Parsear JSON
+            # Parse JSON
             import re
             import json
             json_match = re.search(r'\{[\s\S]*\}', response_text)
             if json_match:
                 detection_data = json.loads(json_match.group())
 
-                # Validar y normalizar
                 doc_type = detection_data.get("document_type", "documento_general")
                 doc_type_display = detection_data.get("document_type_display", "Documento")
                 confidence = float(detection_data.get("confidence", 0.5))
                 key_sections = detection_data.get("key_sections", [])
                 suggested_agents = detection_data.get("suggested_agents", ["ContractAgent"])
 
-                # Validar agentes sugeridos
                 valid_agents = {
                     "ContractAgent", "LaborAgent", "ComplianceAgent",
                     "FiscalAgent", "RealEstateAgent", "PrivacyAgent",
@@ -583,11 +583,9 @@ REGLAS:
                 if not suggested_agents:
                     suggested_agents = ["ContractAgent"]
 
-                # Asegurar SummarizerAgent al final
                 if "SummarizerAgent" not in suggested_agents:
                     suggested_agents.append("SummarizerAgent")
 
-                # Determinar analysis_type basado en doc_type
                 analysis_type = self.DOCUMENT_TYPE_TO_ANALYSIS.get(
                     doc_type.lower().replace(" ", "_"),
                     "legal"
@@ -597,24 +595,24 @@ REGLAS:
                     "document_type": doc_type,
                     "document_type_display": doc_type_display,
                     "confidence": confidence,
-                    "key_sections": key_sections[:10],  # Máximo 10 secciones
+                    "key_sections": key_sections[:10],
                     "suggested_agents": suggested_agents,
                     "analysis_type": analysis_type,
                 }
 
-                logger.info(f"🔍 Documento detectado: {doc_type_display} (confianza: {confidence:.2f})")
+                logger.info(f"Documento detectado: {doc_type_display} (confianza: {confidence:.2f})")
                 logger.info(f"   Secciones: {', '.join(key_sections[:5])}...")
                 logger.info(f"   Agentes sugeridos: {', '.join(suggested_agents)}")
 
                 return result
 
         except Exception as e:
-            logger.warning(f"⚠️ Error detectando tipo de documento: {e}")
+            logger.warning(f"Error detectando tipo de documento: {e}")
 
         return self._default_detection_result()
 
     def _default_detection_result(self) -> dict:
-        """Resultado de detección por defecto cuando falla el LLM."""
+        """Resultado de deteccion por defecto cuando falla el LLM."""
         return {
             "document_type": "documento_general",
             "document_type_display": "Documento General",
@@ -630,15 +628,15 @@ REGLAS:
         task: str,
         tenant_id: str,
         document_id: str,
-        chat_client,
+        llm_cfg: dict,
         document_type_info: dict = None,
     ) -> str:
         """
-        Genera un plan dinámico basado en el contenido del documento usando LLM.
+        Genera un plan dinamico basado en el contenido del documento usando LLM.
 
-        El LLM analiza el documento y genera pasos específicos según:
+        El LLM analiza el documento y genera pasos especificos segun:
         - Tipo de documento detectado (si se proporciona document_type_info)
-        - Cláusulas y secciones presentes
+        - Clausulas y secciones presentes
         - Posibles riesgos identificados
 
         Args:
@@ -646,18 +644,16 @@ REGLAS:
             task: Tarea solicitada por el usuario
             tenant_id: ID del tenant
             document_id: ID del documento
-            chat_client: Cliente LLM para generar el plan
+            llm_cfg: LLM configuration dict for Qwen-Agent
             document_type_info: Resultado de detect_document_type() (opcional)
 
         Returns:
             ID del plan generado
         """
-        from agent_framework import ChatAgent
+        from qwen_agent.agents import Assistant
 
-        # Aumentar límite a 8000 chars para mejor contexto
         content_preview = document_content[:8000] if document_content else ""
 
-        # Construir contexto de tipo detectado si existe
         type_context = ""
         if document_type_info:
             doc_type = document_type_info.get("document_type_display", "Documento")
@@ -671,11 +667,10 @@ TIPO DE DOCUMENTO DETECTADO:
 - Secciones identificadas: {', '.join(sections[:7]) if sections else 'No identificadas'}
 - Agentes sugeridos: {', '.join(suggested)}
 
-IMPORTANTE: Usa esta información para generar un plan ESPECÍFICO para este tipo de documento.
+IMPORTANTE: Usa esta informacion para generar un plan ESPECIFICO para este tipo de documento.
 """
 
-        # Prompt mejorado para generar plan dinámico
-        planning_prompt = f"""Genera un plan de análisis específico para el siguiente documento.
+        planning_prompt = f"""Genera un plan de analisis especifico para el siguiente documento.
 {type_context}
 DOCUMENTO (primeros 8000 caracteres):
 ---
@@ -685,73 +680,65 @@ DOCUMENTO (primeros 8000 caracteres):
 TAREA SOLICITADA: {task}
 
 AGENTES DISPONIBLES (usa EXACTAMENTE estos nombres):
-- ContractAgent: Análisis de cláusulas contractuales, partes, obligaciones
-- LaborAgent: Derecho laboral, período de prueba, jornada, Art. 14 ET, convenios
-- ComplianceAgent: Cumplimiento normativo, RGPD, protección de datos
+- ContractAgent: Analisis de clausulas contractuales, partes, obligaciones
+- LaborAgent: Derecho laboral, periodo de prueba, jornada, Art. 14 ET, convenios
+- ComplianceAgent: Cumplimiento normativo, RGPD, proteccion de datos
 - FiscalAgent: Aspectos fiscales, tributarios, IVA, retenciones
 - RealEstateAgent: Contratos inmobiliarios, arrendamiento, compraventa
 - PrivacyAgent: Privacidad, cookies, consentimientos, derechos ARCO
-- EducationAgent: Normativa educativa, becas, matrículas
-- SummarizerAgent: Resúmenes ejecutivos (SIEMPRE incluir al final)
+- EducationAgent: Normativa educativa, becas, matriculas
+- SummarizerAgent: Resumenes ejecutivos (SIEMPRE incluir al final)
 
 GENERA UN PLAN con 3-6 pasos en formato JSON:
 ```json
 {{
   "document_type": "tipo detectado",
   "steps": [
-    {{"description": "Paso específico con referencia a artículos/cláusulas reales", "agent": "NombreAgente"}},
+    {{"description": "Paso especifico con referencia a articulos/clausulas reales", "agent": "NombreAgente"}},
     ...
   ]
 }}
 ```
 
-REGLAS CRÍTICAS:
-1. CADA paso debe ser ESPECÍFICO para ESTE documento, mencionando cláusulas/artículos reales
-2. NO uses descripciones genéricas como "Analizar estructura" - sé específico
-3. Si es contrato laboral: menciona artículos del ET específicos (Art. 14 período prueba, Art. 34 jornada)
-4. Si hay cláusulas de penalización, exclusividad, no competencia: analízalas explícitamente
-5. SummarizerAgent SIEMPRE es el último paso
-6. Máximo 6 pasos para eficiencia
+REGLAS CRITICAS:
+1. CADA paso debe ser ESPECIFICO para ESTE documento, mencionando clausulas/articulos reales
+2. NO uses descripciones genericas como "Analizar estructura" - se especifico
+3. Si es contrato laboral: menciona articulos del ET especificos (Art. 14 periodo prueba, Art. 34 jornada)
+4. Si hay clausulas de penalizacion, exclusividad, no competencia: analizalas explicitamente
+5. SummarizerAgent SIEMPRE es el ultimo paso
+6. Maximo 6 pasos para eficiencia
 7. Responde SOLO con el JSON"""
 
         try:
-            # Crear agente planificador temporal
-            planner = ChatAgent(
+            planner = Assistant(
+                llm=llm_cfg,
                 name="PlannerAgent",
-                chat_client=chat_client,
-                instructions="Eres un experto en análisis de documentos legales. Generas planes de análisis estructurados en JSON.",
+                description="Experto en analisis de documentos legales.",
+                system_message="Eres un experto en analisis de documentos legales. Generas planes de analisis estructurados en JSON.",
             )
 
-            # Generar plan con LLM
-            logger.info("🤖 Generando plan dinámico con LLM...")
-            response = await planner.run(planning_prompt)
+            logger.info("Generando plan dinamico con LLM...")
+            response = planner.run([{"role": "user", "content": planning_prompt}])
 
-            # Extraer respuesta usando .text (Agent Framework API)
             response_text = ""
-            if hasattr(response, 'text') and response.text:
-                response_text = response.text
-            elif hasattr(response, 'messages'):
-                for msg in response.messages:
-                    if hasattr(msg, 'content'):
-                        response_text = msg.content
-                        break
-            elif hasattr(response, 'content'):
-                response_text = response.content
-            else:
-                response_text = str(response)
+            for chunk in response:
+                if hasattr(chunk, 'content'):
+                    response_text += chunk.content
+                elif isinstance(chunk, dict) and 'content' in chunk:
+                    response_text += chunk['content']
+                elif isinstance(chunk, str):
+                    response_text += chunk
 
-            # Parsear JSON del response
             import re
+            import json
             json_match = re.search(r'\{[\s\S]*\}', response_text)
             if json_match:
-                import json
                 plan_data = json.loads(json_match.group())
 
                 document_type = plan_data.get("document_type", "documento")
                 steps_data = plan_data.get("steps", [])
 
                 if steps_data:
-                    # Validar que los agentes existen
                     valid_agents = {
                         "ContractAgent", "LaborAgent", "ComplianceAgent",
                         "FiscalAgent", "RealEstateAgent", "PrivacyAgent",
@@ -764,21 +751,19 @@ REGLAS CRÍTICAS:
                         agent = step.get("agent", "ContractAgent")
                         desc = step.get("description", "Analizar documento")
 
-                        # Validar agente
                         if agent not in valid_agents:
-                            logger.warning(f"Agente inválido '{agent}', usando ContractAgent")
+                            logger.warning(f"Agente invalido '{agent}', usando ContractAgent")
                             agent = "ContractAgent"
 
                         steps.append((desc, agent))
 
-                    # Asegurar que SummarizerAgent está al final
                     if steps and steps[-1][1] != "SummarizerAgent":
                         steps.append(("Generar resumen ejecutivo con hallazgos", "SummarizerAgent"))
 
-                    logger.info(f"✅ Plan dinámico generado: {document_type} con {len(steps)} pasos")
+                    logger.info(f"Plan dinamico generado: {document_type} con {len(steps)} pasos")
 
                     return self.create_plan(
-                        title=f"Análisis de {document_type}",
+                        title=f"Analisis de {document_type}",
                         steps=steps,
                         analysis_type="dynamic",
                         tenant_id=tenant_id,
@@ -786,15 +771,14 @@ REGLAS CRÍTICAS:
                     )
 
         except Exception as e:
-            logger.warning(f"⚠️ Error generando plan dinámico: {e}, usando plan predefinido")
+            logger.warning(f"Error generando plan dinamico: {e}, usando plan predefinido")
 
-        # Fallback inteligente: usar tipo detectado si existe
         fallback_analysis_type = "legal"
         if document_type_info:
             fallback_analysis_type = document_type_info.get("analysis_type", "legal")
-            logger.info(f"📋 Fallback inteligente: usando plan '{fallback_analysis_type}' basado en tipo detectado")
+            logger.info(f"Fallback inteligente: usando plan '{fallback_analysis_type}' basado en tipo detectado")
         else:
-            logger.info("📋 Usando plan 'legal' predefinido como fallback")
+            logger.info("Usando plan 'legal' predefinido como fallback")
 
         return self.create_plan_for_analysis(
             analysis_type=fallback_analysis_type,

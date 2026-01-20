@@ -40,6 +40,7 @@ class EmmaQuery(BaseModel):
     max_iterations: int = Field(default=3, ge=1, le=10)
     enable_learning: bool = True
     enable_debug: bool = Field(default=False, description="Enable chain-of-thought debugging for admin users")
+    deep_reasoning: bool = Field(default=True, description="Enable deep reasoning mode for complex analysis (slower but more thorough)")
     preferred_visualization: Optional[VisualizationType] = None
 
     class Config:

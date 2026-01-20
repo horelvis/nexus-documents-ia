@@ -1,10 +1,16 @@
 # Weaviate Service - Multi-Agent RAG Pipeline
 # Primary LLM: vLLM (high-throughput GPU inference)
-# Fallback: OpenAI, Anthropic
-# Framework: Microsoft Agent Framework
+# Models: Qwen3-VL-4B-Instruct + Qwen3-VL-Embedding-2B + Qwen3-VL-Reranker-2B
+# Framework: Qwen-Agent (optimized for Qwen models)
 
 # Weaviate vector database
 weaviate-client>=4.9.0
+
+# MCP (Model Context Protocol) - External data source integration
+# Enables connecting to storage, databases, REST APIs via MCP servers
+# Documentation: https://modelcontextprotocol.io/
+mcp>=1.8.0
+pyyaml>=6.0.0
 
 # FastAPI and core
 fastapi>=0.104.0
@@ -42,12 +48,13 @@ python-multipart>=0.0.9  # For Form data handling in FastAPI
 structlog>=23.2.0
 loguru>=0.7.0
 
-# Microsoft Agent Framework
-# Multi-agent orchestration with vLLM, OpenAI, Anthropic support
-# Documentation: https://learn.microsoft.com/en-us/agent-framework/
-# NOTE: Must install with --pre flag as it's in beta
-# pip install agent-framework --pre (or use version specifier below)
-agent-framework>=1.0.0b1
+# Qwen-Agent Framework
+# Multi-agent orchestration optimized for Qwen models (Qwen3-VL)
+# Features: Function calling, MCP support, Code Interpreter, RAG
+# Documentation: https://github.com/QwenLM/Qwen-Agent
+# Handles tool parsing internally (no vLLM --tool-call-parser needed)
+qwen-agent>=0.0.14
+python-dateutil>=2.8.0  # Required by qwen-agent for DateRuntime
 
 # OpenAI client for vLLM compatibility layer
 openai>=1.0.0

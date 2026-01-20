@@ -1,25 +1,28 @@
 """
-Workflow Orchestration Patterns for Agent Framework
+Workflow Orchestration Patterns for Multi-Agent Systems
 
 This module provides three workflow patterns for orchestrating
 multi-agent interactions:
 
-1. SequentialWorkflow (SequentialBuilder):
+1. SequentialWorkflow:
    Agents take turns in a fixed order. Good for pipelines like:
    Search -> Analyze -> Summarize
 
-2. GroupChatWorkflow (GroupBuilder with Coordinator):
+2. GroupChatWorkflow:
    A coordinator dynamically selects which agent should respond based on
    the conversation context. Good for complex queries requiring
    different specialists.
 
-3. SwarmWorkflow (HandoffBuilder - RECOMMENDED):
-   Coordinator routes to specialists using native handoffs.
+3. SwarmWorkflow (RECOMMENDED):
+   Coordinator routes to specialists using handoffs.
    Good for triage patterns where a router distributes work.
-   Uses Microsoft Agent Framework's HandoffBuilder for proper handoff orchestration.
 
-FRAMEWORK: Microsoft Agent Framework
-Reference: https://github.com/microsoft/agent-framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework builder patterns
+- Now uses Qwen-Agent's Assistant class with our orchestration patterns
 """
 
 from .sequential import (

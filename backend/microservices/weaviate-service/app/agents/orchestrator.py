@@ -1,5 +1,9 @@
 """
-Agent Orchestrator - Main Entry Point for Agent Framework System
+Agent Orchestrator - Main Entry Point for Agent System (DEPRECATED)
+
+⚠️ DEPRECATED: This orchestrator is deprecated. Use EmmaCoordinator instead.
+The recommended flow is EmmaCoordinator + semantic-router.
+This file is maintained for backward compatibility only.
 
 This orchestrator manages:
 1. Agent and workflow creation (lazy loading)
@@ -7,8 +11,12 @@ This orchestrator manages:
 3. Timeout handling and fallback to RAG pipeline
 4. Multi-tenant support
 
-FRAMEWORK: Microsoft Agent Framework
-Uses ChatAgent with vLLM (primary) or OpenAI (fallback).
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework to Qwen-Agent
+- Uses Assistant with get_llm_config() instead of ChatAgent
 
 Usage:
     from app.agents import get_orchestrator
@@ -47,15 +55,18 @@ class AgentResponse:
 
 class AgentOrchestrator:
     """
-    Main orchestrator for the Agent Framework system.
+    Main orchestrator for the Agent system (DEPRECATED).
+
+    ⚠️ DEPRECATED: Use EmmaCoordinator instead for new implementations.
+    This class is maintained for backward compatibility only.
 
     Responsibilities:
-    1. Create and manage ChatAgents on demand (lazy loading)
+    1. Create and manage Assistants on demand (lazy loading)
     2. Select appropriate workflow based on query characteristics
     3. Execute workflows with timeout protection
     4. Automatic fallback to RAG pipeline on failure
 
-    FRAMEWORK: Microsoft Agent Framework
+    FRAMEWORK: Qwen-Agent
     All components are lazily loaded to avoid startup failures
     if LLM provider (vLLM/OpenAI) is not available.
     """
@@ -68,15 +79,15 @@ class AgentOrchestrator:
             config: Agent configuration (uses global if None)
         """
         self.config = config or agent_config
-        self._model_client = None
+        self._llm_cfg = None
         self._workflows: Dict[WorkflowType, Any] = {}
         self._rag_pipeline = None
         self._initialized = False
 
         logger.warning(
-            "AutoGen AgentOrchestrator está **deprecado**. "
-            "El flujo soportado es EmmaCoordinator + semantic-router. "
-            "Habilítalo solo si necesitas compatibilidad legacy (AUTOGEN_ENABLED=true)."
+            "⚠️ AgentOrchestrator is DEPRECATED. "
+            "Use EmmaCoordinator + semantic-router instead. "
+            "Enable only for legacy compatibility (AUTOGEN_ENABLED=true)."
         )
         logger.info(
             f"AgentOrchestrator created: enabled={self.config.enabled}, "
@@ -89,31 +100,31 @@ class AgentOrchestrator:
             return
 
         if not self.config.enabled:
-            logger.info("Agent Framework disabled, using RAG only")
+            logger.info("Agent system disabled, using RAG only")
             self._initialized = True
             return
 
         try:
-            # Test that we can import Agent Framework
-            from agent_framework import ChatAgent
+            # Test that we can import Qwen-Agent
+            from qwen_agent.agents import Assistant
             self._initialized = True
-            logger.info("Agent Framework initialized successfully")
+            logger.info("Qwen-Agent initialized successfully")
         except ImportError as e:
-            logger.warning(f"Agent Framework not available: {e}")
+            logger.warning(f"Qwen-Agent not available: {e}")
             self.config.enabled = False
             self._initialized = True
 
-    def _get_chat_client(self):
-        """Get or create the chat client (lazy)."""
-        if self._model_client is None:
-            from .model_client import get_chat_client
+    def _get_llm_config(self):
+        """Get or create the LLM configuration (lazy)."""
+        if self._llm_cfg is None:
+            from .model_client import get_llm_config
             try:
-                self._model_client = get_chat_client(self.config)
-                logger.debug(f"Chat client created: {self.config.model_provider}")
+                self._llm_cfg = get_llm_config()
+                logger.debug(f"LLM config created: {self._llm_cfg.get('model', 'unknown')}")
             except Exception as e:
-                logger.error(f"Failed to create chat client: {e}")
+                logger.error(f"Failed to create LLM config: {e}")
                 raise
-        return self._model_client
+        return self._llm_cfg
 
     def _get_rag_pipeline(self):
         """Get or create RAG pipeline for fallback."""
@@ -131,26 +142,26 @@ class AgentOrchestrator:
             return self._workflows[workflow_type]
 
         try:
-            client = self._get_chat_client()
+            llm_cfg = self._get_llm_config()
 
             if workflow_type == WorkflowType.SEQUENTIAL:
                 from .workflows import create_analysis_pipeline
                 self._workflows[workflow_type] = create_analysis_pipeline(
-                    client,
+                    llm_cfg,
                     max_turns=self.config.max_turns
                 )
 
             elif workflow_type == WorkflowType.GROUP_CHAT:
                 from .workflows import create_specialist_group
                 self._workflows[workflow_type] = create_specialist_group(
-                    client,
+                    llm_cfg,
                     max_turns=self.config.max_turns
                 )
 
             elif workflow_type == WorkflowType.SWARM:
                 from .workflows import create_document_swarm
                 self._workflows[workflow_type] = create_document_swarm(
-                    client,
+                    llm_cfg,
                     max_turns=self.config.max_turns
                 )
 

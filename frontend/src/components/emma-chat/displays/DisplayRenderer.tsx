@@ -4,6 +4,9 @@ import { TextDisplay } from "./Generic/TextDisplay"
 import { DocumentDisplay } from "./Document/DocumentDisplay"
 import { InfoDisplay } from "./SystemMessages/InfoDisplay"
 import { WorkflowProgress } from "./Generic/WorkflowProgress"
+import { ThinkingIndicator } from "./Generic/ThinkingIndicator"
+import { DelegationBadge } from "./Generic/DelegationBadge"
+import { StreamingTextDisplay } from "./Generic/StreamingTextDisplay"
 import { DisplayRendererProps, DocumentInfo } from "../types"
 
 export function DisplayRenderer({
@@ -69,16 +72,76 @@ export function DisplayRenderer({
       return <InfoDisplay content={message.content} type="info" />
 
     case "progress":
+      const { metadata } = message
+      const hasDelegations = metadata?.delegations && metadata.delegations.length > 0
+      const hasStreamingText = metadata?.streamingText && metadata.streamingText.length > 0
+      const hasWorkflowSteps = metadata?.workflow_steps && metadata.workflow_steps.length > 0
+
+      // Priority 1: Show streaming text with delegations (ReAct agent response building)
+      if (hasStreamingText) {
+        return (
+          <div className="space-y-3">
+            {/* Delegations badges */}
+            {hasDelegations && (
+              <div className="flex flex-wrap gap-2">
+                {metadata.delegations!.map((delegation, idx) => (
+                  <DelegationBadge
+                    key={`${delegation.agent}-${idx}`}
+                    agent={delegation.agent}
+                    message={delegation.message}
+                    elapsedMs={delegation.elapsedMs}
+                    isActive={idx === metadata.delegations!.length - 1 && metadata.isStreaming}
+                  />
+                ))}
+              </div>
+            )}
+            {/* Streaming text with cursor */}
+            <StreamingTextDisplay
+              text={metadata.streamingText!}
+              isStreaming={metadata.isStreaming || false}
+            />
+          </div>
+        )
+      }
+
+      // Priority 2: Show workflow progress (PlanningFlow with steps)
+      if (hasWorkflowSteps) {
+        return (
+          <WorkflowProgress
+            message={message.content}
+            progress={metadata?.progress || 0}
+            currentStep={metadata?.step}
+            totalSteps={metadata?.total_steps}
+            currentAgent={metadata?.agent}
+            steps={metadata?.workflow_steps}
+            planId={metadata?.plan_id}
+          />
+        )
+      }
+
+      // Priority 3: Show thinking indicator with stage and delegations
       return (
-        <WorkflowProgress
-          message={message.content}
-          progress={message.metadata?.progress || 0}
-          currentStep={message.metadata?.step}
-          totalSteps={message.metadata?.total_steps}
-          currentAgent={message.metadata?.agent}
-          steps={message.metadata?.workflow_steps}
-          planId={message.metadata?.plan_id}
-        />
+        <div className="space-y-3">
+          {/* Thinking indicator with stage */}
+          <ThinkingIndicator
+            stage={metadata?.stage}
+            message={metadata?.stageMessage}
+          />
+          {/* Delegations if any (tool usage during thinking) */}
+          {hasDelegations && (
+            <div className="flex flex-col gap-2 ml-4">
+              {metadata.delegations!.map((delegation, idx) => (
+                <DelegationBadge
+                  key={`${delegation.agent}-${idx}`}
+                  agent={delegation.agent}
+                  message={delegation.message}
+                  elapsedMs={delegation.elapsedMs}
+                  isActive={idx === metadata.delegations!.length - 1}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )
 
     case "result":

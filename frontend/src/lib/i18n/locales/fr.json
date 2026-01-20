@@ -212,6 +212,7 @@
       "teams": "Gestion des Équipes",
       "settings": "Paramètres du Tenant",
       "siteGuest": "Configuration Portail",
+      "connectors": "Connecteurs Externes",
       "providers": "Fournisseurs de Signature",
       "publicKnowledge": "Base de Connaissances Juridiques",
       "billing": "Facturation",

@@ -6,13 +6,18 @@ using various search strategies (semantic, keyword, hybrid).
 
 System message is loaded from YAML configuration (emma_prompts.yaml).
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with function_list (tool names as strings)
 """
 
 import logging
 from typing import Any
 
-from agent_framework import ChatAgent
+from qwen_agent.agents import Assistant
 
 from app.services.rag.prompt_loader import get_agent_system_message
 
@@ -25,48 +30,46 @@ Always include tenant_id in all tool calls. End with "TASK_COMPLETE" when done."
 
 
 def create_search_agent(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "SearchAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
-    Create a search specialist agent using Agent Framework.
+    Create a search specialist agent using Qwen-Agent.
 
     This agent excels at finding relevant documents using the appropriate
     search strategy based on the query characteristics.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent for document search
+        Configured Assistant for document search
 
     Example:
-        >>> from app.agents.model_client import get_chat_client
-        >>> client = get_chat_client()
-        >>> search_agent = create_search_agent(client)
+        >>> from app.agents.model_client import get_llm_config
+        >>> llm_cfg = get_llm_config()
+        >>> search_agent = create_search_agent(llm_cfg)
     """
-    from ..tools.search_tools import (
-        semantic_search,
-        hybrid_search,
-        keyword_search,
-    )
-
-    instructions = get_agent_system_message("SearchAgent", DEFAULT_SEARCH_MSG)
+    system_message = get_agent_system_message("SearchAgent", DEFAULT_SEARCH_MSG)
     logger.debug(f"Creating SearchAgent: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=instructions,
-        tools=[semantic_search, hybrid_search, keyword_search],
+        system_message=system_message,
+        function_list=[
+            'nexus_semantic_search',
+            'nexus_hybrid_search',
+            'nexus_keyword_search',
+        ],
     )
 
 
 def create_search_agent_with_metadata(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "SearchAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
     Create a search agent with metadata filtering capabilities.
 
@@ -74,19 +77,12 @@ def create_search_agent_with_metadata(
     for filtering documents by type, date, tags, etc.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent with metadata filtering
+        Configured Assistant with metadata filtering
     """
-    from ..tools.search_tools import (
-        semantic_search,
-        hybrid_search,
-        keyword_search,
-        search_by_metadata,
-    )
-
     base_instructions = get_agent_system_message("SearchAgent", DEFAULT_SEARCH_MSG)
     extended_instructions = base_instructions + """
 
@@ -98,18 +94,23 @@ Use this when the user wants to browse documents by category or time period.
 
     logger.debug(f"Creating SearchAgent with metadata: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=extended_instructions,
-        tools=[semantic_search, hybrid_search, keyword_search, search_by_metadata],
+        system_message=extended_instructions,
+        function_list=[
+            'nexus_semantic_search',
+            'nexus_hybrid_search',
+            'nexus_keyword_search',
+            'nexus_search_by_metadata',
+        ],
     )
 
 
 def create_search_agent_with_sharing(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "SearchAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
     Create a search agent with sharing insights capabilities.
 
@@ -117,29 +118,12 @@ def create_search_agent_with_sharing(
     and site guest information from PostgreSQL via REST API.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent with sharing insights tools
+        Configured Assistant with sharing insights tools
     """
-    from ..tools.search_tools import (
-        semantic_search,
-        hybrid_search,
-        keyword_search,
-        search_by_metadata,
-    )
-    from ..tools.sharing_insights_tools import (
-        query_recent_shares,
-        query_shares_to_recipient,
-        query_sharing_statistics,
-        query_site_guests,
-        query_guest_documents,
-        query_guest_activity,
-        query_guest_statistics,
-        query_sharing_overview,
-    )
-
     base_instructions = get_agent_system_message("SearchAgent", DEFAULT_SEARCH_MSG)
     extended_instructions = base_instructions + """
 
@@ -167,24 +151,24 @@ Use sharing tools when users ask about:
 
     logger.debug(f"Creating SearchAgent with sharing insights: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=extended_instructions,
-        tools=[
-            # Search tools
-            semantic_search,
-            hybrid_search,
-            keyword_search,
-            search_by_metadata,
+        system_message=extended_instructions,
+        function_list=[
+            # Search tools (nexus_ prefix to avoid Qwen-Agent built-in conflicts)
+            'nexus_semantic_search',
+            'nexus_hybrid_search',
+            'nexus_keyword_search',
+            'nexus_search_by_metadata',
             # Sharing insights tools
-            query_recent_shares,
-            query_shares_to_recipient,
-            query_sharing_statistics,
-            query_site_guests,
-            query_guest_documents,
-            query_guest_activity,
-            query_guest_statistics,
-            query_sharing_overview,
+            'query_recent_shares',
+            'query_shares_to_recipient',
+            'query_sharing_statistics',
+            'query_site_guests',
+            'query_guest_documents',
+            'query_guest_activity',
+            'query_guest_statistics',
+            'query_sharing_overview',
         ],
     )

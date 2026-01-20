@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agent_framework import ChatAgent
+    from qwen_agent.agents import Assistant
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class OrchestrationPattern(str, Enum):
     HANDOFF = "handoff"      # Default: LLM decides via .as_tool()
     SEQUENTIAL = "sequential"  # Pipeline: A → B → C
     CONCURRENT = "concurrent"  # Parallel: A | B | C → Aggregate
+    RLM_LONG = "rlm_long"    # Recursive: For documents >50K tokens (arXiv:2512.24601)
 
 
 @dataclass
@@ -98,7 +99,7 @@ class BaseOrchestration(ABC):
         task: str,
         tenant_id: str,
         session_id: str,
-        agents: List["ChatAgent"],
+        agents: List["Assistant"],
         **kwargs
     ) -> OrchestrationResult:
         """
@@ -223,8 +224,8 @@ async def detect_orchestration_pattern(
 def get_agents_for_pattern(
     pattern: OrchestrationPattern,
     query: str,
-    available_agents: Dict[str, "ChatAgent"]
-) -> List["ChatAgent"]:
+    available_agents: Dict[str, "Assistant"]
+) -> List["Assistant"]:
     """
     Get the list of agents to use for a given pattern.
 
@@ -311,3 +312,32 @@ def get_agents_for_pattern(
         return agents
 
     return []
+
+
+def should_use_rlm(context_tokens: int) -> bool:
+    """
+    Determine if RLM pattern should be used based on context size.
+
+    RLM (Recursive Language Models) is activated when the context
+    exceeds the threshold defined in settings.rlm_threshold_tokens.
+
+    Args:
+        context_tokens: Estimated token count of the context
+
+    Returns:
+        True if RLM should be used, False otherwise
+    """
+    try:
+        from app.core.config import settings
+        return (
+            settings.rlm_enabled
+            and context_tokens > settings.rlm_threshold_tokens
+        )
+    except Exception:
+        # Fallback to hardcoded threshold if settings unavailable
+        return context_tokens > 50000
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count from text length."""
+    return len(text) // 4  # Rough estimate: 4 chars per token

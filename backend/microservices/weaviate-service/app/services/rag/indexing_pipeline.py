@@ -5,13 +5,15 @@ Complete RAG preprocessing pipeline:
 - Text Extraction: Call textextract-service for PDF/DOCX/etc.
 - Layer 0: DocumentIntelligence (quality assessment, cleaning)
 - Layer 1: SemanticChunker (structure-aware chunking)
+- Layer 2: VisualExtractor (multimodal content for images/tables/diagrams)
 
 This pipeline prepares documents for vector indexing with:
 1. Text extraction from binary files via textextract-service
 2. Quality analysis of extracted text
 3. Automatic cleaning if needed
 4. Intelligent chunking based on document structure
-5. Metadata enrichment for retrieval
+5. Visual content extraction (tables, diagrams, images) for multimodal embedding
+6. Metadata enrichment for retrieval
 
 Usage:
     from app.services.rag.indexing_pipeline import indexing_pipeline
@@ -32,6 +34,16 @@ Usage:
         metadata={"title": "Contract"},
         tenant_id="tenant-abc"
     )
+
+    # Process with multimodal (visual) content
+    result = await indexing_pipeline.process_file(
+        document_id="doc-123",
+        file_bytes=pdf_content,
+        filename="report.pdf",
+        metadata={"title": "Annual Report"},
+        tenant_id="tenant-abc",
+        extract_visuals=True,  # Enable multimodal extraction
+    )
 """
 
 import logging
@@ -40,6 +52,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.core.config import settings
 from .document_intelligence import (
     DocumentIntelligence,
     DocumentAnalysis,
@@ -53,6 +66,11 @@ from .semantic_chunker import (
     DocumentType,
     semantic_chunker,
 )
+from .hierarchical_indexer import (
+    HierarchicalIndexer,
+    DocumentSummary,
+    hierarchical_indexer,
+)
 from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
@@ -63,7 +81,38 @@ from app.services.text_alignment_service import (
 from app.services.knowledge import KnowledgeExtractionService, get_knowledge_service
 from app.services.knowledge.schemas import KnowledgeExtractionResult
 
+# Conditional imports for multimodal support
+try:
+    from .visual_extractor import (
+        VisualContentExtractor,
+        VisualExtractionResult,
+        ExtractedVisual,
+        visual_extractor,
+    )
+    from app.services.multimodal_embedding_service import (
+        MultimodalEmbeddingService,
+        ContentType,
+        VisualContent,
+        multimodal_embedding_service,
+    )
+    MULTIMODAL_AVAILABLE = True
+except ImportError:
+    MULTIMODAL_AVAILABLE = False
+    visual_extractor = None
+    multimodal_embedding_service = None
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VisualEmbeddingItem:
+    """A visual content item with its embedding"""
+    content_type: str  # image, table_image, diagram, page_thumbnail
+    embedding: List[float]
+    page_number: int
+    bbox: tuple  # (x0, y0, x1, y1)
+    caption: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,12 +134,23 @@ class IndexingResult:
     # Knowledge extraction results
     knowledge_result: Optional[KnowledgeExtractionResult] = None
 
+    # Hierarchical summary (for long context RAG)
+    document_summary: Optional[DocumentSummary] = None
+
+    # Visual/Multimodal extraction results
+    visual_embeddings: List[VisualEmbeddingItem] = field(default_factory=list)
+    images_count: int = 0
+    tables_count: int = 0
+    diagrams_count: int = 0
+
     # Processing metadata
     processed_at: datetime = field(default_factory=datetime.now)
     extraction_time_ms: float = 0.0
     analysis_time_ms: float = 0.0
     chunking_time_ms: float = 0.0
     knowledge_extraction_time_ms: float = 0.0
+    summary_generation_time_ms: float = 0.0  # Hierarchical RAG
+    visual_extraction_time_ms: float = 0.0
     total_time_ms: float = 0.0
 
     # Status
@@ -113,11 +173,18 @@ class IndexingResult:
                 "relationships_count": self.knowledge_result.relationships_count if self.knowledge_result else 0,
                 "domain": self.knowledge_result.domain.value if self.knowledge_result else None,
             } if self.knowledge_result else None,
+            "visual": {
+                "visual_embeddings_count": len(self.visual_embeddings),
+                "images_count": self.images_count,
+                "tables_count": self.tables_count,
+                "diagrams_count": self.diagrams_count,
+            } if self.visual_embeddings else None,
             "timing": {
                 "extraction_ms": self.extraction_time_ms,
                 "analysis_ms": self.analysis_time_ms,
                 "chunking_ms": self.chunking_time_ms,
                 "knowledge_extraction_ms": self.knowledge_extraction_time_ms,
+                "visual_extraction_ms": self.visual_extraction_time_ms,
                 "total_ms": self.total_time_ms,
             },
             "processed_at": self.processed_at.isoformat(),
@@ -137,7 +204,8 @@ class IndexingPipeline:
     3. Clean text if needed
     4. Chunk document (SemanticChunker)
     5. Extract knowledge entities (KnowledgeExtractionService)
-    6. Enrich chunks with metadata
+    6. Extract visual content (VisualExtractor) - for multimodal embedding
+    7. Enrich chunks with metadata
     """
 
     def __init__(
@@ -152,6 +220,9 @@ class IndexingPipeline:
         self.chunker = chunker or semantic_chunker
         self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
         self._knowledge_extraction_enabled = True
+        # Visual extractor for multimodal support
+        self._visual_extractor = visual_extractor if MULTIMODAL_AVAILABLE else None
+        self._embedding_service = multimodal_embedding_service if MULTIMODAL_AVAILABLE else None
 
     async def process_file(
         self,
@@ -162,6 +233,7 @@ class IndexingPipeline:
         tenant_id: str,
         user_id: Optional[str] = None,
         extraction_strategy: str = "auto",
+        extract_visuals: Optional[bool] = None,
     ) -> IndexingResult:
         """
         Process a document file through the complete pipeline.
@@ -174,6 +246,8 @@ class IndexingPipeline:
             tenant_id: Tenant identifier
             user_id: Optional user identifier
             extraction_strategy: Text extraction strategy (auto, fast, hi_res)
+            extract_visuals: If True, extract visual content for multimodal embedding.
+                           Defaults to config setting (MULTIMODAL_EMBEDDING_ENABLED).
 
         Returns:
             IndexingResult with chunks ready for embedding
@@ -247,6 +321,30 @@ class IndexingPipeline:
         result.extraction_language = extract_result.language
         result.extraction_characters = extract_result.characters
         result.extraction_time_ms = extraction_time
+
+        # === Stage 5: Visual Content Extraction (if enabled) ===
+        # Only for PDFs and when multimodal is available and enabled
+        should_extract_visuals = (
+            extract_visuals if extract_visuals is not None
+            else settings.multimodal_embedding_enabled
+        )
+        is_pdf = filename.lower().endswith('.pdf')
+
+        if should_extract_visuals and is_pdf and MULTIMODAL_AVAILABLE and self._visual_extractor:
+            visual_result = await self._extract_visuals(
+                pdf_bytes=file_bytes,
+                document_id=document_id,
+                tenant_id=tenant_id,
+            )
+
+            if visual_result:
+                result.visual_embeddings = visual_result.visual_embeddings
+                result.images_count = visual_result.images_count
+                result.tables_count = visual_result.tables_count
+                result.diagrams_count = visual_result.diagrams_count
+                result.visual_extraction_time_ms = visual_result.visual_extraction_time_ms
+                result.warnings.extend(visual_result.warnings)
+
         result.total_time_ms = (time.time() - start_time) * 1000
 
         return result
@@ -427,15 +525,53 @@ class IndexingPipeline:
                 warnings.append(f"Knowledge extraction failed: {e}")
                 knowledge_time = (time.time() - knowledge_start) * 1000
 
+        # === Stage 5: Hierarchical Summary Generation ===
+        document_summary = None
+        summary_time = 0.0
+
+        if settings.rag_hierarchical_enabled:
+            logger.info(f"[{document_id}] Generating document summary for hierarchical RAG...")
+            summary_start = time.time()
+
+            try:
+                document_summary = await hierarchical_indexer.generate_document_summary(
+                    document_id=document_id,
+                    title=metadata.get("title", "Untitled"),
+                    full_text=text_for_chunking,
+                    document_type=metadata.get("document_type", "general"),
+                    tenant_id=tenant_id,
+                    total_chunks=len(chunks),
+                    metadata=metadata,
+                )
+
+                if document_summary:
+                    # Index the summary in Weaviate
+                    await hierarchical_indexer.index_summary(document_summary)
+                    logger.info(
+                        f"[{document_id}] Generated and indexed document summary "
+                        f"({len(document_summary.summary)} chars, {len(document_summary.key_topics)} topics)"
+                    )
+                else:
+                    warnings.append("Summary generation returned None (LLM may be unavailable)")
+
+                summary_time = (time.time() - summary_start) * 1000
+
+            except Exception as e:
+                logger.warning(f"[{document_id}] Summary generation failed (non-blocking): {e}")
+                warnings.append(f"Summary generation failed: {e}")
+                summary_time = (time.time() - summary_start) * 1000
+
         return IndexingResult(
             document_id=document_id,
             tenant_id=tenant_id,
             analysis=analysis,
             chunks=chunks,
             knowledge_result=knowledge_result,
+            document_summary=document_summary,
             analysis_time_ms=analysis_time,
             chunking_time_ms=chunking_time,
             knowledge_extraction_time_ms=knowledge_time,
+            summary_generation_time_ms=summary_time,
             success=True,
             errors=errors,
             warnings=warnings,
@@ -741,6 +877,127 @@ class IndexingPipeline:
             errors=errors,
             warnings=warnings,
         )
+
+    async def _extract_visuals(
+        self,
+        pdf_bytes: bytes,
+        document_id: str,
+        tenant_id: str,
+    ) -> Optional["VisualExtractionPipelineResult"]:
+        """
+        Extract visual content from PDF and generate embeddings.
+
+        This method:
+        1. Extracts images, tables, and diagrams from the PDF
+        2. Generates embeddings using Qwen3-VL-Embedding
+        3. Returns results ready for Weaviate storage
+
+        Args:
+            pdf_bytes: PDF file content
+            document_id: Document identifier
+            tenant_id: Tenant identifier
+
+        Returns:
+            VisualExtractionPipelineResult or None if extraction fails
+        """
+        import time
+        start_time = time.time()
+
+        if not self._visual_extractor or not self._embedding_service:
+            logger.debug(f"[{document_id}] Visual extraction not available")
+            return None
+
+        if not settings.multimodal_embedding_enabled:
+            logger.debug(f"[{document_id}] Multimodal embedding disabled")
+            return None
+
+        try:
+            # Step 1: Extract visual content from PDF
+            logger.info(f"[{document_id}] Extracting visual content...")
+            visual_result = await self._visual_extractor.extract_visuals(
+                pdf_bytes=pdf_bytes,
+                document_id=document_id,
+            )
+
+            if not visual_result.success or not visual_result.visuals:
+                if visual_result.errors:
+                    logger.warning(f"[{document_id}] Visual extraction warnings: {visual_result.errors}")
+                return VisualExtractionPipelineResult(
+                    visual_embeddings=[],
+                    images_count=0,
+                    tables_count=0,
+                    diagrams_count=0,
+                    visual_extraction_time_ms=(time.time() - start_time) * 1000,
+                    warnings=visual_result.warnings,
+                )
+
+            logger.info(
+                f"[{document_id}] Found {len(visual_result.visuals)} visual elements: "
+                f"{visual_result.images_count} images, {visual_result.tables_count} tables, "
+                f"{visual_result.diagrams_count} diagrams"
+            )
+
+            # Step 2: Generate embeddings for visual content
+            visual_contents = [v.to_visual_content() for v in visual_result.visuals]
+            embedding_results = await self._embedding_service.embed_visual_content(visual_contents)
+
+            # Step 3: Create VisualEmbeddingItems for successful embeddings
+            visual_embeddings = []
+            for visual, emb_result in zip(visual_result.visuals, embedding_results):
+                if emb_result.success and emb_result.vectors:
+                    visual_embeddings.append(VisualEmbeddingItem(
+                        content_type=visual.content_type.value,
+                        embedding=emb_result.vectors[0],
+                        page_number=visual.page_number,
+                        bbox=visual.bbox,
+                        caption=visual.caption,
+                        metadata={
+                            "width": visual.width,
+                            "height": visual.height,
+                            "detection_method": visual.detection_method,
+                            "embedding_model": emb_result.model_used,
+                            "embedding_dimensions": emb_result.dimensions,
+                            **visual.metadata,
+                        },
+                    ))
+
+            processing_time = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"[{document_id}] Generated {len(visual_embeddings)} visual embeddings "
+                f"({processing_time:.0f}ms)"
+            )
+
+            return VisualExtractionPipelineResult(
+                visual_embeddings=visual_embeddings,
+                images_count=visual_result.images_count,
+                tables_count=visual_result.tables_count,
+                diagrams_count=visual_result.diagrams_count,
+                visual_extraction_time_ms=processing_time,
+                warnings=visual_result.warnings,
+            )
+
+        except Exception as e:
+            logger.error(f"[{document_id}] Visual extraction failed: {e}")
+            return VisualExtractionPipelineResult(
+                visual_embeddings=[],
+                images_count=0,
+                tables_count=0,
+                diagrams_count=0,
+                visual_extraction_time_ms=(time.time() - start_time) * 1000,
+                warnings=[f"Visual extraction failed: {e}"],
+            )
+
+
+@dataclass
+class VisualExtractionPipelineResult:
+    """Result of visual extraction in the pipeline"""
+    visual_embeddings: List[VisualEmbeddingItem]
+    images_count: int = 0
+    tables_count: int = 0
+    diagrams_count: int = 0
+    visual_extraction_time_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass

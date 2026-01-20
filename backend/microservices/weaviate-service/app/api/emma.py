@@ -80,14 +80,16 @@ async def emma_query_stream(
                 event_type = event.get("event", "message")
                 event_data = event.get("data", {})
 
-                # Format as SSE
-                yield f"event: {event_type}\n"
-                yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                # Format as SSE - yield as single message to ensure atomicity
+                sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                yield sse_message
+                # Force immediate flush to client (prevents buffering)
+                await asyncio.sleep(0)
 
         except Exception as e:
             logger.error(f"❌ Stream error: {e}")
-            yield f"event: error\n"
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+            await asyncio.sleep(0)
 
     return StreamingResponse(
         generate_sse(),

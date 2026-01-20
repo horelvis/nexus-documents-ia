@@ -15,6 +15,13 @@ USE CASES:
 - "Primero busca el contrato, después analiza las cláusulas, finalmente resume"
 - Document processing pipelines (extract → validate → transform)
 - Multi-stage analysis (search → analyze → risk-assess → summarize)
+
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with run(messages) interface
 """
 
 from __future__ import annotations
@@ -33,9 +40,59 @@ from .base import (
 )
 
 if TYPE_CHECKING:
-    from agent_framework import ChatAgent
+    from qwen_agent.agents import Assistant
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_qwen_agent(agent: "Assistant", prompt: str) -> tuple[str, list]:
+    """
+    Execute a Qwen-Agent Assistant and extract the response.
+
+    Qwen-Agent's run() returns a generator yielding message lists.
+    This helper runs the agent and extracts the final text response.
+
+    Args:
+        agent: Qwen-Agent Assistant instance
+        prompt: User query/prompt
+
+    Returns:
+        Tuple of (answer_text, tools_called)
+    """
+    messages = [{'role': 'user', 'content': prompt}]
+
+    # Run agent and collect all response messages
+    all_responses = []
+    tools_called = []
+
+    # Qwen-Agent's run() can be sync or async depending on LLM
+    # We handle both cases
+    try:
+        for response_messages in agent.run(messages):
+            all_responses.extend(response_messages)
+            # Track tool calls
+            for msg in response_messages:
+                if isinstance(msg, dict):
+                    if msg.get('function_call'):
+                        tools_called.append(msg['function_call'].get('name', 'unknown'))
+    except Exception as e:
+        logger.error(f"Error running Qwen agent: {e}")
+        raise
+
+    # Extract final answer from responses
+    answer = ""
+    for msg in all_responses:
+        if isinstance(msg, dict):
+            content = msg.get('content', '')
+            role = msg.get('role', '')
+            if role == 'assistant' and content:
+                answer = content
+
+    # Clean Qwen thinking tags if present
+    if "</think>" in answer:
+        answer = answer.split("</think>")[-1].strip()
+
+    return answer, tools_called
 
 
 @dataclass
@@ -73,7 +130,7 @@ class SequentialOrchestration(BaseOrchestration):
         task: str,
         tenant_id: str,
         session_id: str,
-        agents: List["ChatAgent"],
+        agents: List["Assistant"],
         **kwargs
     ) -> OrchestrationResult:
         """
@@ -83,7 +140,7 @@ class SequentialOrchestration(BaseOrchestration):
             task: Original user query
             tenant_id: Tenant identifier
             session_id: Session for context
-            agents: List of agents to execute in order
+            agents: List of Qwen-Agent Assistant instances to execute in order
 
         Returns:
             OrchestrationResult with final answer and all intermediate results
@@ -118,29 +175,13 @@ class SequentialOrchestration(BaseOrchestration):
 
                 logger.info(f"  → [{i+1}/{len(agents)}] Executing {agent_name}...")
 
-                # Execute agent with timeout
-                result = await asyncio.wait_for(
-                    agent.run(prompt, thread=agent.get_new_thread()),
+                # Execute Qwen-Agent with timeout
+                answer, tools_called = await asyncio.wait_for(
+                    _run_qwen_agent(agent, prompt),
                     timeout=self.config.agent_timeout_ms / 1000
                 )
 
-                # Extract answer
-                answer = result.text if hasattr(result, 'text') else str(result)
-
-                # Clean Qwen thinking tags
-                if "</think>" in answer:
-                    answer = answer.split("</think>")[-1].strip()
-
                 execution_time = (time.perf_counter() - agent_start) * 1000
-
-                # Track tools called
-                tools_called = []
-                if hasattr(result, 'messages'):
-                    for msg in result.messages:
-                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                            for tc in msg.tool_calls:
-                                tool_name = tc.function.name if hasattr(tc, 'function') else str(tc)
-                                tools_called.append(tool_name)
 
                 agent_result = AgentResult(
                     agent_name=agent_name,
@@ -221,7 +262,7 @@ class SequentialOrchestration(BaseOrchestration):
         task: str,
         tenant_id: str,
         session_id: str,
-        agents: List["ChatAgent"],
+        agents: List["Assistant"],
         **kwargs
     ):
         """
@@ -267,14 +308,10 @@ class SequentialOrchestration(BaseOrchestration):
                 else:
                     prompt = task
 
-                result = await asyncio.wait_for(
-                    agent.run(prompt, thread=agent.get_new_thread()),
+                answer, tools_called = await asyncio.wait_for(
+                    _run_qwen_agent(agent, prompt),
                     timeout=self.config.agent_timeout_ms / 1000
                 )
-
-                answer = result.text if hasattr(result, 'text') else str(result)
-                if "</think>" in answer:
-                    answer = answer.split("</think>")[-1].strip()
 
                 accumulated_context += f"\n\n**{agent_name}:**\n{answer}"
 

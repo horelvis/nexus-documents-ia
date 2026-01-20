@@ -19,6 +19,7 @@ Reference: "I Rebuilt My RAG Pipeline 11 Times" - Hybrid Search + RRF section
 
 import logging
 import asyncio
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 import httpx
@@ -31,6 +32,7 @@ from .soft_selection import (
     SoftSelectionResult,
     allocate_token_budget,
 )
+from .graph_retriever import graph_retriever
 from ...core.config import settings
 from ...core.security import get_tenant_collection_name
 from ..weaviate_service import weaviate_service
@@ -38,6 +40,14 @@ from ...schemas.weaviate import SearchRequest
 from ...schemas.public_knowledge import PublicSearchRequest, PublicDocumentCategory
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Chunk Expansion for Long Context RAG
+# =============================================================================
+# Adjacent chunk retrieval preserves context across chunk boundaries.
+# When a relevant chunk is found, we also fetch chunks immediately before/after
+# from the same document to provide fuller context to the LLM.
 
 
 # Use centralized function from security module
@@ -129,6 +139,14 @@ class MultiStageRetriever:
             if self._public_knowledge_enabled:
                 await self._initialize_public_knowledge()
 
+            # Initialize Graph-Enhanced Retriever if enabled
+            if settings.rag_knowledge_graph_enabled:
+                try:
+                    await graph_retriever.initialize()
+                    logger.info("✅ Graph-Enhanced Retriever initialized (Apache AGE)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Graph-Enhanced Retriever not available: {e}")
+
             self._initialized = True
             logger.info("✅ MultiStageRetriever initialized")
         except Exception as e:
@@ -219,7 +237,32 @@ class MultiStageRetriever:
         # Determine if public knowledge should be included
         use_public_knowledge = include_public_knowledge if include_public_knowledge is not None else self._public_knowledge_enabled
 
-        logger.info(f"🔍 Starting 3-stage retrieval for: '{query_analysis.original_query}' (public_knowledge={use_public_knowledge}, soft_selection={self._soft_selection_enabled})")
+        logger.info(f"🔍 Starting 4-stage retrieval for: '{query_analysis.original_query}' (public_knowledge={use_public_knowledge}, soft_selection={self._soft_selection_enabled})")
+
+        # =====================================================================
+        # Stage 0: Graph-Enhanced Query Expansion (Knowledge Graph)
+        # =====================================================================
+        if settings.rag_knowledge_graph_enabled:
+            try:
+                graph_start = time.time()
+                query_analysis = await graph_retriever.expand_query_with_graph(
+                    query_analysis=query_analysis,
+                    tenant_id=tenant_id,
+                )
+                graph_time_ms = (time.time() - graph_start) * 1000
+
+                if query_analysis.graph_expansion and query_analysis.graph_expansion.get("applied"):
+                    detected = query_analysis.graph_expansion.get("detected_entities", [])
+                    expanded = query_analysis.graph_expansion.get("expanded_terms", [])
+                    logger.info(
+                        f"  Stage 0: Graph expansion - "
+                        f"{len(detected)} entities, {len(expanded)} terms added "
+                        f"({graph_time_ms:.0f}ms)"
+                    )
+                else:
+                    logger.debug(f"  Stage 0: No graph expansion ({graph_time_ms:.0f}ms)")
+            except Exception as e:
+                logger.warning(f"  Stage 0: Graph expansion failed: {e}")
 
         # Stage 1: Filtered vector/hybrid search (tenant documents) with ACL
         tenant_candidates = await self._stage1_filtered_search(
@@ -268,6 +311,17 @@ class MultiStageRetriever:
         )
         logger.info(f"  Stage 2: {len(reranked)} results after reranking")
 
+        # Stage 2.5: Chunk Expansion (Long Context RAG)
+        # Fetch adjacent chunks to preserve context across boundaries
+        if settings.rag_chunk_expansion_enabled:
+            expanded = await self.expand_chunks(
+                documents=reranked,
+                collection_name=collection_name,
+                expand_size=settings.rag_chunk_expansion_size,
+            )
+            logger.info(f"  Stage 2.5: Expanded {len(reranked)} → {len(expanded)} documents with adjacent chunks")
+            reranked = expanded
+
         # Stage 3: Context fusion with soft selection (group by document, diversify)
         final, selection_metadata = self._stage3_context_fusion(
             query_analysis=query_analysis,
@@ -275,6 +329,15 @@ class MultiStageRetriever:
             limit=top_k,
         )
         logger.info(f"  Stage 3: {len(final)} final results after fusion")
+
+        # Add chunk expansion metadata
+        selection_metadata["chunk_expansion_enabled"] = settings.rag_chunk_expansion_enabled
+        selection_metadata["chunk_expansion_size"] = settings.rag_chunk_expansion_size
+
+        # Add graph expansion metadata
+        selection_metadata["graph_expansion_enabled"] = settings.rag_knowledge_graph_enabled
+        if query_analysis.graph_expansion:
+            selection_metadata["graph_expansion"] = query_analysis.graph_expansion
 
         return final, selection_metadata
 
@@ -369,6 +432,196 @@ class MultiStageRetriever:
         )
 
         return merged
+
+    # =========================================================================
+    # CHUNK EXPANSION METHODS (Long Context RAG)
+    # =========================================================================
+
+    async def expand_chunks(
+        self,
+        documents: List[RetrievedDocument],
+        collection_name: str,
+        expand_size: int = 1,
+    ) -> List[RetrievedDocument]:
+        """
+        Expand retrieved chunks with adjacent chunks from the same document.
+
+        This preserves context across chunk boundaries, which is critical for:
+        - Legal documents where clauses reference previous sections
+        - Technical documentation with cross-references
+        - Narratives that span multiple chunks
+
+        Args:
+            documents: Retrieved documents to expand
+            collection_name: Weaviate collection name
+            expand_size: Number of chunks to fetch before/after each result
+
+        Returns:
+            List of documents with expanded content from adjacent chunks
+        """
+        if not settings.rag_chunk_expansion_enabled or expand_size <= 0:
+            return documents
+
+        expanded_docs = []
+        processed_chunks = set()  # Avoid duplicate expansions
+
+        for doc in documents:
+            # Extract chunk metadata
+            chunk_index = doc.metadata.get("chunk_index", 0)
+            total_chunks = doc.metadata.get("total_chunks", 1)
+            document_id = doc.metadata.get("document_id") or doc.document_id
+
+            # Skip if no document_id or already processed
+            chunk_key = f"{document_id}:{chunk_index}"
+            if not document_id or chunk_key in processed_chunks:
+                expanded_docs.append(doc)
+                continue
+
+            processed_chunks.add(chunk_key)
+
+            # Fetch adjacent chunks
+            try:
+                adjacent_chunks = await self._fetch_adjacent_chunks(
+                    document_id=document_id,
+                    current_chunk_index=chunk_index,
+                    total_chunks=total_chunks,
+                    expand_size=expand_size,
+                    collection_name=collection_name,
+                )
+
+                if adjacent_chunks:
+                    # Merge adjacent chunks into expanded document
+                    expanded_doc = self._merge_adjacent_chunks(doc, adjacent_chunks)
+                    expanded_docs.append(expanded_doc)
+                    # Mark adjacent chunks as processed
+                    for adj in adjacent_chunks:
+                        adj_idx = adj.get("chunk_index", 0)
+                        processed_chunks.add(f"{document_id}:{adj_idx}")
+                else:
+                    expanded_docs.append(doc)
+
+            except Exception as e:
+                logger.warning(f"⚠️ Chunk expansion failed for {document_id}: {e}")
+                expanded_docs.append(doc)
+
+        return expanded_docs
+
+    async def _fetch_adjacent_chunks(
+        self,
+        document_id: str,
+        current_chunk_index: int,
+        total_chunks: int,
+        expand_size: int,
+        collection_name: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch adjacent chunks from Weaviate by document_id and chunk_index.
+
+        Args:
+            document_id: Parent document ID
+            current_chunk_index: Index of the current chunk
+            total_chunks: Total number of chunks in the document
+            expand_size: Number of chunks to fetch before/after
+            collection_name: Weaviate collection name
+
+        Returns:
+            List of adjacent chunk data dictionaries
+        """
+        # Calculate indices to fetch
+        indices_to_fetch = []
+        for offset in range(-expand_size, expand_size + 1):
+            if offset == 0:
+                continue  # Skip current chunk
+            target_idx = current_chunk_index + offset
+            if 0 <= target_idx < total_chunks:
+                indices_to_fetch.append(target_idx)
+
+        if not indices_to_fetch:
+            return []
+
+        try:
+            # Query Weaviate for adjacent chunks by document_id + chunk_index
+            adjacent_chunks = await weaviate_service.fetch_chunks_by_indices(
+                collection_name=collection_name,
+                document_id=document_id,
+                chunk_indices=indices_to_fetch,
+            )
+            return adjacent_chunks
+
+        except Exception as e:
+            logger.debug(f"Could not fetch adjacent chunks: {e}")
+            return []
+
+    def _merge_adjacent_chunks(
+        self,
+        primary_doc: RetrievedDocument,
+        adjacent_chunks: List[Dict[str, Any]],
+    ) -> RetrievedDocument:
+        """
+        Merge primary document with adjacent chunks into expanded content.
+
+        Chunks are ordered by chunk_index and merged with clear delimiters.
+
+        Args:
+            primary_doc: The originally retrieved document
+            adjacent_chunks: Adjacent chunk data from Weaviate
+
+        Returns:
+            New RetrievedDocument with expanded content
+        """
+        primary_idx = primary_doc.metadata.get("chunk_index", 0)
+
+        # Create list of all chunks including primary
+        all_chunks = [
+            {
+                "chunk_index": primary_idx,
+                "content": primary_doc.content,
+                "is_primary": True,
+            }
+        ]
+
+        for chunk in adjacent_chunks:
+            all_chunks.append({
+                "chunk_index": chunk.get("chunk_index", 0),
+                "content": chunk.get("content", ""),
+                "is_primary": False,
+            })
+
+        # Sort by chunk_index
+        all_chunks.sort(key=lambda c: c["chunk_index"])
+
+        # Merge content with markers
+        merged_parts = []
+        for chunk in all_chunks:
+            if chunk["is_primary"]:
+                merged_parts.append(f"[FRAGMENTO PRINCIPAL (chunk {chunk['chunk_index']})]\n{chunk['content']}")
+            else:
+                merged_parts.append(f"[CONTEXTO ADYACENTE (chunk {chunk['chunk_index']})]\n{chunk['content']}")
+
+        merged_content = "\n\n---\n\n".join(merged_parts)
+
+        # Create new document with expanded content
+        expanded_doc = RetrievedDocument(
+            id=primary_doc.id,
+            title=primary_doc.title,
+            content=merged_content,
+            score=primary_doc.score,
+            document_type=primary_doc.document_type,
+            tenant_id=primary_doc.tenant_id,
+            metadata={
+                **primary_doc.metadata,
+                "expanded": True,
+                "expansion_size": len(all_chunks),
+                "chunk_range": f"{all_chunks[0]['chunk_index']}-{all_chunks[-1]['chunk_index']}",
+            },
+            vector_score=primary_doc.vector_score,
+            bm25_score=primary_doc.bm25_score,
+            rerank_score=primary_doc.rerank_score,
+            chunk_index=primary_doc.chunk_index,
+            total_chunks=primary_doc.total_chunks,
+        )
+
+        return expanded_doc
 
     async def _stage1_filtered_search(
         self,
@@ -769,6 +1022,334 @@ class MultiStageRetriever:
                 final_results.append(doc)
 
         return final_results[:limit], {"soft_selection_enabled": False}
+
+    # =========================================================================
+    # MULTIMODAL RETRIEVAL METHODS (Cross-modal search support)
+    # =========================================================================
+
+    async def retrieve_multimodal(
+        self,
+        query_analysis: QueryAnalysis,
+        tenant_id: str,
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
+        collection_name: Optional[str] = None,
+        top_k: int = 10,
+        stage1_limit: int = 50,
+        stage2_limit: int = 20,
+        include_public_knowledge: Optional[bool] = None,
+        include_visual: bool = True,
+        visual_limit: int = 5,
+        visual_content_types: Optional[List[str]] = None,
+    ) -> Tuple[List[RetrievedDocument], List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Execute multimodal retrieval: text + visual content search with RRF fusion.
+
+        This method extends the standard retrieve() to also search for relevant
+        visual content (tables, diagrams, images) that match the query.
+
+        Args:
+            query_analysis: Analyzed query from Layer 1
+            tenant_id: Tenant identifier
+            user_id: User identifier for ACL filtering
+            user_role_ids: Role IDs for role-based ACL
+            is_admin: Whether user is admin (bypasses ACL)
+            collection_name: Optional specific collection
+            top_k: Final number of text documents to return
+            stage1_limit: Number of candidates from initial search
+            stage2_limit: Number after reranking
+            include_public_knowledge: Include public legal knowledge
+            include_visual: Whether to search visual content
+            visual_limit: Maximum visual results to return
+            visual_content_types: Filter visual content types (image, table_image, diagram)
+
+        Returns:
+            Tuple of (text_documents, visual_results, metadata)
+            - text_documents: List[RetrievedDocument] from text search
+            - visual_results: List[Dict] with visual content metadata
+            - metadata: Dict with selection and retrieval metadata
+        """
+        await self.initialize()
+
+        # Execute standard text retrieval
+        text_docs, selection_metadata = await self.retrieve(
+            query_analysis=query_analysis,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role_ids=user_role_ids,
+            is_admin=is_admin,
+            collection_name=collection_name,
+            top_k=top_k,
+            stage1_limit=stage1_limit,
+            stage2_limit=stage2_limit,
+            include_public_knowledge=include_public_knowledge,
+        )
+
+        # Execute visual content search if enabled
+        visual_results = []
+        if include_visual and settings.multimodal_embedding_enabled:
+            visual_results = await self._search_visual_content(
+                query_analysis=query_analysis,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role_ids=user_role_ids,
+                limit=visual_limit,
+                content_types=visual_content_types,
+            )
+            logger.info(f"  Visual search: {len(visual_results)} visual results")
+
+        # Update metadata
+        metadata = {
+            **selection_metadata,
+            "multimodal_enabled": include_visual and settings.multimodal_embedding_enabled,
+            "visual_results_count": len(visual_results),
+            "text_results_count": len(text_docs),
+        }
+
+        return text_docs, visual_results, metadata
+
+    async def _search_visual_content(
+        self,
+        query_analysis: QueryAnalysis,
+        tenant_id: str,
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        limit: int = 5,
+        content_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for visual content using the query embedding.
+
+        Uses the multimodal embedding service to generate a query embedding
+        compatible with visual content, then searches the visual collection.
+
+        Args:
+            query_analysis: Analyzed query with embedding
+            tenant_id: Tenant identifier
+            user_id: User ID for ACL filtering
+            user_role_ids: Role IDs for ACL
+            limit: Maximum results
+            content_types: Filter by content types
+
+        Returns:
+            List of visual content results with metadata
+        """
+        try:
+            # Import multimodal embedding service
+            from ..multimodal_embedding_service import multimodal_embedding_service
+
+            if not multimodal_embedding_service.is_multimodal_enabled:
+                return []
+
+            # Generate query embedding using Qwen3-VL for cross-modal compatibility
+            # This ensures text queries can find relevant images
+            query_embedding_result = await multimodal_embedding_service.embed_texts(
+                texts=[query_analysis.expanded_query],
+                use_multimodal=True,  # Use Qwen3-VL for cross-modal search
+            )
+
+            if not query_embedding_result.success or not query_embedding_result.vectors:
+                logger.warning("⚠️ Failed to generate query embedding for visual search")
+                return []
+
+            query_vector = query_embedding_result.vectors[0]
+
+            # Search visual content collection
+            visual_results = await weaviate_service.search_visual_content(
+                tenant_id=tenant_id,
+                query_vector=query_vector,
+                user_id=user_id,
+                user_role_ids=user_role_ids,
+                content_types=content_types,
+                limit=limit,
+                certainty=0.65,  # Lower threshold for cross-modal search
+            )
+
+            return visual_results
+
+        except Exception as e:
+            logger.warning(f"⚠️ Visual content search failed: {e}")
+            return []
+
+    async def retrieve_with_cross_modal_rrf(
+        self,
+        query_analysis: QueryAnalysis,
+        tenant_id: str,
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
+        collection_name: Optional[str] = None,
+        top_k: int = 10,
+        visual_top_k: int = 3,
+        text_weight: float = 1.0,
+        visual_weight: float = 0.5,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Execute cross-modal retrieval with RRF fusion of text and visual results.
+
+        This method combines text documents and visual content into a single
+        ranked list using Reciprocal Rank Fusion, useful for queries like
+        "show me the organization chart" or "find tables about revenue".
+
+        Args:
+            query_analysis: Analyzed query
+            tenant_id: Tenant identifier
+            user_id: User ID for ACL
+            user_role_ids: Role IDs for ACL
+            is_admin: Admin bypass flag
+            collection_name: Optional collection name
+            top_k: Total results to return (text + visual combined)
+            visual_top_k: Maximum visual results before RRF
+            text_weight: Weight for text results in RRF
+            visual_weight: Weight for visual results in RRF
+
+        Returns:
+            Tuple of (combined_results, metadata)
+            - combined_results: List of dicts with 'type' field (text/visual)
+            - metadata: Retrieval metadata
+        """
+        await self.initialize()
+
+        # Get text results
+        text_docs, selection_metadata = await self.retrieve(
+            query_analysis=query_analysis,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role_ids=user_role_ids,
+            is_admin=is_admin,
+            collection_name=collection_name,
+            top_k=top_k * 2,  # Get more candidates for RRF
+        )
+
+        # Get visual results
+        visual_results = []
+        if settings.multimodal_embedding_enabled:
+            visual_results = await self._search_visual_content(
+                query_analysis=query_analysis,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role_ids=user_role_ids,
+                limit=visual_top_k * 2,
+            )
+
+        # Convert to unified format for RRF
+        text_ranked = [
+            {
+                "id": doc.chunk_id or doc.document_id,
+                "type": "text",
+                "score": doc.score,
+                "document_id": doc.document_id,
+                "content": doc.content,
+                "title": doc.title,
+                "metadata": doc.metadata,
+            }
+            for doc in text_docs
+        ]
+
+        visual_ranked = [
+            {
+                "id": v["visual_id"],
+                "type": "visual",
+                "score": v.get("certainty", 0.5),
+                "document_id": v["document_id"],
+                "content_type": v["content_type"],
+                "caption": v.get("caption"),
+                "page_number": v["page_number"],
+                "bbox": v["bbox"],
+                "metadata": {
+                    "width": v.get("width"),
+                    "height": v.get("height"),
+                    "embedding_model": v.get("embedding_model"),
+                },
+            }
+            for v in visual_results
+        ]
+
+        # Apply RRF fusion with weights
+        if text_ranked and visual_ranked:
+            # Apply weights by adjusting ranks
+            combined = self._cross_modal_rrf_fusion(
+                text_ranked=text_ranked,
+                visual_ranked=visual_ranked,
+                text_weight=text_weight,
+                visual_weight=visual_weight,
+                k=self._rrf_k,
+            )
+        elif text_ranked:
+            combined = text_ranked
+        elif visual_ranked:
+            combined = visual_ranked
+        else:
+            combined = []
+
+        # Apply top_k limit
+        combined = combined[:top_k]
+
+        metadata = {
+            **selection_metadata,
+            "cross_modal_rrf": True,
+            "text_candidates": len(text_ranked),
+            "visual_candidates": len(visual_ranked),
+            "combined_results": len(combined),
+            "text_weight": text_weight,
+            "visual_weight": visual_weight,
+        }
+
+        return combined, metadata
+
+    def _cross_modal_rrf_fusion(
+        self,
+        text_ranked: List[Dict[str, Any]],
+        visual_ranked: List[Dict[str, Any]],
+        text_weight: float = 1.0,
+        visual_weight: float = 0.5,
+        k: int = 60,
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply RRF fusion to combine text and visual results.
+
+        Uses the formula: score(d) = Σ weight_i / (k + rank_i(d))
+
+        Args:
+            text_ranked: Text results sorted by relevance
+            visual_ranked: Visual results sorted by relevance
+            text_weight: Weight for text results
+            visual_weight: Weight for visual results
+            k: RRF constant (default 60)
+
+        Returns:
+            Combined and re-ranked results
+        """
+        # Calculate RRF scores
+        rrf_scores: Dict[str, float] = {}
+        id_to_item: Dict[str, Dict[str, Any]] = {}
+
+        # Process text results
+        for rank, item in enumerate(text_ranked):
+            item_id = item["id"]
+            rrf_score = text_weight / (k + rank + 1)
+            rrf_scores[item_id] = rrf_scores.get(item_id, 0) + rrf_score
+            id_to_item[item_id] = item
+
+        # Process visual results
+        for rank, item in enumerate(visual_ranked):
+            item_id = item["id"]
+            rrf_score = visual_weight / (k + rank + 1)
+            rrf_scores[item_id] = rrf_scores.get(item_id, 0) + rrf_score
+            id_to_item[item_id] = item
+
+        # Sort by RRF score
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+
+        # Build combined results
+        combined = []
+        for item_id in sorted_ids:
+            item = id_to_item[item_id].copy()
+            item["rrf_score"] = rrf_scores[item_id]
+            combined.append(item)
+
+        return combined
 
 
 # Global instance

@@ -498,7 +498,7 @@ class KnowledgeExtractionService:
         acl_everyone: bool = False
     ) -> Dict[str, str]:
         """
-        Store entities in PostgreSQL and Weaviate.
+        Store entities in Weaviate and Knowledge Graph.
 
         Returns a mapping of entity_value -> entity_id for relationship storage.
         """
@@ -506,6 +506,14 @@ class KnowledgeExtractionService:
 
         if not self.config.store_in_weaviate:
             return entity_map
+
+        # Import graph service for knowledge graph storage
+        try:
+            from .graph_service import knowledge_graph_service
+            graph_available = True
+        except ImportError:
+            graph_available = False
+            logger.debug("Knowledge graph service not available")
 
         for entity in entities:
             try:
@@ -530,6 +538,21 @@ class KnowledgeExtractionService:
                     acl_everyone=acl_everyone
                 )
 
+                # Also store in Knowledge Graph for graph-based retrieval
+                if graph_available:
+                    await knowledge_graph_service.add_entity(
+                        tenant_id=tenant_id,
+                        entity_id=entity_id,
+                        entity_type=entity.entity_type.value if hasattr(entity.entity_type, 'value') else str(entity.entity_type),
+                        entity_value=entity.entity_value,
+                        document_id=document_id,
+                        attributes={
+                            "domain": entity.domain.value if hasattr(entity.domain, 'value') else str(entity.domain),
+                            "confidence": entity.extraction_confidence,
+                            "label": entity.entity_label,
+                        },
+                    )
+
                 entity_map[entity.entity_value] = entity_id
                 logger.debug(f"Stored entity {entity_id}: {entity.entity_value}")
 
@@ -537,7 +560,7 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store entity {entity.entity_value}: {e}")
                 continue
 
-        logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate")
+        logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate and knowledge graph")
         return entity_map
 
     async def _store_relationships(
@@ -548,12 +571,20 @@ class KnowledgeExtractionService:
         entity_map: Dict[str, str]
     ) -> int:
         """
-        Store relationships.
+        Store relationships in Knowledge Graph and log them.
 
-        Note: Relationships are primarily stored in PostgreSQL.
-        Weaviate entities are updated with related_entity_ids for fast lookup.
+        Note: Relationships are now stored in the Knowledge Graph (NetworkX + Redis)
+        for graph-based query expansion during retrieval.
         """
         stored_count = 0
+
+        # Import graph service for persistent storage
+        try:
+            from .graph_service import knowledge_graph_service
+            graph_available = True
+        except ImportError:
+            graph_available = False
+            logger.debug("Knowledge graph service not available")
 
         for rel in relationships:
             try:
@@ -563,7 +594,18 @@ class KnowledgeExtractionService:
                 if not source_id or not target_id:
                     continue
 
-                # Log relationship for now (PostgreSQL storage to be added)
+                # Store in Knowledge Graph if available
+                if graph_available:
+                    await knowledge_graph_service.add_relationship(
+                        tenant_id=tenant_id,
+                        source_id=source_id,
+                        target_id=target_id,
+                        relationship_type=rel.relationship_type.value if hasattr(rel.relationship_type, 'value') else str(rel.relationship_type),
+                        strength=rel.relationship_strength,
+                        document_id=document_id,
+                        context_snippet=rel.context_snippet,
+                    )
+
                 logger.debug(
                     f"Relationship: {rel.source_entity_value} "
                     f"--[{rel.relationship_type}]--> "
@@ -575,7 +617,7 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store relationship: {e}")
                 continue
 
-        logger.info(f"📦 Processed {stored_count} relationships")
+        logger.info(f"📦 Stored {stored_count} relationships in knowledge graph")
         return stored_count
 
     async def delete_document_knowledge(

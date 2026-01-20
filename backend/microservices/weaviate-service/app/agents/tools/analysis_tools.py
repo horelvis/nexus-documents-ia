@@ -1,5 +1,5 @@
 """
-Analysis Tools for Agent Framework
+Analysis Tools for Qwen-Agent Framework
 
 These tools provide document analysis capabilities including:
 - Deep document analysis
@@ -7,28 +7,47 @@ These tools provide document analysis capabilities including:
 - Entity extraction
 - Risk identification
 
-FRAMEWORK: Microsoft Agent Framework
-Uses ChatAgent with @ai_function decorator.
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework @ai_function pattern
+- Uses class-based tools with @register_tool decorator
 """
 
+import asyncio
 import json
 import logging
-from typing import Annotated, List, Dict, Any, Optional
-from pydantic import Field
+from typing import Dict, Optional, Union
+
+from qwen_agent.tools.base import BaseTool, register_tool
 
 from app.core.security import get_tenant_collection_name
 from app.core.execution_context import resolve_tenant_id, resolve_document_id
 
-# Try to import ai_function from Agent Framework, fall back to identity decorator
-try:
-    from agent_framework import ai_function
-except ImportError:
-    def ai_function(func):
-        return func
-
 logger = logging.getLogger(__name__)
 
-# Lazy loading
+
+# =============================================================================
+# Async Helper
+# =============================================================================
+
+def _run_async(coro):
+    """Run an async coroutine from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=120)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+# =============================================================================
+# Lazy Loading
+# =============================================================================
+
 _rag_pipeline = None
 _weaviate_service = None
 
@@ -51,109 +70,13 @@ def _get_weaviate_service():
     return _weaviate_service
 
 
-@ai_function
-async def analyze_document(
-    document_id: Annotated[str, Field(description="Unique identifier of the document to analyze")],
-    tenant_id: Annotated[str, Field(description="Tenant ID owning the document")],
-    analysis_type: Annotated[str, Field(description="Type: comprehensive, summary, structure, risks, obligations")] = "comprehensive",
-) -> str:
-    """
-    Perform deep analysis of a specific document.
-
-    This tool retrieves a document and performs the requested type of analysis,
-    extracting structured information based on the analysis type.
-
-    Analysis types:
-    - comprehensive: Full analysis including structure, entities, summary, and key points
-    - summary: Executive summary with main conclusions
-    - structure: Document structure analysis (sections, headings, organization)
-    - risks: Identify potential risks, issues, or concerns
-    - obligations: Extract obligations, requirements, and commitments
-
-    Args:
-        document_id: The unique document identifier
-        tenant_id: Tenant identifier for access control
-        analysis_type: Type of analysis to perform
-
-    Returns:
-        JSON string with analysis results including:
-        - summary: Brief overview
-        - key_points: List of important points
-        - entities: Extracted named entities
-        - analysis_specific_data: Data specific to the analysis type
-    """
-    # Resolve tenant_id and document_id from execution context (overrides LLM-provided values)
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    actual_document_id = resolve_document_id(document_id)
-
-    logger.info(f"🔍 ANALYSIS_TOOL CALLED: analyze_document")
-    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}")
-    logger.info(f"🔍 Resolved: actual_document_id={actual_document_id}, actual_tenant_id={actual_tenant_id}, type={analysis_type}")
-
-    # If no valid document_id, return error
-    if not actual_document_id:
-        return json.dumps({
-            "error": "No valid document_id provided or found in context",
-            "llm_provided": document_id,
-            "hint": "The document may not have been loaded correctly. Try refreshing or selecting the document again."
-        })
-
-    try:
-        service = _get_weaviate_service()
-        collection_name = get_tenant_collection_name(actual_tenant_id)
-        logger.info(f"🔍 Collection name: {collection_name}")
-
-        # Get document content using resolved document_id
-        doc = await service.get_document_by_id(
-            collection_name=collection_name,
-            document_id=actual_document_id,
-        )
-
-        if not doc:
-            return json.dumps({
-                "error": "Document not found",
-                "document_id": actual_document_id,
-                "llm_provided": document_id
-            })
-
-        content = doc.get("content", "")
-        title = doc.get("title", doc.get("filename", "Unknown"))
-
-        # Perform analysis based on type
-        pipeline = _get_rag_pipeline()
-
-        if analysis_type == "comprehensive":
-            analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
-        elif analysis_type == "summary":
-            analysis = await _summary_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
-        elif analysis_type == "structure":
-            analysis = await _structure_analysis(content, title)
-        elif analysis_type == "risks":
-            analysis = await _risk_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
-        elif analysis_type == "obligations":
-            analysis = await _obligation_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
-        else:
-            analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
-
-        return json.dumps({
-            "document_id": actual_document_id,
-            "document_title": title,
-            "analysis_type": analysis_type,
-            **analysis
-        }, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        logger.exception(f"Document analysis error: {e}")
-        return json.dumps({
-            "error": str(e),
-            "document_id": actual_document_id
-        })
-
+# =============================================================================
+# Internal Analysis Functions
+# =============================================================================
 
 async def _comprehensive_analysis(content: str, title: str, pipeline, document_id: str = "", tenant_id: str = "") -> Dict:
     """Perform comprehensive document analysis using RAG pipeline."""
     try:
-        # Use the pipeline's analyze_document method
         result = await pipeline.analyze_document(
             document_content=content,
             document_id=document_id or "analysis",
@@ -179,7 +102,6 @@ async def _comprehensive_analysis(content: str, title: str, pipeline, document_i
 
 def _basic_analysis(content: str, title: str) -> Dict:
     """Fallback basic analysis when LLM fails."""
-    # Extract basic info from content
     lines = content.strip().split('\n')
     word_count = len(content.split())
 
@@ -216,7 +138,6 @@ async def _structure_analysis(content: str, title: str) -> Dict:
 
     for i, line in enumerate(lines):
         stripped = line.strip()
-        # Detect potential headers
         if stripped and (
             stripped.isupper() or
             stripped.endswith(':') or
@@ -231,7 +152,7 @@ async def _structure_analysis(content: str, title: str) -> Dict:
     return {
         "total_lines": len(lines),
         "total_paragraphs": content.count('\n\n') + 1,
-        "potential_sections": sections[:20],  # Limit to first 20
+        "potential_sections": sections[:20],
         "has_numbered_lists": bool(any(line.strip().startswith(('1.', '2.', 'a)', 'b)')) for line in lines)),
         "has_bullet_points": bool(any(line.strip().startswith(('-', '*', '•')) for line in lines)),
     }
@@ -275,82 +196,248 @@ async def _obligation_analysis(content: str, title: str, pipeline, document_id: 
         return {"obligation_analysis": f"Obligation extraction not available: {e}"}
 
 
-@ai_function
-async def compare_documents(
-    doc_ids: Annotated[str, Field(description="Document IDs separated by comma (e.g., 'id1,id2,id3')")],
-    tenant_id: Annotated[str, Field(description="Tenant ID for access control")],
-    aspect: Annotated[str, Field(description="Aspect to compare: all, content, structure, dates, amounts")] = "all",
-) -> str:
+# =============================================================================
+# Qwen-Agent Tool Classes
+# =============================================================================
+
+@register_tool('analyze_document')
+class AnalyzeDocumentTool(BaseTool):
+    """
+    Perform deep analysis of a specific document.
+
+    This tool retrieves a document and performs the requested type of analysis,
+    extracting structured information based on the analysis type.
+
+    Analysis types:
+    - comprehensive: Full analysis including structure, entities, summary, and key points
+    - summary: Executive summary with main conclusions
+    - structure: Document structure analysis (sections, headings, organization)
+    - risks: Identify potential risks, issues, or concerns
+    - obligations: Extract obligations, requirements, and commitments
+    """
+
+    description = '''Perform deep analysis of a specific document.
+
+Analysis types available:
+- comprehensive: Full analysis including structure, entities, summary
+- summary: Executive summary with main conclusions
+- structure: Document structure analysis
+- risks: Identify potential risks, issues, or concerns
+- obligations: Extract obligations, requirements, and commitments
+
+Returns JSON with analysis results including summary, key_points, entities, and analysis-specific data.'''
+
+    parameters = [
+        {
+            'name': 'document_id',
+            'type': 'string',
+            'description': 'Unique identifier of the document to analyze',
+            'required': True
+        },
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID owning the document',
+            'required': True
+        },
+        {
+            'name': 'analysis_type',
+            'type': 'string',
+            'description': 'Type: comprehensive, summary, structure, risks, obligations (default: comprehensive)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        """Execute document analysis."""
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        document_id = params.get('document_id')
+        tenant_id = params.get('tenant_id')
+        analysis_type = params.get('analysis_type', 'comprehensive')
+
+        return _run_async(self._analyze_document(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            analysis_type=analysis_type
+        ))
+
+    async def _analyze_document(
+        self,
+        document_id: str,
+        tenant_id: str,
+        analysis_type: str = "comprehensive",
+    ) -> str:
+        """Async implementation of document analysis."""
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        actual_document_id = resolve_document_id(document_id)
+
+        logger.info(f"Analyze document: id={actual_document_id}, tenant={actual_tenant_id}, type={analysis_type}")
+
+        if not actual_document_id:
+            return json.dumps({
+                "error": "No valid document_id provided or found in context",
+                "llm_provided": document_id,
+                "hint": "The document may not have been loaded correctly."
+            })
+
+        try:
+            service = _get_weaviate_service()
+            collection_name = get_tenant_collection_name(actual_tenant_id)
+
+            doc = await service.get_document_by_id(
+                collection_name=collection_name,
+                document_id=actual_document_id,
+            )
+
+            if not doc:
+                return json.dumps({
+                    "error": "Document not found",
+                    "document_id": actual_document_id,
+                    "llm_provided": document_id
+                })
+
+            content = doc.get("content", "")
+            title = doc.get("title", doc.get("filename", "Unknown"))
+
+            pipeline = _get_rag_pipeline()
+
+            if analysis_type == "comprehensive":
+                analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
+            elif analysis_type == "summary":
+                analysis = await _summary_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
+            elif analysis_type == "structure":
+                analysis = await _structure_analysis(content, title)
+            elif analysis_type == "risks":
+                analysis = await _risk_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
+            elif analysis_type == "obligations":
+                analysis = await _obligation_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
+            else:
+                analysis = await _comprehensive_analysis(content, title, pipeline, actual_document_id, actual_tenant_id)
+
+            return json.dumps({
+                "document_id": actual_document_id,
+                "document_title": title,
+                "analysis_type": analysis_type,
+                **analysis
+            }, ensure_ascii=False, indent=2)
+
+        except Exception as e:
+            logger.exception(f"Document analysis error: {e}")
+            return json.dumps({
+                "error": str(e),
+                "document_id": actual_document_id
+            })
+
+
+@register_tool('compare_documents')
+class CompareDocumentsTool(BaseTool):
     """
     Compare multiple documents to identify similarities and differences.
 
     Useful for comparing contract versions, policy documents, or related
     documents to understand what changed or differs between them.
-
-    Args:
-        doc_ids: Comma-separated list of document IDs to compare
-        tenant_id: Tenant identifier
-        aspect: What aspect to focus comparison on:
-            - all: Complete comparison
-            - content: Focus on text content differences
-            - structure: Compare document organization
-            - dates: Compare dates and timelines mentioned
-            - amounts: Compare monetary values and quantities
-
-    Returns:
-        JSON string with comparison results including:
-        - similarities: What the documents have in common
-        - differences: How they differ
-        - aspect_specific_analysis: Detailed analysis for requested aspect
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Comparing documents: ids={doc_ids}, tenant={actual_tenant_id}, aspect={aspect}")
 
-    try:
-        ids = [id.strip() for id in doc_ids.split(",")]
-        if len(ids) < 2:
-            return json.dumps({
-                "error": "At least 2 document IDs required for comparison"
-            })
+    description = '''Compare multiple documents to identify similarities and differences.
 
-        service = _get_weaviate_service()
-        collection_name = get_tenant_collection_name(actual_tenant_id)
+Aspects to compare:
+- all: Complete comparison
+- content: Focus on text content differences
+- structure: Compare document organization
+- dates: Compare dates and timelines mentioned
+- amounts: Compare monetary values and quantities
 
-        # Fetch all documents
-        documents = []
-        for doc_id in ids[:5]:  # Limit to 5 documents
-            doc = await service.get_document_by_id(
-                collection_name=collection_name,
-                document_id=doc_id,
-            )
-            if doc:
-                documents.append({
-                    "id": doc_id,
-                    "title": doc.get("title", "Unknown"),
-                    "content": doc.get("content", "")[:3000],  # Limit content
+Returns JSON with similarities, differences, and aspect-specific analysis.'''
+
+    parameters = [
+        {
+            'name': 'doc_ids',
+            'type': 'string',
+            'description': "Document IDs separated by comma (e.g., 'id1,id2,id3')",
+            'required': True
+        },
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for access control',
+            'required': True
+        },
+        {
+            'name': 'aspect',
+            'type': 'string',
+            'description': 'Aspect to compare: all, content, structure, dates, amounts (default: all)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        """Execute document comparison."""
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        doc_ids = params.get('doc_ids')
+        tenant_id = params.get('tenant_id')
+        aspect = params.get('aspect', 'all')
+
+        return _run_async(self._compare_documents(
+            doc_ids=doc_ids,
+            tenant_id=tenant_id,
+            aspect=aspect
+        ))
+
+    async def _compare_documents(
+        self,
+        doc_ids: str,
+        tenant_id: str,
+        aspect: str = "all",
+    ) -> str:
+        """Async implementation of document comparison."""
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Comparing documents: ids={doc_ids}, tenant={actual_tenant_id}, aspect={aspect}")
+
+        try:
+            ids = [id.strip() for id in doc_ids.split(",")]
+            if len(ids) < 2:
+                return json.dumps({
+                    "error": "At least 2 document IDs required for comparison"
                 })
 
-        if len(documents) < 2:
-            return json.dumps({
-                "error": "Could not find enough documents to compare"
-            })
+            service = _get_weaviate_service()
+            collection_name = get_tenant_collection_name(actual_tenant_id)
 
-        # Basic comparison without LLM
-        comparison = {
-            "documents_compared": [d["title"] for d in documents],
-            "document_count": len(documents),
-            "lengths": {d["id"]: len(d["content"]) for d in documents},
-        }
+            documents = []
+            for doc_id in ids[:5]:
+                doc = await service.get_document_by_id(
+                    collection_name=collection_name,
+                    document_id=doc_id,
+                )
+                if doc:
+                    documents.append({
+                        "id": doc_id,
+                        "title": doc.get("title", "Unknown"),
+                        "content": doc.get("content", "")[:3000],
+                    })
 
-        # Try LLM-based comparison
-        pipeline = _get_rag_pipeline()
-        doc_summaries = "\n\n".join([
-            f"Document: {d['title']}\nContent excerpt: {d['content'][:1500]}"
-            for d in documents
-        ])
+            if len(documents) < 2:
+                return json.dumps({
+                    "error": "Could not find enough documents to compare"
+                })
 
-        prompt = f"""Compare these {len(documents)} documents:
+            comparison = {
+                "documents_compared": [d["title"] for d in documents],
+                "document_count": len(documents),
+                "lengths": {d["id"]: len(d["content"]) for d in documents},
+            }
+
+            pipeline = _get_rag_pipeline()
+            doc_summaries = "\n\n".join([
+                f"Document: {d['title']}\nContent excerpt: {d['content'][:1500]}"
+                for d in documents
+            ])
+
+            prompt = f"""Compare these {len(documents)} documents:
 
 {doc_summaries}
 
@@ -362,81 +449,115 @@ Provide:
 3. Notable observations
 """
 
-        try:
-            # Use process_query which is the correct RAGPipeline method
-            rag_result = await pipeline.process_query(
-                query=prompt,
-                tenant_id=actual_tenant_id,
-                validate_claims=False,
-                top_k=3,
-            )
-            comparison["analysis"] = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
+            try:
+                rag_result = await pipeline.process_query(
+                    query=prompt,
+                    tenant_id=actual_tenant_id,
+                    validate_claims=False,
+                    top_k=3,
+                )
+                comparison["analysis"] = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
+            except Exception as e:
+                comparison["analysis"] = f"Detailed comparison not available: {e}"
+
+            return json.dumps(comparison, ensure_ascii=False, indent=2)
+
         except Exception as e:
-            comparison["analysis"] = f"Detailed comparison not available: {e}"
-
-        return json.dumps(comparison, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        logger.exception(f"Document comparison error: {e}")
-        return json.dumps({"error": str(e)})
+            logger.exception(f"Document comparison error: {e}")
+            return json.dumps({"error": str(e)})
 
 
-@ai_function
-async def extract_entities(
-    document_id: Annotated[str, Field(description="Document ID to extract entities from")],
-    tenant_id: Annotated[str, Field(description="Tenant ID for access control")],
-    entity_types: Annotated[str, Field(description="Entity types to extract: all, persons, organizations, dates, amounts, locations")] = "all",
-) -> str:
+@register_tool('extract_entities')
+class ExtractEntitiesTool(BaseTool):
     """
     Extract named entities from a document.
 
     Identifies and extracts specific types of entities mentioned in the
     document, such as people, organizations, dates, monetary amounts,
     and locations.
-
-    Args:
-        document_id: Document to extract entities from
-        tenant_id: Tenant identifier
-        entity_types: Which entity types to extract (comma-separated or 'all')
-
-    Returns:
-        JSON string with extracted entities grouped by type:
-        - persons: People mentioned
-        - organizations: Companies, institutions
-        - dates: Dates and time references
-        - amounts: Monetary values, quantities
-        - locations: Places, addresses
     """
-    # Resolve tenant_id from execution context (overrides LLM-provided value)
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"🔍 ANALYSIS_TOOL CALLED: extract_entities")
-    logger.info(f"🔍 Parameters: document_id={document_id}, tenant_id={tenant_id}, actual_tenant_id={actual_tenant_id}, types={entity_types}")
 
-    try:
-        service = _get_weaviate_service()
-        collection_name = get_tenant_collection_name(actual_tenant_id)
-        logger.info(f"🔍 Collection name: {collection_name}")
+    description = '''Extract named entities from a document.
 
-        doc = await service.get_document_by_id(
-            collection_name=collection_name,
+Entity types available:
+- all: Extract all types
+- persons: People mentioned
+- organizations: Companies, institutions
+- dates: Dates and time references
+- amounts: Monetary values, quantities
+- locations: Places, addresses
+
+Returns JSON with extracted entities grouped by type.'''
+
+    parameters = [
+        {
+            'name': 'document_id',
+            'type': 'string',
+            'description': 'Document ID to extract entities from',
+            'required': True
+        },
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for access control',
+            'required': True
+        },
+        {
+            'name': 'entity_types',
+            'type': 'string',
+            'description': 'Entity types to extract: all, persons, organizations, dates, amounts, locations (default: all)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        """Execute entity extraction."""
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        document_id = params.get('document_id')
+        tenant_id = params.get('tenant_id')
+        entity_types = params.get('entity_types', 'all')
+
+        return _run_async(self._extract_entities(
             document_id=document_id,
-        )
+            tenant_id=tenant_id,
+            entity_types=entity_types
+        ))
 
-        if not doc:
-            return json.dumps({
-                "error": "Document not found",
-                "document_id": document_id
-            })
+    async def _extract_entities(
+        self,
+        document_id: str,
+        tenant_id: str,
+        entity_types: str = "all",
+    ) -> str:
+        """Async implementation of entity extraction."""
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Extract entities: document_id={document_id}, tenant={actual_tenant_id}, types={entity_types}")
 
-        content = doc.get("content", "")
-        title = doc.get("title", "Unknown")
+        try:
+            service = _get_weaviate_service()
+            collection_name = get_tenant_collection_name(actual_tenant_id)
 
-        # Use RAG pipeline for entity extraction
-        pipeline = _get_rag_pipeline()
+            doc = await service.get_document_by_id(
+                collection_name=collection_name,
+                document_id=document_id,
+            )
 
-        types_to_extract = entity_types if entity_types != "all" else "persons, organizations, dates, amounts, locations"
+            if not doc:
+                return json.dumps({
+                    "error": "Document not found",
+                    "document_id": document_id
+                })
 
-        prompt = f"""Extract named entities from this document.
+            content = doc.get("content", "")
+            title = doc.get("title", "Unknown")
+
+            pipeline = _get_rag_pipeline()
+
+            types_to_extract = entity_types if entity_types != "all" else "persons, organizations, dates, amounts, locations"
+
+            prompt = f"""Extract named entities from this document.
 
 Document: {title}
 
@@ -448,27 +569,50 @@ Extract these entity types: {types_to_extract}
 Format as structured lists for each entity type.
 """
 
-        try:
-            # Use process_query which is the correct RAGPipeline method
-            rag_result = await pipeline.process_query(
-                query=prompt,
-                tenant_id=actual_tenant_id,
-                validate_claims=False,
-                top_k=3,
-            )
-            entities = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
-            return json.dumps({
-                "document_id": document_id,
-                "document_title": title,
-                "entity_types_requested": types_to_extract,
-                "entities": entities,
-            }, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return json.dumps({
-                "document_id": document_id,
-                "error": f"Entity extraction failed: {e}"
-            })
+            try:
+                rag_result = await pipeline.process_query(
+                    query=prompt,
+                    tenant_id=actual_tenant_id,
+                    validate_claims=False,
+                    top_k=3,
+                )
+                entities = rag_result.answer if hasattr(rag_result, 'answer') else str(rag_result)
+                return json.dumps({
+                    "document_id": document_id,
+                    "document_title": title,
+                    "entity_types_requested": types_to_extract,
+                    "entities": entities,
+                }, ensure_ascii=False, indent=2)
+            except Exception as e:
+                return json.dumps({
+                    "document_id": document_id,
+                    "error": f"Entity extraction failed: {e}"
+                })
 
-    except Exception as e:
-        logger.exception(f"Entity extraction error: {e}")
-        return json.dumps({"error": str(e)})
+        except Exception as e:
+            logger.exception(f"Entity extraction error: {e}")
+            return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# Tool Registration Exports
+# =============================================================================
+
+ANALYSIS_TOOLS = [
+    AnalyzeDocumentTool,
+    CompareDocumentsTool,
+    ExtractEntitiesTool,
+]
+
+ANALYSIS_TOOL_NAMES = [
+    'analyze_document',
+    'compare_documents',
+    'extract_entities',
+]
+
+
+def get_analysis_tools() -> list:
+    """
+    Get list of analysis tool names for use in Qwen-Agent Assistant's function_list.
+    """
+    return ANALYSIS_TOOL_NAMES

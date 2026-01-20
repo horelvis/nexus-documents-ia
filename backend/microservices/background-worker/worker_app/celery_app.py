@@ -13,6 +13,7 @@ celery_app = Celery(
         "worker_app.tasks.email_tasks",
         "worker_app.tasks.indexing_tasks",
         "worker_app.tasks.channel_tasks",
+        "worker_app.tasks.connector_tasks",
     ],
 )
 
@@ -23,6 +24,7 @@ celery_app.conf.update(
         "email.*": {"queue": "email"},
         "indexing.*": {"queue": "indexing"},
         "channels.*": {"queue": "channels"},
+        "connectors.*": {"queue": "connectors"},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
@@ -46,6 +48,10 @@ celery_app.conf.update(
         },
         "channels-scheduled-sync": {
             "task": "channels.sync_scheduled",
+            "schedule": crontab(minute="*/15"),  # Every 15 minutes
+        },
+        "connectors-scheduled-sync": {
+            "task": "connectors.sync_scheduled",
             "schedule": crontab(minute="*/15"),  # Every 15 minutes
         },
     },

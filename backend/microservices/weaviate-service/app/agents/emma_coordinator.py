@@ -1,13 +1,14 @@
 """
 Emma Coordinator Agent - Main AI Assistant with Multi-Pattern Orchestration
 
-This module implements Emma as a ChatAgent that supports multiple orchestration
-patterns based on the query type:
+This module implements Emma as a Qwen-Agent Assistant that supports multiple
+orchestration patterns based on the query type:
 
 ORCHESTRATION PATTERNS:
-1. HANDOFF (default): LLM decides via .as_tool() - natural delegation
+1. HANDOFF (default): LLM decides via tool calls - natural delegation
 2. SEQUENTIAL: Pipeline A → B → C - for step-by-step analysis
 3. CONCURRENT: Parallel A | B | C - for multi-perspective analysis
+4. RLM_LONG: Recursive decomposition for documents >50K tokens (arXiv:2512.24601)
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────────────┐
@@ -18,7 +19,7 @@ Architecture:
     │         ┌──────────────┼──────────────┬──────────────┐              │
     │         ▼              ▼              ▼              │              │
     │     HANDOFF       SEQUENTIAL      CONCURRENT        │              │
-    │   (.as_tool())     (A→B→C)        (A|B|C)           │              │
+    │  (tool calls)      (A→B→C)        (A|B|C)           │              │
     │                                                      │              │
     │         ┌──────────────┼──────────────┬──────────────┤              │
     │         ▼              ▼              ▼              ▼              │
@@ -27,29 +28,35 @@ Architecture:
     │   │ Agent    │  │ Agent    │  │ Agent     │  │ Agent    │          │
     │   └──────────┘  └──────────┘  └──────────┘  └──────────┘          │
     │                                                                      │
-    │   AgentThread manages full conversation context automatically        │
-    │   Redis persistence via serialize()/deserialize()                    │
+    │   Custom message history with Redis persistence                      │
     └─────────────────────────────────────────────────────────────────────┘
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent + AgentThread pattern
+- Now uses Qwen-Agent's Assistant class with custom message history
+- Delegation is handled via registered tools instead of .as_tool()
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator, TYPE_CHECKING
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 
-from agent_framework import ChatAgent, AgentThread
-from agent_framework.openai import OpenAIChatClient
-from openai import AsyncOpenAI
+if TYPE_CHECKING:
+    from qwen_agent.agents import Assistant
 
 from app.agents.config import agent_config
+from app.agents.model_client import get_llm_config
 
 # Timeout for LLM inference (seconds)
 # vLLM can take 30-60s for complex analysis with tool calling
@@ -106,7 +113,10 @@ from app.agents.orchestration import (
     get_agents_for_pattern,
     get_sequential_orchestration,
     get_concurrent_orchestration,
+    should_use_rlm,
+    estimate_tokens,
 )
+from app.agents.rlm_orchestrator import rlm_orchestrator, RLMResult
 from app.services.rag.prompt_loader import get_agent_system_message, get_context_root
 
 logger = logging.getLogger(__name__)
@@ -120,8 +130,13 @@ def clean_thinking_tags(text: str) -> str:
     """
     Remove Qwen3 thinking tags from LLM output.
 
-    Qwen3 uses <think>...</think> tags for chain-of-thought reasoning.
-    This function removes these tags and returns only the final answer.
+    Qwen3 uses <think>...</think> tags for chain-of-thought reasoning
+    when enable_thinking=True. This function removes these tags and
+    returns only the final answer.
+
+    Note: When using vLLM with chat_template_kwargs: {enable_thinking: false},
+    the model should not produce thinking tags. This function is a fallback
+    for cases where thinking mode is enabled or for compatibility.
 
     Args:
         text: Raw LLM output that may contain thinking tags
@@ -129,8 +144,12 @@ def clean_thinking_tags(text: str) -> str:
     Returns:
         Cleaned text with thinking content removed
     """
-    if "</think>" in text:
-        return text.split("</think>")[-1].strip()
+    import re
+
+    # Remove content inside <think>...</think> tags using regex
+    # This handles multiline content within thinking tags
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
     return text
 
 
@@ -160,14 +179,14 @@ class EmmaCoordinator:
     """
     Emma Coordinator Agent - Main entry point for all queries.
 
-    Uses Microsoft Agent Framework's native capabilities:
-    - ChatAgent as the main coordinator
-    - .as_tool() to convert specialist agents into callable tools
-    - AgentThread for automatic conversation context management
-    - serialize()/deserialize() for Redis persistence
+    Uses Qwen-Agent framework with custom orchestration:
+    - Assistant as the main coordinator agent
+    - Custom delegation tools to route to specialist agents
+    - Manual message history management with Redis persistence
+    - Multiple orchestration patterns (handoff, sequential, concurrent)
 
-    This solves the context loss problem by letting the framework
-    manage conversation state instead of manual prompt engineering.
+    This implementation manages conversation state through Redis-persisted
+    message history, allowing Emma to maintain context across turns.
     """
 
     def __init__(
@@ -178,12 +197,12 @@ class EmmaCoordinator:
         Initialize EmmaCoordinator.
 
         Args:
-            redis_client: Redis client for thread persistence (creates one if None)
+            redis_client: Redis client for message history persistence (creates one if None)
         """
         self._redis = redis_client
-        self._client: Optional[OpenAIChatClient] = None
-        self._emma: Optional[ChatAgent] = None
-        self._subagents: Dict[str, ChatAgent] = {}
+        self._llm_cfg: Optional[dict] = None
+        self._emma: Optional["Assistant"] = None
+        self._subagents: Dict[str, "Assistant"] = {}
         self._initialized = False
 
         # Orchestration patterns
@@ -195,18 +214,9 @@ class EmmaCoordinator:
         if self._initialized:
             return
 
-        # Create OpenAI-compatible client pointing to vLLM with proper timeout
-        # The timeout prevents httpx from aborting requests during complex analysis
-        async_client = AsyncOpenAI(
-            api_key="dummy",  # vLLM doesn't need a real key
-            base_url=agent_config.vllm_base_url,
-            timeout=LLM_TIMEOUT_SECONDS,  # 2 minutes for complex analysis
-        )
-        self._client = OpenAIChatClient(
-            model_id=agent_config.vllm_model,
-            async_client=async_client,
-        )
-        logger.info(f"✅ OpenAIChatClient created with {LLM_TIMEOUT_SECONDS}s timeout")
+        # Get Qwen-Agent LLM configuration (uses vLLM backend)
+        self._llm_cfg = get_llm_config()
+        logger.info(f"✅ LLM config created for {self._llm_cfg.get('model', 'unknown')}")
 
         # Initialize Redis using shared connection pool (not individual connection)
         # This prevents connection exhaustion under load
@@ -217,7 +227,7 @@ class EmmaCoordinator:
         # Create all specialist subagents
         self._create_subagents()
 
-        # Create Emma coordinator with subagents as tools
+        # Create Emma coordinator with delegation tools
         self._create_emma_coordinator()
 
         # Initialize orchestration patterns
@@ -229,52 +239,50 @@ class EmmaCoordinator:
             self._concurrent.set_aggregator(self._subagents["summarizer_agent"])
 
         self._initialized = True
-        logger.info(f"✅ EmmaCoordinator initialized with {len(self._subagents)} subagent tools + orchestration patterns")
+        logger.info(f"✅ EmmaCoordinator initialized with {len(self._subagents)} subagents + orchestration patterns")
 
     def _create_subagents(self) -> None:
-        """Create all specialist subagents."""
+        """Create all specialist subagents using Qwen-Agent Assistant."""
         self._subagents = {
-            "search_agent": create_search_agent_with_sharing(self._client),
-            "contract_agent": create_contract_agent(self._client),
-            "compliance_agent": create_compliance_agent(self._client),
-            "analyst_agent": create_analyst_agent(self._client),
-            "summarizer_agent": create_summarizer_agent(self._client),
-            "labor_agent": create_labor_agent(self._client),
-            "fiscal_agent": create_fiscal_agent(self._client),
-            "privacy_agent": create_privacy_agent(self._client),
+            "search_agent": create_search_agent_with_sharing(self._llm_cfg),
+            "contract_agent": create_contract_agent(self._llm_cfg),
+            "compliance_agent": create_compliance_agent(self._llm_cfg),
+            "analyst_agent": create_analyst_agent(self._llm_cfg),
+            "summarizer_agent": create_summarizer_agent(self._llm_cfg),
+            "labor_agent": create_labor_agent(self._llm_cfg),
+            "fiscal_agent": create_fiscal_agent(self._llm_cfg),
+            "privacy_agent": create_privacy_agent(self._llm_cfg),
         }
 
         logger.info(f"Created {len(self._subagents)} specialist subagents")
 
     def _create_emma_coordinator(self) -> None:
         """
-        Create Emma as the main coordinator agent.
+        Create Emma as the main coordinator agent using Qwen-Agent.
 
-        Uses .as_tool() to convert each subagent into a callable tool,
-        enabling natural LLM-based delegation without external routing.
+        In Qwen-Agent, we use function_list with registered tool names
+        instead of .as_tool() pattern. The tools are registered globally
+        via @register_tool decorator and can be referenced by name.
         """
-        # Convert subagents to tools using .as_tool()
-        subagent_tools = []
-        for name, agent in self._subagents.items():
-            # .as_tool() creates a tool that lets Emma delegate to this agent
-            tool = agent.as_tool(
-                name=name,
-                description=self._get_agent_description(name)
-            )
-            subagent_tools.append(tool)
-            logger.debug(f"Converted {name} to tool")
+        from qwen_agent.agents import Assistant
 
-        # Add Human-in-the-Loop clarification tools
-        # These allow Emma to ask users for clarification when needed
-        from app.agents.tools.clarification_tools import (
-            ask_user_clarification,
-            ask_confirmation,
-            suggest_follow_up,
-        )
-        subagent_tools.append(ask_user_clarification)
-        subagent_tools.append(ask_confirmation)
-        subagent_tools.append(suggest_follow_up)
-        logger.info("Added 3 HITL clarification tools (ask_user_clarification, ask_confirmation, suggest_follow_up)")
+        # Build list of tool names Emma can use
+        # IMPORTANT: Keep this list minimal to stay within vLLM context limits
+        # Each tool adds ~400 tokens to context. With 8640 max tokens and
+        # ~2000 system prompt, we can afford ~16 tools max. Keeping to 5-6 essential.
+        # Specialized tools (sharing insights) are delegated to subagents.
+        emma_tools = [
+            # Core search (semantic covers keyword/hybrid cases)
+            'nexus_semantic_search',
+            # Core RAG - fetch and analyze documents
+            'get_document_content',
+            'analyze_document',
+            # HITL clarification (essential for user interaction)
+            'ask_user_clarification',
+            'ask_confirmation',
+        ]
+
+        logger.info(f"Emma will use {len(emma_tools)} tools: {emma_tools}")
 
         # Load context root (global document management context based on ISO 15489)
         context_root = get_context_root()
@@ -294,15 +302,21 @@ class EmmaCoordinator:
             full_instructions = agent_instructions
             logger.warning("No context_root found, using agent instructions only")
 
-        # Create Emma coordinator with all subagent tools
-        self._emma = ChatAgent(
+        # Add /no_think directive if thinking mode is disabled
+        # This is the soft switch method for Qwen3 models to disable chain-of-thought
+        if not agent_config.vllm_enable_thinking:
+            full_instructions = f"/no_think\n\n{full_instructions}"
+            logger.info("Added /no_think directive to disable Qwen3 thinking mode")
+
+        # Create Emma coordinator using Qwen-Agent Assistant
+        self._emma = Assistant(
+            llm=self._llm_cfg,
             name="Emma",
-            chat_client=self._client,
-            instructions=full_instructions,
-            tools=subagent_tools,
+            system_message=full_instructions,
+            function_list=emma_tools,
         )
 
-        logger.info(f"Created Emma coordinator with {len(subagent_tools)} subagent tools")
+        logger.info(f"Created Emma coordinator (Qwen-Agent Assistant) with {len(emma_tools)} tools")
 
     def _get_agent_description(self, agent_name: str) -> str:
         """Get description for each subagent tool."""
@@ -331,31 +345,31 @@ class EmmaCoordinator:
         return descriptions.get(agent_name, f"Specialist agent: {agent_name}")
 
     def _get_thread_key(self, tenant_id: str, session_id: str) -> str:
-        """Get Redis key for thread storage."""
+        """Get Redis key for message history storage."""
         return f"{EMMA_THREAD_KEY_PREFIX}{tenant_id}:{session_id}"
 
-    async def _load_thread(
+    async def _load_message_history(
         self,
         tenant_id: str,
         session_id: str
-    ) -> AgentThread:
+    ) -> List[Dict[str, Any]]:
         """
-        Load existing thread from Redis or create new one.
+        Load existing message history from Redis or return empty list.
 
-        AgentThread automatically maintains full conversation history,
-        solving the context loss problem.
+        Message history format compatible with Qwen-Agent:
+        [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
         """
-        thread, _ = await self._load_thread_with_status(tenant_id, session_id)
-        return thread
+        messages, _ = await self._load_message_history_with_status(tenant_id, session_id)
+        return messages
 
-    async def _load_thread_with_status(
+    async def _load_message_history_with_status(
         self,
         tenant_id: str,
         session_id: str
-    ) -> tuple[AgentThread, bool]:
+    ) -> tuple[List[Dict[str, Any]], bool]:
         """
-        Load existing thread from Redis or create new one.
-        Returns (thread, is_new_session) tuple.
+        Load existing message history from Redis or return empty list.
+        Returns (messages, is_new_session) tuple.
 
         is_new_session=True means this is the first message in the session,
         useful for injecting user context and Emma's introduction.
@@ -366,35 +380,70 @@ class EmmaCoordinator:
             serialized_json = await self._redis.get(key)
 
             if serialized_json:
-                logger.info(f"📜 Loading existing Emma thread: {session_id[:16]}...")
-                serialized_dict = json.loads(serialized_json)
-                thread = await AgentThread.deserialize(serialized_dict)
-                return thread, False  # Existing session
+                logger.info(f"📜 Loading existing message history: {session_id[:16]}...")
+                messages = json.loads(serialized_json)
+                return messages, False  # Existing session
 
         except Exception as e:
-            logger.warning(f"⚠️ Failed to load thread from Redis: {e}")
+            logger.warning(f"⚠️ Failed to load message history from Redis: {e}")
 
-        # Create new thread
-        logger.info(f"🆕 Creating new Emma thread: {session_id[:16]}...")
-        return self._emma.get_new_thread(), True  # New session
+        # Return empty list for new session
+        logger.info(f"🆕 Creating new message history: {session_id[:16]}...")
+        return [], True  # New session
 
-    async def _save_thread(
+    async def _save_message_history(
         self,
-        thread: AgentThread,
+        messages: List[Dict[str, Any]],
         tenant_id: str,
         session_id: str
     ) -> None:
-        """Save thread to Redis for persistence."""
+        """
+        Save message history to Redis for persistence.
+
+        Implements safeguards to prevent excessive memory usage:
+        - Max 20 messages retained (10 conversation turns)
+        - Max 50KB per message content
+        - Max 500KB total history size
+        """
         key = self._get_thread_key(tenant_id, session_id)
 
+        # Safeguard: Limit message content size
+        MAX_CONTENT_SIZE = 50000  # 50KB per message
+        MAX_HISTORY_SIZE = 500000  # 500KB total
+        MAX_MESSAGES = 20  # Keep last 20 messages (10 turns)
+
+        # Truncate individual messages if too long
+        truncated_messages = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                content = msg.get('content', '')
+                if isinstance(content, str) and len(content) > MAX_CONTENT_SIZE:
+                    logger.warning(f"⚠️ Truncating large message ({len(content)} chars)")
+                    msg = {**msg, 'content': content[:MAX_CONTENT_SIZE] + '... [truncated]'}
+                truncated_messages.append(msg)
+            else:
+                truncated_messages.append(msg)
+
+        # Keep only last N messages
+        if len(truncated_messages) > MAX_MESSAGES:
+            logger.info(f"📦 Pruning history from {len(truncated_messages)} to {MAX_MESSAGES} messages")
+            truncated_messages = truncated_messages[-MAX_MESSAGES:]
+
         try:
-            serialized_dict = await thread.serialize()
-            serialized_json = json.dumps(serialized_dict, default=str)
+            serialized_json = json.dumps(truncated_messages, default=str)
+
+            # Final size check
+            if len(serialized_json) > MAX_HISTORY_SIZE:
+                logger.error(f"❌ History too large ({len(serialized_json)} bytes), clearing old messages")
+                # Keep only the last 4 messages if still too large
+                truncated_messages = truncated_messages[-4:]
+                serialized_json = json.dumps(truncated_messages, default=str)
+
             await self._redis.setex(key, EMMA_THREAD_TTL_SECONDS, serialized_json)
-            logger.debug(f"💾 Saved Emma thread: {session_id[:16]}...")
+            logger.debug(f"💾 Saved message history ({len(truncated_messages)} messages, {len(serialized_json)} bytes): {session_id[:16]}...")
 
         except Exception as e:
-            logger.warning(f"⚠️ Failed to save thread to Redis: {e}")
+            logger.warning(f"⚠️ Failed to save message history to Redis: {e}")
 
     async def execute(
         self,
@@ -405,7 +454,8 @@ class EmmaCoordinator:
         user_role_ids: Optional[List[str]] = None,
         is_admin: bool = False,
         user_context: Optional[Dict[str, Any]] = None,
-        orchestration_hint: Optional[str] = None
+        orchestration_hint: Optional[str] = None,
+        deep_reasoning: bool = True
     ) -> EmmaCoordinatorResult:
         """
         Execute a query using the optimal orchestration pattern.
@@ -457,16 +507,32 @@ class EmmaCoordinator:
                 pattern = OrchestrationPattern(orchestration_hint.lower())
                 logger.info(f"📋 Using explicit orchestration hint: {pattern.value}")
             else:
-                pattern = await detect_orchestration_pattern(
-                    query,
-                    use_llm=True,
-                    vllm_base_url=agent_config.vllm_base_url,
-                    vllm_model=agent_config.vllm_model
-                )
-                logger.info(f"🔍 Detected orchestration pattern: {pattern.value}")
+                # Check if RLM is needed based on document content size
+                document_content = user_context.get("document_content", "") if user_context else ""
+                context_tokens = estimate_tokens(document_content)
+
+                if should_use_rlm(context_tokens):
+                    pattern = OrchestrationPattern.RLM_LONG
+                    logger.info(
+                        f"🔄 RLM activated: {context_tokens} tokens > threshold, "
+                        f"using recursive processing"
+                    )
+                else:
+                    pattern = await detect_orchestration_pattern(
+                        query,
+                        use_llm=True,
+                        vllm_base_url=agent_config.vllm_base_url,
+                        vllm_model=agent_config.vllm_model
+                    )
+                    logger.info(f"🔍 Detected orchestration pattern: {pattern.value}")
 
             # Route to appropriate orchestration
-            if pattern == OrchestrationPattern.SEQUENTIAL:
+            if pattern == OrchestrationPattern.RLM_LONG:
+                return await self._execute_rlm(
+                    query, tenant_id, session_id, user_context, start_time
+                )
+
+            elif pattern == OrchestrationPattern.SEQUENTIAL:
                 return await self._execute_sequential(
                     query, tenant_id, session_id, user_context, start_time
                 )
@@ -513,10 +579,10 @@ class EmmaCoordinator:
         Prepare execution context - shared by execute and execute_stream.
 
         Returns:
-            tuple: (thread, full_query, is_new_session)
+            tuple: (message_history, full_query, is_new_session)
         """
-        # Load or create thread (this is where context lives!)
-        thread, is_new_session = await self._load_thread_with_status(tenant_id, session_id)
+        # Load or create message history (this is where context lives!)
+        message_history, is_new_session = await self._load_message_history_with_status(tenant_id, session_id)
 
         # Build context-aware query with user info for new sessions
         full_query = self._build_query_with_context(
@@ -526,7 +592,7 @@ class EmmaCoordinator:
         logger.info(f"🤖 Emma processing: {query[:50]}...")
         logger.info(f"📝 Full query: {full_query[:200]}...")
 
-        return thread, full_query, is_new_session
+        return message_history, full_query, is_new_session
 
     def _extract_tool_calls(self, response) -> tuple:
         """
@@ -569,39 +635,63 @@ class EmmaCoordinator:
         based on the query content and her instructions.
         """
         # Use shared preparation logic
-        thread, full_query, _ = await self._prepare_execution(
+        message_history, full_query, _ = await self._prepare_execution(
             query, tenant_id, session_id, user_context
         )
 
-        # Execute with Emma - she'll delegate to subagents as needed
-        response = await self._emma.run(full_query, thread=thread)
+        # Add current query to message history
+        messages = message_history + [{'role': 'user', 'content': full_query}]
 
-        # Extract answer and clean thinking tags
-        answer = response.text if hasattr(response, 'text') else str(response)
+        # Execute with Emma using Qwen-Agent's run() generator pattern
+        all_responses = []
+        tools_called = []
+
+        try:
+            for response_messages in self._emma.run(messages):
+                all_responses.extend(response_messages)
+                # Track tool calls
+                for msg in response_messages:
+                    if isinstance(msg, dict) and msg.get('function_call'):
+                        tools_called.append(msg['function_call'].get('name', 'unknown'))
+        except Exception as e:
+            logger.error(f"Error running Emma: {e}")
+            raise
+
+        # Extract final answer from responses
+        answer = ""
+        for msg in all_responses:
+            if isinstance(msg, dict):
+                content = msg.get('content', '')
+                role = msg.get('role', '')
+                if role == 'assistant' and content:
+                    answer = content
+
+        # Clean Qwen thinking tags if present
         answer = clean_thinking_tags(answer)
 
-        # Use shared tool extraction logic
-        agents_delegated, tools_called = self._extract_tool_calls(response)
+        # Build updated message history with assistant response
+        updated_history = messages + [{'role': 'assistant', 'content': answer}]
 
-        # Save thread with updated context
-        await self._save_thread(thread, tenant_id, session_id)
+        # Save updated message history
+        await self._save_message_history(updated_history, tenant_id, session_id)
 
         execution_time = (time.perf_counter() - start_time) * 1000
 
-        logger.info(f"📤 HANDOFF COMPLETE: agents={agents_delegated}, tools={tools_called}, time={execution_time:.0f}ms")
+        logger.info(f"📤 HANDOFF COMPLETE: tools={tools_called}, time={execution_time:.0f}ms")
 
         return EmmaCoordinatorResult(
             success=True,
             answer=answer,
-            agents_delegated=agents_delegated,
-            tools_called=tools_called,
+            agents_delegated=[],  # In Qwen-Agent, we use tools directly, not subagent delegation
+            tools_called=list(set(tools_called)),
             execution_time_ms=execution_time,
             thread_id=session_id,
             metadata={
-                "framework": "microsoft_agent_framework",
+                "framework": "qwen_agent",
                 "pattern": "handoff",
                 "context_maintained": True,
-                "tenant_id": tenant_id
+                "tenant_id": tenant_id,
+                "message_count": len(updated_history)
             }
         )
 
@@ -650,9 +740,9 @@ class EmmaCoordinator:
             execution_time_ms=result.execution_time_ms,
             thread_id=session_id,
             metadata={
-                "framework": "microsoft_agent_framework",
+                "framework": "qwen_agent",
                 "pattern": "sequential",
-                "pipeline": [a.name for a in agents],
+                "pipeline": [getattr(a, 'name', str(a)) for a in agents],
                 "intermediate_results_count": len(result.intermediate_results),
                 "tenant_id": tenant_id,
                 **result.metadata
@@ -703,14 +793,90 @@ class EmmaCoordinator:
             execution_time_ms=result.execution_time_ms,
             thread_id=session_id,
             metadata={
-                "framework": "microsoft_agent_framework",
+                "framework": "qwen_agent",
                 "pattern": "concurrent",
-                "parallel_agents": [a.name for a in agents],
+                "parallel_agents": [getattr(a, 'name', str(a)) for a in agents],
                 "aggregated": result.metadata.get("aggregated", False),
                 "successful_agents": result.metadata.get("successful_agents", 0),
                 "tenant_id": tenant_id
             }
         )
+
+    async def _execute_rlm(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str,
+        user_context: Optional[Dict[str, Any]],
+        start_time: float
+    ) -> EmmaCoordinatorResult:
+        """
+        Execute using RLM (Recursive Language Model) pattern for long documents.
+
+        RLM decomposes the query into sub-tasks, processes each section,
+        and aggregates results - enabling processing of documents >50K tokens.
+
+        Reference: arXiv:2512.24601 (RLM paper)
+        """
+        logger.info(f"🔄 RLM: Processing long context query")
+
+        # Get document content from user_context
+        document_content = ""
+        if user_context:
+            document_content = user_context.get("document_content", "")
+
+        # If no document content, fall back to HANDOFF
+        if not document_content:
+            logger.warning("⚠️ RLM: No document content, falling back to HANDOFF")
+            return await self._execute_handoff(
+                query, tenant_id, session_id, user_context, start_time
+            )
+
+        context_tokens = estimate_tokens(document_content)
+        logger.info(f"🔄 RLM: Context size: {context_tokens} tokens")
+
+        try:
+            # Initialize RLM orchestrator
+            await rlm_orchestrator.initialize()
+
+            # Process with RLM
+            rlm_result: RLMResult = await rlm_orchestrator.process(
+                query=query,
+                context=document_content,
+                tenant_id=tenant_id,
+                metadata={
+                    "session_id": session_id,
+                    "user_context": user_context,
+                }
+            )
+
+            execution_time = (time.perf_counter() - start_time) * 1000
+
+            return EmmaCoordinatorResult(
+                success=rlm_result.success,
+                answer=rlm_result.final_answer,
+                agents_delegated=[],  # RLM doesn't use sub-agents
+                tools_called=[],
+                execution_time_ms=execution_time,
+                thread_id=session_id,
+                metadata={
+                    "framework": "rlm_recursive",
+                    "pattern": "rlm_long",
+                    "original_context_tokens": rlm_result.original_context_tokens,
+                    "total_tokens_processed": rlm_result.total_tokens_processed,
+                    "recursion_depth": rlm_result.recursion_depth_reached,
+                    "sub_tasks_count": len(rlm_result.sub_tasks),
+                    "rlm_execution_time_ms": rlm_result.execution_time_ms,
+                    "tenant_id": tenant_id
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"❌ RLM execution failed: {e}")
+            # Fallback to HANDOFF on error
+            return await self._execute_handoff(
+                query, tenant_id, session_id, user_context, start_time
+            )
 
     def _build_query_with_context(
         self,
@@ -784,7 +950,8 @@ class EmmaCoordinator:
         user_id: Optional[str] = None,
         user_role_ids: Optional[List[str]] = None,
         is_admin: bool = False,
-        user_context: Optional[Dict[str, Any]] = None
+        user_context: Optional[Dict[str, Any]] = None,
+        deep_reasoning: bool = True
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Execute query with aggressive streaming responses.
@@ -827,9 +994,10 @@ class EmmaCoordinator:
                     "agent": "Emma"
                 }
             }
+            await asyncio.sleep(0)  # Force flush
 
             # Use shared preparation logic
-            thread, full_query, _ = await self._prepare_execution(
+            message_history, full_query, _ = await self._prepare_execution(
                 query, tenant_id, session_id, user_context
             )
 
@@ -842,6 +1010,7 @@ class EmmaCoordinator:
                     "agent": "Emma"
                 }
             }
+            await asyncio.sleep(0)  # Force flush
 
             yield {
                 "event": "start",
@@ -850,128 +1019,206 @@ class EmmaCoordinator:
                     "agent": "Emma"
                 }
             }
+            await asyncio.sleep(0)  # Force flush
 
-            # Stream Emma's response
-            # Note: Streaming requires stateful handling of thinking tags since they
-            # may span multiple chunks. For non-streaming, use clean_thinking_tags()
-            thinking_buffer = ""
-            in_thinking_mode = False  # Track if we're inside <think>...</think>
-            final_answer = ""  # Accumulate the actual response for the complete event
+            # Apply thinking mode soft switch based on deep_reasoning flag
+            # /think enables extended reasoning, /no_think disables it
+            if deep_reasoning:
+                reasoning_query = f"/think\n{full_query}"
+                logger.info("🧠 Deep reasoning ENABLED (/think)")
+            else:
+                reasoning_query = f"/no_think\n{full_query}"
+                logger.info("⚡ Fast mode ENABLED (/no_think)")
+
+            # Build messages for Qwen-Agent
+            messages = message_history + [{'role': 'user', 'content': reasoning_query}]
+
+            # Process Emma's response using Qwen-Agent's run() generator
+            # IMPORTANT: Qwen-Agent's run() is SYNCHRONOUS and blocks the event loop.
+            # We must run it in a thread executor to allow async SSE streaming.
+            import queue
+            import threading
+
             tools_used = []
-            first_token_emitted = False  # Track first real token for UX feedback
+            first_token_emitted = False
+            previous_clean_content = ""
+            final_answer = ""
 
-            async for chunk in self._emma.run_stream(full_query, thread=thread):
-                if hasattr(chunk, 'text') and chunk.text:
-                    text = chunk.text
+            # Thread-safe queue for passing events from sync generator to async generator
+            event_queue: queue.Queue = queue.Queue()
 
-                    # Handle Qwen3 thinking tags properly for streaming
-                    # Tags may be split across multiple chunks
+            def run_emma_sync():
+                """Run Emma's sync generator in a separate thread."""
+                nonlocal previous_clean_content, final_answer
+                logger.info("🧵 Emma sync thread STARTED")
+                batch_count = 0
+                try:
+                    for response_batch in self._emma.run(messages):
+                        batch_count += 1
+                        logger.info(f"🧵 Thread received batch #{batch_count}: {len(response_batch)} messages")
+                        for msg in response_batch:
+                            if not isinstance(msg, dict):
+                                continue
+                            logger.info(f"🧵 Thread queueing message: role={msg.get('role')}, has_content={bool(msg.get('content'))}")
+                            event_queue.put(("message", msg))
+                    logger.info(f"🧵 Thread completed after {batch_count} batches, sending done")
+                    event_queue.put(("done", None))
+                except Exception as e:
+                    logger.error(f"❌ Emma sync thread error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    event_queue.put(("error", str(e)))
 
-                    # Check if thinking mode starts
-                    if "<think>" in text:
-                        in_thinking_mode = True
-                        # Keep text before <think> (if any)
-                        before_think = text.split("<think>")[0]
-                        # Store the rest in buffer
-                        thinking_buffer = "<think>" + text.split("<think>", 1)[1] if "<think>" in text else ""
+            # Start Emma in a background thread
+            emma_thread = threading.Thread(target=run_emma_sync, daemon=True)
+            emma_thread.start()
 
-                        if before_think.strip():
-                            final_answer += before_think
-                            yield {
-                                "event": "token",
-                                "data": {"text": before_think, "agent": "Emma"}
+            # Tool descriptions for UI
+            tool_descriptions = {
+                "nexus_semantic_search": "Buscando documentos...",
+                "nexus_hybrid_search": "Buscando documentos...",
+                "nexus_keyword_search": "Buscando documentos...",
+                "get_document_content": "Obteniendo documento...",
+                "analyze_document": "Analizando documento...",
+                "query_recent_shares": "Consultando comparticiones...",
+                "query_site_guests": "Consultando invitados...",
+                "query_sharing_statistics": "Consultando estadísticas...",
+                "query_guest_documents": "Consultando documentos de invitado...",
+                "query_guest_activity": "Consultando actividad de invitado...",
+                "query_sharing_overview": "Obteniendo resumen de comparticiones...",
+                "ask_user_clarification": "Necesito tu ayuda para aclarar algo...",
+                "ask_confirmation": "Esperando confirmación...",
+                "suggest_follow_up": "Preparando sugerencias...",
+            }
+
+            # Process events from the queue asynchronously
+            logger.info("🔄 Starting async event loop for queue processing")
+            loop_iterations = 0
+            last_heartbeat = time.time()
+            HEARTBEAT_INTERVAL = 5.0  # Send progress event every 5 seconds
+            had_error = False  # Track if an error occurred to avoid sending complete after error
+
+            while True:
+                loop_iterations += 1
+                # Non-blocking poll with small sleep to yield to event loop
+                try:
+                    event_type, data = event_queue.get(timeout=0.1)
+                    logger.info(f"🔄 Queue got event: {event_type}")
+                except queue.Empty:
+                    # Send heartbeat to keep connection alive during LLM processing
+                    current_time = time.time()
+                    if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        last_heartbeat = current_time
+                        elapsed_ms = int((current_time - start_time) * 1000)
+                        logger.info(f"💓 Sending heartbeat (elapsed: {elapsed_ms}ms)")
+                        yield {
+                            "event": "progress",
+                            "data": {
+                                "message": "Emma está procesando...",
+                                "stage": "thinking",
+                                "elapsed_ms": elapsed_ms,
+                                "agent": "Emma"
                             }
+                        }
+                        await asyncio.sleep(0)  # Force flush heartbeat
+                    # Allow other async tasks to run
+                    await asyncio.sleep(0.01)
+                    continue
 
-                        # Check if thinking also ends in same chunk
-                        if "</think>" in thinking_buffer:
-                            text = thinking_buffer.split("</think>")[-1]
-                            thinking_buffer = ""
-                            in_thinking_mode = False
-                            if text.strip():
-                                final_answer += text
-                                yield {
-                                    "event": "token",
-                                    "data": {"text": text, "agent": "Emma"}
-                                }
+                if event_type == "done":
+                    logger.info("🔄 Received DONE signal from thread")
+                    break
+                elif event_type == "error":
+                    had_error = True
+                    yield {
+                        "event": "error",
+                        "data": {"error": data, "message": f"Error: {data}"}
+                    }
+                    break
+                elif event_type == "message":
+                    msg = data
+
+                    # Track tool calls (delegations)
+                    if msg.get('function_call'):
+                        tool_name = msg['function_call'].get('name', 'unknown')
+                        logger.info(f"🔧 STREAM TOOL CALL: {tool_name}")
+                        tools_used.append(tool_name)
+                        delegation_message = tool_descriptions.get(tool_name, f"Consultando {tool_name}...")
+
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        yield {
+                            "event": "delegation",
+                            "data": {
+                                "agent": tool_name,
+                                "message": delegation_message,
+                                "elapsed_ms": elapsed_ms
+                            }
+                        }
+                        await asyncio.sleep(0)  # Force flush delegation
                         continue
 
-                    # If we're in thinking mode, accumulate and check for end
-                    if in_thinking_mode:
-                        thinking_buffer += text
-                        if "</think>" in thinking_buffer:
-                            # Thinking ended, extract text after </think>
-                            text = thinking_buffer.split("</think>")[-1]
-                            thinking_buffer = ""
-                            in_thinking_mode = False
-                            if text.strip():
-                                final_answer += text
+                    # Process assistant content
+                    raw_content = msg.get('content', '')
+                    role = msg.get('role', '')
+
+                    if role == 'assistant' and raw_content:
+                        # Check if we're still inside a thinking block
+                        # Don't emit tokens until thinking is complete
+                        is_thinking = '<think>' in raw_content and '</think>' not in raw_content
+
+                        if is_thinking:
+                            # Still thinking - don't emit tokens yet
+                            continue
+
+                        clean_content = clean_thinking_tags(raw_content)
+
+                        # Calculate delta (what's new since last batch)
+                        if len(clean_content) > len(previous_clean_content):
+                            if clean_content.startswith(previous_clean_content):
+                                delta = clean_content[len(previous_clean_content):]
+                            else:
+                                delta = clean_content
+
+                            if delta.strip():
+                                if not first_token_emitted:
+                                    first_token_emitted = True
+                                    elapsed_ms = int((time.time() - start_time) * 1000)
+                                    yield {
+                                        "event": "first_token",
+                                        "data": {
+                                            "message": "Escribiendo respuesta...",
+                                            "elapsed_ms": elapsed_ms,
+                                            "agent": "Emma"
+                                        }
+                                    }
+                                    await asyncio.sleep(0)  # Force flush first_token
+
                                 yield {
                                     "event": "token",
-                                    "data": {"text": text, "agent": "Emma"}
+                                    "data": {
+                                        "text": delta,
+                                        "agent": "Emma"
+                                    }
                                 }
-                        continue  # Don't yield thinking content
+                                await asyncio.sleep(0)  # Force flush token
 
-                    # Normal text (not in thinking mode)
-                    if text.strip():
-                        final_answer += text
+                            previous_clean_content = clean_content
 
-                        # AGGRESSIVE STREAMING: Emit first_token event once
-                        if not first_token_emitted:
-                            first_token_emitted = True
-                            elapsed_ms = int((time.time() - start_time) * 1000)
-                            yield {
-                                "event": "first_token",
-                                "data": {
-                                    "message": "Escribiendo respuesta...",
-                                    "elapsed_ms": elapsed_ms,
-                                    "agent": "Emma"
-                                }
-                            }
+                        final_answer = clean_content
 
-                    yield {
-                        "event": "token",
-                        "data": {
-                            "text": text,
-                            "agent": "Emma"
-                        }
-                    }
+            # Wait for thread to finish (with timeout)
+            emma_thread.join(timeout=5.0)
 
-                # Track tool calls (delegations) - AGGRESSIVE STREAMING
-                if hasattr(chunk, 'tool_call') and chunk.tool_call:
-                    tool_name = chunk.tool_call.function.name if hasattr(chunk.tool_call, 'function') else str(chunk.tool_call)
-                    logger.info(f"🔧 STREAM TOOL CALL: {tool_name}")
-                    tools_used.append(tool_name)
+            # Skip completion events if there was an error
+            if had_error:
+                logger.info("🚫 Skipping completion - error already sent")
+                return
 
-                    # Get human-readable description for the tool
-                    tool_descriptions = {
-                        "search_agent": "Buscando documentos...",
-                        "contract_agent": "Analizando contrato...",
-                        "compliance_agent": "Verificando cumplimiento...",
-                        "analyst_agent": "Analizando documento...",
-                        "summarizer_agent": "Generando resumen...",
-                        "labor_agent": "Consultando normativa laboral...",
-                        "fiscal_agent": "Consultando normativa fiscal...",
-                        "privacy_agent": "Verificando protección de datos...",
-                        # Human-in-the-Loop tools
-                        "ask_user_clarification": "Necesito tu ayuda para aclarar algo...",
-                        "ask_confirmation": "Esperando confirmación...",
-                        "suggest_follow_up": "Preparando sugerencias...",
-                    }
-                    delegation_message = tool_descriptions.get(tool_name, f"Consultando {tool_name}...")
+            # Build updated message history with assistant response
+            updated_history = messages + [{'role': 'assistant', 'content': final_answer}]
 
-                    # Emit delegation event with elapsed time
-                    elapsed_ms = int((time.time() - start_time) * 1000)
-                    yield {
-                        "event": "delegation",
-                        "data": {
-                            "agent": tool_name,
-                            "message": delegation_message,
-                            "elapsed_ms": elapsed_ms
-                        }
-                    }
-
-            # Save thread after streaming
-            await self._save_thread(thread, tenant_id, session_id)
+            # Save updated message history
+            await self._save_message_history(updated_history, tenant_id, session_id)
 
             # Calculate execution time
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -1011,6 +1258,7 @@ class EmmaCoordinator:
                         "_raw": clarification_data,
                     }
                 }
+                await asyncio.sleep(0)  # Force flush
             else:
                 # Normal completion - send complete event with the accumulated answer
                 yield {
@@ -1024,6 +1272,7 @@ class EmmaCoordinator:
                         "execution_time_ms": execution_time_ms
                     }
                 }
+                await asyncio.sleep(0)  # Force flush
 
         except Exception as e:
             logger.error(f"❌ Emma stream failed: {e}")
@@ -1034,6 +1283,7 @@ class EmmaCoordinator:
                     "message": f"Error: {str(e)}"
                 }
             }
+            await asyncio.sleep(0)  # Force flush
 
         finally:
             # Always clear execution context to prevent leaking to other requests
@@ -1044,10 +1294,10 @@ class EmmaCoordinator:
         key = self._get_thread_key(tenant_id, session_id)
         try:
             await self._redis.delete(key)
-            logger.info(f"🗑️ Cleared Emma thread: {session_id[:16]}...")
+            logger.info(f"🗑️ Cleared Emma message history: {session_id[:16]}...")
             return True
         except Exception as e:
-            logger.warning(f"⚠️ Failed to clear thread: {e}")
+            logger.warning(f"⚠️ Failed to clear message history: {e}")
             return False
 
     def get_status(self) -> Dict[str, Any]:
@@ -1056,12 +1306,12 @@ class EmmaCoordinator:
             "initialized": self._initialized,
             "subagents": list(self._subagents.keys()) if self._subagents else [],
             "subagent_count": len(self._subagents) if self._subagents else 0,
-            "framework": "microsoft_agent_framework",
-            "context_management": "AgentThread",
+            "framework": "qwen_agent",
+            "context_management": "message_history",
             "persistence": "Redis",
-            "delegation_method": ".as_tool()",
+            "delegation_method": "function_list",
             "orchestration_patterns": {
-                "handoff": True,  # Default: LLM decides via .as_tool()
+                "handoff": True,  # Default: LLM decides via tools
                 "sequential": self._sequential is not None,
                 "concurrent": self._concurrent is not None,
                 "detection": "keywords + LLM"

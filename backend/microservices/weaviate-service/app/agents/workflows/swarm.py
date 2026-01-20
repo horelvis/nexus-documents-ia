@@ -1,5 +1,5 @@
 """
-Handoff Workflow - Native Microsoft Agent Framework Implementation
+Swarm Workflow - Handoff-Based Agent Coordination
 
 Agents explicitly delegate tasks to other agents using handoffs.
 A coordinator agent analyzes incoming requests and routes to specialists.
@@ -7,24 +7,34 @@ A coordinator agent analyzes incoming requests and routes to specialists.
 Use when: You need explicit control over agent delegation,
 or when a central router should distribute work.
 
-FRAMEWORK: Microsoft Agent Framework
-Uses HandoffBuilder for handoff-based multi-agent orchestration.
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
 
-Reference: https://github.com/microsoft/agent-framework
+MIGRATION NOTE:
+- Migrated from MS Agent Framework HandoffBuilder pattern
+- Now uses Qwen-Agent's Assistant class with our SequentialOrchestration
+- Handoffs are simulated by routing through coordinator
 """
 
 import logging
-from typing import List, Any, AsyncIterator
+from typing import List, Any, AsyncIterator, TYPE_CHECKING
 from dataclasses import dataclass
 
-from agent_framework import ChatAgent, HandoffBuilder
+if TYPE_CHECKING:
+    from qwen_agent.agents import Assistant
+
+from ..orchestration import (
+    SequentialOrchestration,
+    SequentialConfig,
+    get_sequential_orchestration,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SwarmResult:
-    """Result from a handoff workflow execution."""
+    """Result from a swarm workflow execution."""
     answer: str
     messages: List[Any]
     agents_used: List[str]
@@ -35,28 +45,28 @@ class SwarmResult:
 
 class SwarmWorkflow:
     """
-    Handoff workflow with explicit handoffs between agents.
+    Swarm workflow with coordinator-based handoffs.
 
-    In a Handoff workflow, agents use handoffs to explicitly delegate control
-    to other agents. The coordinator analyzes requests and routes to specialists.
+    In this workflow, a coordinator (triage) agent analyzes requests
+    and routes to the appropriate specialists. The execution follows
+    a sequential pattern where each agent's output feeds into the next.
 
     Typical pattern:
     1. Coordinator receives request
-    2. Coordinator analyzes and hands off to specialist
-    3. Specialist works and may hand off to another or back to coordinator
-
-    FRAMEWORK: Microsoft Agent Framework (HandoffBuilder)
+    2. Coordinator analyzes and routes to specialist
+    3. Specialist works and produces output
+    4. Summarizer creates final summary
     """
 
     def __init__(
         self,
-        agents: List[ChatAgent],
+        agents: List["Assistant"],
         max_turns: int = 15,
         termination_text: str = "TASK_COMPLETE",
         enable_return_to_previous: bool = True,
     ):
         """
-        Initialize handoff workflow.
+        Initialize swarm workflow.
 
         Args:
             agents: List of agents (first is the coordinator/triage agent)
@@ -67,92 +77,67 @@ class SwarmWorkflow:
         self.agents = agents
         self.max_turns = max_turns
         self.termination_text = termination_text
-        self.coordinator = agents[0]
+        self.coordinator = agents[0] if agents else None
         self.specialists = agents[1:] if len(agents) > 1 else []
 
-        # Build the handoff workflow using HandoffBuilder
-        builder = (
-            HandoffBuilder(
-                name="document_analysis_workflow",
-                participants=agents
-            )
-            .set_coordinator(self.coordinator)
-            .max_turns(max_turns)
-            .termination_text(termination_text)
+        # Create orchestration config
+        self.config = SequentialConfig(
+            continue_on_error=True,
+            agent_timeout_ms=60000,
+            accumulate_context=True,
         )
-
-        # Coordinator can hand off to any specialist
-        if self.specialists:
-            builder.add_handoff(self.coordinator, self.specialists)
-
-            # Each specialist can hand off to other specialists
-            for specialist in self.specialists:
-                other_specialists = [s for s in self.specialists if s != specialist]
-                if other_specialists:
-                    builder.add_handoff(specialist, other_specialists)
-
-        # Enable return to previous agent for continuity
-        if enable_return_to_previous:
-            builder.enable_return_to_previous(True)
-
-        self.workflow = builder.build()
 
         logger.debug(
-            f"Created HandoffWorkflow with {len(agents)} agents: "
-            f"coordinator={self.coordinator.name}, "
-            f"specialists={[a.name for a in self.specialists]}"
+            f"Created SwarmWorkflow with {len(agents)} agents: "
+            f"coordinator={self.coordinator.name if self.coordinator and hasattr(self.coordinator, 'name') else 'None'}, "
+            f"specialists={[a.name for a in self.specialists if hasattr(a, 'name')]}"
         )
 
-    async def run(self, task: str) -> SwarmResult:
+    async def run(self, task: str, tenant_id: str = "default", session_id: str = "default") -> SwarmResult:
         """
-        Execute the handoff workflow.
+        Execute the swarm workflow.
 
-        The coordinator receives the task and decides
-        how to delegate it to specialists.
+        The coordinator receives the task and the pipeline executes
+        through all configured agents.
 
         Args:
             task: Task description with context
+            tenant_id: Tenant identifier
+            session_id: Session identifier
 
         Returns:
             SwarmResult with answer, delegation path, and metadata
         """
-        logger.info(f"Starting handoff workflow: task='{task[:50]}...'")
+        logger.info(f"Starting swarm workflow: task='{task[:50]}...'")
 
         try:
-            messages = []
-            agents_used = set()
+            orchestration = get_sequential_orchestration(self.config)
+            result = await orchestration.execute(
+                task=task,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                agents=self.agents,
+            )
+
+            # Build handoffs list from execution order
             handoffs = []
-            answer = ""
-            last_agent = None
+            agents_executed = result.agents_executed
+            for i in range(len(agents_executed) - 1):
+                handoffs.append(f"{agents_executed[i]} -> {agents_executed[i+1]}")
 
-            async for event in self.workflow.run_stream(task):
-                if hasattr(event, 'content'):
-                    messages.append(event)
-                    answer = event.content
-
-                    # Track which agent produced this message
-                    current_agent = getattr(event, 'source', None)
-                    if current_agent:
-                        agents_used.add(current_agent)
-
-                        # Track handoffs (agent changes)
-                        if last_agent and current_agent != last_agent:
-                            handoffs.append(f"{last_agent} -> {current_agent}")
-                        last_agent = current_agent
-
-            completed = self.termination_text in answer if answer else False
+            completed = self.termination_text in result.answer if result.answer else False
 
             return SwarmResult(
-                answer=answer,
-                messages=messages,
-                agents_used=list(agents_used),
+                answer=result.answer,
+                messages=[r.answer for r in result.intermediate_results],
+                agents_used=result.agents_executed,
                 handoffs=handoffs,
-                turns_taken=len(messages),
-                completed=completed,
+                turns_taken=len(result.intermediate_results),
+                completed=completed or result.success,
             )
 
         except Exception as e:
-            logger.exception(f"Handoff workflow error: {e}")
+            logger.exception(f"Swarm workflow error: {e}")
             return SwarmResult(
                 answer=f"Error: {e}",
                 messages=[],
@@ -162,12 +147,18 @@ class SwarmWorkflow:
                 completed=False,
             )
 
-    async def run_stream(self, task: str) -> AsyncIterator[Any]:
+    async def run_stream(self, task: str, tenant_id: str = "default", session_id: str = "default") -> AsyncIterator[Any]:
         """Execute with streaming."""
-        logger.info("Starting streaming handoff workflow")
+        logger.info("Starting streaming swarm workflow")
 
         try:
-            async for event in self.workflow.run_stream(task):
+            orchestration = get_sequential_orchestration(self.config)
+            async for event in orchestration.execute_stream(
+                task=task,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                agents=self.agents,
+            ):
                 yield event
         except Exception as e:
             logger.exception(f"Streaming error: {e}")
@@ -175,11 +166,11 @@ class SwarmWorkflow:
 
 
 def create_document_swarm(
-    chat_client: Any,
+    llm_cfg: dict,
     max_turns: int = 20,
 ) -> SwarmWorkflow:
     """
-    Create a pre-configured document analysis handoff workflow.
+    Create a pre-configured document analysis swarm workflow.
 
     Structure:
     - TriageAgent (Coordinator): Analyzes request and routes to specialist
@@ -198,11 +189,11 @@ def create_document_swarm(
     Triage -> TaxDeclarationAgent -> SummarizerAgent
 
     Args:
-        chat_client: Agent Framework chat client
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         max_turns: Maximum turns
 
     Returns:
-        Configured SwarmWorkflow (using HandoffBuilder internally)
+        Configured SwarmWorkflow
     """
     from ..agents import (
         create_search_agent,
@@ -216,14 +207,14 @@ def create_document_swarm(
     )
 
     # Create agents
-    triage = create_triage_agent(chat_client)
-    search = create_search_agent(chat_client)
-    contract = create_contract_agent(chat_client)
-    labor = create_labor_agent(chat_client)
-    legal = create_legal_agent(chat_client)
-    compliance = create_compliance_agent(chat_client)
-    tax_declaration = create_tax_declaration_agent(chat_client)
-    summarizer = create_summarizer_agent(chat_client)
+    triage = create_triage_agent(llm_cfg)
+    search = create_search_agent(llm_cfg)
+    contract = create_contract_agent(llm_cfg)
+    labor = create_labor_agent(llm_cfg)
+    legal = create_legal_agent(llm_cfg)
+    compliance = create_compliance_agent(llm_cfg)
+    tax_declaration = create_tax_declaration_agent(llm_cfg)
+    summarizer = create_summarizer_agent(llm_cfg)
 
     # Order matters: first agent is the coordinator
     return SwarmWorkflow(
@@ -233,17 +224,17 @@ def create_document_swarm(
 
 
 def create_simple_swarm(
-    chat_client: Any,
+    llm_cfg: dict,
     max_turns: int = 10,
 ) -> SwarmWorkflow:
     """
-    Create a simple search -> summarize handoff workflow.
+    Create a simple search -> summarize swarm workflow.
 
     Lightweight workflow with just triage, search, and summarizer.
     Good for quick document lookup tasks.
 
     Args:
-        chat_client: Agent Framework chat client
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         max_turns: Maximum turns
 
     Returns:
@@ -255,9 +246,9 @@ def create_simple_swarm(
         create_triage_agent,
     )
 
-    triage = create_triage_agent(chat_client)
-    search = create_search_agent(chat_client)
-    summarizer = create_summarizer_agent(chat_client)
+    triage = create_triage_agent(llm_cfg)
+    search = create_search_agent(llm_cfg)
+    summarizer = create_summarizer_agent(llm_cfg)
 
     return SwarmWorkflow(
         agents=[triage, search, summarizer],

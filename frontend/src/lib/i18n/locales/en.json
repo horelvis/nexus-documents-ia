@@ -688,6 +688,7 @@
       "teams": "Team Management",
       "settings": "Tenant Settings",
       "siteGuest": "Portal Settings",
+      "connectors": "External Connectors",
       "providers": "Signature Providers",
       "publicKnowledge": "Legal Knowledge Base",
       "billing": "Billing",

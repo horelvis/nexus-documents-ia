@@ -17,6 +17,13 @@ USE CASES:
 - Multi-domain compliance checks (GDPR + LOPDGDD + sector)
 - Parallel searches across different document types
 - Ensemble analysis for comprehensive reports
+
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with run(messages) interface
 """
 
 from __future__ import annotations
@@ -35,9 +42,57 @@ from .base import (
 )
 
 if TYPE_CHECKING:
-    from agent_framework import ChatAgent
+    from qwen_agent.agents import Assistant
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_qwen_agent(agent: "Assistant", prompt: str) -> tuple[str, list]:
+    """
+    Execute a Qwen-Agent Assistant and extract the response.
+
+    Qwen-Agent's run() returns a generator yielding message lists.
+    This helper runs the agent and extracts the final text response.
+
+    Args:
+        agent: Qwen-Agent Assistant instance
+        prompt: User query/prompt
+
+    Returns:
+        Tuple of (answer_text, tools_called)
+    """
+    messages = [{'role': 'user', 'content': prompt}]
+
+    # Run agent and collect all response messages
+    all_responses = []
+    tools_called = []
+
+    try:
+        for response_messages in agent.run(messages):
+            all_responses.extend(response_messages)
+            # Track tool calls
+            for msg in response_messages:
+                if isinstance(msg, dict):
+                    if msg.get('function_call'):
+                        tools_called.append(msg['function_call'].get('name', 'unknown'))
+    except Exception as e:
+        logger.error(f"Error running Qwen agent: {e}")
+        raise
+
+    # Extract final answer from responses
+    answer = ""
+    for msg in all_responses:
+        if isinstance(msg, dict):
+            content = msg.get('content', '')
+            role = msg.get('role', '')
+            if role == 'assistant' and content:
+                answer = content
+
+    # Clean Qwen thinking tags if present
+    if "</think>" in answer:
+        answer = answer.split("</think>")[-1].strip()
+
+    return answer, tools_called
 
 
 @dataclass
@@ -72,7 +127,7 @@ class ConcurrentOrchestration(BaseOrchestration):
 
     def __init__(
         self,
-        aggregator: Optional["ChatAgent"] = None,
+        aggregator: Optional["Assistant"] = None,
         config: Optional[ConcurrentConfig] = None,
         name: str = "ConcurrentOrchestration"
     ):
@@ -81,7 +136,7 @@ class ConcurrentOrchestration(BaseOrchestration):
         self.aggregator = aggregator
         self.config = config or ConcurrentConfig()
 
-    def set_aggregator(self, aggregator: "ChatAgent") -> None:
+    def set_aggregator(self, aggregator: "Assistant") -> None:
         """Set the aggregator agent."""
         self.aggregator = aggregator
 
@@ -90,7 +145,7 @@ class ConcurrentOrchestration(BaseOrchestration):
         task: str,
         tenant_id: str,
         session_id: str,
-        agents: List["ChatAgent"],
+        agents: List["Assistant"],
         **kwargs
     ) -> OrchestrationResult:
         """
@@ -100,7 +155,7 @@ class ConcurrentOrchestration(BaseOrchestration):
             task: User query to send to all agents
             tenant_id: Tenant identifier
             session_id: Session for context
-            agents: List of agents to execute in parallel
+            agents: List of Qwen-Agent Assistant instances to execute in parallel
 
         Returns:
             OrchestrationResult with aggregated answer
@@ -196,7 +251,7 @@ class ConcurrentOrchestration(BaseOrchestration):
 
     async def _execute_single_agent(
         self,
-        agent: "ChatAgent",
+        agent: "Assistant",
         task: str
     ) -> AgentResult:
         """Execute a single agent and return its result."""
@@ -204,24 +259,8 @@ class ConcurrentOrchestration(BaseOrchestration):
         start_time = time.perf_counter()
 
         try:
-            result = await agent.run(task, thread=agent.get_new_thread())
-
-            answer = result.text if hasattr(result, 'text') else str(result)
-
-            # Clean Qwen thinking tags
-            if "</think>" in answer:
-                answer = answer.split("</think>")[-1].strip()
-
+            answer, tools_called = await _run_qwen_agent(agent, task)
             execution_time = (time.perf_counter() - start_time) * 1000
-
-            # Track tools
-            tools_called = []
-            if hasattr(result, 'messages'):
-                for msg in result.messages:
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            tool_name = tc.function.name if hasattr(tc, 'function') else str(tc)
-                            tools_called.append(tool_name)
 
             logger.info(f"  ✓ {agent_name} completed in {execution_time:.0f}ms")
 
@@ -266,12 +305,7 @@ class ConcurrentOrchestration(BaseOrchestration):
         )
 
         try:
-            result = await self.aggregator.run(prompt, thread=self.aggregator.get_new_thread())
-            answer = result.text if hasattr(result, 'text') else str(result)
-
-            if "</think>" in answer:
-                answer = answer.split("</think>")[-1].strip()
-
+            answer, _ = await _run_qwen_agent(self.aggregator, prompt)
             logger.info("✅ Aggregation complete")
             return answer
 
@@ -292,7 +326,7 @@ class ConcurrentOrchestration(BaseOrchestration):
         task: str,
         tenant_id: str,
         session_id: str,
-        agents: List["ChatAgent"],
+        agents: List["Assistant"],
         **kwargs
     ):
         """

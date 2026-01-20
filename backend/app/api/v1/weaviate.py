@@ -72,6 +72,7 @@ async def emma_query_stream(
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Weaviate service to client."""
+            import asyncio
             async with weaviate_client.stream_client(timeout=300.0) as client:
                 async with client.stream(
                     "POST",
@@ -90,6 +91,8 @@ async def emma_query_stream(
 
                     async for chunk in response.aiter_bytes():
                         yield chunk
+                        # Force immediate flush to prevent buffering
+                        await asyncio.sleep(0)
 
         return StreamingResponse(
             stream_sse(),

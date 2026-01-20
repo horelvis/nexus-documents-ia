@@ -6,13 +6,18 @@ from documents and multi-document analyses.
 
 System message is loaded from YAML configuration (emma_prompts.yaml).
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with function_list (tool names as strings)
 """
 
 import logging
 from typing import Any
 
-from agent_framework import ChatAgent
+from qwen_agent.agents import Assistant
 
 from app.services.rag.prompt_loader import get_agent_system_message
 
@@ -25,65 +30,62 @@ Always include tenant_id in all tool calls. End with "TASK_COMPLETE" when done."
 
 
 def create_summarizer_agent(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "SummarizerAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
-    Create a summarization specialist agent using Agent Framework.
+    Create a summarization specialist agent using Qwen-Agent.
 
     This agent excels at creating clear, actionable executive summaries
     from documents and analyses.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent for summarization
+        Configured Assistant for summarization
 
     Example:
-        >>> from app.agents.model_client import get_chat_client
-        >>> client = get_chat_client()
-        >>> summarizer = create_summarizer_agent(client)
+        >>> from app.agents.model_client import get_llm_config
+        >>> llm_cfg = get_llm_config()
+        >>> summarizer = create_summarizer_agent(llm_cfg)
     """
-    from ..tools.rag_tools import rag_answer, summarize_documents, get_document_content
-    from ..tools.search_tools import hybrid_search
-
-    instructions = get_agent_system_message("SummarizerAgent", DEFAULT_SUMMARIZER_MSG)
+    system_message = get_agent_system_message("SummarizerAgent", DEFAULT_SUMMARIZER_MSG)
     logger.debug(f"Creating SummarizerAgent: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=instructions,
-        tools=[
-            rag_answer,
-            summarize_documents,
-            get_document_content,
-            hybrid_search,
+        system_message=system_message,
+        function_list=[
+            'rag_answer',
+            'summarize_documents',
+            'get_document_content',
+            'hybrid_search',
         ],
     )
 
 
 def create_triage_agent(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "TriageAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
     Create a coordinator agent for the handoff workflow.
 
     This agent analyzes incoming requests and routes them to the appropriate
-    specialist agent using the HandoffBuilder's handoff mechanism.
+    specialist agent using handoff mechanisms.
 
-    In the Microsoft Agent Framework, handoffs are triggered automatically
-    when the coordinator decides which specialist should handle the request.
+    In Qwen-Agent, handoffs are managed via the orchestrator that decides
+    which specialist should handle the request based on the triage analysis.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent as workflow coordinator
+        Configured Assistant as workflow coordinator
     """
     triage_instructions = """You are the coordinator agent that routes document analysis requests to specialist agents.
 
@@ -126,9 +128,9 @@ CRITICAL RULES:
     logger.debug(f"Creating coordinator TriageAgent: name={name}")
 
     # Coordinator doesn't need tools - it only routes via handoffs
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=triage_instructions,
-        tools=[],
+        system_message=triage_instructions,
+        function_list=[],
     )

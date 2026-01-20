@@ -355,7 +355,7 @@ The Weaviate Service includes a complete Microsoft Agent Framework + vLLM integr
                  │
     ┌────────────▼────────────────────────────────┐
     │        LLM Provider Factory                  │
-    │  • vLLM (primary) → Qwen3-14B       │
+    │  • vLLM (primary) → Qwen3-4B-Thinking        │
     │  • OpenAI (fallback) → GPT-4o-mini           │
     │  • Anthropic (fallback) → Claude 3.5        │
     └────────────┬────────────────────────────────┘
@@ -364,9 +364,9 @@ The Weaviate Service includes a complete Microsoft Agent Framework + vLLM integr
     │           vLLM Server (Docker)               │
     │  • GPU: NVIDIA CUDA 12.2 (RTX 4090)          │
     │  • API: OpenAI-compatible (:8000)            │
-    │  • Model: Qwen/Qwen3-14B            │
-    │  • Context: 32K native (131K with YaRN)      │
-    │  • Tool calling: Hermes-style parser         │
+    │  • Model: Qwen/Qwen3-4B-Thinking-2507        │
+    │  • Context: 256K native (32K recommended)    │
+    │  • Thinking: Automatic <think> blocks        │
     └─────────────────────────────────────────────┘
 ```
 
@@ -394,24 +394,79 @@ result = await orchestrator.execute(
 ```
 
 **Supported LLM Providers:**
-- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-14B)
+- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-4B-Thinking)
 - `LLM_PROVIDER=ollama` - Legacy local models (llama3.2, qwen2.5, mistral)
 - `LLM_PROVIDER=openai` - Fallback to GPT-4o, GPT-4o-mini
 - `LLM_PROVIDER=anthropic` - Fallback to Claude 3.5 Sonnet, Claude 3 Opus
 - `LLM_PROVIDER=google` - Fallback to Gemini 1.5 Flash, Gemini 1.5 Pro
+
+#### Recommended Model Configuration (RTX 4090 24GB)
+
+**Multimodal RAG Configuration (RECOMMENDED):**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  RECOMMENDED: Multimodal RAG with Cross-Modal Search        │
+├─────────────────────────────────────────────────────────────┤
+│  LLM: Qwen/Qwen3-4B-Thinking-2507                           │
+│    • VRAM: ~10GB (45% allocation)                           │
+│    • Context: 32K tokens (reduced from 256K for VRAM)       │
+│    • Features: Extended reasoning with <think> blocks       │
+│    • Docs: https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507│
+├─────────────────────────────────────────────────────────────┤
+│  Embedding: Qwen/Qwen3-VL-Embedding-2B                      │
+│    • VRAM: ~5GB (20% allocation)                            │
+│    • Dimensions: 1024                                       │
+│    • Features: Unified text + image embedding space         │
+│    • Cross-modal: Text queries find images/diagrams         │
+│    • Docs: https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B│
+├─────────────────────────────────────────────────────────────┤
+│  Total VRAM: ~15GB (65% of 24GB)                            │
+│  Buffer: ~9GB for batching and concurrent requests          │
+└─────────────────────────────────────────────────────────────┘
+
+PDF Processing Pipeline:
+  ✅ Text extraction → Chunking → Text embedding
+  ✅ Images/Tables/Diagrams → Visual extraction → Multimodal embedding
+  ✅ Cross-modal search: "find diagrams about X" works
+```
+
+**Alternative: Text-Only Configuration (Maximum Context):**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ALTERNATIVE: Maximum Context (no image embedding)          │
+├─────────────────────────────────────────────────────────────┤
+│  LLM: Qwen/Qwen3-4B-Thinking-2507                           │
+│    • VRAM: ~16GB (70% allocation)                           │
+│    • Context: 256K tokens (full native)                     │
+├─────────────────────────────────────────────────────────────┤
+│  Embedding: Qwen/Qwen3-Embedding-0.6B (text-only)           │
+│    • VRAM: ~1.2GB                                           │
+│    • Dimensions: 1024                                       │
+│    • Text-only (no image embedding)                         │
+├─────────────────────────────────────────────────────────────┤
+│  Set: MULTIMODAL_EMBEDDING_ENABLED=false                    │
+│  Use with: docker compose profiles (disable qwen3-vl-embed) │
+└─────────────────────────────────────────────────────────────┘
+```
 
 **vLLM Configuration:**
 ```bash
 # Environment variables for vLLM (docker-compose.yml)
 VLLM_ENABLED=true
 VLLM_BASE_URL=http://vllm:8000/v1
-VLLM_MODEL=Qwen/Qwen3-14B
-VLLM_MAX_MODEL_LEN=32768  # Native 32K, up to 131K with YaRN
+VLLM_MODEL=Qwen/Qwen3-4B-Thinking-2507
+VLLM_MAX_MODEL_LEN=32768  # 32K for multimodal setup, 262144 for text-only
 HF_TOKEN=your_huggingface_token  # Required for Qwen3
 
-# NOTE: Uses vllm/vllm-openai:latest (vLLM >= 0.9.0 required for Qwen3)
-# Hardware: RTX 4090 (24GB VRAM) - ~14GB VRAM usage at FP16
-# Tool calling: Hermes-style parser (--tool-call-parser hermes)
+# Multimodal Embedding (Qwen3-VL-Embedding-2B)
+EMBEDDING_PROVIDER=qwen3-vl
+EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-2B
+EMBEDDING_URL=http://qwen3-vl-embedding:8000/v1
+MULTIMODAL_EMBEDDING_ENABLED=true
+
+# NOTE: Uses vllm-qwen3vl image (vLLM + transformers 4.57+)
+# Hardware: RTX 4090 (24GB VRAM)
+# Total VRAM: LLM(45%) + Embedding(20%) = 65% = ~16GB
 ```
 
 **vLLM Server API Endpoints:**
@@ -438,22 +493,22 @@ The vLLM server exposes multiple APIs beyond the OpenAI-compatible interface:
 # Check available models
 curl http://localhost:8000/v1/models | jq
 
-# Test chat completion
+# Test chat completion with thinking mode
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-14B",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 100
+    "model": "Qwen/Qwen3-4B-Thinking-2507",
+    "messages": [{"role": "user", "content": "Explain step by step: What is 25 * 4?"}],
+    "max_tokens": 1000,
+    "temperature": 0.6
   }'
 
-# Test tool calling (Hermes format)
-curl http://localhost:8000/v1/chat/completions \
+# Test multimodal embedding
+curl http://localhost:8001/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-14B",
-    "messages": [{"role": "user", "content": "What is 25 * 4?"}],
-    "tools": [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}}}}]
+    "model": "Qwen/Qwen3-VL-Embedding-2B",
+    "input": ["This is a test document about contracts"]
   }'
 
 # Check metrics

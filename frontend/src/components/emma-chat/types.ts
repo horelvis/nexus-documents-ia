@@ -85,6 +85,17 @@ export interface WorkflowStep {
   error?: string
 }
 
+// Stage types for progress tracking
+export type ProgressStage = 'init' | 'loading_document' | 'analyzing' | 'context_preparation' | 'thinking' | 'searching' | 'generating'
+
+// Delegation event data (when Emma uses tools)
+export interface DelegationInfo {
+  agent: string
+  message: string
+  elapsedMs?: number
+  timestamp?: Date
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -113,6 +124,12 @@ export interface EmmaMessage {
     agent?: string
     plan_id?: string
     workflow_steps?: WorkflowStep[]
+    // Enhanced progress tracking (new)
+    stage?: ProgressStage
+    stageMessage?: string
+    delegations?: DelegationInfo[]
+    streamingText?: string
+    isStreaming?: boolean
     // Error handling fields (i18n keys)
     errorType?: string
     errorTitleKey?: string

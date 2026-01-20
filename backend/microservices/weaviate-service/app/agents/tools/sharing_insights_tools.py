@@ -1,41 +1,51 @@
 """
-Sharing Insights Tools for Agent Framework
+Sharing Insights Tools for Qwen-Agent Framework
 
-These functions provide Emma AI with the ability to query document sharing
+These tools provide Emma AI with the ability to query document sharing
 and site guest information from the PostgreSQL database via REST API.
 
 IMPORTANT: These tools DO NOT access the database directly. They call the
 main API's /sharing-insights endpoints via HTTP.
 
-Parameters use Annotated[type, Field(description="...")] format for
-proper schema generation.
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
 
-FRAMEWORK: Microsoft Agent Framework
+MIGRATION NOTE:
+- Migrated from MS Agent Framework @ai_function pattern
+- Uses class-based tools with @register_tool decorator
 """
 
+import asyncio
 import json
 import logging
-from typing import Annotated, Optional
+from typing import Union
 
-from pydantic import Field
+from qwen_agent.tools.base import BaseTool, register_tool
 
 from app.core.execution_context import resolve_tenant_id
 from app.services.sharing_insights_client import get_sharing_insights_client
 
-# Import ai_function from Agent Framework
-try:
-    from agent_framework import ai_function
-except ImportError:
-    # Fallback identity decorator if Agent Framework not installed
-    def ai_function(func):
-        return func
-
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Async Helper
+# =============================================================================
+
+def _run_async(coro):
+    """Run an async coroutine from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=60)
+    except RuntimeError:
+        return asyncio.run(coro)
 
 
 def _format_response(data: dict, max_items: int = 20) -> str:
     """Format API response as JSON string for agent consumption."""
-    # Truncate lists if too long
     for key, value in data.items():
         if isinstance(value, list) and len(value) > max_items:
             data[key] = value[:max_items]
@@ -49,338 +59,488 @@ def _format_response(data: dict, max_items: int = 20) -> str:
 # Document Shares Tools
 # =============================================================================
 
-@ai_function
-async def query_recent_shares(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    days: Annotated[int, Field(description="Number of days to look back")] = 7,
-    limit: Annotated[int, Field(description="Maximum number of results")] = 20,
-) -> str:
-    """
-    Get documents that have been shared recently.
+@register_tool('query_recent_shares')
+class QueryRecentSharesTool(BaseTool):
+    """Get documents that have been shared recently."""
 
-    Use this tool to answer questions like:
-    - "What documents have I shared this week?"
-    - "Show me recent document shares"
-    - "What files did I share in the last month?"
+    description = '''Get documents that have been shared recently.
 
-    Args:
-        tenant_id: Tenant identifier for data isolation
-        days: How many days to look back (default 7, max 365)
-        limit: Maximum results to return (default 20)
+Use this to answer questions like:
+- "What documents have I shared this week?"
+- "Show me recent document shares"
+- "What files did I share in the last month?"
 
-    Returns:
-        JSON string with list of recent shares including:
-        - document_title: Name of the shared document
-        - recipient_email: Who it was shared with
-        - share_type: Type of share (view, download, edit)
-        - access_count: How many times it was accessed
-        - created_at: When it was shared
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query recent shares: tenant={actual_tenant_id}, days={days}")
+Returns JSON with list of recent shares including document_title, recipient_email, share_type, access_count, created_at.'''
 
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_recent_shares(
-            tenant_id=actual_tenant_id,
-            days=min(days, 365),
-            limit=min(limit, 50)
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying recent shares: {e}")
-        return json.dumps({"error": str(e), "shares": []})
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'days',
+            'type': 'integer',
+            'description': 'Number of days to look back (default 7, max 365)',
+            'required': False
+        },
+        {
+            'name': 'limit',
+            'type': 'integer',
+            'description': 'Maximum number of results (default 20)',
+            'required': False
+        }
+    ]
 
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
 
-@ai_function
-async def query_shares_to_recipient(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    email: Annotated[str, Field(description="Email address of the recipient")],
-    limit: Annotated[int, Field(description="Maximum number of results")] = 20,
-) -> str:
-    """
-    Find all documents shared with a specific person.
+        tenant_id = params.get('tenant_id')
+        days = params.get('days', 7)
+        limit = params.get('limit', 20)
 
-    Use this tool to answer questions like:
-    - "What documents have I shared with john@example.com?"
-    - "What can Maria access?"
-    - "Show shares to the client"
+        return _run_async(self._query_recent_shares(tenant_id, days, limit))
 
-    Args:
-        tenant_id: Tenant identifier
-        email: Email address of the recipient to search
-        limit: Maximum results
+    async def _query_recent_shares(self, tenant_id: str, days: int, limit: int) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query recent shares: tenant={actual_tenant_id}, days={days}")
 
-    Returns:
-        JSON string with shares to that recipient including:
-        - document_title: Document name
-        - share_type: Permission level
-        - access_count: Times accessed
-        - created_at: When shared
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query shares to recipient: tenant={actual_tenant_id}, email={email}")
-
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_shares_by_recipient(
-            tenant_id=actual_tenant_id,
-            email=email,
-            limit=min(limit, 50)
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying shares by recipient: {e}")
-        return json.dumps({"error": str(e), "shares": []})
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_recent_shares(
+                tenant_id=actual_tenant_id,
+                days=min(days, 365),
+                limit=min(limit, 50)
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying recent shares: {e}")
+            return json.dumps({"error": str(e), "shares": []})
 
 
-@ai_function
-async def query_sharing_statistics(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    days: Annotated[int, Field(description="Period to analyze in days")] = 30,
-) -> str:
-    """
-    Get statistics about document sharing activity.
+@register_tool('query_shares_to_recipient')
+class QuerySharesToRecipientTool(BaseTool):
+    """Find all documents shared with a specific person."""
 
-    Use this tool to answer questions like:
-    - "How many documents have been shared?"
-    - "What are the sharing statistics?"
-    - "Which documents are most shared?"
+    description = '''Find all documents shared with a specific person.
 
-    Args:
-        tenant_id: Tenant identifier
-        days: Period to analyze (default 30 days)
+Use this to answer questions like:
+- "What documents have I shared with john@example.com?"
+- "What can Maria access?"
+- "Show shares to the client"
 
-    Returns:
-        JSON string with statistics including:
-        - total_shares: Total number of shares
-        - active_shares: Currently active shares
-        - expired_shares: Expired shares
-        - total_access_count: Total accesses
-        - unique_recipients: Unique people shared with
-        - most_shared_documents: Top shared documents
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query sharing statistics: tenant={actual_tenant_id}, days={days}")
+Returns JSON with shares to that recipient including document_title, share_type, access_count, created_at.'''
 
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_share_statistics(
-            tenant_id=actual_tenant_id,
-            days=min(days, 365)
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying sharing statistics: {e}")
-        return json.dumps({"error": str(e)})
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'email',
+            'type': 'string',
+            'description': 'Email address of the recipient',
+            'required': True
+        },
+        {
+            'name': 'limit',
+            'type': 'integer',
+            'description': 'Maximum number of results (default 20)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+        email = params.get('email')
+        limit = params.get('limit', 20)
+
+        return _run_async(self._query_shares_to_recipient(tenant_id, email, limit))
+
+    async def _query_shares_to_recipient(self, tenant_id: str, email: str, limit: int) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query shares to recipient: tenant={actual_tenant_id}, email={email}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_shares_by_recipient(
+                tenant_id=actual_tenant_id,
+                email=email,
+                limit=min(limit, 50)
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying shares by recipient: {e}")
+            return json.dumps({"error": str(e), "shares": []})
+
+
+@register_tool('query_sharing_statistics')
+class QuerySharingStatisticsTool(BaseTool):
+    """Get statistics about document sharing activity."""
+
+    description = '''Get statistics about document sharing activity.
+
+Use this to answer questions like:
+- "How many documents have been shared?"
+- "What are the sharing statistics?"
+- "Which documents are most shared?"
+
+Returns JSON with statistics including total_shares, active_shares, expired_shares, total_access_count, unique_recipients, most_shared_documents.'''
+
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'days',
+            'type': 'integer',
+            'description': 'Period to analyze in days (default 30)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+        days = params.get('days', 30)
+
+        return _run_async(self._query_sharing_statistics(tenant_id, days))
+
+    async def _query_sharing_statistics(self, tenant_id: str, days: int) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query sharing statistics: tenant={actual_tenant_id}, days={days}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_share_statistics(
+                tenant_id=actual_tenant_id,
+                days=min(days, 365)
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying sharing statistics: {e}")
+            return json.dumps({"error": str(e)})
 
 
 # =============================================================================
 # Site Guests Tools
 # =============================================================================
 
-@ai_function
-async def query_site_guests(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    active_only: Annotated[bool, Field(description="Only show active guests")] = False,
-    limit: Annotated[int, Field(description="Maximum number of results")] = 50,
-) -> str:
-    """
-    List external guests who have access to the site portal.
+@register_tool('query_site_guests')
+class QuerySiteGuestsTool(BaseTool):
+    """List external guests who have access to the site portal."""
 
-    Use this tool to answer questions like:
-    - "Who are my external guests?"
-    - "List invited users"
-    - "Show me site guests"
-    - "Who has portal access?"
+    description = '''List external guests who have access to the site portal.
 
-    Args:
-        tenant_id: Tenant identifier
-        active_only: If True, only return active guests
-        limit: Maximum results
+Use this to answer questions like:
+- "Who are my external guests?"
+- "List invited users"
+- "Show me site guests"
+- "Who has portal access?"
 
-    Returns:
-        JSON string with guest list including:
-        - email: Guest's email
-        - name: Guest's name
-        - is_active: Whether guest is active
-        - can_view/can_download/can_upload: Permissions
-        - invited_at: When they were invited
-        - last_access_at: Last activity
-        - shares_count: Number of share collections
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query site guests: tenant={actual_tenant_id}, active_only={active_only}")
+Returns JSON with guest list including email, name, is_active, permissions, invited_at, last_access_at, shares_count.'''
 
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_site_guests(
-            tenant_id=actual_tenant_id,
-            active_only=active_only,
-            limit=min(limit, 100)
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying site guests: {e}")
-        return json.dumps({"error": str(e), "guests": []})
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'active_only',
+            'type': 'boolean',
+            'description': 'Only show active guests (default false)',
+            'required': False
+        },
+        {
+            'name': 'limit',
+            'type': 'integer',
+            'description': 'Maximum number of results (default 50)',
+            'required': False
+        }
+    ]
 
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
 
-@ai_function
-async def query_guest_documents(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    email: Annotated[str, Field(description="Guest's email address")],
-) -> str:
-    """
-    Get all documents accessible by a specific guest.
+        tenant_id = params.get('tenant_id')
+        active_only = params.get('active_only', False)
+        limit = params.get('limit', 50)
 
-    Use this tool to answer questions like:
-    - "What can guest@example.com see?"
-    - "What documents does the external user have access to?"
-    - "Show what Juan can access in the portal"
+        return _run_async(self._query_site_guests(tenant_id, active_only, limit))
 
-    Args:
-        tenant_id: Tenant identifier
-        email: Guest's email address
+    async def _query_site_guests(self, tenant_id: str, active_only: bool, limit: int) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query site guests: tenant={actual_tenant_id}, active_only={active_only}")
 
-    Returns:
-        JSON string with accessible documents including:
-        - document_title: Document name
-        - share_name: Name of the share collection
-        - permission_type: view/download/upload
-        - shared_at: When it was shared
-        - shared_by: Who shared it
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query guest documents: tenant={actual_tenant_id}, email={email}")
-
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_guest_documents(
-            tenant_id=actual_tenant_id,
-            email=email
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying guest documents: {e}")
-        return json.dumps({"error": str(e), "documents": []})
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_site_guests(
+                tenant_id=actual_tenant_id,
+                active_only=active_only,
+                limit=min(limit, 100)
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying site guests: {e}")
+            return json.dumps({"error": str(e), "guests": []})
 
 
-@ai_function
-async def query_guest_activity(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-    email: Annotated[str, Field(description="Guest's email address")],
-    days: Annotated[int, Field(description="Number of days to look back")] = 30,
-    limit: Annotated[int, Field(description="Maximum number of results")] = 50,
-) -> str:
-    """
-    Get activity history for a specific guest.
+@register_tool('query_guest_documents')
+class QueryGuestDocumentsTool(BaseTool):
+    """Get all documents accessible by a specific guest."""
 
-    Use this tool to answer questions like:
-    - "What has guest@example.com done?"
-    - "Show me the activity of the external user"
-    - "When did Juan last access documents?"
+    description = '''Get all documents accessible by a specific guest.
 
-    Args:
-        tenant_id: Tenant identifier
-        email: Guest's email address
-        days: Days to look back (default 30)
-        limit: Maximum results
+Use this to answer questions like:
+- "What can guest@example.com see?"
+- "What documents does the external user have access to?"
+- "Show what Juan can access in the portal"
 
-    Returns:
-        JSON string with activity logs including:
-        - action: What they did (login, view, download)
-        - document_title: Which document (if applicable)
-        - created_at: When it happened
-        - success: Whether it succeeded
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query guest activity: tenant={actual_tenant_id}, email={email}, days={days}")
+Returns JSON with accessible documents including document_title, share_name, permission_type, shared_at, shared_by.'''
 
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_guest_activity(
-            tenant_id=actual_tenant_id,
-            email=email,
-            days=min(days, 365),
-            limit=min(limit, 100)
-        )
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying guest activity: {e}")
-        return json.dumps({"error": str(e), "activities": []})
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'email',
+            'type': 'string',
+            'description': "Guest's email address",
+            'required': True
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+        email = params.get('email')
+
+        return _run_async(self._query_guest_documents(tenant_id, email))
+
+    async def _query_guest_documents(self, tenant_id: str, email: str) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query guest documents: tenant={actual_tenant_id}, email={email}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_guest_documents(
+                tenant_id=actual_tenant_id,
+                email=email
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying guest documents: {e}")
+            return json.dumps({"error": str(e), "documents": []})
 
 
-@ai_function
-async def query_guest_statistics(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-) -> str:
-    """
-    Get statistics about site guests.
+@register_tool('query_guest_activity')
+class QueryGuestActivityTool(BaseTool):
+    """Get activity history for a specific guest."""
 
-    Use this tool to answer questions like:
-    - "How many guests do I have?"
-    - "Site guest statistics"
-    - "Who are the most active external users?"
+    description = '''Get activity history for a specific guest.
 
-    Args:
-        tenant_id: Tenant identifier
+Use this to answer questions like:
+- "What has guest@example.com done?"
+- "Show me the activity of the external user"
+- "When did Juan last access documents?"
 
-    Returns:
-        JSON string with statistics including:
-        - total_guests: Total number of guests
-        - active_guests: Currently active guests
-        - total_logins: Total login count
-        - total_document_views: Total views
-        - most_active_guests: Most active guests
-        - guests_by_permission: Breakdown by permission type
-    """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query guest statistics: tenant={actual_tenant_id}")
+Returns JSON with activity logs including action, document_title, created_at, success.'''
 
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_guest_statistics(tenant_id=actual_tenant_id)
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying guest statistics: {e}")
-        return json.dumps({"error": str(e)})
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'email',
+            'type': 'string',
+            'description': "Guest's email address",
+            'required': True
+        },
+        {
+            'name': 'days',
+            'type': 'integer',
+            'description': 'Number of days to look back (default 30)',
+            'required': False
+        },
+        {
+            'name': 'limit',
+            'type': 'integer',
+            'description': 'Maximum number of results (default 50)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+        email = params.get('email')
+        days = params.get('days', 30)
+        limit = params.get('limit', 50)
+
+        return _run_async(self._query_guest_activity(tenant_id, email, days, limit))
+
+    async def _query_guest_activity(self, tenant_id: str, email: str, days: int, limit: int) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query guest activity: tenant={actual_tenant_id}, email={email}, days={days}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_guest_activity(
+                tenant_id=actual_tenant_id,
+                email=email,
+                days=min(days, 365),
+                limit=min(limit, 100)
+            )
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying guest activity: {e}")
+            return json.dumps({"error": str(e), "activities": []})
+
+
+@register_tool('query_guest_statistics')
+class QueryGuestStatisticsTool(BaseTool):
+    """Get statistics about site guests."""
+
+    description = '''Get statistics about site guests.
+
+Use this to answer questions like:
+- "How many guests do I have?"
+- "Site guest statistics"
+- "Who are the most active external users?"
+
+Returns JSON with statistics including total_guests, active_guests, total_logins, total_document_views, most_active_guests, guests_by_permission.'''
+
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+
+        return _run_async(self._query_guest_statistics(tenant_id))
+
+    async def _query_guest_statistics(self, tenant_id: str) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query guest statistics: tenant={actual_tenant_id}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_guest_statistics(tenant_id=actual_tenant_id)
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying guest statistics: {e}")
+            return json.dumps({"error": str(e)})
 
 
 # =============================================================================
 # Overview Tool
 # =============================================================================
 
-@ai_function
-async def query_sharing_overview(
-    tenant_id: Annotated[str, Field(description="Tenant ID for data isolation")],
-) -> str:
+@register_tool('query_sharing_overview')
+class QuerySharingOverviewTool(BaseTool):
+    """Get a high-level overview of all sharing activity."""
+
+    description = '''Get a high-level overview of all sharing activity.
+
+Use this to answer questions like:
+- "Give me an overview of sharing"
+- "Summary of document sharing"
+- "What's the sharing status?"
+
+Returns JSON with overview including total_document_shares, active_document_shares, total_share_accesses, total_site_guests, shares_last_7_days, guest_invitations_last_7_days.'''
+
+    parameters = [
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        tenant_id = params.get('tenant_id')
+
+        return _run_async(self._query_sharing_overview(tenant_id))
+
+    async def _query_sharing_overview(self, tenant_id: str) -> str:
+        actual_tenant_id = resolve_tenant_id(tenant_id)
+        logger.info(f"Query sharing overview: tenant={actual_tenant_id}")
+
+        try:
+            client = get_sharing_insights_client()
+            result = await client.get_sharing_overview(tenant_id=actual_tenant_id)
+            return _format_response(result)
+        except Exception as e:
+            logger.error(f"Error querying sharing overview: {e}")
+            return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# Tool Registration Exports
+# =============================================================================
+
+SHARING_INSIGHTS_TOOLS = [
+    QueryRecentSharesTool,
+    QuerySharesToRecipientTool,
+    QuerySharingStatisticsTool,
+    QuerySiteGuestsTool,
+    QueryGuestDocumentsTool,
+    QueryGuestActivityTool,
+    QueryGuestStatisticsTool,
+    QuerySharingOverviewTool,
+]
+
+SHARING_INSIGHTS_TOOL_NAMES = [
+    'query_recent_shares',
+    'query_shares_to_recipient',
+    'query_sharing_statistics',
+    'query_site_guests',
+    'query_guest_documents',
+    'query_guest_activity',
+    'query_guest_statistics',
+    'query_sharing_overview',
+]
+
+
+def get_sharing_insights_tools() -> list:
     """
-    Get a high-level overview of all sharing activity.
-
-    Use this tool to answer questions like:
-    - "Give me an overview of sharing"
-    - "Summary of document sharing"
-    - "What's the sharing status?"
-
-    Args:
-        tenant_id: Tenant identifier
-
-    Returns:
-        JSON string with overview including:
-        - total_document_shares: Total shares created
-        - active_document_shares: Currently active
-        - total_share_accesses: Total accesses
-        - total_site_guests: Number of guests
-        - shares_last_7_days: Recent shares
-        - guest_invitations_last_7_days: Recent invitations
+    Get list of sharing insights tool names for use in Qwen-Agent Assistant's function_list.
     """
-    actual_tenant_id = resolve_tenant_id(tenant_id)
-    logger.info(f"Query sharing overview: tenant={actual_tenant_id}")
-
-    try:
-        client = get_sharing_insights_client()
-        result = await client.get_sharing_overview(tenant_id=actual_tenant_id)
-        return _format_response(result)
-    except Exception as e:
-        logger.error(f"Error querying sharing overview: {e}")
-        return json.dumps({"error": str(e)})
+    return SHARING_INSIGHTS_TOOL_NAMES

@@ -25,6 +25,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@nexus/shared": [
+        "./packages/shared/src/index.ts"
+      ],
+      "@nexus/shared/*": [
+        "./packages/shared/src/*"
       ]
     }
   },

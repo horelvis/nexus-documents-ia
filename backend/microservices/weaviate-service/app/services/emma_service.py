@@ -321,10 +321,10 @@ Responde SOLO una palabra:"""
             await self._memory.initialize()
             logger.info("✅ Memory Protocol initialized")
 
-            # Build available tools list
+            # Build available tools list (using nexus_ prefix to avoid Qwen-Agent conflicts)
             legacy_tools = [
-                "semantic_search", "hybrid_search", "keyword_search",
-                "search_public_knowledge", "search_with_legal_context",
+                "nexus_semantic_search", "nexus_hybrid_search", "nexus_keyword_search",
+                "nexus_search_public_knowledge", "nexus_search_with_legal_context",
                 "analyze_document", "compare_documents", "rag_answer",
                 "get_document_content", "summarize_documents"
             ]
@@ -432,7 +432,8 @@ Responde SOLO una palabra:"""
                 user_role_ids=query.user_role_ids,
                 is_admin=query.is_admin,
                 user_context=user_context,
-                orchestration_hint=orchestration_hint
+                orchestration_hint=orchestration_hint,
+                deep_reasoning=query.deep_reasoning
             )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -585,7 +586,8 @@ Responde SOLO una palabra:"""
                 user_id=user_id,
                 user_role_ids=query.user_role_ids,
                 is_admin=query.is_admin,
-                user_context=user_context
+                user_context=user_context,
+                deep_reasoning=query.deep_reasoning
             ):
                 if "data" not in event:
                     event["data"] = {}
@@ -676,7 +678,7 @@ Responde SOLO una palabra:"""
                 iterations=1,
                 learning_applied=False,
                 suggestions=self._generate_suggestions(query.query),
-                available_tools=["rag_answer", "semantic_search", "hybrid_search"]
+                available_tools=["rag_answer", "nexus_semantic_search", "nexus_hybrid_search"]
             )
         except Exception as e:
             logger.error(f"❌ RAG fallback failed: {e}")
@@ -769,25 +771,30 @@ Responde SOLO una palabra:"""
             await self.initialize()
 
         try:
-            from app.agents.tools import search_tools, analysis_tools, rag_tools
+            from app.agents.tools import (
+                SemanticSearchTool, HybridSearchTool, KeywordSearchTool,
+                AnalyzeDocumentTool, CompareDocumentsTool, RAGAnswerTool
+            )
+            import json
 
-            tool_map = {
-                "semantic_search": search_tools.semantic_search,
-                "hybrid_search": search_tools.hybrid_search,
-                "keyword_search": search_tools.keyword_search,
-                "analyze_document": analysis_tools.analyze_document,
-                "compare_documents": analysis_tools.compare_documents,
-                "rag_answer": rag_tools.rag_answer,
+            # Map tool names to Qwen-Agent tool classes (nexus_ prefix for search tools)
+            tool_class_map = {
+                "nexus_semantic_search": SemanticSearchTool,
+                "nexus_hybrid_search": HybridSearchTool,
+                "nexus_keyword_search": KeywordSearchTool,
+                "analyze_document": AnalyzeDocumentTool,
+                "compare_documents": CompareDocumentsTool,
+                "rag_answer": RAGAnswerTool,
             }
 
-            tool_func = tool_map.get(tool_execution.tool_name)
-            if not tool_func:
+            tool_class = tool_class_map.get(tool_execution.tool_name)
+            if not tool_class:
                 raise ValueError(f"Unknown tool: {tool_execution.tool_name}")
 
-            result = await tool_func(
-                tenant_id=tool_execution.tenant_id,
-                **tool_execution.parameters
-            )
+            # Instantiate tool and call with parameters
+            tool_instance = tool_class()
+            params = {"tenant_id": tool_execution.tenant_id, **tool_execution.parameters}
+            result = tool_instance.call(json.dumps(params))
 
             return {"status": "success", "tool": tool_execution.tool_name, "result": result}
         except Exception as e:
@@ -795,15 +802,15 @@ Responde SOLO una palabra:"""
             return {"status": "error", "tool": tool_execution.tool_name, "error": str(e)}
 
     async def list_tools(self) -> List[ToolInfo]:
-        """List all available tools."""
+        """List all available tools (using nexus_ prefix for search tools)."""
         return [
-            ToolInfo(name="semantic_search", description="Search by semantic meaning",
+            ToolInfo(name="nexus_semantic_search", description="Search by semantic meaning",
                      parameters={"query": "string", "tenant_id": "string", "top_k": "int"},
                      return_type="list", category="search"),
-            ToolInfo(name="hybrid_search", description="Search combining vectors and keywords",
+            ToolInfo(name="nexus_hybrid_search", description="Search combining vectors and keywords",
                      parameters={"query": "string", "tenant_id": "string", "top_k": "int"},
                      return_type="list", category="search"),
-            ToolInfo(name="keyword_search", description="Search by exact keywords",
+            ToolInfo(name="nexus_keyword_search", description="Search by exact keywords",
                      parameters={"query": "string", "tenant_id": "string", "top_k": "int"},
                      return_type="list", category="search"),
             ToolInfo(name="analyze_document", description="Deep analysis of a document",

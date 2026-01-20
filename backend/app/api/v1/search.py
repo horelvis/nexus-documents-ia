@@ -1,3 +1,13 @@
+"""
+Search API endpoints.
+
+Uses UnifiedSearchService which automatically selects the appropriate backend:
+- Elasticsearch when Feature.ELASTICSEARCH_SEARCH is enabled
+- Weaviate hybrid (BM25 + vector) when disabled
+
+For on-premise Emma-centric deployments, Elasticsearch is disabled by default.
+"""
+
 import logging
 from typing import List, Optional
 
@@ -8,6 +18,11 @@ from app.services.search_service import SearchService
 from app.services.weaviate_client import weaviate_client
 from app.services.reindex_service import ReindexService
 from app.services.cag_client import CAGClient
+from app.services.unified_search_service import (
+    UnifiedSearchService,
+    SearchUserContext as UnifiedUserContext,
+)
+from app.core.features import Feature, FeatureFlags
 from app.schemas.document import ChatMessage
 
 logger = logging.getLogger(__name__)
@@ -144,7 +159,7 @@ async def search_database(
 async def search_documents(
     query: str = Query(..., description="Texto de búsqueda"),
     limit: int = Query(10, ge=1, le=100),
-    search_type: Optional[str] = Query("auto", description="Tipo de búsqueda: auto, elasticsearch, database"),
+    search_type: Optional[str] = Query("auto", description="Tipo de búsqueda: auto, hybrid, semantic, keyword, database"),
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -152,97 +167,81 @@ async def search_documents(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    OPTIMIZED search - Elasticsearch primary, Database fallback only if ES is down
-    - auto: Try Elasticsearch first, fallback to Database only if ES fails
-    - elasticsearch: Force Elasticsearch search
-    - database: Force database search (metadata only)
-    """
-    from app.services.elasticsearch_client import elasticsearch_client, SearchUserContext
+    Unified search endpoint using the appropriate backend.
 
+    When Elasticsearch is enabled (SAAS mode):
+    - Uses ES for hybrid/keyword search with Weaviate fallback
+
+    When Elasticsearch is disabled (ON_PREMISE mode):
+    - Uses Weaviate native hybrid search (BM25 + vector)
+
+    Search types:
+    - auto: Automatically select best search type based on query
+    - hybrid: Combined keyword + semantic search (default)
+    - semantic: Pure vector similarity search
+    - keyword: Pure BM25/keyword search
+    - database: PostgreSQL metadata search only (fallback)
+    """
     try:
         # Build user context for ACL filtering
         user_role_ids = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        user_context = SearchUserContext(
+        user_context = UnifiedUserContext(
             user_id=str(current_user.id),
             role_ids=user_role_ids,
             is_admin=current_user.is_admin
         )
 
-        # Always try Elasticsearch first (has the content)
-        if search_type in ["auto", "elasticsearch"]:
-            try:
-
-                # Prepare filters
-                filters = {}
-                if tags:
-                    filters["tags"] = tags
-                if date_from:
-                    filters["date_from"] = date_from
-                if date_to:
-                    filters["date_to"] = date_to
-
-                # Try Elasticsearch microservice search with ACL filtering
-                results = await elasticsearch_client.hybrid_search(
-                    tenant_id=tenant_id,
-                    query=query,
-                    limit=limit,
-                    filters=filters,
-                    user_context=user_context
-                )
-
-                # Ensure results is a list
-                if results and isinstance(results, list) and len(results) > 0:
-                    return results
-                elif results:
-                    # If results is not a list, wrap it
-                    wrapped = [results] if isinstance(results, dict) else []
-                    if wrapped:
-                        return wrapped
-
-                # No Elasticsearch hits found
-                if search_type == "auto":
-                    logger.info("🔍 Elasticsearch returned no results, trying semantic Weaviate fallback")
-                    try:
-                        search_service = SearchService(tenant_id=tenant_id)
-                        vector_results = await search_service.search_documents(
-                            query=query,
-                            limit=limit,
-                            search_type="semantic",
-                            filters=filters
-                        )
-                        if vector_results:
-                            logger.info(f"✅ Semantic fallback returned {len(vector_results)} results")
-                            return vector_results
-                    except Exception as vector_error:
-                        logger.warning(f"⚠️ Semantic fallback failed: {vector_error}")
-
-            except Exception as es_error:
-                logger.warning(f"⚠️ Elasticsearch failed: {es_error}")
-
-                # Only fallback to database if it's a connection issue or explicitly requested
-                if search_type == "database" or "connection" in str(es_error).lower() or "timeout" in str(es_error).lower():
-                    logger.info("🔄 Falling back to database search (metadata only)")
-                    return await search_database(query, limit, tags, None, current_user, tenant_id)
-                else:
-                    # For other ES errors, still try database as fallback in auto mode
-                    if search_type == "auto":
-                        logger.info("🔄 ES error in auto mode, trying database fallback")
-                        return await search_database(query, limit, tags, None, current_user, tenant_id)
-                    else:
-                        # Re-raise ES error if search_type is explicitly elasticsearch
-                        raise es_error
-
-        # If search_type is database or if we reach here, do database search
+        # Database-only search (fallback)
         if search_type == "database":
             return await search_database(query, limit, tags, None, current_user, tenant_id)
 
-        # Default: return empty results
+        # Prepare filters
+        filters = {}
+        if tags:
+            filters["tags"] = tags
+        if date_from:
+            filters["date_from"] = date_from
+        if date_to:
+            filters["date_to"] = date_to
+
+        # Use UnifiedSearchService (auto-selects ES or Weaviate based on feature flags)
+        unified_service = UnifiedSearchService(tenant_id=tenant_id)
+
+        # Determine actual search type
+        actual_search_type = search_type
+        if search_type == "auto":
+            actual_search_type = await unified_service.suggest_search_type(query)
+            logger.debug(f"Auto-selected search type: {actual_search_type}")
+        elif search_type == "elasticsearch":
+            # Legacy: map to hybrid
+            actual_search_type = "hybrid"
+
+        # Execute unified search
+        results = await unified_service.search(
+            query=query,
+            limit=limit,
+            search_type=actual_search_type,
+            filters=filters,
+            user_context=user_context,
+        )
+
+        if results:
+            return results
+
+        # Fallback to database if no results
+        if search_type == "auto":
+            logger.info("No results from unified search, trying database fallback")
+            return await search_database(query, limit, tags, None, current_user, tenant_id)
+
         return []
 
     except Exception as e:
-        logger.error(f"💥 Search endpoint error: {e}")
-        # Return empty list instead of raising exception to avoid Content-Length issues
-        return []
+        logger.error(f"Search endpoint error: {e}")
+        # Fallback to database on any error
+        try:
+            return await search_database(query, limit, tags, None, current_user, tenant_id)
+        except Exception:
+            return []
 
 
 @router.get("/analytics", response_model=dict)

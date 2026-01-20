@@ -1,14 +1,13 @@
 """
 Async dependencies for FastAPI endpoints.
 
-Authentication flow (NO JIT Provisioning):
-1. Frontend sends Clerk JWT token in Authorization header
-2. Backend validates token with Clerk JWKS (via unified auth module)
-3. If user doesn't exist in DB → returns 401 (must register first)
-4. Returns authenticated user
+Authentication flow:
+- SaaS mode: Clerk JWT token validation
+- On-premise mode: OIDC/SAML/LDAP token validation via AuthProviderFactory
 
-User creation is handled by Clerk webhook on user.created event.
-Login only validates existing users.
+User lookup:
+- SaaS: by clerk_user_id
+- On-premise: by sso_external_id
 """
 from typing import Optional
 import logging
@@ -16,12 +15,13 @@ import os
 
 from fastapi import Depends, HTTPException, status, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
 from app.db.models import User
 from app.core.config import settings
+from app.core.features import is_on_premise_mode
 from app.core.auth import (
     verify_clerk_token,
     AuthError,
@@ -107,81 +107,116 @@ async def get_current_user_async(
 
     token = authorization.split(" ")[1]
 
-    # Verify token using unified auth module
-    try:
-        payload = verify_clerk_token(token)
-    except TokenExpiredError:
-        logger.info(
-            "Auth token expired | method=%s path=%s origin=%s client=%s request_id=%s",
-            request.method,
-            request.url.path,
-            origin,
-            client_host,
-            x_request_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    except TokenInvalidError as e:
-        logger.warning(
-            "Auth token invalid | method=%s path=%s origin=%s client=%s request_id=%s error=%s",
-            request.method,
-            request.url.path,
-            origin,
-            client_host,
-            x_request_id,
-            e.message,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e.message),
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    except ClerkConfigError:
-        logger.error(
-            "Auth misconfigured (Clerk) | method=%s path=%s request_id=%s",
-            request.method,
-            request.url.path,
-            x_request_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication service not configured"
-        )
-    except AuthError as e:
-        logger.warning(
-            "Auth error | method=%s path=%s origin=%s client=%s request_id=%s status=%s error=%s",
-            request.method,
-            request.url.path,
-            origin,
-            client_host,
-            x_request_id,
-            e.status_code,
-            e.message,
-        )
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.message,
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+    # Verify token based on deployment mode
+    user_external_id = None
+    is_sso_mode = is_on_premise_mode()
 
-    clerk_user_id = payload.get('sub')
+    if is_sso_mode:
+        # On-premise mode: Use AuthProviderFactory for OIDC/SAML/LDAP
+        try:
+            from app.core.auth.factory import AuthProviderFactory
+            from app.core.auth.exceptions import TokenExpiredError as SSOTokenExpired
+            from app.core.auth.exceptions import TokenInvalidError as SSOTokenInvalid
 
-    # Find user
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.roles), selectinload(User.image))
-        .where(User.clerk_user_id == clerk_user_id)
-    )
+            provider = await AuthProviderFactory.get_default()
+            identity = await provider.verify_token(token)
+            user_external_id = identity.external_id
+            logger.debug(f"SSO token verified for user: {user_external_id[:8]}...")
+
+        except SSOTokenExpired:
+            logger.info(
+                "SSO token expired | method=%s path=%s origin=%s client=%s request_id=%s",
+                request.method, request.url.path, origin, client_host, x_request_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except SSOTokenInvalid as e:
+            logger.warning(
+                "SSO token invalid | method=%s path=%s origin=%s client=%s request_id=%s error=%s",
+                request.method, request.url.path, origin, client_host, x_request_id, str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(e),
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except Exception as e:
+            logger.error(f"SSO auth error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+    else:
+        # SaaS mode: Use Clerk token validation
+        try:
+            payload = verify_clerk_token(token)
+            user_external_id = payload.get('sub')
+        except TokenExpiredError:
+            logger.info(
+                "Auth token expired | method=%s path=%s origin=%s client=%s request_id=%s",
+                request.method, request.url.path, origin, client_host, x_request_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except TokenInvalidError as e:
+            logger.warning(
+                "Auth token invalid | method=%s path=%s origin=%s client=%s request_id=%s error=%s",
+                request.method, request.url.path, origin, client_host, x_request_id, e.message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(e.message),
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except ClerkConfigError:
+            logger.error(
+                "Auth misconfigured (Clerk) | method=%s path=%s request_id=%s",
+                request.method, request.url.path, x_request_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication service not configured"
+            )
+        except AuthError as e:
+            logger.warning(
+                "Auth error | method=%s path=%s origin=%s client=%s request_id=%s status=%s error=%s",
+                request.method, request.url.path, origin, client_host, x_request_id, e.status_code, e.message,
+            )
+            raise HTTPException(
+                status_code=e.status_code,
+                detail=e.message,
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+    # Find user based on deployment mode
+    if is_sso_mode:
+        # On-premise: lookup by sso_external_id
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.roles), selectinload(User.image))
+            .where(User.sso_external_id == user_external_id)
+        )
+    else:
+        # SaaS: lookup by clerk_user_id
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.roles), selectinload(User.image))
+            .where(User.clerk_user_id == user_external_id)
+        )
     user = result.scalar_one_or_none()
 
-    # NO JIT provisioning - user must register via SignUp flow
+    # NO JIT provisioning - user must register via SignUp flow (or SSO login endpoint)
     if not user:
         logger.warning(
             "Auth attempt for unregistered user | user=%s method=%s path=%s origin=%s client=%s request_id=%s",
-            f"{clerk_user_id[:8]}..." if clerk_user_id else None,
+            f"{user_external_id[:8]}..." if user_external_id else None,
             request.method,
             request.url.path,
             origin,

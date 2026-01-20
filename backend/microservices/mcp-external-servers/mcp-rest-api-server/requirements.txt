@@ -1,0 +1,21 @@
+# MCP REST API Server
+# Provides tools for interacting with external REST APIs
+
+# MCP SDK
+mcp>=1.8.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP Client
+httpx>=0.25.0
+aiohttp>=3.9.0
+
+# Server
+uvicorn[standard]>=0.24.0
+starlette>=0.27.0
+
+# Config
+pyyaml>=6.0.0
+
+# Logging
+structlog>=23.2.0

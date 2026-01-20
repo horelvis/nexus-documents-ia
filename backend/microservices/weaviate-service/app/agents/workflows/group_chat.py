@@ -8,15 +8,26 @@ agent selection.
 Use when: Complex queries that may need different specialists
 depending on how the conversation evolves.
 
-FRAMEWORK: Microsoft Agent Framework
-Uses Coordinator agent pattern for dynamic multi-agent orchestration.
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework GroupBuilder pattern
+- Now uses Qwen-Agent's Assistant class with our ConcurrentOrchestration
 """
 
 import logging
-from typing import List, Any, AsyncIterator
+from typing import List, Any, AsyncIterator, TYPE_CHECKING
 from dataclasses import dataclass
 
-from agent_framework import ChatAgent, GroupBuilder
+if TYPE_CHECKING:
+    from qwen_agent.agents import Assistant
+
+from ..orchestration import (
+    ConcurrentOrchestration,
+    ConcurrentConfig,
+    get_concurrent_orchestration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +64,6 @@ class GroupChatWorkflow:
     """
     Group chat where a coordinator selects which agent responds.
 
-    Uses Agent Framework's GroupBuilder with coordinator pattern.
     At each turn, the coordinator analyzes the conversation and
     chooses which specialist should respond.
 
@@ -63,8 +73,8 @@ class GroupChatWorkflow:
 
     def __init__(
         self,
-        agents: List[ChatAgent],
-        coordinator_client: Any,
+        agents: List["Assistant"],
+        coordinator_llm_cfg: dict,
         max_turns: int = 15,
         termination_text: str = "TASK_COMPLETE",
     ):
@@ -72,8 +82,8 @@ class GroupChatWorkflow:
         Initialize group chat workflow.
 
         Args:
-            agents: List of specialist agents (min 2)
-            coordinator_client: LLM client for coordinator
+            agents: List of Qwen-Agent Assistant instances (min 2)
+            coordinator_llm_cfg: LLM config dict for coordinator
             max_turns: Maximum conversation turns
             termination_text: Text that signals completion
         """
@@ -81,42 +91,40 @@ class GroupChatWorkflow:
             raise ValueError("GroupChat requires at least 2 agents")
 
         self.agents = agents
-        self.coordinator_client = coordinator_client
+        self.coordinator_llm_cfg = coordinator_llm_cfg
         self.max_turns = max_turns
         self.termination_text = termination_text
 
         # Build role descriptions for coordinator
         roles = "\n".join([
             f"- {a.name}: {self._get_agent_role(a)}"
-            for a in agents
+            for a in agents if hasattr(a, 'name')
         ])
 
-        coordinator_instructions = COORDINATOR_INSTRUCTIONS.replace("{roles}", roles)
+        self.coordinator_instructions = COORDINATOR_INSTRUCTIONS.replace("{roles}", roles)
 
-        # Build the group chat workflow
-        self.workflow = (
-            GroupBuilder()
-            .participants(agents)
-            .coordinator(coordinator_client, coordinator_instructions)
-            .max_turns(max_turns)
-            .termination_text(termination_text)
-            .build()
+        # Create orchestration config
+        self.config = ConcurrentConfig(
+            global_timeout_ms=120000,
+            min_successful_agents=1,
+            use_aggregator=True,
         )
 
         logger.debug(
             f"Created GroupChatWorkflow with {len(agents)} agents: "
-            f"{[a.name for a in agents]}"
+            f"{[a.name for a in agents if hasattr(a, 'name')]}"
         )
 
-    def _get_agent_role(self, agent: ChatAgent) -> str:
+    def _get_agent_role(self, agent: "Assistant") -> str:
         """Extract a brief role description from agent."""
-        instructions = getattr(agent, 'instructions', '')
-        if instructions:
-            first_line = instructions.split('\n')[0]
+        system_message = getattr(agent, 'system_message', '')
+        if system_message:
+            first_line = system_message.split('\n')[0]
             return first_line[:100]
-        return f"{agent.name} specialist"
+        name = getattr(agent, 'name', 'Unknown')
+        return f"{name} specialist"
 
-    async def run(self, task: str) -> GroupChatResult:
+    async def run(self, task: str, tenant_id: str = "default", session_id: str = "default") -> GroupChatResult:
         """
         Execute the group chat workflow.
 
@@ -125,6 +133,8 @@ class GroupChatWorkflow:
 
         Args:
             task: Task description with context
+            tenant_id: Tenant identifier
+            session_id: Session identifier
 
         Returns:
             GroupChatResult with answer and metadata
@@ -132,25 +142,34 @@ class GroupChatWorkflow:
         logger.info(f"Starting group chat workflow: task='{task[:50]}...'")
 
         try:
-            messages = []
-            agents_used = set()
-            answer = ""
+            # Create coordinator agent for aggregation
+            from qwen_agent.agents import Assistant
 
-            async for event in self.workflow.run_stream(task):
-                if hasattr(event, 'content'):
-                    messages.append(event)
-                    answer = event.content
-                    if hasattr(event, 'source'):
-                        agents_used.add(event.source)
+            coordinator = Assistant(
+                llm=self.coordinator_llm_cfg,
+                name="Coordinator",
+                system_message=self.coordinator_instructions,
+                function_list=[],
+            )
 
-            completed = self.termination_text in answer if answer else False
+            orchestration = get_concurrent_orchestration(self.config)
+            orchestration.set_aggregator(coordinator)
+
+            result = await orchestration.execute(
+                task=task,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                agents=self.agents,
+            )
+
+            completed = self.termination_text in result.answer if result.answer else False
 
             return GroupChatResult(
-                answer=answer,
-                messages=messages,
-                agents_used=list(agents_used),
-                turns_taken=len(messages),
-                completed=completed,
+                answer=result.answer,
+                messages=[r.answer for r in result.intermediate_results],
+                agents_used=result.agents_executed,
+                turns_taken=len(result.intermediate_results),
+                completed=completed or result.success,
             )
 
         except Exception as e:
@@ -163,12 +182,30 @@ class GroupChatWorkflow:
                 completed=False,
             )
 
-    async def run_stream(self, task: str) -> AsyncIterator[Any]:
+    async def run_stream(self, task: str, tenant_id: str = "default", session_id: str = "default") -> AsyncIterator[Any]:
         """Execute with streaming."""
         logger.info("Starting streaming group chat")
 
         try:
-            async for event in self.workflow.run_stream(task):
+            # Create coordinator agent for aggregation
+            from qwen_agent.agents import Assistant
+
+            coordinator = Assistant(
+                llm=self.coordinator_llm_cfg,
+                name="Coordinator",
+                system_message=self.coordinator_instructions,
+                function_list=[],
+            )
+
+            orchestration = get_concurrent_orchestration(self.config)
+            orchestration.set_aggregator(coordinator)
+
+            async for event in orchestration.execute_stream(
+                task=task,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                agents=self.agents,
+            ):
                 yield event
         except Exception as e:
             logger.exception(f"Streaming error: {e}")
@@ -176,7 +213,7 @@ class GroupChatWorkflow:
 
 
 def create_specialist_group(
-    chat_client: Any,
+    llm_cfg: dict,
     max_turns: int = 15,
 ) -> GroupChatWorkflow:
     """
@@ -188,7 +225,7 @@ def create_specialist_group(
     Includes: Search, Analyst, Contract, Compliance, Summarizer
 
     Args:
-        chat_client: Agent Framework chat client
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         max_turns: Maximum turns
 
     Returns:
@@ -203,22 +240,22 @@ def create_specialist_group(
     )
 
     agents = [
-        create_search_agent(chat_client),
-        create_analyst_agent(chat_client),
-        create_contract_agent(chat_client),
-        create_compliance_agent(chat_client),
-        create_summarizer_agent(chat_client),
+        create_search_agent(llm_cfg),
+        create_analyst_agent(llm_cfg),
+        create_contract_agent(llm_cfg),
+        create_compliance_agent(llm_cfg),
+        create_summarizer_agent(llm_cfg),
     ]
 
     return GroupChatWorkflow(
         agents=agents,
-        coordinator_client=chat_client,
+        coordinator_llm_cfg=llm_cfg,
         max_turns=max_turns,
     )
 
 
 def create_search_and_summarize_group(
-    chat_client: Any,
+    llm_cfg: dict,
     max_turns: int = 10,
 ) -> GroupChatWorkflow:
     """
@@ -228,7 +265,7 @@ def create_search_and_summarize_group(
     execution on simpler queries.
 
     Args:
-        chat_client: Agent Framework chat client
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         max_turns: Maximum turns
 
     Returns:
@@ -237,12 +274,12 @@ def create_search_and_summarize_group(
     from ..agents import create_search_agent, create_summarizer_agent
 
     agents = [
-        create_search_agent(chat_client),
-        create_summarizer_agent(chat_client),
+        create_search_agent(llm_cfg),
+        create_summarizer_agent(llm_cfg),
     ]
 
     return GroupChatWorkflow(
         agents=agents,
-        coordinator_client=chat_client,
+        coordinator_llm_cfg=llm_cfg,
         max_turns=max_turns,
     )

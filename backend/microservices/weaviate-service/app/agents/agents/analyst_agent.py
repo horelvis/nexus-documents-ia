@@ -6,13 +6,18 @@ extracting insights, identifying patterns, and generating reports.
 
 System message is loaded from YAML configuration (emma_prompts.yaml).
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent
+Reference: https://github.com/QwenLM/Qwen-Agent
+
+MIGRATION NOTE:
+- Migrated from MS Agent Framework ChatAgent pattern
+- Uses Assistant class with function_list (tool names as strings)
 """
 
 import logging
 from typing import Any
 
-from agent_framework import ChatAgent
+from qwen_agent.agents import Assistant
 
 from app.services.rag.prompt_loader import get_agent_system_message
 
@@ -25,46 +30,39 @@ Always include tenant_id in all tool calls. End with "TASK_COMPLETE" when done."
 
 
 def create_analyst_agent(
-    chat_client: Any,
+    llm_cfg: dict,
     name: str = "AnalystAgent",
-) -> ChatAgent:
+) -> Assistant:
     """
-    Create a document analyst agent using Agent Framework.
+    Create a document analyst agent using Qwen-Agent.
 
     This agent excels at deep document analysis, extracting insights,
     and generating comprehensive reports.
 
     Args:
-        chat_client: Agent Framework chat client (from get_chat_client())
+        llm_cfg: Qwen-Agent LLM configuration dict (from get_llm_config())
         name: Agent name for identification
 
     Returns:
-        Configured ChatAgent for document analysis
+        Configured Assistant for document analysis
 
     Example:
-        >>> from app.agents.model_client import get_chat_client
-        >>> client = get_chat_client()
-        >>> analyst = create_analyst_agent(client)
+        >>> from app.agents.model_client import get_llm_config
+        >>> llm_cfg = get_llm_config()
+        >>> analyst = create_analyst_agent(llm_cfg)
     """
-    from ..tools.analysis_tools import (
-        analyze_document,
-        compare_documents,
-        extract_entities,
-    )
-    from ..tools.rag_tools import rag_answer, get_document_content
-
-    instructions = get_agent_system_message("AnalystAgent", DEFAULT_ANALYST_MSG)
+    system_message = get_agent_system_message("AnalystAgent", DEFAULT_ANALYST_MSG)
     logger.debug(f"Creating AnalystAgent: name={name}")
 
-    return ChatAgent(
+    return Assistant(
+        llm=llm_cfg,
         name=name,
-        chat_client=chat_client,
-        instructions=instructions,
-        tools=[
-            analyze_document,
-            compare_documents,
-            extract_entities,
-            rag_answer,
-            get_document_content,
+        system_message=system_message,
+        function_list=[
+            'analyze_document',
+            'compare_documents',
+            'extract_entities',
+            'rag_answer',
+            'get_document_content',
         ],
     )

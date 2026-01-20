@@ -34,9 +34,10 @@ class QueryAnalysis:
     key_terms: List[str]                    # Important terms for matching
     language: str = "es"                    # Detected language
     embeddings: Optional[List[float]] = None  # Query embeddings
+    graph_expansion: Optional[Dict[str, Any]] = None  # Graph expansion metadata
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "original_query": self.original_query,
             "expanded_query": self.expanded_query,
             "query_variations": self.query_variations,
@@ -45,6 +46,9 @@ class QueryAnalysis:
             "key_terms": self.key_terms,
             "language": self.language,
         }
+        if self.graph_expansion:
+            result["graph_expansion"] = self.graph_expansion
+        return result
 
 
 @dataclass

@@ -197,6 +197,12 @@ export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
         color: "teal",
       },
       {
+        title: t('sidebar.admin.connectors'),
+        url: "/admin/connectors",
+        icon: IconDatabase,
+        color: "emerald",
+      },
+      {
         title: t('sidebar.admin.providers'),
         url: "/admin/signature-providers",
         icon: IconSignature,

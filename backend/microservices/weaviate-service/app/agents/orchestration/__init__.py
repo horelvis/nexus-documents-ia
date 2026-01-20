@@ -54,6 +54,9 @@ from .base import (
     detect_orchestration_pattern_llm,
     # Agent selection
     get_agents_for_pattern,
+    # RLM helpers (Long Context RAG)
+    should_use_rlm,
+    estimate_tokens,
 )
 
 # Semantic Routers (optional - graceful fallback if not installed)
@@ -107,6 +110,9 @@ __all__ = [
     # Detection (main entry point)
     "detect_orchestration_pattern",
     "get_agents_for_pattern",
+    # RLM helpers (Long Context RAG)
+    "should_use_rlm",
+    "estimate_tokens",
     # Deprecated (kept for backward compatibility)
     "detect_orchestration_pattern_keywords",
     "detect_orchestration_pattern_llm",

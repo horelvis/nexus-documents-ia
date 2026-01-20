@@ -137,14 +137,35 @@ const agentConfig: Record<string, { icon: React.ReactNode; color: string; bgColo
     bgColor: "bg-teal-100 dark:bg-teal-900/40",
     label: "Educación"
   },
+  // Tool-related configs
+  clarification: {
+    icon: <MessageSquare className="h-4 w-4" />,
+    color: "text-purple-500 dark:text-purple-400",
+    bgColor: "bg-purple-100 dark:bg-purple-900/40",
+    label: "Clarificación"
+  },
 }
 
-function getAgentConfig(agentName: string) {
-  return agentConfig[agentName] || {
+// Exported for reuse in DelegationBadge and other components
+export function getAgentConfig(agentName: string) {
+  // Handle tool names (snake_case) by mapping to agent config
+  const toolToAgentMap: Record<string, string> = {
+    'nexus_semantic_search': 'search',
+    'nexus_hybrid_search': 'search',
+    'nexus_search': 'search',
+    'analyze_document': 'analysis',
+    'ask_user_clarification': 'clarification',
+    'share_insights': 'synthesis',
+    'plan_tasks': 'reasoning',
+  }
+
+  const mappedName = toolToAgentMap[agentName] || agentName
+
+  return agentConfig[mappedName] || {
     icon: <Brain className="h-4 w-4" />,
     color: "text-gray-500 dark:text-gray-400",
     bgColor: "bg-gray-100 dark:bg-gray-800",
-    label: agentName?.replace('Agent', '') || "Agente"
+    label: agentName?.replace('Agent', '').replace(/_/g, ' ') || "Agente"
   }
 }
 

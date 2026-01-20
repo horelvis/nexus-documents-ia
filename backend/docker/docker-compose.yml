@@ -15,15 +15,9 @@ services:
         condition: service_healthy
       weaviate:
         condition: service_healthy
-      storage-service:
-        condition: service_healthy
-      gotenberg:
+      mcp-storage:
         condition: service_healthy
       langextract-service:
-        condition: service_healthy
-      elasticsearch-service:
-        condition: service_healthy
-      textextract-service:
         condition: service_healthy
       background-worker:
         condition: service_started
@@ -42,16 +36,12 @@ services:
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - LANGEXTRACT_SERVICE_URL=${LANGEXTRACT_SERVICE_URL:-http://langextract-service:8000}
-      - TEXT_EXTRACTION_SERVICE_URL=${TEXT_EXTRACTION_SERVICE_URL:-http://textextract-service:8000}
-      - ELASTICSEARCH_SERVICE_URL=${ELASTICSEARCH_SERVICE_URL:-http://elasticsearch-service:8000}
-      - TEMPLATE_EDITOR_SERVICE_URL=${TEMPLATE_EDITOR_SERVICE_URL:-http://template-editor-service:8000}
-      - GOTENBERG_BASE_URL=${GOTENBERG_BASE_URL:-http://gotenberg:3000}
+      # MCP Configuration (NEW - replaces direct storage-service calls)
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       # Infrastructure
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
-      - ELASTICSEARCH_HOST=elasticsearch
-      - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
       # Migration settings
       - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}
     volumes:
@@ -72,42 +62,84 @@ services:
       retries: 3
       start_period: 40s
 
-  # Elasticsearch Service - DEVELOPMENT MODE
-  elasticsearch-service:
+  # =============================================================================
+  # MCP Storage Server (NEW - replaces storage-service)
+  # =============================================================================
+  # Model Context Protocol server for file storage operations
+  # Provides: upload, download, list, delete, signed_url, move
+  # Transport: HTTP/SSE for MCP protocol
+  mcp-storage:
     build:
-      context: ../microservices/elasticsearch-service
+      context: ../microservices/mcp-storage-server
       dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS=${GCS_CREDENTIALS:-/app/credentials/nexus-document-ia-04252dae0146.json}
+      - GCS_DEFAULT_BUCKET=${GCS_DEFAULT_BUCKET:-nexus-documents}
+      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
+    volumes:
+      # Mount source code for development
+      - ../microservices/mcp-storage-server/app:/app/app:ro
+      # Mount credentials for GCS
+      - ../../credentials:/app/credentials:ro
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # MCP Alfresco Server - Alfresco 7.x ECM Integration
+  # =============================================================================
+  # Model Context Protocol server for Alfresco document management
+  # Provides: search, download, upload, list, versions, move, copy, delete
+  # Transport: HTTP/SSE for MCP protocol
+  # API: Alfresco Content Services REST API + Search API (AFTS)
+  mcp-alfresco:
+    profiles: ["alfresco"]  # Enable with: docker compose --profile alfresco up
+    build:
+      context: ../microservices/mcp-alfresco-server
+      dockerfile: Dockerfile
     depends_on:
-      elasticsearch:
+      db:
         condition: service_healthy
     networks:
       - backend-network
     env_file:
       - .env
     environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - ELASTICSEARCH_HOST=elasticsearch
-      - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      # Database connection (reads connector config from backend DB)
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      # Cache settings
+      - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
     volumes:
-      # Montar código fuente para desarrollo
-      - ../microservices/elasticsearch-service/app:/app/app:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+      # Mount source code for development
+      - ../microservices/mcp-alfresco-server/app:/app/app:ro
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
 
-  # Storage Service - DEVELOPMENT MODE
+  # Storage Service - LEGACY (will be deprecated)
+  # TODO: Remove after migrating all code to MCP
   storage-service:
+    profiles: ["legacy-storage"]  # Only start with: docker compose --profile legacy-storage up
     build:
       context: ../microservices/storage-service
       dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
     networks:
       - backend-network
     env_file:
@@ -116,12 +148,9 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      # Rate limit for development (default is 10, too low for dev)
       - RATE_LIMIT_PER_MINUTE=100
     volumes:
-      # Montar código fuente para desarrollo
       - ../microservices/storage-service/app:/app/app:ro
-      # Montar credentials para GCS (usar carpeta raíz)
       - ../../credentials:/app/credentials:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
@@ -162,32 +191,9 @@ services:
       timeout: 10s
       retries: 3
 
-  # Text Extraction Service - DEVELOPMENT MODE (uses Apache Tika)
-  textextract-service:
-    build:
-      context: ../microservices/textextract-service
-      dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
-    depends_on:
-      tika:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - TIKA_URL=${TIKA_URL:-http://tika:9998}
-    volumes:
-      - ../microservices/textextract-service/app:/app/app:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Weaviate Service - DEVELOPMENT MODE (uses TEI for embeddings)
+  # Weaviate Service - DEVELOPMENT MODE
+  # Multimodal RAG with unified text+image embeddings
+  # Uses Qwen3-VL-Embedding-2B for cross-modal search capabilities
   weaviate-service:
     build:
       context: ../microservices/weaviate-service
@@ -196,7 +202,9 @@ services:
     depends_on:
       weaviate:
         condition: service_healthy
-      text-embeddings-inference:
+      vllm:
+        condition: service_healthy
+      qwen3-vl-embedding:
         condition: service_healthy
     networks:
       - backend-network
@@ -212,22 +220,39 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
       # vLLM Configuration (PRIMARY - high-throughput GPU inference)
-      # Model: Qwen3-4B - 32K context, Spanish + tool calling (Hermes-style)
-      # 4B model uses ~8-9GB VRAM, leaving room for embeddings and reranker
+      # Model: Qwen3-4B-Thinking-2507 - Extended reasoning with automatic thinking mode
+      # ~10GB VRAM (FP16 with 32K context), coexists with multimodal embedding (~5GB)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}
+      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-true}
       # LLM Configuration
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
-      # Embedding Configuration (TEI - HuggingFace Text Embeddings Inference)
-      # Model: BAAI/bge-m3 (1024 dim, 8192 context, 100+ languages)
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-tei}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      # Embedding Configuration (Qwen3-VL-Embedding-2B - Multimodal)
+      # Model: Qwen/Qwen3-VL-Embedding-2B (1024 dim, text + images)
+      # Replaces TEI/bge-m3 with unified multimodal embeddings
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-qwen3-vl}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
-      - TEI_URL=${TEI_URL:-http://text-embeddings-inference:8080}
-      # Agent Framework settings (Microsoft Agent Framework)
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://qwen3-vl-embedding:8000/v1}
+      # Multimodal is now enabled by default (single unified embedding model)
+      - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-true}
+      - MULTIMODAL_EMBEDDING_URL=${MULTIMODAL_EMBEDDING_URL:-http://qwen3-vl-embedding:8000/v1}
+      - MULTIMODAL_EMBEDDING_MODEL=${MULTIMODAL_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      - MULTIMODAL_EMBEDDING_DIMENSIONS=${MULTIMODAL_EMBEDDING_DIMENSIONS:-1024}
+      # Reranker uses local CrossEncoder (ms-marco-MiniLM-L-6-v2) in multi_stage_retriever.py
+      # No external reranker service needed
+      # Agent Framework settings (Qwen-Agent)
+      # Qwen-Agent handles tool parsing internally, optimized for Qwen models
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
+      - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
+      # MCP Configuration (Model Context Protocol for external data sources)
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
+      - MCP_SERVERS_CONFIG=${MCP_SERVERS_CONFIG:-/app/config/mcp_servers.yaml}
+      - MCP_CONNECTION_TIMEOUT=${MCP_CONNECTION_TIMEOUT:-30}
       # Suppress known deprecation warnings from third-party libraries
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
     volumes:
@@ -250,31 +275,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Template Editor Service - DEVELOPMENT MODE
-  template-editor-service:
-    build:
-      context: ../microservices/template-editor-service
-      dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - TEMPLATE_EDITOR_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
-    volumes:
-      # Montar código fuente para desarrollo
-      - ../microservices/template-editor-service/app:/app/app:ro
-      - ../../credentials:/app/credentials:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-
   # Background worker microservice (previews, emails, indexing retries)
   background-worker:
     build:
@@ -287,8 +287,6 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      gotenberg:
         condition: service_healthy
     networks:
       - backend-network
@@ -309,9 +307,19 @@ services:
     restart: unless-stopped
 
 
-  # Base de datos PostgreSQL
+  # =============================================================================
+  # PostgreSQL with Apache AGE - Graph Database Extension
+  # =============================================================================
+  # Image: apache/age (PostgreSQL 16 + AGE extension pre-installed)
+  # Features:
+  #   - Cypher query language for graph traversal
+  #   - Native graph storage in PostgreSQL
+  #   - ACID transactions for graph operations
+  #   - Integrated with existing relational data
+  # Use case: Knowledge Graph for RAG query expansion and entity relationships
+  # Docs: https://age.apache.org/
   db:
-    image: postgres:15-alpine
+    image: apache/age:release_PG15_1.6.0
     environment:
       POSTGRES_SERVER: db
       POSTGRES_USER: ${POSTGRES_USER:-nexus_user}
@@ -322,7 +330,7 @@ services:
       - backend-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-camunda-schema.sql:/docker-entrypoint-initdb.d/init-camunda-schema.sql
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
       interval: 10s
@@ -365,40 +373,56 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Elasticsearch para búsqueda híbrida
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.http.ssl.enabled=false
-      - xpack.security.transport.ssl.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+  # =============================================================================
+  # Qwen3-VL-Embedding-2B - MULTIMODAL EMBEDDING SERVICE (ENABLED)
+  # =============================================================================
+  # Model: Qwen/Qwen3-VL-Embedding-2B (2B params, 1024 dim output)
+  # Capabilities:
+  #   - Unified text + image embeddings in same vector space
+  #   - Cross-modal search: text queries find relevant images/diagrams
+  #   - PDF visual content: tables, charts, diagrams, screenshots
+  # VRAM: ~5GB (weights + minimal KV cache for short sequences)
+  # API: vLLM OpenAI-compatible /v1/embeddings endpoint
+  # Docs: https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B
+  #
+  # RECOMMENDED CONFIGURATION (Multimodal RAG):
+  #   LLM: Qwen3-4B-Thinking-2507 (45% VRAM = ~11GB)
+  #   Embedding: Qwen3-VL-Embedding-2B (20% VRAM = ~5GB)
+  #   Total: ~65% = ~16GB of 24GB, leaves ~8GB buffer
+  qwen3-vl-embedding:
+    # Custom vLLM image with transformers 4.57+ for Qwen3 model support
+    build:
+      context: ./vllm-custom
+      dockerfile: Dockerfile
+    image: vllm-custom:latest
+    depends_on:
+      vllm:
+        condition: service_healthy  # Wait for vLLM to be healthy before starting
     networks:
       - backend-network
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
-
-  # Text Embeddings Inference (TEI) - Dedicated GPU embedding server
-  # Model: BAAI/bge-m3 (1024 dim, 8192 context)
-  # Multilingual: 100+ languages, dense+sparse+multi-vector embeddings
-  # NOTE: Using 'latest' (1.6+) - version 1.5 has a bug with HuggingFace Hub redirects
-  text-embeddings-inference:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    networks:
-      - backend-network
+      - embedding_cache:/root/.cache/huggingface
     environment:
-      - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_ID=${EMBEDDING_MODEL:-BAAI/bge-m3}
-    volumes:
-      - tei_cache:/data
-    command: ["--model-id", "${EMBEDDING_MODEL:-BAAI/bge-m3}", "--port", "8080", "--max-batch-tokens", "16384", "--dtype", "float16", "--auto-truncate"]
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+      - NVIDIA_DISABLE_REQUIRE=1
+      - CUDA_VISIBLE_DEVICES=0
+    # Embedding mode configuration - OPTIMIZED FOR COEXISTENCE:
+    # --gpu-memory-utilization 0.20: ~5GB, coexists with LLM (45%)
+    # --max-model-len 512: embeddings only need short sequences
+    # Model weights: ~4.2GB, leaves ~0.8GB for minimal KV cache
+    # Combined with vLLM (45%): Total ~65% = 16GB, leaves ~8GB buffer
+    command:
+      - "--model"
+      - "${EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}"
+      - "--max-model-len"
+      - "512"
+      - "--gpu-memory-utilization"
+      - "0.20"
+      - "--trust-remote-code"
+      - "--enforce-eager"
+      - "--port"
+      - "8000"
     deploy:
       resources:
         reservations:
@@ -407,21 +431,38 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      start_period: 180s
     restart: unless-stopped
 
-  # vLLM para inferencia de alta velocidad (GPU) - PRIMARY LLM SERVER
-  # Requires HF_TOKEN in .env for gated models
-  # Official vLLM image with full tool calling support (vLLM >= 0.9.0)
-  # Model: Qwen3-4B - Efficient model with excellent Spanish + tool calling
-  # ~8-9GB VRAM, 32K native context, performance comparable to larger models
+  # =============================================================================
+  # Qwen3-4B-Thinking-2507 - PRIMARY LLM SERVER (Extended Reasoning)
+  # =============================================================================
+  # Model: Qwen/Qwen3-4B-Thinking-2507
+  # Optimized for on-premise with 24GB VRAM (RTX 4090)
+  # Capabilities:
+  #   - Extended reasoning: Automatic <think>...</think> blocks for complex tasks
+  #   - 256K native context (use 32K for VRAM efficiency with embedding model)
+  #   - Text-only model (no vision) - use with multimodal embedding for images
+  # VRAM: ~10GB (FP16 with 32K context)
+  # Context: 256K native, 32K recommended when coexisting with embedding model
+  # API: OpenAI-compatible /v1/chat/completions
+  # Docs: https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507
+  #
+  # RECOMMENDED CONFIGURATION (Multimodal RAG):
+  #   LLM: Qwen3-4B-Thinking-2507 (~10GB) - Extended reasoning for document analysis
+  #   Embedding: Qwen3-VL-Embedding-2B (~5GB) - Unified text+image embeddings
+  #   Total: ~15GB of 24GB VRAM
+  #   Benefits: Cross-modal search (text queries find images), thinking mode
   vllm:
-    # Using v0.9.0 for Qwen3 support (requires >= 0.9.x)
-    image: vllm/vllm-openai:v0.9.0
+    # Custom vLLM image with transformers 4.57+ for Qwen3 model support
+    build:
+      context: ./vllm-custom
+      dockerfile: Dockerfile
+    image: vllm-custom:latest
     networks:
       - backend-network
     volumes:
@@ -431,19 +472,29 @@ services:
       - VLLM_LOGGING_LEVEL=INFO
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
-    # Tool calling enabled with --enable-auto-tool-choice
-    # 4B model: ~8-9GB VRAM in bfloat16, leaves room for 16K context
+    # Qwen3-4B-Thinking-2507 configuration:
+    # - Text-only model with automatic thinking mode
+    # - Qwen-Agent handles tool parsing internally
+    # VRAM Budget (RTX 4090 24GB):
+    #   - LLM weights: ~8GB
+    #   - KV cache (32K context): ~2GB
+    #   - Embedding model: ~5GB (Qwen3-VL-Embedding-2B)
+    #   - Total: ~15GB, leaves ~9GB buffer for batching
+    # NOTE: Reduced to 32K context to coexist with multimodal embedding
+    # For full 256K context, disable multimodal embedding or use external API
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
+      - "${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
       - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-16384}"
+      - "${VLLM_MAX_MODEL_LEN:-32768}"
       - "--gpu-memory-utilization"
-      - "0.85"
-      - "--enable-auto-tool-choice"
-      - "--tool-call-parser"
-      - "hermes"
+      - "0.45"
       - "--trust-remote-code"
+      - "--enforce-eager"
+      # Reasoning parser separates <think>...</think> into reasoning_content field
+      # This prevents thinking content from appearing in the main response
+      - "--reasoning-parser"
+      - "deepseek_r1"
     deploy:
       resources:
         reservations:
@@ -456,92 +507,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 180s  # 8B model loads faster than 14B
-    restart: unless-stopped
-
-  # Gotenberg para conversión de documentos
-  gotenberg:
-    image: gotenberg/gotenberg:8.7.0
-    # Servicio interno, no se expone fuera de la red Docker
-    networks:
-      - backend-network
-    command:
-      - "gotenberg"
-      - "--api-port=3000"
-      - "--chromium-disable-web-security"
-      - "--chromium-allow-file-access-from-files"
-      - "--log-level=info"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  # Apache Tika para extracción de texto de documentos
-  tika:
-    image: apache/tika:3.1.0.0
-    # Servicio interno, no se expone fuera de la red Docker
-    networks:
-      - backend-network
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9998' 2>/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-
-  # Camunda 7 BPM Engine para workflows de aprobación
-  camunda:
-    image: camunda/camunda-bpm-platform:run-7.22.0
-    # Servicio interno, no se expone fuera de la red Docker
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - backend-network
-    environment:
-      - DB_DRIVER=org.postgresql.Driver
-      - DB_URL=jdbc:postgresql://db:5432/${POSTGRES_DB:-nexus_db}?currentSchema=camunda
-      - DB_USERNAME=${POSTGRES_USER:-nexus_user}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-nexus_password}
-      - WAIT_FOR=db:5432
-      - WAIT_FOR_TIMEOUT=120
-    volumes:
-      - camunda_data:/camunda/configuration/resources
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/engine-rest/engine || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-
-  # Camunda Service - Python wrapper para workflows BPMN
-  camunda-service:
-    build:
-      context: ../microservices/camunda-service
-      dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
-    depends_on:
-      camunda:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - CAMUNDA_URL=http://camunda:8080
-    volumes:
-      - ../microservices/camunda-service/app:/app/app:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      start_period: 180s
     restart: unless-stopped
 
   # TTS Service - Text-to-Speech using Microsoft VibeVoice
@@ -605,6 +571,64 @@ services:
       start_period: 120s  # Model loading takes time
     restart: unless-stopped
 
+  # =============================================================================
+  # KeyCloak - OAuth/OIDC Server for SSO
+  # =============================================================================
+  # Admin Console: http://localhost:8080
+  # OIDC Discovery: http://localhost:8080/realms/nexus/.well-known/openid-configuration
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    ports:
+      - "0.0.0.0:8080:8080"
+    environment:
+      # Admin credentials
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Database - use dedicated PostgreSQL for KeyCloak
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
+      - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-keycloak}
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
+      # Hostname configuration
+      - KC_HOSTNAME=nexus-docs360.es
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_ENABLED=true
+      - KC_PROXY_HEADERS=xforwarded
+      # Health and metrics
+      - KC_HEALTH_ENABLED=true
+      - KC_METRICS_ENABLED=true
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    command: start-dev
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\n\r\n' >&3;cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # KeyCloak dedicated database
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=${KEYCLOAK_DB_USER:-keycloak}
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
+    volumes:
+      - keycloak_data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USER:-keycloak} -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 networks:
   backend-network:
     driver: bridge
@@ -613,8 +637,7 @@ volumes:
   postgres_data:
   redis_data:
   weaviate_data:
-  elasticsearch_data:
-  vllm_cache:  # Cache for HuggingFace models used by vLLM
-  tei_cache:   # Cache for TEI embedding models
-  camunda_data:
+  vllm_cache:  # Cache for LLM model (vLLM service)
+  embedding_cache:  # Cache for embedding model (multimodal embeddings service)
   tts_model_cache:  # Cache for VibeVoice TTS models
+  keycloak_data:  # KeyCloak PostgreSQL data

@@ -134,6 +134,12 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     clerk_user_id = Column(String(255), nullable=True, unique=True, index=True)
     stripe_customer_id = Column(String(255), nullable=True, unique=True, index=True)
+
+    # SSO external ID (for on-premise deployments)
+    # This is the subject claim from OIDC/SAML - unique per user per IdP
+    sso_external_id = Column(String(255), nullable=True, unique=True, index=True)
+    sso_provider = Column(String(50), nullable=True)  # oidc, saml, ldap
+    sso_groups = Column(JSONB, default=list)  # Groups/roles from SSO provider
     
     # Subscription info cached from Stripe
     subscription_plan = Column(String(50), nullable=True, default="trial")
@@ -163,6 +169,11 @@ class User(Base):
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
     document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
+
+    # Connector relationships (On-Premise / Emma)
+    connector_auths = relationship("UserConnectorAuth", back_populates="user", cascade="all, delete-orphan")
+    document_syncs = relationship("UserDocumentSync", back_populates="user", cascade="all, delete-orphan")
+    indexed_documents = relationship("IndexedDocument", back_populates="owner", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
@@ -320,9 +331,82 @@ class Tenant(Base):
     team_invitations = relationship("TeamInvitation", back_populates="tenant", cascade="all, delete-orphan")
     site_guests = relationship("SiteGuest", back_populates="tenant", cascade="all, delete-orphan")
 
+    # Connector relationships (On-Premise / Emma)
+    connectors = relationship("Connector", back_populates="tenant", cascade="all, delete-orphan")
+
     __table_args__ = (
         Index('idx_tenants_active', 'is_active'),
         Index('idx_tenants_slug', 'slug'),
+    )
+
+    # Relationship to auth config
+    auth_config = relationship("TenantAuthConfig", back_populates="tenant", uselist=False)
+
+
+class TenantAuthConfig(Base):
+    """
+    Authentication configuration per tenant.
+
+    Allows each tenant to use different authentication providers:
+    - clerk: Clerk.dev (default for SaaS)
+    - oidc: OpenID Connect (KeyCloak, Azure AD, Okta)
+    - saml: SAML 2.0 (ADFS, enterprise IdPs)
+    - ldap: Direct LDAP/Active Directory
+    """
+    __tablename__ = "tenant_auth_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), unique=True, nullable=False)
+
+    # Provider type: clerk, oidc, saml, ldap
+    provider = Column(String(50), default="clerk", nullable=False)
+
+    # Common settings
+    auto_provision_users = Column(Boolean, default=True, nullable=False)
+    default_role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True)
+    group_role_mapping = Column(JSONB, nullable=True)  # {"AD-Admins": "admin", "AD-Users": "member"}
+
+    # OIDC configuration (KeyCloak, Azure AD, Okta, etc.)
+    oidc_config = Column(JSONB, nullable=True)
+    # Expected structure:
+    # {
+    #   "issuer": "https://keycloak.example.com/realms/myrealm",
+    #   "client_id": "my-app",
+    #   "client_secret": "encrypted-secret",
+    #   "scopes": ["openid", "profile", "email", "groups"]
+    # }
+
+    # SAML configuration (ADFS, Okta SAML, etc.)
+    saml_config = Column(JSONB, nullable=True)
+    # Expected structure:
+    # {
+    #   "entity_id": "https://myapp.example.com",
+    #   "sso_url": "https://idp.example.com/sso",
+    #   "certificate": "-----BEGIN CERTIFICATE-----...",
+    #   "attribute_mapping": {"email": "mail", "name": "displayName"}
+    # }
+
+    # LDAP configuration (Active Directory, OpenLDAP)
+    ldap_config = Column(JSONB, nullable=True)
+    # Expected structure:
+    # {
+    #   "server": "ldap://dc.example.com",
+    #   "base_dn": "DC=example,DC=com",
+    #   "bind_dn": "CN=service,OU=Users,DC=example,DC=com",
+    #   "bind_password": "encrypted-password",
+    #   "user_filter": "(sAMAccountName={username})",
+    #   "group_filter": "(member={dn})"
+    # }
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="auth_config")
+    default_role = relationship("Role", foreign_keys=[default_role_id])
+
+    __table_args__ = (
+        Index('idx_tenant_auth_configs_tenant', 'tenant_id'),
     )
 
 
@@ -1936,3 +2020,273 @@ class KnowledgeRelationship(Base):
         Index('idx_knowledge_rels_type', 'relationship_type'),
         Index('idx_knowledge_rels_tenant', 'tenant_id'),
     )
+
+
+# =====================================
+# CONNECTOR MODELS (On-Premise / Emma)
+# =====================================
+
+class ConnectorType:
+    """Supported connector types."""
+    SHAREPOINT = "sharepoint"
+    ONEDRIVE = "onedrive"
+    GOOGLE_DRIVE = "google_drive"
+    GOOGLE_WORKSPACE = "google_workspace"
+    # Future: email, database, etc.
+
+
+class ConnectorAuthType:
+    """Authentication types for connectors."""
+    SERVICE_ACCOUNT = "service_account"  # App-level auth (admin configures once)
+    DELEGATED = "delegated"  # User must consent (OAuth per user)
+    API_KEY = "api_key"  # Simple API key
+
+
+class Connector(Base):
+    """
+    External data source connector configuration.
+    
+    Admin-managed. Defines connection to SharePoint, OneDrive, Google Workspace, etc.
+    One connector per data source type per tenant.
+    
+    Example configs:
+    - SharePoint: {"tenant_url": "https://company.sharepoint.com", "client_id": "...", "client_secret": "..."}
+    - OneDrive: {"client_id": "...", "client_secret": "...", "tenant_id": "..."}
+    - Google Workspace: {"service_account_json": "...", "domain": "company.com"}
+    """
+    __tablename__ = "connectors"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Connector identity
+    name = Column(String(255), nullable=False)  # "SharePoint Corporativo"
+    description = Column(Text, nullable=True)
+    connector_type = Column(String(50), nullable=False, index=True)  # sharepoint, onedrive, google_drive
+    
+    # Authentication
+    auth_type = Column(String(50), nullable=False, default="delegated")  # service_account, delegated, api_key
+    
+    # Connection config (encrypted at rest via app-level encryption)
+    # For service_account: full credentials
+    # For delegated: client_id, client_secret, auth endpoints
+    config = Column(JSONB, nullable=False, default=dict)
+    
+    # Sync settings
+    sync_enabled = Column(Boolean, default=True, nullable=False)
+    sync_interval_hours = Column(Integer, default=24)  # How often to sync
+    
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_health_check = Column(DateTime(timezone=True), nullable=True)
+    health_status = Column(String(20), default="unknown")  # healthy, degraded, error, unknown
+    health_message = Column(Text, nullable=True)
+    
+    # Audit
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="connectors")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    user_auths = relationship("UserConnectorAuth", back_populates="connector", cascade="all, delete-orphan")
+    user_syncs = relationship("UserDocumentSync", back_populates="connector", cascade="all, delete-orphan")
+    indexed_documents = relationship("IndexedDocument", back_populates="connector")
+    
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'connector_type', 'name', name='uq_connector_tenant_type_name'),
+        Index('idx_connector_tenant_active', 'tenant_id', 'is_active'),
+    )
+
+
+class UserConnectorAuth(Base):
+    """
+    User's OAuth tokens for delegated access connectors.
+    
+    For connectors using delegated auth, each user must grant consent.
+    This stores their OAuth tokens for accessing their personal data.
+    
+    Example: User grants access to their OneDrive personal files.
+    """
+    __tablename__ = "user_connector_auths"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # OAuth tokens (should be encrypted at rest)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_type = Column(String(50), default="Bearer")
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Scopes granted by user
+    scopes = Column(JSONB, default=list)  # ["Files.Read", "Sites.Read.All"]
+    
+    # Status
+    is_valid = Column(Boolean, default=True)  # Set to False if refresh fails
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)  # Last error if invalid
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="connector_auths")
+    connector = relationship("Connector", back_populates="user_auths")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'connector_id', name='uq_user_connector_auth'),
+        Index('idx_user_connector_auth_valid', 'user_id', 'is_valid'),
+    )
+    
+    def is_expired(self) -> bool:
+        """Check if access token has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+
+class SyncStatus:
+    """Status values for document sync."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PAUSED = "paused"
+
+
+class UserDocumentSync(Base):
+    """
+    Tracks a user's document sync status for a connector.
+    
+    Each user can sync their documents from each connector independently.
+    Supports incremental sync via delta tokens.
+    """
+    __tablename__ = "user_document_syncs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Sync configuration
+    sync_enabled = Column(Boolean, default=True)
+    include_paths = Column(JSONB, default=list)  # ["/Documents", "/Projects"] - empty = all
+    exclude_paths = Column(JSONB, default=list)  # ["/Personal", "/Trash"]
+    
+    # Sync status
+    status = Column(String(20), default="pending", nullable=False, index=True)
+    status_message = Column(Text, nullable=True)
+    
+    # Sync progress
+    last_sync_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_sync_completed_at = Column(DateTime(timezone=True), nullable=True)
+    next_sync_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Delta token for incremental sync (MS Graph, Google Drive)
+    delta_token = Column(Text, nullable=True)
+    
+    # Statistics
+    documents_total = Column(Integer, default=0)
+    documents_indexed = Column(Integer, default=0)
+    documents_failed = Column(Integer, default=0)
+    total_size_bytes = Column(Integer, default=0)
+    
+    # Error tracking
+    consecutive_failures = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="document_syncs")
+    connector = relationship("Connector", back_populates="user_syncs")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'connector_id', name='uq_user_document_sync'),
+        Index('idx_user_doc_sync_status', 'status'),
+        Index('idx_user_doc_sync_next', 'next_sync_at'),
+    )
+
+
+class IndexedDocument(Base):
+    """
+    Metadata for documents indexed in Weaviate from external connectors.
+    
+    This is the source of truth for:
+    - Document ownership (who can access)
+    - Document location (where it came from)
+    - Weaviate reference (where it's indexed)
+    
+    Access control: A user can access a document if:
+    1. They are the owner (owner_id = user_id)
+    2. Document is public to tenant (is_tenant_public = True)
+    3. They are in shared_with_users
+    4. They belong to a group in shared_with_groups
+    """
+    __tablename__ = "indexed_documents"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Source information
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="SET NULL"), nullable=True, index=True)
+    external_id = Column(String(512), nullable=False)  # ID in source system (driveItem id, etc.)
+    external_url = Column(Text, nullable=True)  # URL to open document in source
+    external_path = Column(Text, nullable=True)  # Path in source (/Documents/Project/file.docx)
+    
+    # Ownership
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Access control
+    is_tenant_public = Column(Boolean, default=False, nullable=False)  # All tenant users can see
+    shared_with_users = Column(JSONB, default=list)  # [user_id, user_id, ...]
+    shared_with_groups = Column(JSONB, default=list)  # [group_name, group_name, ...] - from SSO
+    
+    # Document metadata
+    title = Column(String(512), nullable=False)
+    description = Column(Text, nullable=True)
+    mime_type = Column(String(100), nullable=True)
+    file_extension = Column(String(20), nullable=True)
+    size_bytes = Column(Integer, default=0)
+    
+    # Content hash for deduplication
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA-256 of content
+    
+    # Weaviate reference
+    weaviate_collection = Column(String(100), nullable=True)  # Collection name
+    weaviate_id = Column(UUID(as_uuid=True), nullable=True)  # Object ID in Weaviate
+    
+    # Processing status
+    indexing_status = Column(String(20), default="pending")  # pending, processing, indexed, failed
+    indexing_error = Column(Text, nullable=True)
+    
+    # Timestamps from source
+    source_created_at = Column(DateTime(timezone=True), nullable=True)
+    source_modified_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Our timestamps
+    indexed_at = Column(DateTime(timezone=True), nullable=True)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    connector = relationship("Connector", back_populates="indexed_documents")
+    owner = relationship("User", back_populates="indexed_documents")
+    
+    __table_args__ = (
+        UniqueConstraint('connector_id', 'external_id', name='uq_indexed_doc_connector_external'),
+        Index('idx_indexed_doc_owner', 'owner_id'),
+        Index('idx_indexed_doc_tenant_public', 'tenant_id', 'is_tenant_public'),
+        Index('idx_indexed_doc_weaviate', 'weaviate_id'),
+        Index('idx_indexed_doc_status', 'indexing_status'),
+    )
+
+
+# Add relationships to existing models
+# These will be added via backref or need manual addition to User and Tenant classes

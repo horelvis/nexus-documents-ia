@@ -11,31 +11,46 @@ In Agent Framework, tools are defined as regular async functions with:
 
 The @ai_function decorator registers them as callable tools.
 
-FRAMEWORK: Microsoft Agent Framework
+FRAMEWORK: Qwen-Agent (migrated from Microsoft Agent Framework)
 
 Example usage:
-    from app.agents.tools import semantic_search, rag_answer
+    from app.agents.tools import get_search_tools, SEARCH_TOOL_NAMES
+    from qwen_agent.agents import Assistant
 
-    agent = ChatAgent(
-        name="SearchAgent",
-        chat_client=client,
-        tools=[semantic_search, hybrid_search, rag_answer],
+    agent = Assistant(
+        llm=llm_cfg,
+        function_list=get_search_tools(),  # Returns ['nexus_semantic_search', ...]
+        system_message="..."
     )
 """
 
 from .search_tools import (
-    semantic_search,
-    hybrid_search,
-    keyword_search,
+    SemanticSearchTool,
+    HybridSearchTool,
+    KeywordSearchTool,
+    SearchByMetadataTool,
+    SearchPublicKnowledgeTool,
+    SearchWithLegalContextTool,
+    SEARCH_TOOLS,
+    SEARCH_TOOL_NAMES,
+    get_search_tools,
 )
 from .analysis_tools import (
-    analyze_document,
-    compare_documents,
-    extract_entities,
+    AnalyzeDocumentTool,
+    CompareDocumentsTool,
+    ExtractEntitiesTool,
+    ANALYSIS_TOOLS,
+    ANALYSIS_TOOL_NAMES,
+    get_analysis_tools,
 )
 from .rag_tools import (
-    rag_answer,
-    get_document_content,
+    RAGAnswerTool,
+    GetDocumentContentTool,
+    SummarizeDocumentsTool,
+    AnswerWithContextTool,
+    RAG_TOOLS,
+    RAG_TOOL_NAMES,
+    get_rag_tools,
 )
 from .planning_tool import (
     PlanningTool,
@@ -45,54 +60,84 @@ from .planning_tool import (
     get_planning_tool,
 )
 from .sharing_insights_tools import (
-    query_recent_shares,
-    query_shares_to_recipient,
-    query_sharing_statistics,
-    query_site_guests,
-    query_guest_documents,
-    query_guest_activity,
-    query_guest_statistics,
-    query_sharing_overview,
+    QueryRecentSharesTool,
+    QuerySharesToRecipientTool,
+    QuerySharingStatisticsTool,
+    QuerySiteGuestsTool,
+    QueryGuestDocumentsTool,
+    QueryGuestActivityTool,
+    QueryGuestStatisticsTool,
+    QuerySharingOverviewTool,
+    SHARING_INSIGHTS_TOOLS,
+    SHARING_INSIGHTS_TOOL_NAMES,
+    get_sharing_insights_tools,
 )
 from .clarification_tools import (
-    ask_user_clarification,
-    ask_confirmation,
-    suggest_follow_up,
+    AskUserClarificationTool,
+    AskConfirmationTool,
+    SuggestFollowUpTool,
+    CLARIFICATION_TOOLS,
+    CLARIFICATION_TOOL_NAMES,
+    get_clarification_tools,
+    # Utility functions
     is_clarification_response,
     parse_clarification_response,
+    extract_selected_document,
 )
 
 __all__ = [
-    # Search tools
-    "semantic_search",
-    "hybrid_search",
-    "keyword_search",
-    # Analysis tools
-    "analyze_document",
-    "compare_documents",
-    "extract_entities",
-    # RAG tools
-    "rag_answer",
-    "get_document_content",
+    # Search tools (Qwen-Agent class-based)
+    "SemanticSearchTool",
+    "HybridSearchTool",
+    "KeywordSearchTool",
+    "SearchByMetadataTool",
+    "SearchPublicKnowledgeTool",
+    "SearchWithLegalContextTool",
+    "SEARCH_TOOLS",
+    "SEARCH_TOOL_NAMES",
+    "get_search_tools",
+    # Analysis tools (Qwen-Agent class-based)
+    "AnalyzeDocumentTool",
+    "CompareDocumentsTool",
+    "ExtractEntitiesTool",
+    "ANALYSIS_TOOLS",
+    "ANALYSIS_TOOL_NAMES",
+    "get_analysis_tools",
+    # RAG tools (Qwen-Agent class-based)
+    "RAGAnswerTool",
+    "GetDocumentContentTool",
+    "SummarizeDocumentsTool",
+    "AnswerWithContextTool",
+    "RAG_TOOLS",
+    "RAG_TOOL_NAMES",
+    "get_rag_tools",
     # Planning tools (OpenManus-style)
     "PlanningTool",
     "PlanStepStatus",
     "Plan",
     "PlanStep",
     "get_planning_tool",
-    # Sharing insights tools (Emma AI - PostgreSQL queries via REST)
-    "query_recent_shares",
-    "query_shares_to_recipient",
-    "query_sharing_statistics",
-    "query_site_guests",
-    "query_guest_documents",
-    "query_guest_activity",
-    "query_guest_statistics",
-    "query_sharing_overview",
-    # Human-in-the-Loop clarification tools
-    "ask_user_clarification",
-    "ask_confirmation",
-    "suggest_follow_up",
+    # Sharing insights tools (Qwen-Agent class-based)
+    "QueryRecentSharesTool",
+    "QuerySharesToRecipientTool",
+    "QuerySharingStatisticsTool",
+    "QuerySiteGuestsTool",
+    "QueryGuestDocumentsTool",
+    "QueryGuestActivityTool",
+    "QueryGuestStatisticsTool",
+    "QuerySharingOverviewTool",
+    "SHARING_INSIGHTS_TOOLS",
+    "SHARING_INSIGHTS_TOOL_NAMES",
+    "get_sharing_insights_tools",
+    # Human-in-the-Loop clarification tools (Qwen-Agent class-based)
+    "AskUserClarificationTool",
+    "AskConfirmationTool",
+    "SuggestFollowUpTool",
+    "CLARIFICATION_TOOLS",
+    "CLARIFICATION_TOOL_NAMES",
+    "get_clarification_tools",
+    # Clarification utility functions
     "is_clarification_response",
     "parse_clarification_response",
+    "extract_selected_document",
 ]
