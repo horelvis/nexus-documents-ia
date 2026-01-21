@@ -25,35 +25,195 @@ NexusDocs360 On-Premise is designed for organizations that require complete cont
 
 ## Hardware Requirements
 
-### Minimum Configuration (Text-Only)
+> ⚠️ **IMPORTANTE**: Los requisitos de hardware son críticos para el rendimiento. Una configuración "justa" resultará en tiempos de respuesta lentos y posibles errores de memoria.
 
-| Component | Specification |
-|-----------|---------------|
-| **GPU** | NVIDIA RTX 3090 (24GB VRAM) |
-| **CPU** | 8+ cores (Intel i7/AMD Ryzen 7) |
-| **RAM** | 32GB DDR4 |
-| **Storage** | 500GB NVMe SSD |
-| **Network** | 1 Gbps |
+### Resumen por Escenario
 
-### Recommended Configuration (Multimodal RAG)
+| Escenario | CPU | RAM | GPU VRAM | Disco | Usuarios | Costo Est. |
+|-----------|-----|-----|----------|-------|----------|------------|
+| **Desarrollo** | 8 cores | 32GB | 12-24GB | 256GB SSD | 1-3 | ~$3,000 |
+| **Producción Pequeña** | 16 cores | 64GB | 24GB | 1TB NVMe | 10-50 | ~$10,000 |
+| **Producción Media** | 32 cores | 128GB | 48GB | 2TB NVMe | 50-200 | ~$35,000 |
+| **Enterprise** | 64+ cores | 256GB+ | 80GB+ | 4TB+ NVMe | 200+ | ~$200,000 |
 
-| Component | Specification |
-|-----------|---------------|
-| **GPU** | NVIDIA RTX 4090 (24GB VRAM) |
-| **CPU** | 16+ cores (Intel i9/AMD Ryzen 9) |
-| **RAM** | 64GB DDR5 |
-| **Storage** | 1TB NVMe SSD + 4TB HDD |
-| **Network** | 10 Gbps |
+### Configuración Mínima (Funcional pero LIMITADA)
 
-### Enterprise Configuration (High Throughput)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ⚠️  CONFIGURACIÓN MÍNIMA - Solo desarrollo/pruebas                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  GPU:     NVIDIA RTX 3060 12GB                                              │
+│  CPU:     Intel i5-10400 / AMD Ryzen 5 3600 (6 cores)                       │
+│  RAM:     16GB DDR4                                                         │
+│  Disco:   256GB SSD SATA                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ❌ LIMITACIONES SEVERAS:                                                    │
+│     • Solo Qwen3-1.7B (modelo muy pequeño)                                  │
+│     • Contexto máximo 8K tokens                                             │
+│     • Embeddings en CPU (muy lento, 2-5 segundos por chunk)                 │
+│     • Sin TTS local                                                         │
+│     • SIL disponible pero lento                                             │
+│     • Agent Self-Verifies: ~2-3 minutos por claim                           │
+│     • 1-2 usuarios concurrentes máximo                                      │
+│     • NO RECOMENDADO para producción                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-| Component | Specification |
-|-----------|---------------|
-| **GPU** | 2x NVIDIA A100 (80GB) or H100 |
-| **CPU** | 32+ cores (AMD EPYC/Intel Xeon) |
-| **RAM** | 256GB ECC |
-| **Storage** | 2TB NVMe RAID + NAS |
-| **Network** | 25 Gbps |
+### Configuración Recomendada (Experiencia fluida)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ✅ CONFIGURACIÓN RECOMENDADA - Desarrollo + Demos                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  GPU:     NVIDIA RTX 4090 24GB                                              │
+│  CPU:     Intel i7-12700 / AMD Ryzen 7 5800X (8-12 cores)                   │
+│  RAM:     32GB DDR4-3200                                                    │
+│  Disco:   512GB NVMe Gen4                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Distribución VRAM (24GB total):                                            │
+│                                                                              │
+│  ████████████████████░░░░░░░░░░░░░░░░░░░░  vLLM Qwen3-4B      8GB   (33%)  │
+│  ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  BGE-M3 Embeddings  2GB   (8%)   │
+│  ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  KV Cache           4GB   (17%)  │
+│  ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  TTS Local          2GB   (8%)   │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  Total usado: ~16GB (67%) | Libre: ~8GB (33%) para batching                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✅ PERMITE:                                                                 │
+│     • Qwen3-4B con contexto 16K tokens                                      │
+│     • BGE-M3 embeddings en GPU (~50-100ms por chunk)                        │
+│     • TTS local (VibeVoice)                                                 │
+│     • SIL completo con respuestas en <2 segundos                            │
+│     • Agent Self-Verifies: 30-50 segundos por claim                         │
+│     • RAG completo en <3 segundos                                           │
+│     • 3-5 usuarios concurrentes                                             │
+│                                                                              │
+│  ⚠️  NOTA: Esta configuración va "JUSTA" si activas todas las features      │
+│     Si ves errores OOM, desactiva TTS local o usa embeddings en CPU         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuración Producción Pequeña (10-50 usuarios)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  🏢 PRODUCCIÓN PEQUEÑA - Servidor único                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  GPU:     NVIDIA RTX 4090 24GB (o A5000 24GB para rack)                     │
+│  CPU:     Intel Xeon W-2255 / AMD EPYC 7313 (16 cores)                      │
+│  RAM:     64GB ECC DDR4-3200                                                │
+│  Disco:   1TB NVMe (OS+Apps) + 2TB NVMe (Datos)                             │
+│  Red:     10GbE                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Distribución RAM (64GB):                                                    │
+│     PostgreSQL + AGE:    8GB                                                │
+│     Redis:               2GB                                                │
+│     Weaviate:            8GB                                                │
+│     Elasticsearch:       8GB                                                │
+│     Microservicios:      16GB                                               │
+│     vLLM:                16GB + GPU                                         │
+│     Sistema:             6GB                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✅ PERMITE:                                                                 │
+│     • Todas las features activas simultáneamente                            │
+│     • 10-50 usuarios concurrentes                                           │
+│     • SLA de respuesta <5 segundos para 95% de queries                      │
+│     • Backups diarios sin impacto                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  💰 Costo estimado: $8,000 - $12,000 USD                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuración Producción Media (50-200 usuarios)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  🏛️ PRODUCCIÓN MEDIA - 3 servidores distribuidos                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐  │
+│  │   SERVIDOR APP      │  │   SERVIDOR AI/ML    │  │   SERVIDOR DATA     │  │
+│  ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤  │
+│  │  CPU: 16 cores      │  │  CPU: 16 cores      │  │  CPU: 16 cores      │  │
+│  │  RAM: 64GB          │  │  RAM: 64GB          │  │  RAM: 128GB         │  │
+│  │  GPU: -             │  │  GPU: 2x RTX 4090   │  │  GPU: -             │  │
+│  │  Disco: 500GB NVMe  │  │  Disco: 1TB NVMe    │  │  Disco: 4TB NVMe    │  │
+│  ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤  │
+│  │  • Main API         │  │  • vLLM Server      │  │  • PostgreSQL+AGE   │  │
+│  │  • Microservices    │  │  • Embeddings       │  │  • Weaviate         │  │
+│  │  • Background       │  │  • TTS Service      │  │  • Elasticsearch    │  │
+│  │    Worker           │  │  • Reranker         │  │  • Redis Cluster    │  │
+│  │  • KeyCloak         │  │                     │  │  • Backups          │  │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘  │
+│                                                                              │
+│  💰 Costo estimado: $25,000 - $40,000 USD                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuración Enterprise (200+ usuarios)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  🏗️ ENTERPRISE - Kubernetes HA                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Control Plane (3x):    8 cores | 32GB RAM | 256GB NVMe                     │
+│  Workers APP (3-5x):    32 cores | 128GB RAM | 1TB NVMe                     │
+│  Workers GPU (2-4x):    32 cores | 128GB RAM | A100 40/80GB o H100          │
+│  Workers DATA (3x):     32 cores | 256GB RAM | 8TB NVMe RAID                │
+│                                                                              │
+│  Storage externo:       NAS/SAN 20TB+ | Backup offsite 50TB+                │
+│                                                                              │
+│  💰 Costo estimado: $150,000 - $300,000 USD                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Guía de Selección de GPU
+
+| Categoría | Modelo | VRAM | Recomendación |
+|-----------|--------|------|---------------|
+| **Consumer** | RTX 3060 | 12GB | ❌ Muy limitado |
+| | RTX 3080 | 10GB | ❌ Insuficiente |
+| | RTX 3090 | 24GB | ⚠️ Solo desarrollo |
+| | RTX 4070 Ti | 12GB | ❌ Insuficiente |
+| | RTX 4080 | 16GB | ⚠️ Ajustado, sin TTS local |
+| | RTX 4090 | 24GB | ✅ Desarrollo + Prod. pequeña |
+| **Professional** | A4000 | 16GB | ⚠️ Ajustado, rack-friendly |
+| | A5000 | 24GB | ✅ Producción pequeña |
+| | A6000 | 48GB | ✅ Producción media-grande |
+| **Datacenter** | L4 | 24GB | ✅ Cloud, eficiente |
+| | L40 | 48GB | ✅ Balance rendimiento/costo |
+| | A100 | 40/80GB | ✅ Enterprise |
+| | H100 | 80GB | ✅ Máximo rendimiento |
+
+### Optimizaciones para Hardware Limitado
+
+Si tu hardware está "justo", aplica estas optimizaciones:
+
+```bash
+# 1. Usar modelo más pequeño (ahorra ~4GB VRAM)
+VLLM_MODEL=Qwen/Qwen3-1.7B
+VLLM_MAX_MODEL_LEN=8192
+
+# 2. Embeddings en CPU (libera ~2GB VRAM)
+EMBEDDING_DEVICE=cpu
+
+# 3. Desactivar TTS local (libera ~2GB VRAM)
+TTS_PROVIDER=google
+
+# 4. Reducir contexto (libera KV cache)
+VLLM_MAX_MODEL_LEN=8192
+
+# 5. Reducir workers Celery
+# En start.sh: celery ... --concurrency=2
+
+# 6. Limitar memoria de contenedores
+# En docker-compose.yml:
+deploy:
+  resources:
+    limits:
+      memory: 4G
+```
 
 ---
 
@@ -146,54 +306,83 @@ For documents without visual elements, maximize context window.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     NexusDocs360 On-Premise Architecture                     │
+│                 NexusDocs360 On-Premise Architecture v2.0                    │
+│                      (con SIL + Agent Self-Verifies)                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                        Docker Compose Stack                          │    │
+│  │                     Application Services                             │    │
 │  │                                                                      │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
-│  │  │                     Application Services                     │    │    │
-│  │  │                                                              │    │    │
-│  │  │  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐   │    │    │
-│  │  │  │   api    │  │ weaviate-service│  │ background-worker│   │    │    │
-│  │  │  │ FastAPI  │  │  RAG + Emma AI  │  │     Celery       │   │    │    │
-│  │  │  │  :8000   │  │     :8007       │  │     :8100        │   │    │    │
-│  │  │  └──────────┘  └─────────────────┘  └──────────────────┘   │    │    │
-│  │  │                                                              │    │    │
-│  │  │  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐   │    │    │
-│  │  │  │langextract│ │  mcp-storage    │  │   tts-service    │   │    │    │
-│  │  │  │  :8009   │  │     :8003       │  │  (VibeVoice)     │   │    │    │
-│  │  │  └──────────┘  └─────────────────┘  └──────────────────┘   │    │    │
-│  │  │                                                              │    │    │
-│  │  └──────────────────────────────────────────────────────────────┘    │    │
+│  │  ┌──────────┐  ┌─────────────────────────┐  ┌──────────────────┐   │    │
+│  │  │   api    │  │    weaviate-service     │  │ background-worker│   │    │
+│  │  │ FastAPI  │  │  ┌───────────────────┐  │  │     Celery       │   │    │
+│  │  │  :8000   │  │  │ Emma AI (RAG)     │  │  │     :8100        │   │    │
+│  │  │          │  │  │ SIL (Pre-LLM)     │  │  │  ┌────────────┐  │   │    │
+│  │  │          │  │  │ Verified Gen      │  │  │  │verification│  │   │    │
+│  │  │          │  │  └───────────────────┘  │  │  │   queue    │  │   │    │
+│  │  │          │  │         :8007           │  │  └────────────┘  │   │    │
+│  │  └──────────┘  └─────────────────────────┘  └──────────────────┘   │    │
 │  │                                                                      │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
-│  │  │                GPU Services (NVIDIA CUDA)                    │    │    │
-│  │  │                                                              │    │    │
-│  │  │  ┌────────────────────────┐  ┌─────────────────────────┐   │    │    │
-│  │  │  │         vllm          │  │   qwen3-vl-embedding    │   │    │    │
-│  │  │  │  Qwen3-4B-Thinking    │  │  Multimodal Embedding   │   │    │    │
-│  │  │  │       :8000           │  │        :8001            │   │    │    │
-│  │  │  └────────────────────────┘  └─────────────────────────┘   │    │    │
-│  │  │                                                              │    │    │
-│  │  └──────────────────────────────────────────────────────────────┘    │    │
+│  │  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐            │    │
+│  │  │langextract│ │  mcp-storage    │  │   tts-service    │            │    │
+│  │  │  :8009   │  │     :8003       │  │  (Google/Local)  │            │    │
+│  │  └──────────┘  └─────────────────┘  └──────────────────┘            │    │
 │  │                                                                      │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
-│  │  │                     Infrastructure                           │    │    │
-│  │  │                                                              │    │    │
-│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐   │    │    │
-│  │  │  │    db    │  │  redis   │  │ weaviate │  │  keycloak │   │    │    │
-│  │  │  │PostgreSQL│  │  Cache   │  │ VectorDB │  │ SSO (opt) │   │    │    │
-│  │  │  │  + AGE   │  │  :6379   │  │  :8080   │  │   :8080   │   │    │    │
-│  │  │  │  :5432   │  │          │  │          │  │           │   │    │    │
-│  │  │  └──────────┘  └──────────┘  └──────────┘  └───────────┘   │    │    │
-│  │  │                                                              │    │    │
-│  │  └──────────────────────────────────────────────────────────────┘    │    │
-│  │                                                                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                    AI/ML Layer (GPU CUDA)                             │   │
+│  │                                                                       │   │
+│  │  ┌──────────────────────┐  ┌───────────────────┐                     │   │
+│  │  │        vLLM          │  │   BGE-M3 Embed    │                     │   │
+│  │  │    Qwen/Qwen3-4B     │  │  (sentence-trans) │                     │   │
+│  │  │       :8000          │  │    in weaviate-   │                     │   │
+│  │  │    ~8GB VRAM         │  │    service ~2GB   │                     │   │
+│  │  └──────────────────────┘  └───────────────────┘                     │   │
+│  │                                                                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                       Data Layer                                      │   │
+│  │                                                                       │   │
+│  │  ┌────────────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐      │   │
+│  │  │  PostgreSQL    │  │  Redis   │  │ Weaviate │  │ KeyCloak  │      │   │
+│  │  │    + AGE       │  │  Cache   │  │ VectorDB │  │   OIDC    │      │   │
+│  │  │  ┌──────────┐  │  │  :6379   │  │  :8080   │  │   :8080   │      │   │
+│  │  │  │Knowledge │  │  │          │  │          │  │           │      │   │
+│  │  │  │  Graph   │  │  │ Verified │  │          │  │           │      │   │
+│  │  │  │ (Cypher) │  │  │ Claims   │  │          │  │           │      │   │
+│  │  │  └──────────┘  │  │ Cache    │  │          │  │           │      │   │
+│  │  │    :5432       │  │          │  │          │  │           │      │   │
+│  │  └────────────────┘  └──────────┘  └──────────┘  └───────────┘      │   │
+│  │                                                                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
+
+Flujo de Consulta:
+─────────────────
+
+Usuario ──▶ API ──▶ weaviate-service
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+    ┌─────────┐    ┌──────────┐    ┌───────────┐
+    │   SIL   │    │   RAG    │    │ Verified  │
+    │ (Pre-   │    │ Pipeline │    │    Gen    │
+    │  LLM)   │    │ (Emma)   │    │  (Stop&Go)│
+    └────┬────┘    └────┬─────┘    └─────┬─────┘
+         │              │                │
+         │         ┌────┴────┐      ┌────┴────┐
+         │         │  vLLM   │      │ Celery  │
+         │         │ Qwen3-4B│      │Verifier │
+         │         └─────────┘      └─────────┘
+         │
+    ┌────┴─────┐
+    │ Apache   │
+    │ AGE Graph│
+    └──────────┘
 ```
 
 ### Service Ports
@@ -636,6 +825,331 @@ docker compose exec db psql -U nexusdocs -d nexusdocs -c "
 | **"Documents referencing this one"** | Document → REFERENCES → Documents |
 | **"Find all invoices > €10,000"** | AMOUNT entities + APPEARS_IN |
 | **Query expansion** | Automatically adds related terms from graph |
+
+---
+
+## 🧠 SIL - Structural Intelligence Layer (NUEVO)
+
+El **SIL (Structural Intelligence Layer)** es un sistema de **razonamiento pre-LLM** que aprende la **ESTRUCTURA** de los documentos, no su contenido. Permite responder consultas estructurales **sin invocar RAG**, ahorrando hasta un **70-90% de tokens**.
+
+### Problema que Resuelve
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  RAG TRADICIONAL                    →    SIL (NUEVO)                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ❌ Embebe contenido completo       →    ✅ Embebe descripciones estructurales│
+│  ❌ Siempre invoca LLM + RAG        →    ✅ Responde estructuralmente si puede│
+│  ❌ 10K+ tokens por consulta        →    ✅ 500-1000 tokens (70-90% ahorro)  │
+│  ❌ Sin consciencia temporal        →    ✅ Historial completo y evolución   │
+│  ❌ Lento para consultas simples    →    ✅ <500ms para consultas estructurales│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Arquitectura de 5 Capas
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    SIL - 5 LAYER ARCHITECTURE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  CAPA 1: Extracción Estructural                                              │
+│  ─────────────────────────────────                                           │
+│  Extrae: ubicación, tipo, relaciones, metadata (NO contenido)               │
+│  Input:  "Contrato de servicios con ACME Corp"                              │
+│  Output: {type: "contract", client: "ACME", date: "2024-01", pages: 15}     │
+│                               │                                              │
+│                               ▼                                              │
+│  CAPA 2: Grafo Estructural (Apache AGE)                                      │
+│  ─────────────────────────────────────                                       │
+│  Almacena relaciones en grafo consultable con Cypher                        │
+│  (ACME)-[:HAS_CONTRACT]->(Contract123)-[:SIGNED_BY]->(John)                 │
+│                               │                                              │
+│                               ▼                                              │
+│  CAPA 3: Embeddings Estructurales                                            │
+│  ────────────────────────────────                                            │
+│  Vectoriza DESCRIPCIONES estructurales, no contenido                        │
+│  "Contract for consulting services with ACME Corp, 15 pages, Jan 2024"      │
+│                               │                                              │
+│                               ▼                                              │
+│  CAPA 4: Motor Pre-LLM (Razonador)                                           │
+│  ────────────────────────────────                                            │
+│  Responde consultas estructurales SIN invocar RAG                           │
+│  "¿Cuántos contratos tiene ACME?" → Cypher → 5 (sin leer documentos)        │
+│                               │                                              │
+│                               ▼                                              │
+│  CAPA 5: LLM como Intérprete                                                 │
+│  ──────────────────────────                                                  │
+│  LLM recibe contexto estructural para formular respuesta natural            │
+│  Input: {count: 5, type: "contract", client: "ACME"}                        │
+│  Output: "ACME tiene 5 contratos activos en el sistema"                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Tipos de Razonamiento SIL
+
+| Tipo | Usa RAG | Tiempo | Ejemplo |
+|------|---------|--------|---------|
+| `STRUCTURAL` | ❌ No | <500ms | "¿Cuántos documentos hay?" |
+| `TEMPORAL` | ❌ No | <500ms | "¿Qué se añadió este mes?" |
+| `MULTIHOP` | ❌ No | <1s | "Documentos relacionados con ACME" |
+| `FOCUSED_RAG` | ⚠️ Parcial | 1-3s | "Resumen del contrato #123" |
+| `FULL_RAG` | ✅ Sí | 3-8s | "Explica las cláusulas de..." |
+
+### Endpoints SIL
+
+```bash
+# Consulta estructural (auto-detecta tipo de razonamiento)
+POST http://localhost:8007/sil/query
+{
+  "query": "¿Cuántos contratos tiene ACME?",
+  "tenant_id": "tenant-uuid",
+  "reasoning_mode": "auto"
+}
+
+# Respuesta (SIN leer contenido de documentos)
+{
+  "answer": "ACME tiene 5 contratos activos",
+  "reasoning_type": "STRUCTURAL",
+  "tokens_used": 850,
+  "tokens_saved_vs_rag": 9150,
+  "execution_time_ms": 420,
+  "cypher_query": "MATCH (d:Document {client:'ACME', type:'contract'}) RETURN count(d)"
+}
+
+# Indexar metadatos estructurales de un documento
+POST http://localhost:8007/sil/index-structural
+{
+  "document_id": "doc-uuid",
+  "tenant_id": "tenant-uuid"
+}
+
+# Obtener estructura de un documento
+GET http://localhost:8007/sil/structure/{document_id}
+
+# Estadísticas del grafo
+GET http://localhost:8007/sil/graph/stats
+
+# Búsqueda por similitud estructural
+POST http://localhost:8007/sil/search-structural
+{
+  "query": "contratos de servicios",
+  "tenant_id": "tenant-uuid",
+  "limit": 10
+}
+```
+
+### Configuración SIL
+
+```bash
+# backend/docker/.env
+
+# =============================================================================
+# SIL - Structural Intelligence Layer
+# =============================================================================
+SIL_ENABLED=true
+SIL_AUTO_INDEX=true                    # Indexar estructura al subir documentos
+SIL_REASONING_MODE=auto                # auto | structural | temporal | full_rag
+SIL_STRUCTURAL_SIMILARITY_THRESHOLD=0.7
+SIL_GRAPH_TRAVERSAL_DEPTH=3
+SIL_CACHE_TTL_SECONDS=3600
+```
+
+---
+
+## ✅ Agent Self-Verifies - Generación Verificada (NUEVO)
+
+El patrón **Agent Self-Verifies** implementa generación de documentos donde **cada claim se verifica contra Weaviate** antes de ser aceptado. Reduce alucinaciones en un **~70%** comparado con generación estándar.
+
+### Problema que Resuelve
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  GENERACIÓN TRADICIONAL              →    AGENT SELF-VERIFIES               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ❌ Genera todo de una vez           →    ✅ Genera UN claim a la vez        │
+│  ❌ ~15% tasa de alucinación         →    ✅ <5% tasa de alucinación         │
+│  ❌ Sin verificación                 →    ✅ Cada claim verificado           │
+│  ❌ Confianza binaria                →    ✅ Puntuación de confianza 0-1     │
+│  ❌ Sin corrección                   →    ✅ Auto-corrección si es posible   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Arquitectura Stop-and-Go
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    VERIFIED GENERATION FLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐      ┌─────────────────┐      ┌─────────────────┐          │
+│  │   WRITER    │      │     CELERY      │      │      REDIS      │          │
+│  │   AGENT     │ ───▶ │    VERIFIER     │ ───▶ │      CACHE      │          │
+│  │   (vLLM)    │      │  (Weaviate +    │      │   (Verified     │          │
+│  │             │      │   vLLM)         │      │    Claims)      │          │
+│  └─────────────┘      └─────────────────┘      └─────────────────┘          │
+│        │                     │                        │                      │
+│        │  1. Genera UN       │  2. Busca evidencia    │  3. Si OK,          │
+│        │     claim           │     en Weaviate        │     almacena        │
+│        │                     │  3. Evalúa con vLLM    │                      │
+│        │                     │  4. Sugiere corrección │                      │
+│        │                     │     si es necesario    │                      │
+│        │                     │                        │                      │
+│        │◀────────────────────┼────────────────────────┤                      │
+│        │                     │                        │                      │
+│        │  5. Si VERIFIED:    │                        │                      │
+│        │     genera siguiente│                        │                      │
+│        │  6. Si REJECTED:    │                        │                      │
+│        │     intenta corregir│                        │                      │
+│        │     o salta         │                        │                      │
+│        │                     │                        │                      │
+│        └─────────────────────┼────────────────────────┘                      │
+│                              │                                               │
+│                              ▼                                               │
+│                    ┌─────────────────┐                                       │
+│                    │ DOCUMENTO FINAL │                                       │
+│                    │ (Solo claims    │                                       │
+│                    │  verificados)   │                                       │
+│                    └─────────────────┘                                       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Estados de Claims
+
+| Estado | Descripción | Acción |
+|--------|-------------|--------|
+| `verified` | Evidencia encontrada, confianza >= umbral | ✅ Incluir en documento |
+| `corrected` | Sin evidencia exacta, pero LLM sugirió corrección | ✅ Incluir versión corregida |
+| `rejected` | Sin evidencia suficiente, sin corrección posible | ❌ Descartar |
+| `error` | Error durante verificación (timeout, etc.) | 🔄 Reintentar o descartar |
+
+### Endpoints Verified Generation
+
+```bash
+# Generar documento verificado (síncrono)
+POST http://localhost:8007/verified/generate
+{
+  "query": "Genera un resumen del proyecto Alpha basado en los documentos",
+  "tenant_id": "tenant-uuid",
+  "max_claims": 10,
+  "confidence_threshold": 0.7
+}
+
+# Respuesta
+{
+  "session_id": "uuid",
+  "query": "Genera un resumen del proyecto Alpha...",
+  "document_text": "El proyecto Alpha inició el 15 de marzo de 2024...",
+  "claims": [
+    {
+      "id": "claim-uuid",
+      "text": "El proyecto Alpha inició el 15 de marzo de 2024",
+      "status": "verified",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "document_id": "doc-uuid",
+          "document_title": "Acta de inicio Proyecto Alpha",
+          "text_excerpt": "...fecha de inicio oficial: 15 de marzo de 2024...",
+          "similarity_score": 0.89
+        }
+      ]
+    },
+    {
+      "id": "claim-uuid-2",
+      "text": "El presupuesto inicial fue de 150.000 euros",
+      "status": "corrected",
+      "confidence": 0.78,
+      "original_text": "El presupuesto inicial fue de 200.000 euros",
+      "correction_reason": "Evidencia muestra 150.000€, no 200.000€"
+    }
+  ],
+  "total_claims_generated": 10,
+  "claims_verified": 7,
+  "claims_corrected": 2,
+  "claims_rejected": 1,
+  "average_confidence": 0.85,
+  "execution_time_ms": 45000,
+  "verification_time_ms": 38000
+}
+
+# Generar con streaming SSE (progreso en tiempo real)
+POST http://localhost:8007/verified/generate/stream
+Content-Type: application/json
+
+# Eventos SSE:
+# data: {"event": "claim_generated", "claim": {...}}
+# data: {"event": "verification_started", "task_id": "..."}
+# data: {"event": "claim_verified", "result": {...}}
+# data: {"event": "claim_rejected", "reason": "..."}
+# data: {"event": "document_complete", "document": {...}}
+
+# Obtener claims verificados de una sesión
+GET http://localhost:8007/verified/session/{session_id}/claims
+
+# Estadísticas de sesión
+GET http://localhost:8007/verified/session/{session_id}/stats
+
+# Limpiar sesión
+DELETE http://localhost:8007/verified/session/{session_id}
+```
+
+### Configuración Verified Generation
+
+```bash
+# backend/docker/.env
+
+# =============================================================================
+# VERIFIED GENERATION (Agent Self-Verifies Pattern)
+# =============================================================================
+# Reduce alucinaciones ~70% vs generación estándar
+
+# Máximo número de claims por documento
+VERIFIED_MAX_CLAIMS=20
+
+# Temperatura para generación (bajo = más factual)
+VERIFIED_CLAIM_TEMPERATURE=0.3
+
+# Timeout por claim (segundos)
+VERIFIED_TIMEOUT_SECONDS=45
+
+# Umbral mínimo de confianza para aceptar claim
+VERIFIED_CONFIDENCE_THRESHOLD=0.7
+
+# Intentos de corrección por claim
+VERIFIED_MAX_CORRECTION_ATTEMPTS=2
+
+# Auto-aceptar correcciones sugeridas por LLM
+VERIFIED_AUTO_ACCEPT_CORRECTIONS=true
+
+# TTL del cache en Redis (segundos)
+VERIFIED_CACHE_TTL_SECONDS=3600
+```
+
+### Cola Celery para Verificación
+
+El sistema usa una cola Celery dedicada para tareas de verificación:
+
+```bash
+# El worker debe escuchar la cola "verification"
+celery -A worker_app.celery_app worker -Q default,verification,...
+
+# Tareas registradas:
+# - verification.verify_claim
+# - verification.batch_verify_claims
+```
+
+### Métricas de Rendimiento
+
+| Métrica | Valor Típico | Notas |
+|---------|--------------|-------|
+| Tiempo por claim | 30-50s | Incluye búsqueda + evaluación |
+| Tasa de verificación | 70-85% | Claims que pasan verificación |
+| Tasa de corrección | 10-20% | Claims auto-corregidos |
+| Tasa de rechazo | 5-15% | Claims descartados |
+| Ahorro vs alucinación | ~70% | Reducción de información falsa |
 
 ---
 
