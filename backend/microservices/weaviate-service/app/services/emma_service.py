@@ -1,21 +1,22 @@
 """
-Emma AI Service - Personal AI Assistant for NexusDocs360
+Emma AI Service - Personal AI Assistant for NouxCubeIA
 
 Emma is the user-facing name for the AI assistant.
 This module provides the Emma service interface using:
-- EmmaCoordinator (PRIMARY): Single coordinator agent with .as_tool() delegation
+- EmmaV2 (PRIMARY): Simplified async agent with SIL fast path
 - RAGPipeline (FALLBACK): Simple RAG for when agents are disabled
 
 ARCHITECTURE:
-EmmaCoordinator uses Microsoft Agent Framework's native .as_tool() pattern:
-1. Single ChatAgent as coordinator
-2. Specialist agents converted to tools via .as_tool()
-3. AgentThread maintains conversation context automatically
-4. Redis persistence for cross-session context
-5. LLM naturally decides when to delegate to specialists
+Emma v2 uses a native async LLM client with:
+1. SIL Fast Path - Structural queries answered without LLM (70-90% token savings)
+2. Domain Routing - Dynamic prompt loading based on query domain
+3. Skill Loading - Procedural knowledge loaded on-demand
+4. Agentic Loop - Tool-calling loop for complex queries
+5. Redis persistence for conversation history
 
-NOTE: EmmaHandoffWorkflow is retained for reference but NOT used as fallback.
-Using different context systems between coordinator and handoff causes context loss.
+References:
+- Anthropic Contextual Retrieval: https://www.anthropic.com/news/contextual-retrieval
+- Anthropic Agent Skills: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
 """
 
 import logging
@@ -34,10 +35,17 @@ from app.core.config import settings
 from app.services.tool_integration import ToolIntegration, get_tool_integration
 from app.services.memory import MemoryService, get_memory_service
 
-# PRIMARY: EmmaCoordinator with .as_tool() delegation
-from app.agents.emma_coordinator import (
-    EmmaCoordinator, EmmaCoordinatorResult,
-    get_emma_coordinator
+# PRIMARY: Emma v2 with SIL fast path and domain routing
+from app.agents.emma_v2 import (
+    EmmaV2, EmmaV2Result, ExecutionContext, EmmaV2Config
+)
+
+# NexusRouter: ML-based intent classification
+from app.services.nexus_router import (
+    nexus_router,
+    IntentClassification,
+    RequiredAction,
+    Intent,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,13 +55,18 @@ class EmmaService:
     """
     Emma AI Service - Personal AI Assistant
 
-    Uses EmmaCoordinator as the ONLY execution path for agent-based queries.
+    Uses EmmaV2 as the PRIMARY execution path for agent-based queries.
     Falls back to RAGPipeline only when agents are disabled (settings.agents_enabled=False).
+
+    Emma v2 features:
+    - SIL Fast Path: Structural queries answered without LLM
+    - Domain Routing: Dynamic prompts based on query domain
+    - Skill Loading: Procedural knowledge on-demand
     """
 
     def __init__(self):
-        # PRIMARY: EmmaCoordinator with .as_tool() delegation
-        self._coordinator: EmmaCoordinator = get_emma_coordinator()
+        # PRIMARY: Emma v2 with SIL fast path
+        self._emma_v2: EmmaV2 = EmmaV2()
 
         self._initialized = False
         self._available_tools = []
@@ -65,8 +78,12 @@ class EmmaService:
         # Memory Protocol integration
         self._memory: MemoryService = get_memory_service()
 
+        # NexusRouter: ML-based intent classification (replaces hardcoded patterns)
+        self._nexus_router = nexus_router
+        self._nexus_router_enabled = True  # Can be disabled via config if needed
+
         self._load_config()
-        logger.info("Initializing Emma AI Service (EmmaCoordinator primary, RAGPipeline fallback)")
+        logger.info("Initializing Emma AI Service (EmmaV2 primary, NexusRouter intent classification)")
 
     def _load_config(self):
         """Load Emma configuration from YAML"""
@@ -291,14 +308,19 @@ Responde SOLO una palabra:"""
                 content = doc.get("content", "")
                 title = doc.get("title", doc.get("filename", "Document"))
 
-                # Only load if content is reasonable size (< 6000 chars)
-                # Larger documents should use analyze_document tool
-                if len(content) < 6000:
+                # Load document content if reasonable size (< 20000 chars)
+                # This allows direct analysis without tool calls for most documents
+                if len(content) < 20000:
                     user_context["document_content"] = content
                     user_context["document_title"] = title
                     logger.info(f"📄 Loaded document content: {title} ({len(content)} chars)")
                 else:
-                    logger.info(f"📄 Document too large for direct analysis: {title} ({len(content)} chars)")
+                    # For very large documents, provide title but instruct to use tool
+                    user_context["document_title"] = title
+                    user_context["document_too_large"] = True
+                    logger.info(f"📄 Document too large for direct context: {title} ({len(content)} chars) - use analyze_document tool")
+            else:
+                logger.warning(f"⚠️ Document not found in collection: {document_id}")
 
         except Exception as e:
             logger.warning(f"⚠️ Could not load document content: {e}")
@@ -309,9 +331,9 @@ Responde SOLO una palabra:"""
             return
 
         try:
-            # PRIMARY: Initialize EmmaCoordinator
-            await self._coordinator.initialize()
-            logger.info("✅ EmmaCoordinator initialized (8 subagent tools with .as_tool())")
+            # PRIMARY: Initialize Emma v2
+            await self._emma_v2.initialize()
+            logger.info("✅ EmmaV2 initialized (SIL fast path + domain routing + skills)")
 
             # Initialize Tool Framework
             await self._tool_integration.initialize()
@@ -320,6 +342,14 @@ Responde SOLO una palabra:"""
             # Initialize Memory Protocol
             await self._memory.initialize()
             logger.info("✅ Memory Protocol initialized")
+
+            # Initialize NexusRouter (ML-based intent classification)
+            if self._nexus_router_enabled:
+                try:
+                    await self._nexus_router.initialize()
+                    logger.info("✅ NexusRouter initialized (ML intent classification)")
+                except Exception as e:
+                    logger.warning(f"⚠️ NexusRouter init failed (using fallback): {e}")
 
             # Build available tools list (using nexus_ prefix to avoid Qwen-Agent conflicts)
             legacy_tools = [
@@ -332,7 +362,7 @@ Responde SOLO una palabra:"""
             framework_tool_names = [t["name"] for t in framework_tools]
             self._available_tools = legacy_tools + framework_tool_names
 
-            logger.info(f"✅ Emma AI initialized: EmmaCoordinator (primary) + RAGPipeline (fallback)")
+            logger.info(f"✅ Emma AI initialized: EmmaV2 (primary) + NexusRouter (intent) + RAGPipeline (fallback)")
             self._initialized = True
 
         except Exception as e:
@@ -360,14 +390,16 @@ Responde SOLO una palabra:"""
             logger.warning(f"⚠️ Failed to load conversation history: {e}")
 
         # NOTE: Removed conversational query interception here.
-        # ALL queries now go through EmmaCoordinator to maintain AgentThread context.
-        # The Coordinator handles greetings, identity questions, etc. while preserving memory.
+        # ALL queries now go through EmmaV2 to leverage SIL fast path and domain routing.
+        # Emma v2 handles greetings, structural queries, and content queries efficiently.
 
         try:
-            # ALL queries go through EmmaCoordinator to maintain AgentThread context
-            # The Coordinator handles intent classification internally and preserves memory
+            # ALL queries go through EmmaV2 which:
+            # 1. Tries SIL fast path for structural queries (count, list, exists)
+            # 2. Uses domain routing for dynamic prompt loading
+            # 3. Falls back to agentic loop with tools for complex queries
             if settings.agents_enabled:
-                return await self._execute_with_coordinator(query, session_id, start_time)
+                return await self._execute_with_emma_v2(query, session_id, start_time)
 
             # Fallback to RAG pipeline
             return await self._fallback_rag_query(query, session_id, start_time)
@@ -391,18 +423,26 @@ Responde SOLO una palabra:"""
                 available_tools=self._available_tools
             )
 
-    async def _execute_with_coordinator(
+    async def _execute_with_emma_v2(
         self,
         query: EmmaQuery,
         session_id: str,
         start_time: float
     ) -> EmmaResponse:
         """
-        Execute query using EmmaCoordinator (PRIMARY).
+        Execute query using EmmaV2 (PRIMARY).
 
-        EmmaCoordinator uses .as_tool() to delegate to specialized subagents.
-        Context is maintained automatically via AgentThread + Redis persistence.
-        ACL context (user_role_ids, is_admin) is propagated for document filtering.
+        Flow:
+        1. NexusRouter classifies intent (~10ms) for pre-search if needed
+        2. Emma v2 tries SIL fast path for structural queries (no LLM needed)
+        3. If content needed, domain routing selects appropriate prompt
+        4. Agentic loop with tools handles complex queries
+
+        Emma v2 features:
+        - SIL Fast Path: Structural queries answered without LLM (70-90% token savings)
+        - Domain Routing: Dynamic prompts based on query domain (~700 vs ~4250 tokens)
+        - Skill Loading: Procedural knowledge loaded on-demand
+        - ACL context (user_role_ids, is_admin) propagated for document filtering
         """
         # Get user_id from query directly (set by API endpoint) or from context
         user_id = query.user_id or (query.context.get("user_id") if query.context else None)
@@ -412,56 +452,112 @@ Responde SOLO una palabra:"""
             query.tenant_id, user_id, query.context
         )
 
-        try:
-            # Get orchestration hint from context (optional)
-            orchestration_hint = None
-            if query.context:
-                orchestration_hint = query.context.get("orchestration")
+        # =====================================================================
+        # NexusRouter Pre-Classification (NEW)
+        # =====================================================================
+        classification: Optional[IntentClassification] = None
+        forced_search_results = None
 
-            logger.info(f"🤖 Executing with EmmaCoordinator: {query.query[:50]}...")
+        if self._nexus_router_enabled:
+            try:
+                classification = await self._nexus_router.classify(
+                    query=query.query,
+                    tenant_id=query.tenant_id,
+                )
+                logger.info(
+                    f"🎯 NexusRouter: {classification.intent.value} "
+                    f"({classification.confidence:.2f}) → {classification.required_action.value}"
+                )
+
+                # If search is required, execute it BEFORE LLM
+                if classification.needs_search:
+                    forced_search_results = await self._execute_forced_search(
+                        query=query,
+                        classification=classification,
+                        user_id=user_id,
+                    )
+
+                    # Inject results into user_context for the coordinator
+                    if forced_search_results and user_context:
+                        user_context["forced_search_results"] = forced_search_results
+                        user_context["forced_search_intent"] = classification.intent.value
+                        logger.info(
+                            f"📋 Injected {len(forced_search_results.get('results', []))} "
+                            f"forced search results into context"
+                        )
+                    elif forced_search_results:
+                        user_context = {
+                            "forced_search_results": forced_search_results,
+                            "forced_search_intent": classification.intent.value,
+                        }
+
+            except Exception as e:
+                logger.warning(f"⚠️ NexusRouter classification failed: {e}")
+                # Continue without pre-classification
+
+        try:
+            logger.info(f"🤖 Executing with EmmaV2: {query.query[:50]}...")
             logger.info(f"📋 Query context: tenant={query.tenant_id}, session={session_id[:16]}...")
             logger.info(f"📋 User context: {user_context}")
             logger.info(f"🔐 ACL context: user={user_id}, roles={len(query.user_role_ids or [])}, admin={query.is_admin}")
-            logger.info(f"📋 Orchestration hint: {orchestration_hint}")
+            if classification:
+                logger.info(f"🎯 NexusRouter classification: {classification.intent.value} ({classification.confidence:.2f})")
 
-            result: EmmaCoordinatorResult = await self._coordinator.execute(
-                query=query.query,
+            # Create execution context for Emma v2
+            exec_context = ExecutionContext(
                 tenant_id=query.tenant_id,
-                session_id=session_id,
                 user_id=user_id,
-                user_role_ids=query.user_role_ids,
-                is_admin=query.is_admin,
-                user_context=user_context,
-                orchestration_hint=orchestration_hint,
-                deep_reasoning=query.deep_reasoning
+                role_ids=query.user_role_ids or [],
+                is_admin=query.is_admin or False,
+                thread_id=session_id,
+                conversation_id=session_id,
+            )
+
+            result: EmmaV2Result = await self._emma_v2.execute(
+                query=query.query,
+                context=exec_context,
             )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             # Log result details
-            logger.info(f"📤 Coordinator result: success={result.success}")
-            logger.info(f"📤 Agents delegated: {result.agents_delegated}")
-            logger.info(f"📤 Tools called: {result.tools_called}")
+            logger.info(f"📤 EmmaV2 result: success={result.success}")
+            logger.info(f"📤 SIL answered: {result.sil_answered}, tokens_saved: {result.tokens_saved}")
+            logger.info(f"📤 Domain: {result.domain.value}, tools_called: {result.tools_called}")
+            logger.info(f"📤 Skills used: {result.skills_used}")
             logger.info(f"📤 Answer preview: {result.answer[:200] if result.answer else 'None'}...")
 
-            # Build decision path
-            decision_path = ["emma_coordinator"]
-            if result.agents_delegated:
-                decision_path.extend([f"delegated:{a}" for a in result.agents_delegated])
+            # Build decision path (include NexusRouter if used)
+            decision_path = []
+            if classification:
+                decision_path.append(f"nexus_router:{classification.intent.value}")
+                if classification.needs_search:
+                    decision_path.append("forced_search")
+            decision_path.append("emma_v2")
+            if result.sil_answered:
+                decision_path.append("sil_fast_path")
+            decision_path.append(f"domain:{result.domain.value}")
+            if result.tools_called:
+                decision_path.extend([f"tool:{t}" for t in result.tools_called])
             decision_path.append("completed" if result.success else "error")
 
             # Build debug data
             debug_data = None
             if query.enable_debug:
                 debug_data = {
-                    "coordinator_success": result.success,
-                    "agents_delegated": result.agents_delegated,
+                    "emma_v2_success": result.success,
+                    "sil_answered": result.sil_answered,
+                    "tokens_saved": result.tokens_saved,
+                    "domain": result.domain.value,
                     "tools_called": result.tools_called,
+                    "skills_used": result.skills_used,
+                    "iterations": result.iterations,
                     "thread_id": result.thread_id,
-                    "framework": "microsoft_agent_framework",
-                    "orchestration_pattern": result.metadata.get("pattern", "handoff"),
-                    "context_maintained": True,
-                    "metadata": result.metadata
+                    "framework": "emma_v2_anthropic_style",
+                    "metadata": result.metadata,
+                    # NexusRouter info
+                    "nexus_router": classification.to_dict() if classification else None,
+                    "forced_search_count": len(forced_search_results.get("results", [])) if forced_search_results else 0,
                 }
 
             # Store conversation
@@ -471,7 +567,7 @@ Responde SOLO una palabra:"""
                 user_query=query.query,
                 assistant_response=result.answer,
                 user_id=user_id,
-                tools_used=result.agents_delegated or result.tools_called
+                tools_used=result.tools_called
             )
 
             return EmmaResponse(
@@ -480,26 +576,22 @@ Responde SOLO una palabra:"""
                 session_id=session_id,
                 tenant_id=query.tenant_id,
                 decision_path=decision_path,
-                tools_used=result.agents_delegated or result.tools_called,
+                tools_used=result.tools_called,
                 data=debug_data,
                 visualization=None,
                 confidence_score=0.9 if result.success else 0.5,
                 execution_time_ms=execution_time_ms,
-                iterations=len(result.agents_delegated) if result.agents_delegated else 1,
+                iterations=result.iterations,
                 learning_applied=user_context.get("learning_applied", False) if user_context else False,
                 suggestions=self._generate_suggestions(query.query),
                 available_tools=self._available_tools
             )
 
         except Exception as e:
-            logger.error(f"❌ EmmaCoordinator execution failed: {e}")
+            logger.error(f"❌ EmmaV2 execution failed: {e}")
             import traceback
             traceback.print_exc()
 
-            # Log the error but do NOT fallback to EmmaHandoffWorkflow
-            # Reason: Fallback can cause context degradation because it uses
-            # a different thread storage and context format than EmmaCoordinator.
-            # Instead, return an error response and let the user retry.
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             return EmmaResponse(
@@ -507,7 +599,7 @@ Responde SOLO una palabra:"""
                 answer=f"Lo siento, hubo un error procesando tu consulta. Por favor, intenta de nuevo. Error: {str(e)[:100]}",
                 session_id=session_id,
                 tenant_id=query.tenant_id,
-                decision_path=["emma_coordinator", "error"],
+                decision_path=["emma_v2", "error"],
                 tools_used=[],
                 data={"error": str(e), "coordinator_failed": True} if query.enable_debug else None,
                 visualization=None,
@@ -518,6 +610,104 @@ Responde SOLO una palabra:"""
                 suggestions=[],
                 available_tools=self._available_tools
             )
+
+    async def _execute_forced_search(
+        self,
+        query: EmmaQuery,
+        classification: IntentClassification,
+        user_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Execute forced search based on NexusRouter classification.
+
+        This is called BEFORE the LLM to pre-fetch relevant documents
+        when the classification indicates search is needed.
+
+        Args:
+            query: Original query
+            classification: NexusRouter classification result
+            user_id: User ID for ACL
+
+        Returns:
+            Dict with search results or None if search fails
+        """
+        try:
+            from app.services.weaviate_service import weaviate_service
+            from app.schemas.weaviate import SearchRequest
+
+            # Get search parameters from router
+            search_params = self._nexus_router.get_search_params(
+                classification, query.query
+            )
+
+            logger.info(f"🔍 Executing forced search: {search_params}")
+
+            # Determine limit based on intent
+            if classification.intent == Intent.COUNT:
+                limit = search_params.get("top_k", 100)
+            elif classification.intent == Intent.LIST:
+                limit = search_params.get("top_k", 50)
+            else:
+                limit = search_params.get("top_k", 10)
+
+            # Build SearchRequest
+            # Note: include_channels=False to avoid channel_id filter on collections without it
+            search_request = SearchRequest(
+                query=query.query,
+                limit=limit,
+                tenant_id=query.tenant_id,
+                user_id=user_id,
+                user_role_ids=query.user_role_ids,
+                is_admin=query.is_admin or False,
+                search_type="hybrid",
+                include_channels=False,  # Disable channel filtering for forced search
+            )
+
+            # Execute search
+            search_response = await weaviate_service.search(search_request)
+
+            # Extract results
+            results = []
+            if search_response and hasattr(search_response, 'results'):
+                for r in search_response.results:
+                    results.append({
+                        "id": r.id,
+                        "title": getattr(r, 'title', None),
+                        "content_preview": getattr(r, 'content', '')[:200] if hasattr(r, 'content') else '',
+                        "score": getattr(r, 'score', 0.0),
+                        "metadata": getattr(r, 'metadata', {}),
+                    })
+
+            # Build response based on intent
+            if classification.intent == Intent.COUNT:
+                return {
+                    "type": "count",
+                    "count": len(results),
+                    "results": results[:10],  # Return sample for context
+                    "query": query.query,
+                    "document_types": classification.document_types,
+                }
+            elif classification.intent == Intent.LIST:
+                return {
+                    "type": "list",
+                    "count": len(results),
+                    "results": results,
+                    "query": query.query,
+                    "document_types": classification.document_types,
+                }
+            else:
+                return {
+                    "type": "search",
+                    "count": len(results),
+                    "results": results,
+                    "query": query.query,
+                    "document_types": classification.document_types,
+                    "entities": classification.entities,
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Forced search failed: {e}")
+            return None
 
     async def execute_query_stream(self, query: EmmaQuery) -> AsyncGenerator[Dict[str, Any], None]:
         """Execute Emma AI query with streaming progress."""
@@ -579,28 +769,100 @@ Responde SOLO una palabra:"""
             full_response = []
             tools_used = []
 
-            async for event in self._coordinator.execute_stream(
-                query=query.query,
+            # Create execution context for Emma v2
+            exec_context = ExecutionContext(
                 tenant_id=query.tenant_id,
-                session_id=session_id,
                 user_id=user_id,
-                user_role_ids=query.user_role_ids,
-                is_admin=query.is_admin,
-                user_context=user_context,
-                deep_reasoning=query.deep_reasoning
+                role_ids=query.user_role_ids or [],
+                is_admin=query.is_admin or False,
+                thread_id=session_id,
+                conversation_id=session_id,
+            )
+
+            async for event in self._emma_v2.execute_stream(
+                query=query.query,
+                context=exec_context,
             ):
-                if "data" not in event:
-                    event["data"] = {}
-                event["data"]["session_id"] = session_id
+                # Transform Emma v2 event format to expected format
+                # Emma v2 uses {"type": "...", "content": "..."}
+                # UI expects {"event": "...", "data": {...}}
+                event_type = event.get("type", event.get("event", ""))
 
-                # Collect response text for memory storage
-                event_type = event.get("event", "")
-                if event_type == "answer":
-                    full_response.append(event["data"].get("content", ""))
-                elif event_type == "tool_use":
-                    tools_used.append(event["data"].get("tool", ""))
-
-                yield event
+                # Transform to expected format
+                if event_type == "content":
+                    # Real LLM streaming - pass tokens directly (no fake word splitting)
+                    content = event.get("content", "")
+                    if content:
+                        full_response.append(content)
+                        yield {
+                            "event": "token",
+                            "data": {
+                                "text": content,
+                                "session_id": session_id,
+                            }
+                        }
+                elif event_type == "thinking":
+                    yield {
+                        "event": "thinking",
+                        "data": {"content": event.get("content", ""), "session_id": session_id}
+                    }
+                elif event_type == "tool_call":
+                    tool_name = event.get("name", "")
+                    tools_used.append(tool_name)
+                    yield {
+                        "event": "tool_use",
+                        "data": {
+                            "tool": tool_name,
+                            "arguments": event.get("arguments", {}),
+                            "session_id": session_id
+                        }
+                    }
+                elif event_type == "tool_result":
+                    yield {
+                        "event": "tool_result",
+                        "data": {
+                            "tool": event.get("name", ""),
+                            "result": event.get("result", {}),
+                            "session_id": session_id
+                        }
+                    }
+                elif event_type == "done":
+                    result = event.get("result", {})
+                    process_info = result.get("process_info", {})
+                    # Extract tool names as strings (active_tools may contain objects)
+                    active_tools = process_info.get("active_tools", [])
+                    tools_list = [
+                        t.get("name") if isinstance(t, dict) else str(t)
+                        for t in active_tools
+                    ] if active_tools else []
+                    # Don't include 'answer' - let UI use accumulated streaming_text
+                    # This prevents the "flash" of replacing streamed content
+                    yield {
+                        "event": "complete",
+                        "data": {
+                            "session_id": session_id,
+                            "final_result": {
+                                "confidence_score": 0.95 if process_info.get("sil_used") else 0.85,
+                                "decision_path": ["sil_fast_path"] if process_info.get("sil_used") else ["emma_v2"],
+                                "tools_used": tools_list,
+                            },
+                            "execution_time_ms": process_info.get("execution_time_ms", 0),
+                            "confidence_score": 0.95 if process_info.get("sil_used") else 0.85,
+                        }
+                    }
+                elif event_type == "error":
+                    yield {
+                        "event": "error",
+                        "data": {"error": event.get("error", "Unknown error"), "session_id": session_id}
+                    }
+                else:
+                    # Pass through any other events
+                    if "data" not in event:
+                        event["data"] = {}
+                    event["data"]["session_id"] = session_id
+                    if "type" in event and "event" not in event:
+                        event["event"] = event.pop("type")
+                    yield event
 
             # Store conversation and record interaction for learning
             if full_response:
@@ -823,15 +1085,32 @@ Responde SOLO una palabra:"""
 
     async def health_check(self) -> Dict[str, Any]:
         """Health check for Emma service."""
-        coordinator_status = self._coordinator.get_status() if self._coordinator else {}
+        emma_v2_status = {
+            "initialized": self._emma_v2._initialized if self._emma_v2 else False,
+            "sil_enabled": self._emma_v2.config.enable_sil_fast_path if self._emma_v2 else False,
+            "domain_routing_enabled": self._emma_v2.config.enable_domain_routing if self._emma_v2 else False,
+            "skills_enabled": self._emma_v2.config.enable_skills if self._emma_v2 else False,
+        }
+
+        # List of available agents/capabilities
+        agents = [
+            "search",           # Búsqueda semántica e híbrida
+            "read_document",    # Lectura de documentos
+            "analyze",          # Análisis profundo con RAG
+            "sil_query",        # Consultas estructurales
+            "legal_search",     # Conocimiento legal público
+            "ask_user",         # Clarificación HITL
+        ]
+
         return {
             "status": "healthy",
             "agents_enabled": settings.agents_enabled,
+            "agents": agents,
             "initialized": self._initialized,
-            "coordinator_available": self._coordinator is not None,
+            "emma_v2_available": self._emma_v2 is not None,
             "available_tools_count": len(self._available_tools),
-            "orchestration_type": "EmmaCoordinator",
-            "coordinator_status": coordinator_status
+            "orchestration_type": "EmmaV2",
+            "emma_v2_status": emma_v2_status
         }
 
     async def get_decision_tree_state(self, session_id: str) -> DecisionTreeState:

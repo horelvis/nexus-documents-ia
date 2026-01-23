@@ -34,7 +34,7 @@ class SearchService:
         self.user_id = user_id
         self.role_ids = role_ids or []
         self.is_admin = is_admin
-        self.collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
+        self.collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
         self._emma_timeout = 120.0  # 2 minutes for AI operations
         # Elasticsearch is now a microservice - no local initialization needed
 

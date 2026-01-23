@@ -9,3 +9,8 @@ pydantic-settings>=2.6.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.1
 loguru>=0.7.2
+# Identity document processing
+python-doctr[torch]>=0.9.0
+pillow>=10.0.0
+# MRZ parsing
+mrz>=0.6.2

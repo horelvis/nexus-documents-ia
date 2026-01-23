@@ -1,5 +1,5 @@
 """
-Prometheus metrics integration for NexusDocs360
+Prometheus metrics integration for NouxCubeIA
 """
 import time
 from typing import Dict, Any, Optional

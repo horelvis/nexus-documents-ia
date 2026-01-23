@@ -20,13 +20,33 @@ Key Properties:
 import logging
 import weaviate
 import weaviate.classes.config as wvc
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
+from enum import Enum
 
 from .schemas import StructuralMetadata, SemanticType, DomainType
 from .structural_embedder import structural_embedder
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_value(obj: Union[Enum, str, None]) -> str:
+    """Safely get the value from an enum or return the string directly.
+
+    IMPORTANT: Check Enum BEFORE str because string enums (class X(str, Enum))
+    satisfy both isinstance(obj, str) and isinstance(obj, Enum), but we need
+    to use .value for correct extraction.
+    """
+    if obj is None:
+        return ""
+    # Check Enum FIRST - string enums (str, Enum) satisfy both str and Enum checks
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, str):
+        return obj
+    if hasattr(obj, 'value'):
+        return obj.value
+    return str(obj)
 
 
 # Collection name constant
@@ -323,8 +343,8 @@ class StructuralCollectionService:
                 "tenant_id": tenant_id,
                 "connector_id": connector_id or "",
 
-                "semantic_type": metadata.semantic_type.value if metadata.semantic_type else "",
-                "domain": metadata.domain.value if metadata.domain else "",
+                "semantic_type": _get_enum_value(metadata.semantic_type),
+                "domain": _get_enum_value(metadata.domain),
                 "importance": metadata.importance,
 
                 "folder_path": metadata.folder_path or "",
@@ -333,18 +353,18 @@ class StructuralCollectionService:
 
                 "structural_description": metadata.structural_description or "",
 
-                # Key properties
-                "prop_title": metadata.key_properties.get("title", ""),
-                "prop_client": metadata.key_properties.get("client", ""),
-                "prop_year": metadata.key_properties.get("year", ""),
-                "prop_author": metadata.key_properties.get("author", ""),
-                "prop_version": metadata.key_properties.get("version", ""),
-                "prop_status": metadata.key_properties.get("status", ""),
+                # Key properties (ensure all are strings)
+                "prop_title": str(metadata.key_properties.get("title", "") or ""),
+                "prop_client": str(metadata.key_properties.get("client", "") or ""),
+                "prop_year": str(metadata.key_properties.get("year", "") or ""),
+                "prop_author": str(metadata.key_properties.get("author", "") or ""),
+                "prop_version": str(metadata.key_properties.get("version", "") or ""),
+                "prop_status": str(metadata.key_properties.get("status", "") or ""),
 
-                # Folder semantics
-                "folder_department": metadata.folder_semantics.get("department", ""),
-                "folder_purpose": metadata.folder_semantics.get("purpose", ""),
-                "folder_confidentiality": metadata.folder_semantics.get("confidentiality", ""),
+                # Folder semantics (access attributes directly, not via .get())
+                "folder_department": metadata.folder_semantics.department if metadata.folder_semantics else "",
+                "folder_purpose": getattr(metadata.folder_semantics, 'purpose', "") if metadata.folder_semantics else "",
+                "folder_confidentiality": getattr(metadata.folder_semantics, 'confidentiality', "") if metadata.folder_semantics else "",
 
                 # Temporal
                 "valid_from": now,
@@ -608,6 +628,84 @@ class StructuralCollectionService:
             tenant_id=tenant_id,
             updates={"valid_to": datetime.utcnow()},
         )
+
+    async def clear_collection(self, tenant_id: Optional[str] = None) -> bool:
+        """
+        Clear structural metadata from the collection.
+
+        Args:
+            tenant_id: If provided, only clear data for that tenant.
+                      Otherwise, clear all data in the collection.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        await self.initialize()
+
+        try:
+            if tenant_id:
+                # Delete only for specific tenant
+                Filter = weaviate.classes.query.Filter
+                self._collection.data.delete_many(
+                    where=Filter.by_property("tenant_id").equal(tenant_id)
+                )
+                logger.info(f"✅ Cleared structural collection for tenant {tenant_id}")
+            else:
+                # Clear entire collection by deleting and recreating
+                self._client.collections.delete(STRUCTURAL_DOCUMENTS_COLLECTION)
+                self._initialized = False
+                self._collection = None
+                await self._create_collection()
+                logger.info("✅ Cleared and recreated entire structural collection")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to clear structural collection: {e}")
+            return False
+
+    async def get_all_document_ids(
+        self,
+        tenant_id: Optional[str] = None,
+        limit: int = 10000,
+    ) -> List[str]:
+        """
+        Get all document IDs in the collection.
+
+        Args:
+            tenant_id: Optional tenant filter
+            limit: Maximum number of IDs to return
+
+        Returns:
+            List of document IDs
+        """
+        await self.initialize()
+
+        try:
+            # Build filter
+            combined_filter = None
+            if tenant_id:
+                Filter = weaviate.classes.query.Filter
+                combined_filter = Filter.by_property("tenant_id").equal(tenant_id)
+
+            # Fetch objects with only document_id
+            results = self._collection.query.fetch_objects(
+                limit=limit,
+                filters=combined_filter,
+                return_properties=["document_id"],
+            )
+
+            doc_ids = []
+            for obj in results.objects:
+                doc_id = obj.properties.get("document_id")
+                if doc_id:
+                    doc_ids.append(doc_id)
+
+            return doc_ids
+
+        except Exception as e:
+            logger.error(f"Failed to get document IDs from collection: {e}")
+            return []
 
     async def get_collection_stats(self, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """Get statistics about the structural collection."""

@@ -10,10 +10,15 @@ import { useTranslation } from "@/lib/i18n/hooks"
 import { useRouter } from "next/navigation"
 import { EmmaQueryInput } from "./EmmaQueryInput"
 import { EmmaRenderChat } from "./EmmaRenderChat"
+import { PDFPreviewModal, PreviewDocument } from "./displays/Document/PDFPreviewModal"
 import { toast } from "sonner"
 import { ToastProvider } from "@/contexts/ToastContext"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Brain, Zap } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
-import { EmmaMessage, WorkflowStep } from "./types"
+import { EmmaMessage, WorkflowStep, DelegationInfo, ProgressStage } from "./types"
 
 
 interface EmmaChatProps {
@@ -46,6 +51,11 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
   const [messages, setMessages] = useState<EmmaMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deepReasoning, setDeepReasoning] = useState(false) // Fast mode by default
+
+  // PDF Preview Modal state
+  const [previewDoc, setPreviewDoc] = useState<PreviewDocument | null>(null)
+  const [showPreviewModal, setShowPreviewModal] = useState(false)
   // Persist conversationId in sessionStorage to maintain context across component remounts
   // When documentId is provided, create a new conversation specific to that document
   const [conversationId] = useState(() => {
@@ -139,6 +149,7 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
           session_id: conversationId,
           tenant_id: tenantId,
           enable_debug: isAdmin,
+          deep_reasoning: deepReasoning,
           context
         },
         (event: EmmaStreamEvent) => {
@@ -263,8 +274,170 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
             ))
           }
 
-          // Handle other progress events (planning, consolidating, etc.)
-          if (!['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error'].includes(event.event)) {
+          // Handle delegation events (when Emma uses tools)
+          if (event.event === 'delegation') {
+            const newDelegation: DelegationInfo = {
+              agent: data.agent || data.tool || 'unknown',
+              message: data.message || `Usando ${data.agent || data.tool}...`,
+              elapsedMs: data.elapsed_ms,
+              timestamp: new Date()
+            }
+
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    metadata: {
+                      ...msg.metadata,
+                      delegations: [
+                        ...(msg.metadata?.delegations || []),
+                        newDelegation
+                      ]
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle SIL fast path answer (structural query)
+          if (event.event === 'sil_answer') {
+            setStreamProgress({
+              message: "Respuesta estructural SIL",
+              progress: 90
+            })
+
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    content: data.content || msg.content,
+                    metadata: {
+                      ...msg.metadata,
+                      stage: 'generating' as ProgressStage,
+                      stageMessage: 'Respuesta via SIL',
+                      process_info: data.process_info,
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle tool_call events (Emma v2)
+          if (event.event === 'tool_call') {
+            const newDelegation: DelegationInfo = {
+              agent: data.name || 'tool',
+              message: `Ejecutando ${data.name}...`,
+              timestamp: new Date()
+            }
+
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    metadata: {
+                      ...msg.metadata,
+                      delegations: [
+                        ...(msg.metadata?.delegations || []),
+                        newDelegation
+                      ],
+                      process_info: data.process_info || msg.metadata?.process_info,
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle tool_result events (Emma v2)
+          if (event.event === 'tool_result') {
+            // Update the last delegation with result
+            setMessages(prev => prev.map(msg => {
+              if (msg.id !== progressMessageId) return msg
+
+              const delegations = msg.metadata?.delegations || []
+              const lastIdx = delegations.findIndex(d => d.agent === data.name)
+
+              if (lastIdx >= 0 && data.process_info?.active_tools?.[0]) {
+                const toolInfo = data.process_info.active_tools[0]
+                delegations[lastIdx] = {
+                  ...delegations[lastIdx],
+                  elapsedMs: toolInfo.elapsed_ms,
+                  message: toolInfo.status === 'completed' ? 'Completado' : toolInfo.message
+                }
+              }
+
+              return {
+                ...msg,
+                metadata: {
+                  ...msg.metadata,
+                  delegations,
+                  process_info: {
+                    ...(msg.metadata?.process_info || {}),
+                    ...data.process_info,
+                  },
+                }
+              }
+            }))
+          }
+
+          // Handle progress events with stage
+          if (event.event === 'progress' && data.stage) {
+            setStreamProgress({
+              message: data.message || `Procesando...`,
+              progress: data.progress || 0
+            })
+
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    content: data.message || msg.content,
+                    metadata: {
+                      ...msg.metadata,
+                      stage: data.stage as ProgressStage,
+                      stageMessage: data.message,
+                      progress: data.progress
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle first_token event (transition to streaming mode)
+          if (event.event === 'first_token') {
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    metadata: {
+                      ...msg.metadata,
+                      stage: 'generating' as ProgressStage,
+                      stageMessage: 'Generando respuesta...',
+                      streamingText: data.text || '',
+                      isStreaming: true
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle token events (streaming text)
+          if (event.event === 'token') {
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    metadata: {
+                      ...msg.metadata,
+                      streamingText: (msg.metadata?.streamingText || '') + (data.text || data.token || ''),
+                      isStreaming: true
+                    }
+                  }
+                : msg
+            ))
+          }
+
+          // Handle other progress events (planning, consolidating, etc.) - fallback
+          if (!['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'delegation', 'token', 'first_token'].includes(event.event) && !data.stage) {
             setStreamProgress({
               message: data.message || `Procesando...`,
               progress: data.progress || 0
@@ -320,29 +493,49 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
           }
 
           // Handle completion
-          if (event.event === 'complete') {
+          if (event.event === 'complete' || event.event === 'done') {
             setStreamProgress(null)
 
             // Replace progress message with final result
-            setMessages(prev => prev.map(msg =>
-              msg.id === progressMessageId
-                ? {
-                    ...msg,
-                    type: "result" as const,
-                    content: extractAnswer(data.answer || data.final_result?.summary || "Análisis completado"),
-                    metadata: {
-                      confidence_score: data.final_result?.confidence_score || data.confidence_score || 0.7,
-                      processing_time: data.execution_time_ms,
-                      execution_time_ms: data.execution_time_ms,
-                      decision_path: data.final_result?.decision_path || data.decision_path || [],
-                      tools_used: data.final_result?.tools_used || data.tools_used || [],
-                      agent_flow: workflowSteps.map(s => s.agent),
-                      suggestions: getContextualSuggestions(data),
-                      debug_data: isAdmin ? { ...data, workflow_steps: workflowSteps } : undefined
-                    }
-                  }
-                : msg
-            ))
+            setMessages(prev => prev.map(msg => {
+              if (msg.id !== progressMessageId) return msg
+
+              // Get result data - handle both v1 and v2 response formats
+              const resultData = data.result || data
+
+              // Use streaming text as content if available, otherwise extract from data
+              const finalContent = msg.metadata?.streamingText ||
+                extractAnswer(resultData.answer || data.answer || data.final_result?.summary || "Analisis completado")
+
+              // Merge process_info from event and accumulated during streaming
+              const processInfo = resultData.process_info || data.process_info || msg.metadata?.process_info
+
+              return {
+                ...msg,
+                type: "result" as const,
+                content: finalContent,
+                metadata: {
+                  confidence_score: data.final_result?.confidence_score || resultData.confidence_score || data.confidence_score || 0.7,
+                  processing_time: resultData.latency_ms || data.execution_time_ms,
+                  execution_time_ms: resultData.latency_ms || data.execution_time_ms,
+                  decision_path: data.final_result?.decision_path || resultData.decision_path || data.decision_path || [],
+                  tools_used: resultData.tools_called || data.final_result?.tools_used || data.tools_used || [],
+                  agent_flow: workflowSteps.length > 0
+                    ? workflowSteps.map(s => s.agent)
+                    : msg.metadata?.delegations?.map(d => d.agent) || resultData.tools_called || [],
+                  suggestions: getContextualSuggestions(data),
+                  debug_data: isAdmin ? { ...data, workflow_steps: workflowSteps, delegations: msg.metadata?.delegations } : undefined,
+                  // Process info for AgentProcessPanel
+                  process_info: processInfo,
+                  // Clear streaming state
+                  streamingText: undefined,
+                  isStreaming: false,
+                  delegations: undefined,
+                  stage: undefined,
+                  stageMessage: undefined
+                }
+              }
+            }))
 
             setIsLoading(false)
           }
@@ -397,7 +590,7 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
 
       setIsLoading(false)
     }
-  }, [backendUser?.id, tenantId, isLoading, queryEmmaStream, conversationId, documentId, isAdmin, messages.length, onFirstQuery, t])
+  }, [backendUser?.id, tenantId, isLoading, queryEmmaStream, conversationId, documentId, isAdmin, messages.length, onFirstQuery, t, deepReasoning])
 
   // Expose sendQuery method via ref
   // Handle document interactions
@@ -443,13 +636,17 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
   }, [documentService, tenantId, router, setIsLoading])
 
   const handlePreviewClick = useCallback((doc: any) => {
-    // TODO: Implement document preview (modal, iframe, etc.)
-    console.log('Preview clicked:', doc)
-    if (doc.previewUrl) {
-      window.open(doc.previewUrl, '_blank')
-    } else {
-      toast(`Vista previa de: ${doc.name}`)
+    // Open PDF preview modal
+    const previewDocument: PreviewDocument = {
+      name: doc.name,
+      id: doc.id,
+      url: doc.url,
+      previewUrl: doc.previewUrl,
+      fileType: doc.fileType || (doc.name?.toLowerCase().endsWith('.pdf') ? 'pdf' : undefined),
+      relevanceScore: doc.relevanceScore,
     }
+    setPreviewDoc(previewDocument)
+    setShowPreviewModal(true)
   }, [])
 
   useImperativeHandle(ref, () => ({
@@ -591,15 +788,79 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
 
         {/* Query Input always at bottom */}
         <div className="border-t bg-background p-4 pb-6">
+          {/* Deep Reasoning Toggle */}
+          <TooltipProvider>
+            <div className="flex items-center justify-end gap-2 mb-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2">
+                    <Zap className={cn(
+                      "h-4 w-4 transition-colors",
+                      !deepReasoning ? "text-yellow-500" : "text-muted-foreground"
+                    )} />
+                    <Label
+                      htmlFor="deep-reasoning"
+                      className={cn(
+                        "text-xs cursor-pointer select-none transition-colors",
+                        !deepReasoning ? "text-foreground" : "text-muted-foreground"
+                      )}
+                    >
+                      Rapido
+                    </Label>
+                    <Switch
+                      id="deep-reasoning"
+                      checked={deepReasoning}
+                      onCheckedChange={setDeepReasoning}
+                      disabled={isLoading}
+                      className="data-[state=checked]:bg-purple-600"
+                    />
+                    <Label
+                      htmlFor="deep-reasoning"
+                      className={cn(
+                        "text-xs cursor-pointer select-none transition-colors",
+                        deepReasoning ? "text-foreground" : "text-muted-foreground"
+                      )}
+                    >
+                      Profundo
+                    </Label>
+                    <Brain className={cn(
+                      "h-4 w-4 transition-colors",
+                      deepReasoning ? "text-purple-500" : "text-muted-foreground"
+                    )} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold mb-1">
+                    {deepReasoning ? "Modo Profundo" : "Modo Rapido"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {deepReasoning
+                      ? "Analisis exhaustivo con razonamiento detallado. Ideal para contratos, cumplimiento y analisis legal."
+                      : "Respuestas rapidas y directas. Ideal para busquedas simples y consultas generales."
+                    }
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+
           <EmmaQueryInput
             onSendQuery={handleSendQuery}
             isLoading={isLoading}
             disabled={!backendUser?.id}
-            placeholder="Pregúntame sobre tus documentos... (usa @ para mencionar entidades)"
+            placeholder="Preguntame sobre tus documentos... (usa @ para mencionar entidades)"
             documentId={documentId || "general"}
             enableMentions={enableMentions}
           />
         </div>
+
+        {/* PDF Preview Modal */}
+        <PDFPreviewModal
+          document={previewDoc}
+          open={showPreviewModal}
+          onOpenChange={setShowPreviewModal}
+          tenantId={tenantId}
+        />
       </div>
     </ToastProvider>
   )

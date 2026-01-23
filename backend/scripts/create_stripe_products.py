@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create Stripe Products and Prices for NexusDocs360
+Create Stripe Products and Prices for NouxCubeIA
 This script creates the products in Stripe with proper trial configuration
 """
 
@@ -37,7 +37,7 @@ else:
 # Product definitions
 PRODUCTS = {
     "basic": {
-        "name": "NexusDocs360 Basic",
+        "name": "NouxCubeIA Basic",
         "description": "Plan esencial para uso personal",
         "metadata": {
             "plan_id": "basic",
@@ -48,7 +48,7 @@ PRODUCTS = {
         }
     },
     "pro": {
-        "name": "NexusDocs360 Pro",
+        "name": "NouxCubeIA Pro",
         "description": "Plan profesional para equipos en crecimiento",
         "metadata": {
             "plan_id": "pro",
@@ -197,7 +197,7 @@ def create_or_update_price(product, price_type, price_data):
 
 def main():
     """Main function to create all products and prices"""
-    print("🚀 Creating Stripe products and prices for NexusDocs360...")
+    print("🚀 Creating Stripe products and prices for NouxCubeIA...")
     print(f"   Using Stripe API in {'TEST' if 'test' in stripe.api_key else 'LIVE'} mode")
     print("")
     

@@ -277,6 +277,9 @@ class EmmaCoordinator:
             # Core RAG - fetch and analyze documents
             'get_document_content',
             'analyze_document',
+            # SIL - Structural Intelligence Layer for counting, listing, metadata queries
+            # Answers structural questions without reading document content (saves 70%+ tokens)
+            'sil_query',
             # HITL clarification (essential for user interaction)
             'ask_user_clarification',
             'ask_confirmation',
@@ -412,17 +415,29 @@ class EmmaCoordinator:
         MAX_HISTORY_SIZE = 500000  # 500KB total
         MAX_MESSAGES = 20  # Keep last 20 messages (10 turns)
 
-        # Truncate individual messages if too long
+        # Validate and truncate messages
+        # IMPORTANT: Only save messages with valid role AND content for Qwen-Agent compatibility
         truncated_messages = []
         for msg in messages:
             if isinstance(msg, dict):
+                role = msg.get('role', '')
                 content = msg.get('content', '')
+
+                # Skip messages without role or content (Qwen-Agent requires both)
+                if not role or not content:
+                    logger.warning(f"⚠️ Skipping invalid message (missing role or content): role={role}")
+                    continue
+
+                # Only keep user/assistant/system roles
+                if role not in ('user', 'assistant', 'system'):
+                    logger.warning(f"⚠️ Skipping message with unsupported role: {role}")
+                    continue
+
                 if isinstance(content, str) and len(content) > MAX_CONTENT_SIZE:
                     logger.warning(f"⚠️ Truncating large message ({len(content)} chars)")
-                    msg = {**msg, 'content': content[:MAX_CONTENT_SIZE] + '... [truncated]'}
-                truncated_messages.append(msg)
-            else:
-                truncated_messages.append(msg)
+                    content = content[:MAX_CONTENT_SIZE] + '... [truncated]'
+
+                truncated_messages.append({'role': role, 'content': content})
 
         # Keep only last N messages
         if len(truncated_messages) > MAX_MESSAGES:
@@ -583,6 +598,16 @@ class EmmaCoordinator:
         """
         # Load or create message history (this is where context lives!)
         message_history, is_new_session = await self._load_message_history_with_status(tenant_id, session_id)
+
+        # DEBUG: Log loaded message history contents for debugging follow-up issues
+        logger.info(f"📜 HISTORY LOADED: {len(message_history)} messages, is_new={is_new_session}")
+        for i, msg in enumerate(message_history):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            name = msg.get('name', '')
+            has_fc = bool(msg.get('function_call'))
+            content_preview = content[:100] + '...' if len(content) > 100 else content
+            logger.info(f"  📜 [{i}] role={role}, name={name}, has_function_call={has_fc}, content={content_preview}")
 
         # Build context-aware query with user info for new sessions
         full_query = self._build_query_with_context(
@@ -901,19 +926,22 @@ class EmmaCoordinator:
         # Add document context if user is asking about a specific document
         if user_context and user_context.get("document_id"):
             doc_id = user_context.get("document_id")
+            doc_title = user_context.get("document_title", "Document")
             context_parts.append(f"[Focus Document ID: {doc_id}]")
 
             # Include document content for direct analysis (avoids extra LLM calls)
             if user_context.get("document_content"):
                 doc_content = user_context.get("document_content")
-                doc_title = user_context.get("document_title", "Document")
-                # Truncate if too long (max 4000 chars for context)
-                if len(doc_content) > 4000:
-                    doc_content = doc_content[:4000] + "... [truncated]"
-                context_parts.append(f"[Document: {doc_title}]\n{doc_content}")
+                # Truncate if too long (max 12000 chars for context to fit vLLM limits)
+                if len(doc_content) > 12000:
+                    doc_content = doc_content[:12000] + "\n... [contenido truncado, usar analyze_document para análisis completo]"
+                context_parts.append(f"[Document: {doc_title}]\n---CONTENIDO DEL DOCUMENTO---\n{doc_content}\n---FIN DEL DOCUMENTO---\n\n[INSTRUCCIÓN: Analiza este documento REAL. Extrae información ESPECÍFICA del contenido anterior. NO uses texto genérico ni placeholders.]")
+            elif user_context.get("document_too_large"):
+                # Document too large for context - instruct to use analyze_document tool
+                context_parts.append(f"[Document: {doc_title}]\n[INSTRUCCIÓN: El documento es demasiado grande para incluir en el contexto. USA la herramienta analyze_document con document_id='{doc_id}' para analizarlo.]")
             else:
-                # Fallback instruction for tools
-                context_parts.append(f"[IMPORTANT: When analyzing this document, use document_id='{doc_id}']")
+                # Document content not loaded - instruct to use analyze_document tool
+                context_parts.append(f"[IMPORTANT: El contenido del documento no está disponible. USA la herramienta analyze_document con document_id='{doc_id}' para obtener y analizar el contenido.]")
 
         # Add user personalization
         if user_context:
@@ -1031,7 +1059,19 @@ class EmmaCoordinator:
                 logger.info("⚡ Fast mode ENABLED (/no_think)")
 
             # Build messages for Qwen-Agent
-            messages = message_history + [{'role': 'user', 'content': reasoning_query}]
+            # IMPORTANT: Qwen-Agent requires ALL messages to have 'content' field
+            # Filter out any invalid messages from history to prevent Message.__init__() errors
+            valid_history = []
+            for msg in message_history:
+                if isinstance(msg, dict) and msg.get('role') and msg.get('content'):
+                    # Only include user/assistant messages with content
+                    if msg['role'] in ('user', 'assistant', 'system'):
+                        valid_history.append({'role': msg['role'], 'content': msg['content']})
+                else:
+                    logger.warning(f"⚠️ Skipping invalid message in history: role={msg.get('role')}, has_content={bool(msg.get('content'))}")
+
+            messages = valid_history + [{'role': 'user', 'content': reasoning_query}]
+            logger.info(f"📤 Sending {len(messages)} messages to Emma (filtered from {len(message_history)} history + 1 new)")
 
             # Process Emma's response using Qwen-Agent's run() generator
             # IMPORTANT: Qwen-Agent's run() is SYNCHRONOUS and blocks the event loop.
@@ -1043,6 +1083,8 @@ class EmmaCoordinator:
             first_token_emitted = False
             previous_clean_content = ""
             final_answer = ""
+            # Collect all conversation messages for history (including tool calls/results)
+            conversation_messages = []
 
             # Thread-safe queue for passing events from sync generator to async generator
             event_queue: queue.Queue = queue.Queue()
@@ -1137,6 +1179,13 @@ class EmmaCoordinator:
                     break
                 elif event_type == "message":
                     msg = data
+                    msg_role = msg.get('role', '')
+
+                    # Collect messages for history (tool calls and results contain important context)
+                    # Include: assistant (with tool calls), function/tool (tool results)
+                    if msg_role in ('assistant', 'function', 'tool'):
+                        conversation_messages.append(msg)
+                        logger.info(f"📝 Collected message for history: role={msg_role}, has_content={bool(msg.get('content'))}, has_function_call={bool(msg.get('function_call'))}")
 
                     # Track tool calls (delegations)
                     if msg.get('function_call'):
@@ -1214,8 +1263,48 @@ class EmmaCoordinator:
                 logger.info("🚫 Skipping completion - error already sent")
                 return
 
-            # Build updated message history with assistant response
-            updated_history = messages + [{'role': 'assistant', 'content': final_answer}]
+            # Build updated message history - SIMPLE FORMAT for Qwen-Agent compatibility
+            # Only use 'user' and 'assistant' roles to avoid Qwen-Agent Message parsing issues
+            # Extract document context from tool results and embed in assistant message
+
+            # Extract document names from tool results for context preservation
+            document_context = []
+            logger.info(f"📊 Processing {len(conversation_messages)} conversation messages for context extraction")
+            for msg in conversation_messages:
+                role = msg.get('role', '')
+                content = msg.get('content', '')
+                if role in ('function', 'tool') and content:
+                    # Try to extract document names from JSON results
+                    try:
+                        result_data = json.loads(content)
+                        if '_document_names' in result_data:
+                            document_context.extend(result_data['_document_names'])
+                            logger.info(f"📝 Extracted document names: {result_data['_document_names']}")
+                        elif 'results' in result_data:
+                            for doc in result_data.get('results', [])[:10]:
+                                if doc.get('title'):
+                                    document_context.append(doc['title'])
+                            logger.info(f"📝 Extracted {len(document_context)} document titles from results")
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Not JSON, skip
+
+            # Build history with only user/assistant messages (Qwen-Agent compatible)
+            updated_history = messages.copy()
+
+            # If we found documents, prepend context to assistant answer for follow-up support
+            if document_context and final_answer:
+                context_note = f"[Documentos encontrados: {', '.join(document_context[:10])}]\n\n"
+                # Only add context if not already in the answer
+                if not any(doc in final_answer for doc in document_context[:3]):
+                    final_answer_with_context = context_note + final_answer
+                else:
+                    final_answer_with_context = final_answer
+                updated_history.append({'role': 'assistant', 'content': final_answer_with_context})
+                logger.info(f"📚 Added assistant response with {len(document_context)} document context items")
+            else:
+                updated_history.append({'role': 'assistant', 'content': final_answer})
+
+            logger.info(f"💾 Saving history with {len(updated_history)} total messages (prev={len(messages)}, doc_context={len(document_context)}, answer=1)")
 
             # Save updated message history
             await self._save_message_history(updated_history, tenant_id, session_id)

@@ -10,7 +10,7 @@ import logging
 
 from app.api.async_dependencies import get_current_active_superuser_async
 from app.db.async_database import get_async_db
-from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView
+from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView, IndexedDocument
 from sqlalchemy import text
 from app.schemas.user import UserUpdate, UserResponse
 from app.services.async_document_service import AsyncDocumentService
@@ -200,36 +200,71 @@ async def get_system_stats(
     result = await db.execute(stmt)
     active_tenants = result.scalar() or 0
     
-    # Contar documentos
+    # Contar documentos - from Document table (direct uploads)
     stmt = select(func.count(Document.id))
     result = await db.execute(stmt)
-    total_documents = result.scalar() or 0
-    
+    total_docs = result.scalar() or 0
+
     stmt = select(func.count(Document.id)).filter(Document.indexed == 1)
     result = await db.execute(stmt)
-    indexed_documents = result.scalar() or 0
-    
+    indexed_docs = result.scalar() or 0
+
     stmt = select(func.count(Document.id)).filter(Document.indexed == 2)
     result = await db.execute(stmt)
-    error_documents = result.scalar() or 0
-    
-    # Calcular tamaño total de almacenamiento
+    error_docs = result.scalar() or 0
+
+    # Contar documentos - from IndexedDocument table (connector documents)
+    stmt = select(func.count(IndexedDocument.id))
+    result = await db.execute(stmt)
+    total_indexed_docs = result.scalar() or 0
+
+    stmt = select(func.count(IndexedDocument.id)).filter(IndexedDocument.indexing_status == 'indexed')
+    result = await db.execute(stmt)
+    indexed_indexed_docs = result.scalar() or 0
+
+    stmt = select(func.count(IndexedDocument.id)).filter(IndexedDocument.indexing_status == 'failed')
+    result = await db.execute(stmt)
+    error_indexed_docs = result.scalar() or 0
+
+    # Combined totals
+    total_documents = total_docs + total_indexed_docs
+    indexed_documents = indexed_docs + indexed_indexed_docs
+    error_documents = error_docs + error_indexed_docs
+
+    # Calcular tamaño total de almacenamiento - from both tables
     stmt = select(func.sum(Document.file_size))
     result = await db.execute(stmt)
-    storage_size = result.scalar() or 0
-    
-    # Contar documentos por tipo
+    storage_docs = result.scalar() or 0
+
+    stmt = select(func.sum(IndexedDocument.size_bytes))
+    result = await db.execute(stmt)
+    storage_indexed = result.scalar() or 0
+
+    storage_size = storage_docs + storage_indexed
+
+    # Contar documentos por tipo - combine from both tables
     stmt = select(
-        Document.file_type, 
+        Document.file_type,
         func.count(Document.id)
     ).group_by(Document.file_type)
     result = await db.execute(stmt)
     doc_types = result.all()
-    
-    doc_type_stats = {
-        file_type: count for file_type, count in doc_types
-    }
-    
+
+    stmt = select(
+        IndexedDocument.file_extension,
+        func.count(IndexedDocument.id)
+    ).group_by(IndexedDocument.file_extension)
+    result = await db.execute(stmt)
+    indexed_doc_types = result.all()
+
+    # Merge type counts
+    from collections import defaultdict
+    doc_type_stats = defaultdict(int)
+    for file_type, count in doc_types:
+        doc_type_stats[file_type] += count
+    for file_ext, count in indexed_doc_types:
+        doc_type_stats[file_ext] += count
+
     return {
         "users": {
             "total": total_users,
@@ -243,7 +278,11 @@ async def get_system_stats(
             "total": total_documents,
             "indexed": indexed_documents,
             "error": error_documents,
-            "by_type": doc_type_stats
+            "by_type": dict(doc_type_stats),
+            "breakdown": {
+                "uploads": total_docs,
+                "connectors": total_indexed_docs
+            }
         },
         "storage": {
             "total_bytes": storage_size,
@@ -352,7 +391,7 @@ async def delete_all_documents(
         from app.services.weaviate_client import weaviate_client
 
         # Delete collection if exists
-        collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
         try:
             # Weaviate client doesn't have a delete_collection method yet
             # This would need to be implemented in the microservice
@@ -416,7 +455,7 @@ async def clear_vector_database(
     try:
         from app.services.weaviate_client import weaviate_client
 
-        collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
         collections_cleared = []
 
         # Delete and recreate collection

@@ -1,5 +1,5 @@
 """
-Feature Flags System for NexusDocs360.
+Feature Flags System for NouxCubeIA.
 
 This module provides centralized control over which features are enabled/disabled.
 Designed to support the transition from SaaS to on-premise Emma-centric deployment.

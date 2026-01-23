@@ -598,6 +598,545 @@ async def learning_get_ranking_weights(
 # WEAVIATE SERVICE HEALTH
 # ============================================================================
 
+# ============================================================================
+# STRUCTURAL INTELLIGENCE LAYER (SIL) ENDPOINTS
+# ============================================================================
+
+@router.post("/sil/query")
+async def sil_query(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Process a query through the Structural Intelligence Layer.
+
+    SIL analyzes queries and determines if they can be answered structurally
+    (without reading document content) or if RAG is needed.
+
+    Returns:
+    - Direct answer for structural queries (count, exists, location)
+    - Structural context for augmented RAG
+    - Target documents for focused RAG
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+
+        return await weaviate_client.sil_query(body)
+    except HTTPClientError as e:
+        logger.error(f"❌ SIL query error: {e}")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="SIL query timeout")
+    except Exception as e:
+        logger.error(f"❌ SIL query proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sil/structure/{document_id}")
+async def sil_get_structure(
+    document_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get structural metadata for a specific document"""
+    try:
+        return await weaviate_client.sil_get_structure(document_id, tenant_id)
+    except HTTPClientError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found in SIL")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL get structure proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sil/graph/stats")
+async def sil_graph_stats(
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Get statistics about the structural graph.
+
+    Returns total documents, folders, breakdown by semantic type, etc.
+    """
+    try:
+        return await weaviate_client.sil_graph_stats(tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL graph stats proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sil/search-structural")
+async def sil_search_structural(
+    query: str,
+    limit: int = 10,
+    semantic_type: Optional[str] = None,
+    domain: Optional[str] = None,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """
+    Search structural documents by semantic similarity.
+
+    This searches structural description embeddings, NOT document content.
+    Useful for finding documents by their structural characteristics.
+    """
+    try:
+        return await weaviate_client.sil_search_structural(
+            query=query,
+            tenant_id=tenant_id,
+            limit=limit,
+            semantic_type=semantic_type,
+            domain=domain
+        )
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL search structural proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sil/folder/{folder_path:path}")
+async def sil_get_folder_contents(
+    folder_path: str,
+    include_subfolders: bool = False,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get contents of a structural folder"""
+    try:
+        return await weaviate_client.sil_get_folder_contents(
+            folder_path=folder_path,
+            tenant_id=tenant_id,
+            include_subfolders=include_subfolders
+        )
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL folder contents proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sil/related/{document_id}")
+async def sil_get_related_documents(
+    document_id: str,
+    relationship_type: Optional[str] = None,
+    max_depth: int = 2,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get documents related to a given document through the structural graph"""
+    try:
+        return await weaviate_client.sil_get_related_documents(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            relationship_type=relationship_type,
+            max_depth=max_depth
+        )
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL related documents proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sil/graph/document-ids")
+async def sil_get_document_ids(
+    limit: int = 10000,
+    tenant_id: str = Depends(get_current_tenant_id_async)
+):
+    """Get list of document IDs already indexed in the SIL graph"""
+    try:
+        return await weaviate_client.sil_get_document_ids(tenant_id=tenant_id, limit=limit)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL document IDs proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# SIL ADMIN ENDPOINTS (requires admin permissions)
+# ============================================================================
+
+@router.post("/sil/index-structural")
+async def sil_index_structural(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Index structural metadata for a document.
+
+    Admin endpoint - typically called during document indexing.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        return await weaviate_client.sil_index_structural(body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL index structural proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sil/structure/{document_id}")
+async def sil_mark_document_removed(
+    document_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Mark a document as removed in the structural graph (admin only)"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        return await weaviate_client.sil_mark_document_removed(document_id, tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL mark removed proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sil/graph/clear")
+async def sil_clear_graph(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Clear the structural graph for the current tenant.
+
+    WARNING: This is a destructive operation. All structural metadata will be deleted.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        logger.warning(f"🚨 Admin {current_user.id} clearing SIL graph for tenant {tenant_id}")
+        return await weaviate_client.sil_clear_graph(tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SIL clear graph proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sil/reindex")
+async def sil_reindex(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Re-index documents to the structural graph.
+
+    Modes:
+    - full_reindex=true: Clear graph and re-index ALL documents
+    - full_reindex=false: Only index NEW documents not in graph
+
+    Admin only. For large datasets, this may take several minutes.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+
+        logger.info(
+            f"🔄 Admin {current_user.id} starting SIL reindex | "
+            f"tenant={tenant_id} full={body.get('full_reindex', False)}"
+        )
+
+        return await weaviate_client.sil_reindex(body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="Reindex timeout - operation may still be running")
+    except Exception as e:
+        logger.error(f"❌ SIL reindex proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# BOE LEGISLATION ENDPOINTS (Public Knowledge Indexing)
+# ============================================================================
+
+@router.get("/boe/presets")
+async def boe_list_presets():
+    """List available BOE legislation presets (categories)"""
+    try:
+        return await weaviate_client.boe_list_presets()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE list presets proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/boe/presets/{preset_name}")
+async def boe_get_preset(preset_name: str):
+    """Get details of a specific BOE preset"""
+    try:
+        return await weaviate_client.boe_get_preset(preset_name)
+    except HTTPClientError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Preset '{preset_name}' not found")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE get preset proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/boe/legislation/{boe_id}")
+async def boe_get_legislation_info(boe_id: str):
+    """Get information about a BOE legislation document (without downloading)"""
+    try:
+        return await weaviate_client.boe_get_legislation_info(boe_id)
+    except HTTPClientError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Legislation '{boe_id}' not found in BOE")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE legislation info proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/boe/search")
+async def boe_search(
+    query: str,
+    limit: int = 10
+):
+    """Search BOE for legislation (does not download or index)"""
+    try:
+        return await weaviate_client.boe_search(query=query, limit=limit)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE search proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/boe/all-legislation-ids")
+async def boe_get_all_legislation_ids():
+    """Get all BOE IDs across all presets (for bulk operations)"""
+    try:
+        return await weaviate_client.boe_get_all_legislation_ids()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE all legislation IDs proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# BOE Admin endpoints (require admin permissions)
+
+@router.post("/boe/download")
+async def boe_download_legislation(
+    request: Request,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Download and index a specific BOE legislation document.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+        boe_id = body.get("boe_id")
+        index = body.get("index_to_weaviate", True)
+
+        if not boe_id:
+            raise HTTPException(status_code=400, detail="boe_id is required")
+
+        logger.info(f"📥 Admin {current_user.id} downloading BOE legislation: {boe_id}")
+        return await weaviate_client.boe_download_legislation(boe_id, index=index)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="Download timeout - document may be too large")
+    except Exception as e:
+        logger.error(f"❌ BOE download proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/boe/download/preset")
+async def boe_download_preset(
+    request: Request,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Download all legislation in a preset category.
+    This can take a while for large presets.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+        preset = body.get("preset")
+        index = body.get("index_to_weaviate", True)
+
+        if not preset:
+            raise HTTPException(status_code=400, detail="preset is required")
+
+        logger.info(f"📥 Admin {current_user.id} downloading BOE preset: {preset}")
+        return await weaviate_client.boe_download_preset(preset, index=index)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="Download timeout - try with a smaller preset")
+    except Exception as e:
+        logger.error(f"❌ BOE preset download proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/boe/sync/{boe_id}")
+async def boe_sync_legislation(
+    boe_id: str,
+    force: bool = False,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Sync a specific legislation with BOE and detect article-level changes.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        logger.info(f"🔄 Admin {current_user.id} syncing BOE legislation: {boe_id}")
+        return await weaviate_client.boe_sync_legislation(boe_id, force=force)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="Sync timeout")
+    except Exception as e:
+        logger.error(f"❌ BOE sync proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/boe/sync/all")
+async def boe_sync_all(
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Sync all tracked legislation and detect changes.
+    This can take a while if many laws are tracked.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        logger.info(f"🔄 Admin {current_user.id} syncing all BOE legislation")
+        return await weaviate_client.boe_sync_all()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="Sync timeout - operation may still be running")
+    except Exception as e:
+        logger.error(f"❌ BOE sync all proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/boe/updates")
+async def boe_get_pending_updates(
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Get list of legislation with pending updates from BOE.
+    Admin only.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        return await weaviate_client.boe_get_pending_updates()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ BOE pending updates proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# PUBLIC KNOWLEDGE ENTITY EXTRACTION
+# ============================================================================
+
+@router.post("/public-knowledge/extract")
+async def public_knowledge_extract_entities(
+    limit: int = 100,
+    category: Optional[str] = None,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Extract knowledge entities from public documents into the Knowledge Graph.
+
+    Processes existing public documents (legislation, regulations, etc.) and extracts
+    entities like articles, terms, references, organizations, and dates.
+
+    These entities are stored in the Knowledge Graph for:
+    - Semantic search across entity types
+    - Entity-based queries ("¿Cuántas leyes hablan de vacaciones?")
+    - Relationship discovery between concepts
+
+    Parameters:
+    - limit: Maximum documents to process (default 100)
+    - category: Optional filter by category (legislation, regulation, etc.)
+
+    Admin only. Can take several minutes for large document sets.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        logger.info(
+            f"🧠 Admin {current_user.id} extracting knowledge from public documents | "
+            f"limit={limit} category={category}"
+        )
+        return await weaviate_client.public_knowledge_extract_entities(
+            limit=limit,
+            category=category
+        )
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Extraction timeout - operation may still be running"
+        )
+    except Exception as e:
+        logger.error(f"❌ Public knowledge extraction proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/public-knowledge/stats")
+async def public_knowledge_stats():
+    """Get public knowledge base statistics"""
+    try:
+        return await weaviate_client.public_knowledge_stats()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Public knowledge stats proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# WEAVIATE SERVICE HEALTH
+# ============================================================================
+
 @router.get("/health")
 async def weaviate_service_health():
     """Overall Weaviate service health including Emma AI"""

@@ -6,6 +6,8 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
+from app.core.enums import TeamRole
+
 # Team schemas (Tenant-based - one team per tenant)
 class TeamBase(BaseModel):
     """Base schema for team (tenant)"""
@@ -42,7 +44,7 @@ class TeamWithMembers(TeamResponse):
 class TeamMemberAdd(BaseModel):
     """Schema for inviting a new team member"""
     email: EmailStr = Field(..., description="Email address to invite")
-    role: str = Field(default="member", pattern="^(admin|member)$", description="Role: admin or member")
+    role: TeamRole = Field(default=TeamRole.MEMBER, description="Role: admin or member")
 
 
 class TeamInvitationCreate(BaseModel):

@@ -19,6 +19,7 @@ class ConnectorType(str, Enum):
     AZURE_BLOB = "azure_blob"
     NETWORK_SHARE = "network_share"  # SMB/CIFS
     ALFRESCO = "alfresco"  # Alfresco 7.x ECM
+    DATABASE = "database"  # Generic database BLOB storage
 
 
 class ConnectorAuthType(str, Enum):
@@ -288,6 +289,305 @@ class AlfrescoConfig(BaseModel):
                 parts.append(f'-PATH:"{exclude_path}"')
 
         return " AND ".join(parts)
+
+
+# =============================================================================
+# Database Connector Configuration (Multi-type support)
+# =============================================================================
+
+class DatabaseEngine(str, Enum):
+    """Supported database engines."""
+    POSTGRESQL = "postgresql"
+    MYSQL = "mysql"
+    MARIADB = "mariadb"
+    SQLITE = "sqlite"
+    MSSQL = "mssql"  # SQL Server
+    ORACLE = "oracle"
+
+
+class DocumentStorageType(str, Enum):
+    """How documents are stored in the database."""
+    BLOB = "blob"  # Binary data in a column
+    FILE_PATH = "file_path"  # Path to file on disk/network
+    URL = "url"  # URL to fetch document
+
+
+class DatabaseConfig(BaseModel):
+    """
+    Database connector configuration for extracting documents from RDBMS.
+
+    Supports multiple database engines via SQLAlchemy. Documents can be stored
+    as BLOBs, file paths, or URLs.
+
+    Example configurations:
+
+    PostgreSQL with BLOB storage:
+    {
+        "engine": "postgresql",
+        "host": "localhost",
+        "port": 5432,
+        "database": "documents_db",
+        "username": "reader",
+        "password": "secret",
+        "table_name": "documents",
+        "storage_type": "blob",
+        "column_mapping": {
+            "id": "doc_id",
+            "content": "file_data",
+            "filename": "original_filename",
+            "mime_type": "content_type",
+            "created_at": "created_date",
+            "modified_at": "updated_date"
+        }
+    }
+
+    MySQL with file path storage:
+    {
+        "engine": "mysql",
+        "host": "db.company.com",
+        "database": "fileserver",
+        "username": "sync_user",
+        "password": "secret",
+        "table_name": "file_metadata",
+        "storage_type": "file_path",
+        "file_base_path": "/mnt/documents",
+        "column_mapping": {
+            "id": "file_id",
+            "content": "relative_path",
+            "filename": "display_name",
+            "size": "file_size_bytes"
+        }
+    }
+
+    SQL Server with custom query:
+    {
+        "engine": "mssql",
+        "host": "sqlserver.local",
+        "database": "DocumentArchive",
+        "username": "sa",
+        "password": "secret",
+        "custom_query": "SELECT id, content, name FROM dbo.Archives WHERE status = 'active'",
+        "storage_type": "blob"
+    }
+    """
+    # Database connection
+    engine: DatabaseEngine = Field(
+        ...,
+        description="Database engine type"
+    )
+    host: str = Field(
+        ...,
+        description="Database host"
+    )
+    port: Optional[int] = Field(
+        None,
+        description="Database port (uses default for engine if not specified)"
+    )
+    database: str = Field(
+        ...,
+        description="Database name"
+    )
+    username: str = Field(
+        ...,
+        description="Database username"
+    )
+    password: str = Field(
+        ...,
+        description="Database password"
+    )
+    schema_name: Optional[str] = Field(
+        None,
+        description="Schema name (for PostgreSQL, SQL Server, Oracle)"
+    )
+
+    # SSL/TLS options
+    ssl_enabled: bool = Field(
+        default=False,
+        description="Enable SSL connection"
+    )
+    ssl_ca_cert: Optional[str] = Field(
+        None,
+        description="Path to CA certificate file"
+    )
+    ssl_verify: bool = Field(
+        default=True,
+        description="Verify SSL certificate"
+    )
+
+    # Table configuration (use either table_name OR custom_query)
+    table_name: Optional[str] = Field(
+        None,
+        description="Table containing documents"
+    )
+    custom_query: Optional[str] = Field(
+        None,
+        description="Custom SQL query to fetch documents (overrides table_name)"
+    )
+
+    # Storage type
+    storage_type: DocumentStorageType = Field(
+        default=DocumentStorageType.BLOB,
+        description="How document content is stored"
+    )
+    file_base_path: Optional[str] = Field(
+        None,
+        description="Base path for file_path storage type"
+    )
+
+    # Column mapping - maps our standard fields to actual column names
+    column_mapping: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "id": "id",
+            "content": "content",
+            "filename": "filename",
+            "mime_type": "mime_type",
+            "size": "size",
+            "created_at": "created_at",
+            "modified_at": "modified_at",
+        },
+        description="Map standard fields to actual column names"
+    )
+
+    # Optional columns for additional metadata
+    extra_columns: List[str] = Field(
+        default_factory=list,
+        description="Additional columns to extract as metadata"
+    )
+
+    # Filtering
+    where_clause: Optional[str] = Field(
+        None,
+        description="WHERE clause for filtering (without 'WHERE' keyword)"
+    )
+    order_by: Optional[str] = Field(
+        default="modified_at DESC",
+        description="ORDER BY clause for consistent pagination"
+    )
+
+    # Performance
+    batch_size: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description="Number of documents to fetch per batch"
+    )
+    timeout_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description="Query timeout in seconds"
+    )
+    max_blob_size_mb: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum BLOB size to process in MB"
+    )
+
+    def get_default_port(self) -> int:
+        """Get default port for the database engine."""
+        defaults = {
+            DatabaseEngine.POSTGRESQL: 5432,
+            DatabaseEngine.MYSQL: 3306,
+            DatabaseEngine.MARIADB: 3306,
+            DatabaseEngine.SQLITE: 0,  # N/A
+            DatabaseEngine.MSSQL: 1433,
+            DatabaseEngine.ORACLE: 1521,
+        }
+        return defaults.get(self.engine, 5432)
+
+    def get_connection_url(self, include_password: bool = True) -> str:
+        """
+        Build SQLAlchemy connection URL.
+
+        Args:
+            include_password: Include password in URL (False for logging)
+
+        Returns:
+            SQLAlchemy connection string
+        """
+        # Driver mapping
+        drivers = {
+            DatabaseEngine.POSTGRESQL: "postgresql+asyncpg",
+            DatabaseEngine.MYSQL: "mysql+aiomysql",
+            DatabaseEngine.MARIADB: "mysql+aiomysql",
+            DatabaseEngine.SQLITE: "sqlite+aiosqlite",
+            DatabaseEngine.MSSQL: "mssql+aioodbc",
+            DatabaseEngine.ORACLE: "oracle+oracledb",
+        }
+
+        driver = drivers.get(self.engine, "postgresql+asyncpg")
+        port = self.port or self.get_default_port()
+        password = self.password if include_password else "***"
+
+        if self.engine == DatabaseEngine.SQLITE:
+            return f"{driver}:///{self.database}"
+
+        url = f"{driver}://{self.username}:{password}@{self.host}:{port}/{self.database}"
+
+        # Add schema for supported databases
+        if self.schema_name and self.engine in [
+            DatabaseEngine.POSTGRESQL,
+            DatabaseEngine.MSSQL,
+            DatabaseEngine.ORACLE
+        ]:
+            url += f"?options=-c%20search_path={self.schema_name}"
+
+        return url
+
+    def build_select_query(self) -> str:
+        """
+        Build SELECT query based on configuration.
+
+        Returns:
+            SQL SELECT query string
+        """
+        if self.custom_query:
+            return self.custom_query
+
+        if not self.table_name:
+            raise ValueError("Either table_name or custom_query must be specified")
+
+        # Build column list
+        columns = []
+        for std_name, col_name in self.column_mapping.items():
+            if col_name:
+                columns.append(f"{col_name} AS {std_name}")
+
+        # Add extra columns
+        for col in self.extra_columns:
+            columns.append(col)
+
+        # Build query
+        table = f"{self.schema_name}.{self.table_name}" if self.schema_name else self.table_name
+        query = f"SELECT {', '.join(columns)} FROM {table}"
+
+        if self.where_clause:
+            query += f" WHERE {self.where_clause}"
+
+        if self.order_by:
+            query += f" ORDER BY {self.order_by}"
+
+        return query
+
+    @field_validator("custom_query")
+    @classmethod
+    def validate_custom_query(cls, v: Optional[str]) -> Optional[str]:
+        """Validate custom query is safe (no dangerous keywords)."""
+        if v is None:
+            return v
+
+        v_upper = v.upper()
+        dangerous_keywords = ["DROP", "DELETE", "TRUNCATE", "INSERT", "UPDATE", "ALTER", "CREATE", "EXEC", "EXECUTE"]
+
+        for keyword in dangerous_keywords:
+            if keyword in v_upper:
+                raise ValueError(f"Custom query cannot contain {keyword} keyword")
+
+        if not v_upper.strip().startswith("SELECT"):
+            raise ValueError("Custom query must be a SELECT statement")
+
+        return v
 
 
 # =============================================================================

@@ -17,6 +17,8 @@ from worker_app.tasks.email_tasks import (
     send_password_reset_task,
 )
 from worker_app.tasks.indexing_tasks import retry_document_indexing_task
+from worker_app.tasks.verification_tasks import verify_claim_task, batch_verify_claims_task
+from worker_app.tasks.connector_tasks import sync_and_index_connector_task, index_pending_documents_task
 from worker_app.celery_app import celery_app
 
 app = FastAPI(title="Background Worker", version="1.0.0")
@@ -87,6 +89,26 @@ class IndexRetryRequest(BaseModel):
     tenant_id: str
     user_id: Optional[str] = None
     priority: str = "default"
+
+
+class VerifyClaimRequest(BaseModel):
+    """Request to verify a single claim."""
+    claim_id: str
+    claim_text: str
+    tenant_id: str
+    context_document_ids: Optional[List[str]] = None
+    collections: Optional[List[str]] = None
+    confidence_threshold: float = 0.7
+    session_id: Optional[str] = None
+
+
+class BatchVerifyClaimsRequest(BaseModel):
+    """Request to verify multiple claims."""
+    claims: List[Dict[str, str]]  # [{"id": "...", "text": "..."}]
+    tenant_id: str
+    context_document_ids: Optional[List[str]] = None
+    collections: Optional[List[str]] = None
+    confidence_threshold: float = 0.7
 
 
 @app.get("/health")
@@ -174,6 +196,44 @@ async def enqueue_index_retry(request: IndexRetryRequest, _: None = Depends(veri
     return {"job_id": job.id}
 
 
+# =============================================================================
+# Connector Sync Tasks
+# =============================================================================
+
+class ConnectorSyncRequest(BaseModel):
+    connector_id: str
+    full_sync: bool = False
+    batch_size: int = 10
+
+
+class ConnectorIndexPendingRequest(BaseModel):
+    connector_id: str
+    batch_size: int = 10
+    max_documents: Optional[int] = None
+
+
+@app.post("/tasks/connector/sync")
+async def enqueue_connector_sync(request: ConnectorSyncRequest, _: None = Depends(verify_api_key)):
+    """Trigger connector sync (metadata fetch from Alfresco + indexing to Weaviate)"""
+    job = sync_and_index_connector_task.delay(
+        request.connector_id,
+        full_sync=request.full_sync,
+        batch_size=request.batch_size,
+    )
+    return {"job_id": job.id, "status": "queued", "connector_id": request.connector_id}
+
+
+@app.post("/tasks/connector/index-pending")
+async def enqueue_connector_index_pending(request: ConnectorIndexPendingRequest, _: None = Depends(verify_api_key)):
+    """Index pending documents from a connector to Weaviate"""
+    job = index_pending_documents_task.delay(
+        request.connector_id,
+        batch_size=request.batch_size,
+        max_documents=request.max_documents,
+    )
+    return {"job_id": job.id, "status": "queued", "connector_id": request.connector_id}
+
+
 @app.get("/tasks/status/{job_id}")
 async def get_task_status(job_id: str, _: None = Depends(verify_api_key)):
     result = AsyncResult(job_id, app=celery_app)
@@ -189,3 +249,46 @@ async def get_task_status(job_id: str, _: None = Depends(verify_api_key)):
 @app.get("/tasks/stats")
 async def get_stats(_: None = Depends(verify_api_key)):
     return {"status": "ok"}
+
+
+# =============================================================================
+# Verification Tasks (Agent Self-Verifies pattern)
+# =============================================================================
+
+
+@app.post("/tasks/verification/verify-claim")
+async def enqueue_verify_claim(request: VerifyClaimRequest, _: None = Depends(verify_api_key)):
+    """
+    Enqueue a claim verification task.
+
+    The task searches Weaviate for evidence and uses vLLM to evaluate
+    whether the evidence supports the claim.
+    """
+    job = verify_claim_task.delay(
+        claim_id=request.claim_id,
+        claim_text=request.claim_text,
+        tenant_id=request.tenant_id,
+        context_document_ids=request.context_document_ids,
+        collections=request.collections,
+        confidence_threshold=request.confidence_threshold,
+        session_id=request.session_id,
+    )
+    return {"job_id": job.id}
+
+
+@app.post("/tasks/verification/batch-verify")
+async def enqueue_batch_verify(request: BatchVerifyClaimsRequest, _: None = Depends(verify_api_key)):
+    """
+    Enqueue a batch claim verification task.
+
+    Verifies multiple claims sequentially (not parallel) to ensure
+    each claim is verified against the most recent context.
+    """
+    job = batch_verify_claims_task.delay(
+        claims=request.claims,
+        tenant_id=request.tenant_id,
+        context_document_ids=request.context_document_ids,
+        collections=request.collections,
+        confidence_threshold=request.confidence_threshold,
+    )
+    return {"job_id": job.id}

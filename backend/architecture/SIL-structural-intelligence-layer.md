@@ -2,7 +2,7 @@
 
 ## Visión General
 
-El **Structural Intelligence Layer (SIL)** es un componente revolucionario que representa un cambio de paradigma en la arquitectura RAG de NexusDocs360. En lugar de aprender el **contenido** de los documentos, el SIL aprende su **estructura** - dónde están, cómo se relacionan, qué tipo son.
+El **Structural Intelligence Layer (SIL)** es un componente revolucionario que representa un cambio de paradigma en la arquitectura RAG de NouxCubeIA. En lugar de aprender el **contenido** de los documentos, el SIL aprende su **estructura** - dónde están, cómo se relacionan, qué tipo son.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

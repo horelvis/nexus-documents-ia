@@ -46,8 +46,12 @@ import time
 
 from app.core.config import settings
 from app.core.security import verify_api_key
-from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router, sil_router
+from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router, sil_router, verified_router
 from app.api.agents import router as agents_router
+from app.api.router_admin import router as router_admin_router  # NexusRouter admin API
+from app.api.emma_v2 import router as emma_v2_router  # Emma v2 API
+from app.api.boe_legislation import router as boe_router  # BOE legislation download API
+from app.api.legal_graph import router as legal_graph_router  # Legal Knowledge Graph API
 from app.cag.api.cag import router as cag_router
 from app.cag.api.vector import router as cag_vector_router
 
@@ -166,11 +170,16 @@ async def log_requests(request: Request, call_next):
 # Include routers
 app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
 app.include_router(emma_router, prefix="/emma", tags=["emma"])
+app.include_router(emma_v2_router, prefix="/emma", tags=["emma-v2"])  # Emma v2: /emma/v2/*
 app.include_router(agents_router, tags=["agents"])  # OpenManus-style orchestration
 app.include_router(public_knowledge_router, tags=["public-knowledge"])
+app.include_router(boe_router, tags=["boe-legislation"])  # BOE legislation download API
 app.include_router(knowledge_router, tags=["knowledge"])  # Knowledge graph API
 app.include_router(learning_router, tags=["learning"])  # User learning API
 app.include_router(sil_router, tags=["structural-intelligence"])  # SIL API
+app.include_router(verified_router, tags=["verified-generation"])  # Verified Generation API
+app.include_router(router_admin_router, tags=["nexus-router"])  # NexusRouter admin API
+app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])  # Legal Knowledge Graph API
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
 
@@ -201,7 +210,8 @@ async def service_info():
             "Dynamic data visualization",
             "Multi-provider LLM support",
             "Knowledge extraction from documents",
-            "User preference learning"
+            "User preference learning",
+            "Verified document generation (Agent Self-Verifies)"
         ],
         "agents": [
             "SearchAgent",
@@ -222,6 +232,10 @@ async def service_info():
             "agents": "/agents/* (orchestration)",
             "knowledge": "/knowledge/* (knowledge graph)",
             "learning": "/learning/* (user learning)",
+            "sil": "/sil/* (structural intelligence)",
+            "legal": "/legal/* (legal knowledge graph)",
+            "verified": "/verified/* (verified generation)",
+            "router": "/router/* (intent classification admin)",
             "cag": "/cag/*",
             "health": "/health",
             "docs": "/docs" if settings.debug else None

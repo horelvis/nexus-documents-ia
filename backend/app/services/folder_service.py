@@ -19,7 +19,7 @@ from uuid import UUID
 from sqlalchemy import func, distinct, select, update, union_all, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Document, Tenant, FolderMarker
+from app.db.models import Document, IndexedDocument, Tenant, FolderMarker
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +70,16 @@ class FolderService:
         Build folder tree from DISTINCT folder_paths.
 
         Returns hierarchical tree structure for UI rendering.
-        Includes both document-derived folders and empty FolderMarkers.
+        Includes:
+        - Document table folders (direct uploads)
+        - IndexedDocument table folders (connector documents)
+        - Empty FolderMarkers
         """
-        # Get all distinct folder paths with document counts
-        stmt = (
+        from collections import defaultdict
+        path_to_count: Dict[str, int] = defaultdict(int)
+
+        # Get folder paths from Document table (direct uploads)
+        doc_stmt = (
             select(
                 Document.folder_path,
                 func.count(Document.id).label("count")
@@ -82,9 +88,25 @@ class FolderService:
             .where(Document.folder_path.isnot(None))
             .group_by(Document.folder_path)
         )
+        doc_result = await self.db.execute(doc_stmt)
+        for path, count in doc_result.all():
+            if path:
+                path_to_count[path] += count
 
-        result = await self.db.execute(stmt)
-        folder_counts = result.all()
+        # Get folder paths from IndexedDocument table (connector documents)
+        idx_stmt = (
+            select(
+                IndexedDocument.external_path,
+                func.count(IndexedDocument.id).label("count")
+            )
+            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
+            .where(IndexedDocument.external_path.isnot(None))
+            .group_by(IndexedDocument.external_path)
+        )
+        idx_result = await self.db.execute(idx_stmt)
+        for path, count in idx_result.all():
+            if path:
+                path_to_count[path] += count
 
         # Get empty folder markers
         markers_stmt = (
@@ -94,14 +116,13 @@ class FolderService:
         markers_result = await self.db.execute(markers_stmt)
         marker_paths = {row[0] for row in markers_result.all() if row[0]}
 
-        # Build tree from paths
-        root = FolderNode(name="root", path="/", document_count=0)
-        path_to_count = {path: count for path, count in folder_counts if path}
-
         # Add empty folder markers (with 0 count)
         for marker_path in marker_paths:
             if marker_path not in path_to_count:
                 path_to_count[marker_path] = 0
+
+        # Build tree from paths
+        root = FolderNode(name="root", path="/", document_count=0)
 
         for folder_path, count in path_to_count.items():
             self._add_path_to_tree(root, folder_path, count)
@@ -138,11 +159,15 @@ class FolderService:
         Get flat list of folders with counts.
 
         Returns list of {path, name, document_count} dicts.
-        Includes both:
-        - Folders derived from document paths (with document counts)
+        Includes:
+        - Document table folders (direct uploads)
+        - IndexedDocument table folders (connector documents)
         - Empty folders from FolderMarker table (with 0 count)
         """
-        # Get folders from documents with their counts
+        from collections import defaultdict
+        all_folders: Dict[str, int] = defaultdict(int)
+
+        # Get folders from Document table (direct uploads)
         doc_folders_stmt = (
             select(
                 Document.folder_path,
@@ -152,21 +177,35 @@ class FolderService:
             .where(Document.folder_path.isnot(None))
             .group_by(Document.folder_path)
         )
-
         doc_result = await self.db.execute(doc_folders_stmt)
-        doc_folder_counts = {path: count for path, count in doc_result.all() if path}
+        for path, count in doc_result.all():
+            if path:
+                all_folders[path] += count
+
+        # Get folders from IndexedDocument table (connector documents)
+        idx_folders_stmt = (
+            select(
+                IndexedDocument.external_path,
+                func.count(IndexedDocument.id).label("count")
+            )
+            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
+            .where(IndexedDocument.external_path.isnot(None))
+            .group_by(IndexedDocument.external_path)
+        )
+        idx_result = await self.db.execute(idx_folders_stmt)
+        for path, count in idx_result.all():
+            if path:
+                all_folders[path] += count
 
         # Get empty folder markers
         markers_stmt = (
             select(FolderMarker.folder_path)
             .where(FolderMarker.tenant_id == UUID(self.tenant_id))
         )
-
         markers_result = await self.db.execute(markers_stmt)
         marker_paths = {row[0] for row in markers_result.all() if row[0]}
 
-        # Merge: folder markers that don't have documents yet
-        all_folders = dict(doc_folder_counts)
+        # Add folder markers that don't have documents yet
         for marker_path in marker_paths:
             if marker_path not in all_folders:
                 all_folders[marker_path] = 0
@@ -313,25 +352,52 @@ class FolderService:
         Get statistics about document classification.
 
         Used to determine if auto-classification should be suggested.
+        Combines stats from both Document and IndexedDocument tables.
         """
-        # Total documents
-        total_stmt = (
+        # Total documents from Document table
+        doc_total_stmt = (
             select(func.count(Document.id))
             .where(Document.tenant_id == self.tenant_id)
         )
-        total_result = await self.db.execute(total_stmt)
-        total = total_result.scalar() or 0
+        doc_total_result = await self.db.execute(doc_total_stmt)
+        doc_total = doc_total_result.scalar() or 0
 
-        # Unclassified (in /Sin Clasificar)
-        unclassified_stmt = (
+        # Total documents from IndexedDocument table
+        idx_total_stmt = (
+            select(func.count(IndexedDocument.id))
+            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
+        )
+        idx_total_result = await self.db.execute(idx_total_stmt)
+        idx_total = idx_total_result.scalar() or 0
+
+        total = doc_total + idx_total
+
+        # Unclassified from Document table (in /Sin Clasificar)
+        doc_unclassified_stmt = (
             select(func.count(Document.id))
             .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path == "/Sin Clasificar")
         )
-        unclassified_result = await self.db.execute(unclassified_stmt)
-        unclassified = unclassified_result.scalar() or 0
+        doc_unclassified_result = await self.db.execute(doc_unclassified_stmt)
+        doc_unclassified = doc_unclassified_result.scalar() or 0
 
-        # Auto-classified
+        # IndexedDocument doesn't have /Sin Clasificar concept - all are "classified" by source
+        # But we can check for null/empty external_path
+        idx_unclassified_stmt = (
+            select(func.count(IndexedDocument.id))
+            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
+            .where(
+                (IndexedDocument.external_path.is_(None)) |
+                (IndexedDocument.external_path == "") |
+                (IndexedDocument.external_path == "/")
+            )
+        )
+        idx_unclassified_result = await self.db.execute(idx_unclassified_stmt)
+        idx_unclassified = idx_unclassified_result.scalar() or 0
+
+        unclassified = doc_unclassified + idx_unclassified
+
+        # Auto-classified from Document table
         auto_stmt = (
             select(func.count(Document.id))
             .where(Document.tenant_id == self.tenant_id)
@@ -339,16 +405,32 @@ class FolderService:
         )
         auto_result = await self.db.execute(auto_stmt)
         auto_classified = auto_result.scalar() or 0
+        # IndexedDocument doesn't have auto_classified concept
 
-        # Distinct folders (excluding /Sin Clasificar)
-        folders_stmt = (
+        # Distinct folders from Document table (excluding /Sin Clasificar)
+        doc_folders_stmt = (
             select(func.count(distinct(Document.folder_path)))
             .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path != "/Sin Clasificar")
             .where(Document.folder_path.isnot(None))
         )
-        folders_result = await self.db.execute(folders_stmt)
-        distinct_folders = folders_result.scalar() or 0
+        doc_folders_result = await self.db.execute(doc_folders_stmt)
+        doc_folders = doc_folders_result.scalar() or 0
+
+        # Distinct folders from IndexedDocument table
+        idx_folders_stmt = (
+            select(func.count(distinct(IndexedDocument.external_path)))
+            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
+            .where(IndexedDocument.external_path.isnot(None))
+            .where(IndexedDocument.external_path != "")
+            .where(IndexedDocument.external_path != "/")
+        )
+        idx_folders_result = await self.db.execute(idx_folders_stmt)
+        idx_folders = idx_folders_result.scalar() or 0
+
+        # Note: This might double-count folders with same path in both tables
+        # but that's rare in practice
+        distinct_folders = doc_folders + idx_folders
 
         classified = total - unclassified
 

@@ -109,12 +109,31 @@ class StructuralDocumentResponse(BaseModel):
     created_at: Optional[str] = None
 
 
+class RecentDocument(BaseModel):
+    """A recently indexed document."""
+    id: str
+    title: str
+    type: str
+    created_at: str
+
+
+class TopFolder(BaseModel):
+    """A folder with document count."""
+    path: str
+    count: int
+
+
 class GraphStatsResponse(BaseModel):
     """Response with graph statistics."""
     tenant_id: str
     total_documents: int = 0
     total_folders: int = 0
+    total_relationships: int = 0
     types_breakdown: Dict[str, int] = Field(default_factory=dict)
+    domains_breakdown: Dict[str, int] = Field(default_factory=dict)
+    relationships_breakdown: Dict[str, int] = Field(default_factory=dict)
+    top_folders: List[TopFolder] = Field(default_factory=list)
+    recent_documents: List[RecentDocument] = Field(default_factory=list)
     graph_name: str = "knowledge_graph"
     sil_enabled: bool = True
     error: Optional[str] = None
@@ -153,9 +172,15 @@ async def structural_query(
         )
 
         # Build response
+        # Handle both enum and string values for reasoning_type (due to use_enum_values=True)
+        reasoning_type_str = (
+            result.reasoning_result.type.value
+            if hasattr(result.reasoning_result.type, 'value')
+            else result.reasoning_result.type
+        )
         response = SILQueryResponse(
             original_query=request.query,
-            reasoning_type=result.reasoning_result.type.value,
+            reasoning_type=reasoning_type_str,
             requires_rag=result.reasoning_result.requires_rag,
             answer=result.answer,
             answer_confidence=result.answer_confidence,
@@ -169,7 +194,7 @@ async def structural_query(
 
         logger.info(
             f"SIL query processed: '{request.query[:50]}...' "
-            f"→ {result.reasoning_result.type.value} "
+            f"→ {reasoning_type_str} "
             f"(requires_rag={result.reasoning_result.requires_rag}, "
             f"tokens_saved={result.tokens_saved})"
         )
@@ -224,15 +249,34 @@ async def index_structural_metadata(
             connector_id=request.connector_id,
         )
 
+        # Get enum values safely (handle both enum and string due to use_enum_values=True)
+        semantic_type_str = (
+            metadata.semantic_type.value
+            if hasattr(metadata.semantic_type, 'value')
+            else metadata.semantic_type
+        ) if metadata.semantic_type else None
+        domain_str = (
+            metadata.domain.value
+            if hasattr(metadata.domain, 'value')
+            else metadata.domain
+        ) if metadata.domain else None
+
+        # Convert folder_semantics to dict if it's a Pydantic model
+        folder_semantics_dict = (
+            metadata.folder_semantics.model_dump()
+            if metadata.folder_semantics and hasattr(metadata.folder_semantics, 'model_dump')
+            else metadata.folder_semantics or {}
+        )
+
         return StructuralMetadataResponse(
             document_id=request.document_id,
-            semantic_type=metadata.semantic_type.value if metadata.semantic_type else None,
-            domain=metadata.domain.value if metadata.domain else None,
+            semantic_type=semantic_type_str,
+            domain=domain_str,
             folder_path=metadata.folder_path,
             importance=metadata.importance,
             structural_description=metadata.structural_description,
             key_properties=metadata.key_properties,
-            folder_semantics=metadata.folder_semantics,
+            folder_semantics=folder_semantics_dict,
             indexed_to_weaviate=weaviate_id is not None,
             indexed_to_graph=graph_success,
             weaviate_id=weaviate_id,
@@ -296,16 +340,43 @@ async def get_graph_stats(
     Returns:
     - Total documents indexed
     - Total folders tracked
+    - Total relationships
     - Breakdown by semantic type
+    - Breakdown by domain
+    - Breakdown by relationship type
+    - Top 10 folders by document count
+    - 5 most recently indexed documents
     """
     try:
         stats = await structural_graph.get_graph_stats(tenant_id=tenant_id)
+
+        # Convert top_folders to Pydantic models
+        top_folders = [
+            TopFolder(path=f["path"], count=f["count"])
+            for f in stats.get("top_folders", [])
+        ]
+
+        # Convert recent_documents to Pydantic models
+        recent_documents = [
+            RecentDocument(
+                id=d["id"],
+                title=d["title"],
+                type=d["type"],
+                created_at=d["created_at"]
+            )
+            for d in stats.get("recent_documents", [])
+        ]
 
         return GraphStatsResponse(
             tenant_id=tenant_id,
             total_documents=stats.get("total_documents", 0),
             total_folders=stats.get("total_folders", 0),
+            total_relationships=stats.get("total_relationships", 0),
             types_breakdown=stats.get("types_breakdown", {}),
+            domains_breakdown=stats.get("domains_breakdown", {}),
+            relationships_breakdown=stats.get("relationships_breakdown", {}),
+            top_folders=top_folders,
+            recent_documents=recent_documents,
             graph_name=stats.get("graph_name", "knowledge_graph"),
             sil_enabled=True,
             error=stats.get("error"),
@@ -464,4 +535,132 @@ async def mark_document_removed(
 
     except Exception as e:
         logger.error(f"Failed to mark document as removed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Graph Management Endpoints
+# ============================================================================
+
+class ReindexRequest(BaseModel):
+    """Request for re-indexing documents."""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    full_reindex: bool = Field(False, description="If true, clear graph and re-index all. If false, only new documents.")
+    limit: Optional[int] = Field(None, description="Maximum documents to process")
+    connector_id: Optional[str] = Field(None, description="Filter by connector ID")
+
+
+class ReindexResponse(BaseModel):
+    """Response from re-index operation."""
+    success: bool
+    total_documents: int = 0
+    documents_processed: int = 0
+    documents_skipped: int = 0
+    errors: int = 0
+    message: str = ""
+
+
+@router.delete("/graph/clear")
+async def clear_graph(
+    tenant_id: Optional[str] = None,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Clear the structural graph.
+
+    If tenant_id is provided, only clears data for that tenant.
+    Otherwise, clears all data (use with caution).
+    """
+    try:
+        # Clear Weaviate structural collection
+        weaviate_result = await structural_collection.clear_collection(tenant_id=tenant_id)
+
+        # Clear graph nodes
+        graph_result = await structural_graph.clear_graph(tenant_id=tenant_id)
+
+        return {
+            "success": True,
+            "tenant_id": tenant_id,
+            "weaviate_cleared": weaviate_result,
+            "graph_cleared": graph_result,
+            "message": f"Graph cleared for {'tenant ' + tenant_id if tenant_id else 'all tenants'}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to clear graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph/document-ids")
+async def get_indexed_document_ids(
+    tenant_id: Optional[str] = None,
+    limit: int = 10000,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get list of document IDs already indexed in the graph.
+
+    Useful for incremental indexing to avoid re-processing
+    documents that are already in the graph.
+    """
+    try:
+        # Get from graph
+        document_ids = await structural_graph.get_document_ids(
+            tenant_id=tenant_id,
+            limit=limit,
+        )
+
+        return {
+            "document_ids": document_ids,
+            "count": len(document_ids),
+            "tenant_id": tenant_id,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get document IDs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reindex", response_model=ReindexResponse)
+async def reindex_documents(
+    request: ReindexRequest,
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Re-index documents to the structural graph.
+
+    Modes:
+    - full_reindex=True: Clear graph and re-index ALL documents
+    - full_reindex=False: Only index NEW documents not in graph
+
+    This endpoint triggers the re-indexing process. For large datasets,
+    consider using the background task version.
+    """
+    try:
+        from app.services.sil import sil_reindex_service
+
+        result = await sil_reindex_service.reindex_documents(
+            tenant_id=request.tenant_id,
+            full_reindex=request.full_reindex,
+            limit=request.limit,
+            connector_id=request.connector_id,
+        )
+
+        return ReindexResponse(
+            success=result.get("success", False),
+            total_documents=result.get("total_documents", 0),
+            documents_processed=result.get("documents_processed", 0),
+            documents_skipped=result.get("documents_skipped", 0),
+            errors=result.get("errors", 0),
+            message=result.get("message", "Re-index completed"),
+        )
+
+    except ImportError:
+        # Service not yet implemented - return helpful error
+        raise HTTPException(
+            status_code=501,
+            detail="SIL reindex service not yet implemented. Use the CLI script: python scripts/index_structural_metadata.py --full-reindex"
+        )
+    except Exception as e:
+        logger.error(f"Failed to reindex documents: {e}")
         raise HTTPException(status_code=500, detail=str(e))

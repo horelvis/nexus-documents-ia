@@ -730,7 +730,7 @@ class DocumentACLService:
         created_by = str(doc_row[0]) if doc_row and doc_row[0] else None
 
         # Get tenant collection name
-        collection_name = f"Nexus_{str(self.tenant_id).replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{str(self.tenant_id).replace('-', '_')}_documents"
 
         # 1. Sync to Weaviate (vector search filter)
         await self._sync_acl_to_weaviate(

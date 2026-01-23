@@ -258,11 +258,18 @@ async def get_knowledge_stats(
 ):
     """
     Get knowledge graph statistics for a tenant.
+
+    Combines data from multiple sources:
+    1. Weaviate Knowledge collection (extracted entities)
+    2. SIL structural graph (document types from connectors)
+
+    This ensures on-premise deployments with connector documents
+    also show meaningful knowledge statistics.
     """
     try:
         weaviate = await get_weaviate()
 
-        # Get all entities to compute stats
+        # Get entities from Weaviate Knowledge collection
         results = await weaviate.search_knowledge_entities(
             tenant_id=tenant_id,
             query="*",
@@ -271,7 +278,7 @@ async def get_knowledge_stats(
             is_admin=True
         )
 
-        # Compute stats
+        # Compute stats from Weaviate entities
         entities_by_type: Dict[str, int] = {}
         entities_by_domain: Dict[str, int] = {}
 
@@ -282,9 +289,45 @@ async def get_knowledge_stats(
             entities_by_type[entity_type] = entities_by_type.get(entity_type, 0) + 1
             entities_by_domain[domain] = entities_by_domain.get(domain, 0) + 1
 
+        total_entities = len(results)
+
+        # If no entities in Weaviate, also check SIL structural graph
+        # This is important for on-premise deployments where documents
+        # come from connectors and may not have extracted entities yet
+        if total_entities == 0:
+            try:
+                from app.services.sil.structural_graph import structural_graph
+
+                sil_stats = await structural_graph.get_graph_stats(tenant_id=tenant_id)
+
+                if not sil_stats.get("error"):
+                    # Use SIL document types as entity types
+                    types_breakdown = sil_stats.get("types_breakdown", {})
+                    total_docs = sil_stats.get("total_documents", 0)
+
+                    if total_docs > 0:
+                        # Map document types to entity-like representation
+                        for doc_type, count in types_breakdown.items():
+                            # Convert document types to entity type format
+                            entity_type = f"document:{doc_type}" if doc_type else "document:unknown"
+                            entities_by_type[entity_type] = count
+
+                        # Set total to documents in SIL graph
+                        total_entities = total_docs
+
+                        # Add domain based on document presence
+                        entities_by_domain["structural"] = total_docs
+
+                        logger.info(
+                            f"Knowledge stats enriched from SIL: {total_docs} documents, "
+                            f"{len(types_breakdown)} types"
+                        )
+            except Exception as sil_error:
+                logger.warning(f"Could not get SIL stats for knowledge enrichment: {sil_error}")
+
         return KnowledgeStatsResponse(
             tenant_id=tenant_id,
-            total_entities=len(results),
+            total_entities=total_entities,
             entities_by_type=entities_by_type,
             entities_by_domain=entities_by_domain
         )

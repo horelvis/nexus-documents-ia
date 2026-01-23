@@ -472,6 +472,136 @@ class DocumentIntelligence:
 
         return hints
 
+    def should_trigger_enhanced_ocr(
+        self,
+        analysis: DocumentAnalysis,
+        metadata: Optional[Dict[str, Any]] = None,
+        min_confidence: float = 0.60,
+    ) -> bool:
+        """
+        Determine if enhanced OCR should be triggered for this document.
+
+        Enhanced OCR (EasyOCR/Tesseract) is triggered when:
+        1. Quality is LOW or FAILED
+        2. Confidence is below threshold (default 60%)
+        3. OCR errors or garbled text detected
+        4. Document appears to be a scanned PDF (low text-to-page ratio)
+        5. Source was detected as scanned/image-based
+
+        Args:
+            analysis: DocumentAnalysis result from analyze()
+            metadata: Optional document metadata (may contain page_count, source hints)
+            min_confidence: Confidence threshold below which OCR is triggered
+
+        Returns:
+            True if enhanced OCR should be used
+        """
+        # Check quality level
+        if analysis.quality in [DocumentQuality.LOW, DocumentQuality.FAILED]:
+            logger.info("Enhanced OCR triggered: quality is LOW or FAILED")
+            return True
+
+        # Check confidence threshold
+        if analysis.confidence < min_confidence:
+            logger.info(f"Enhanced OCR triggered: confidence {analysis.confidence:.2f} < {min_confidence}")
+            return True
+
+        # Check for OCR-related issues
+        ocr_issues = {
+            ContentIssue.OCR_ERRORS,
+            ContentIssue.GARBLED_TEXT,
+            ContentIssue.ENCODING_ISSUES,
+        }
+        if ocr_issues & set(analysis.issues):
+            detected = [i.value for i in analysis.issues if i in ocr_issues]
+            logger.info(f"Enhanced OCR triggered: detected issues {detected}")
+            return True
+
+        # Check for scanned PDF characteristics
+        if self._is_scanned_pdf(analysis, metadata):
+            logger.info("Enhanced OCR triggered: document appears to be scanned")
+            return True
+
+        return False
+
+    def _is_scanned_pdf(
+        self,
+        analysis: DocumentAnalysis,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Detect if document is likely a scanned PDF with poor text extraction.
+
+        Indicators:
+        - Very low words per page (< 50 words/page for multi-page docs)
+        - High ratio of special characters (garbled OCR)
+        - Metadata hints (if available)
+        """
+        if not metadata:
+            return False
+
+        page_count = metadata.get("page_count", 0) or metadata.get("pages", 0)
+
+        if page_count and page_count > 0:
+            words_per_page = analysis.word_count / page_count
+
+            # Typical text PDFs have 200-500 words per page
+            # Scanned PDFs with poor OCR often have < 50 words per page
+            if words_per_page < 50 and analysis.word_count > 0:
+                logger.debug(f"Low words per page: {words_per_page:.1f} (likely scanned)")
+                return True
+
+        # Check for source hints in metadata
+        source_type = metadata.get("source_type", "").lower()
+        content_type = metadata.get("content_type", "").lower()
+
+        if any(hint in source_type for hint in ["scan", "image", "ocr"]):
+            return True
+
+        if "image" in content_type and "pdf" not in content_type:
+            return True
+
+        return False
+
+    def get_enhanced_ocr_config(
+        self,
+        analysis: DocumentAnalysis,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get configuration hints for enhanced OCR processing.
+
+        Returns suggested settings for OCR service based on document analysis.
+        """
+        config = {
+            "use_hybrid": False,  # EasyOCR + Tesseract
+            "preprocess": True,
+            "dpi": 300,
+            "languages": ["es", "en"],
+        }
+
+        # Use hybrid mode for very low quality documents
+        if analysis.confidence < 0.4 or analysis.quality == DocumentQuality.FAILED:
+            config["use_hybrid"] = True
+
+        # Increase DPI for documents with many issues
+        if len(analysis.issues) >= 3:
+            config["dpi"] = 400
+
+        # Detect language from metadata if available
+        if metadata:
+            detected_lang = metadata.get("detected_language") or metadata.get("language")
+            if detected_lang:
+                # Prioritize detected language
+                if detected_lang.startswith("es"):
+                    config["languages"] = ["es", "en"]
+                elif detected_lang.startswith("en"):
+                    config["languages"] = ["en", "es"]
+                elif detected_lang.startswith("ca"):
+                    config["languages"] = ["ca", "es", "en"]
+
+        return config
+
 
 # Global instance with default settings
 document_intelligence = DocumentIntelligence()

@@ -48,8 +48,8 @@ const linkGroups = [
 const contactInfo = [
   {
     label: "Escríbenos",
-    value: "contacto@nexusdocs360.com",
-    href: "mailto:contacto@nexusdocs360.com",
+    value: "contacto@nouxcubeia.com",
+    href: "mailto:contacto@nouxcubeia.com",
     icon: IconMail,
   },
   {
@@ -67,9 +67,9 @@ const contactInfo = [
 ]
 
 const social = [
-  { name: "Twitter", href: "https://twitter.com/nexusdocs360", icon: IconBrandTwitter },
-  { name: "LinkedIn", href: "https://linkedin.com/company/nexusdocs360", icon: IconBrandLinkedin },
-  { name: "GitHub", href: "https://github.com/nexusdocs360", icon: IconBrandGithub },
+  { name: "Twitter", href: "https://twitter.com/nouxcubeia", icon: IconBrandTwitter },
+  { name: "LinkedIn", href: "https://linkedin.com/company/nouxcubeia", icon: IconBrandLinkedin },
+  { name: "GitHub", href: "https://github.com/nouxcubeia", icon: IconBrandGithub },
 ]
 
 export function LandingFooter() {

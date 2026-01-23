@@ -47,7 +47,7 @@ Please help me resolve this issue.
 Thank you!
     `)
     
-    window.open(`mailto:support@nexusdocs.com?subject=${subject}&body=${body}`)
+    window.open(`mailto:support@nouxcube.com?subject=${subject}&body=${body}`)
   }
 
   return (

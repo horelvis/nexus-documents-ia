@@ -33,7 +33,7 @@ cd /opt/qdrant && docker-compose up -d
 # Wait for Qdrant to be ready
 sleep 30
 
-# Create collections for NexusDocs360
+# Create collections for NouxCubeIA
 curl -X PUT "http://localhost:6333/collections/documents" \
   -H "Content-Type: application/json" \
   -d '{"vectors": {"size": 1536, "distance": "Cosine"}}'

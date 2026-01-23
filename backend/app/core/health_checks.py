@@ -1,5 +1,5 @@
 """
-Comprehensive health check system for NexusDocs360
+Comprehensive health check system for NouxCubeIA
 """
 import asyncio
 import time

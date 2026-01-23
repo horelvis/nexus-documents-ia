@@ -27,14 +27,34 @@ Each node has valid_from and valid_to timestamps for point-in-time queries.
 import logging
 import json
 import asyncio
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Union
 from datetime import datetime
 from dataclasses import dataclass, field
+from enum import Enum
 
 from ...services.knowledge.age_graph_service import AGEKnowledgeGraphService, age_knowledge_graph
 from .schemas import StructuralMetadata, SemanticType, DomainType
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_value(obj: Union[Enum, str, None]) -> str:
+    """Safely get the value from an enum or return the string directly.
+
+    IMPORTANT: Check Enum BEFORE str because string enums (class X(str, Enum))
+    satisfy both isinstance(obj, str) and isinstance(obj, Enum), but we need
+    to use .value for correct extraction.
+    """
+    if obj is None:
+        return ""
+    # Check Enum FIRST - string enums (str, Enum) satisfy both str and Enum checks
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, str):
+        return obj
+    if hasattr(obj, 'value'):
+        return obj.value
+    return str(obj)
 
 
 @dataclass
@@ -250,8 +270,8 @@ class StructuralGraphService:
                 "connector_id": connector_id or "",
 
                 # Structural classification
-                "semantic_type": metadata.semantic_type.value if metadata.semantic_type else "",
-                "domain": metadata.domain.value if metadata.domain else "",
+                "semantic_type": _get_enum_value(metadata.semantic_type),
+                "domain": _get_enum_value(metadata.domain),
                 "importance": metadata.importance,
 
                 # Location
@@ -260,6 +280,8 @@ class StructuralGraphService:
 
                 # Key properties (flattened)
                 "prop_title": metadata.key_properties.get("title", ""),
+                "prop_filename": metadata.key_properties.get("filename", ""),
+                "prop_file_extension": metadata.key_properties.get("file_extension", ""),
                 "prop_client": metadata.key_properties.get("client", ""),
                 "prop_year": metadata.key_properties.get("year", ""),
                 "prop_author": metadata.key_properties.get("author", ""),
@@ -345,12 +367,21 @@ class StructuralGraphService:
                 properties=folder_props,
             )
 
-            cypher = f"""
-                MERGE (f:{self.LABEL_FOLDER} {{folder_id: '{folder_id}', tenant_id: '{tenant_id}'}})
-                ON CREATE SET f = {node.to_cypher_props()}
-                RETURN id(f)
+            # Apache AGE doesn't support ON CREATE SET, so we use CREATE with check
+            # First check if exists
+            check_cypher = f"""
+                MATCH (f:{self.LABEL_FOLDER} {{folder_id: '{folder_id}', tenant_id: '{tenant_id}'}})
+                RETURN id(f) as node_id
             """
-            await self._age._execute_cypher(conn, cypher, [("id", "agtype")])
+            exists_result = await self._age._execute_cypher(conn, check_cypher, [("node_id", "agtype")])
+
+            if not exists_result:
+                # Node doesn't exist, create it
+                create_cypher = f"""
+                    CREATE (f:{self.LABEL_FOLDER} {node.to_cypher_props()})
+                    RETURN id(f) as node_id
+                """
+                await self._age._execute_cypher(conn, create_cypher, [("node_id", "agtype")])
 
             # Create contains edge from parent folder
             if parent_id:
@@ -675,6 +706,129 @@ class StructuralGraphService:
             logger.error(f"Failed to get related documents: {e}")
             return []
 
+    async def clear_graph(self, tenant_id: Optional[str] = None) -> bool:
+        """
+        Clear structural graph data.
+
+        Args:
+            tenant_id: If provided, only clear data for that tenant.
+                      Otherwise, clear all structural data.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        await self.initialize()
+
+        if not self._age._pool:
+            logger.warning("Graph not available for clearing")
+            return True  # Return True anyway since there's nothing to clear
+
+        try:
+            async with self._age._get_connection() as conn:
+                # Build tenant filter for each label
+                if tenant_id:
+                    doc_filter = f"{{tenant_id: '{tenant_id}'}}"
+                else:
+                    doc_filter = ""
+
+                # Delete structural documents - use OPTIONAL MATCH to handle empty results
+                # We need a RETURN clause for AGE, so count deleted nodes
+                doc_cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT} {doc_filter})
+                    WITH d, count(d) as cnt
+                    DETACH DELETE d
+                    RETURN cnt as deleted
+                """
+                try:
+                    await self._age._execute_cypher(conn, doc_cypher, [("deleted", "agtype")])
+                except Exception as e:
+                    # May fail if no nodes match - that's OK
+                    logger.debug(f"Document deletion: {e}")
+
+                # Delete structural folders
+                folder_cypher = f"""
+                    MATCH (f:{self.LABEL_FOLDER} {doc_filter})
+                    WITH f, count(f) as cnt
+                    DETACH DELETE f
+                    RETURN cnt as deleted
+                """
+                try:
+                    await self._age._execute_cypher(conn, folder_cypher, [("deleted", "agtype")])
+                except Exception as e:
+                    logger.debug(f"Folder deletion: {e}")
+
+                # Delete structural sites
+                site_cypher = f"""
+                    MATCH (s:{self.LABEL_SITE} {doc_filter})
+                    WITH s, count(s) as cnt
+                    DETACH DELETE s
+                    RETURN cnt as deleted
+                """
+                try:
+                    await self._age._execute_cypher(conn, site_cypher, [("deleted", "agtype")])
+                except Exception as e:
+                    logger.debug(f"Site deletion: {e}")
+
+            logger.info(f"✅ Cleared structural graph for {'tenant ' + tenant_id if tenant_id else 'all tenants'}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to clear graph: {e}")
+            return False
+
+    async def get_document_ids(
+        self,
+        tenant_id: Optional[str] = None,
+        limit: int = 10000,
+    ) -> List[str]:
+        """
+        Get list of document IDs already indexed in the graph.
+
+        Args:
+            tenant_id: Optional tenant filter
+            limit: Maximum number of IDs to return
+
+        Returns:
+            List of document IDs in the graph
+        """
+        await self.initialize()
+
+        if not self._age._pool:
+            return []
+
+        try:
+            async with self._age._get_connection() as conn:
+                # Build query
+                tenant_filter = f"WHERE d.tenant_id = '{tenant_id}'" if tenant_id else ""
+
+                cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT})
+                    {tenant_filter}
+                    RETURN d.document_id as document_id
+                    LIMIT {limit}
+                """
+
+                results = await self._age._execute_cypher(
+                    conn, cypher, [("document_id", "agtype")]
+                )
+
+                # Extract document IDs
+                doc_ids = []
+                for row in results:
+                    doc_id = row.get("document_id")
+                    if doc_id:
+                        # Remove quotes if present
+                        if isinstance(doc_id, str):
+                            doc_id = doc_id.strip('"')
+                        doc_ids.append(doc_id)
+
+                logger.info(f"Found {len(doc_ids)} document IDs in graph")
+                return doc_ids
+
+        except Exception as e:
+            logger.error(f"Failed to get document IDs: {e}")
+            return []
+
     async def get_graph_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Get statistics about the structural graph for a tenant."""
         await self.initialize()
@@ -685,44 +839,167 @@ class StructuralGraphService:
         try:
             async with self._age._get_connection() as conn:
                 # Count documents
+                # Note: Using 'total' instead of 'count' as alias to avoid conflict
+                # with the reserved word 'count' in PostgreSQL/Apache AGE
                 doc_cypher = f"""
                     MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})
                     WHERE d.valid_to = '' OR d.valid_to IS NULL
-                    RETURN count(d) as count
+                    RETURN count(d) as total
                 """
-                doc_result = await self._age._execute_cypher(conn, doc_cypher, [("count", "agtype")])
-                doc_count = doc_result[0]["count"] if doc_result else 0
+                doc_result = await self._age._execute_cypher(conn, doc_cypher, [("total", "agtype")])
+                doc_count = doc_result[0]["total"] if doc_result else 0
 
                 # Count folders
                 folder_cypher = f"""
                     MATCH (f:{self.LABEL_FOLDER} {{tenant_id: '{tenant_id}'}})
-                    RETURN count(f) as count
+                    RETURN count(f) as total
                 """
-                folder_result = await self._age._execute_cypher(conn, folder_cypher, [("count", "agtype")])
-                folder_count = folder_result[0]["count"] if folder_result else 0
+                folder_result = await self._age._execute_cypher(conn, folder_cypher, [("total", "agtype")])
+                folder_count = folder_result[0]["total"] if folder_result else 0
 
                 # Count by semantic type
                 type_cypher = f"""
                     MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})
                     WHERE d.valid_to = '' OR d.valid_to IS NULL
-                    RETURN d.semantic_type as type, count(d) as count
+                    RETURN d.semantic_type as semantic_type, count(d) as total
                 """
                 type_results = await self._age._execute_cypher(
-                    conn, type_cypher, [("type", "agtype"), ("count", "agtype")]
+                    conn, type_cypher, [("semantic_type", "agtype"), ("total", "agtype")]
                 )
 
                 types_breakdown = {}
                 for row in type_results:
-                    t = row.get("type", "unknown")
+                    t = row.get("semantic_type", "unknown")
                     if isinstance(t, str):
                         t = t.strip('"')
-                    types_breakdown[t or "unknown"] = row.get("count", 0)
+                    types_breakdown[t or "unknown"] = row.get("total", 0)
+
+                # Count by domain
+                domain_cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})
+                    WHERE d.valid_to = '' OR d.valid_to IS NULL
+                    RETURN d.domain as domain, count(d) as total
+                """
+                domain_results = await self._age._execute_cypher(
+                    conn, domain_cypher, [("domain", "agtype"), ("total", "agtype")]
+                )
+
+                domains_breakdown = {}
+                for row in domain_results:
+                    d = row.get("domain", "unknown")
+                    if isinstance(d, str):
+                        d = d.strip('"')
+                    domains_breakdown[d or "unknown"] = row.get("total", 0)
+
+                # Top folders by document count (simplified - no ORDER BY on aggregation)
+                top_folders_cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})
+                    WHERE d.valid_to = '' OR d.valid_to IS NULL
+                    RETURN d.folder_path as folder_path, count(d) as cnt
+                """
+                try:
+                    top_folders_results = await self._age._execute_cypher(
+                        conn, top_folders_cypher, [("folder_path", "agtype"), ("cnt", "agtype")]
+                    )
+                except Exception as e:
+                    logger.warning(f"Top folders query failed: {e}")
+                    top_folders_results = []
+
+                # Process and sort in Python instead
+                top_folders = []
+                for row in top_folders_results:
+                    path = row.get("folder_path", "")
+                    if isinstance(path, str):
+                        path = path.strip('"')
+                    if path:
+                        top_folders.append({
+                            "path": path,
+                            "count": row.get("cnt", 0)
+                        })
+                # Sort by count descending and take top 10
+                top_folders = sorted(top_folders, key=lambda x: x["count"], reverse=True)[:10]
+
+                # Recent documents (simplified - no ORDER BY)
+                # Use prop_title for title, prop_filename as fallback
+                recent_cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})
+                    WHERE d.valid_to = '' OR d.valid_to IS NULL
+                    RETURN d.node_id as doc_id, d.prop_title as doc_title, d.prop_filename as doc_filename, d.semantic_type as doc_type, d.valid_from as doc_created
+                """
+                try:
+                    recent_results = await self._age._execute_cypher(
+                        conn, recent_cypher, [("doc_id", "agtype"), ("doc_title", "agtype"), ("doc_filename", "agtype"), ("doc_type", "agtype"), ("doc_created", "agtype")]
+                    )
+                except Exception as e:
+                    logger.warning(f"Recent documents query failed: {e}")
+                    recent_results = []
+
+                recent_documents = []
+                for row in recent_results:
+                    # Try prop_title first
+                    title = row.get("doc_title", "")
+                    if isinstance(title, str):
+                        title = title.strip('"')
+
+                    # If no title, use prop_filename (which includes extension)
+                    if not title:
+                        filename = row.get("doc_filename", "")
+                        if isinstance(filename, str):
+                            filename = filename.strip('"')
+                        if filename:
+                            title = filename
+
+                    doc_type = row.get("doc_type", "")
+                    if isinstance(doc_type, str):
+                        doc_type = doc_type.strip('"')
+                    created = str(row.get("doc_created", "")).strip('"')
+                    recent_documents.append({
+                        "id": str(row.get("doc_id", "")).strip('"'),
+                        "title": title or "Sin título",
+                        "type": doc_type or "unknown",
+                        "created_at": created,
+                    })
+                # Sort by created_at descending and take last 5
+                recent_documents = sorted(
+                    recent_documents,
+                    key=lambda x: x["created_at"] or "",
+                    reverse=True
+                )[:5]
+
+                # Count relationships (simplified)
+                rel_cypher = f"""
+                    MATCH (d:{self.LABEL_DOCUMENT} {{tenant_id: '{tenant_id}'}})-[r]-()
+                    WHERE d.valid_to = '' OR d.valid_to IS NULL
+                    RETURN type(r) as rel_type, count(r) as rel_cnt
+                """
+                try:
+                    rel_results = await self._age._execute_cypher(
+                        conn, rel_cypher, [("rel_type", "agtype"), ("rel_cnt", "agtype")]
+                    )
+                except Exception as e:
+                    logger.warning(f"Relationships query failed: {e}")
+                    rel_results = []
+
+                relationships_breakdown = {}
+                total_relationships = 0
+                for row in rel_results:
+                    rel_type = row.get("rel_type", "unknown")
+                    if isinstance(rel_type, str):
+                        rel_type = rel_type.strip('"')
+                    count = row.get("rel_cnt", 0)
+                    relationships_breakdown[rel_type or "unknown"] = count
+                    total_relationships += count
 
                 return {
                     "tenant_id": tenant_id,
                     "total_documents": doc_count,
                     "total_folders": folder_count,
+                    "total_relationships": total_relationships,
                     "types_breakdown": types_breakdown,
+                    "domains_breakdown": domains_breakdown,
+                    "relationships_breakdown": relationships_breakdown,
+                    "top_folders": top_folders,
+                    "recent_documents": recent_documents,
                     "graph_name": self.GRAPH_NAME,
                 }
 

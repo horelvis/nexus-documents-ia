@@ -33,7 +33,7 @@ async def liveness_check() -> Dict[str, Any]:
     return {
         "status": "alive",
         "timestamp": "2024-01-01T00:00:00Z",  # Would be dynamic
-        "service": "nexusdocs360"
+        "service": "nouxcubeia"
     }
 
 

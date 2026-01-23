@@ -1,6 +1,6 @@
 # TTS Service
 
-Text-to-Speech microservice for NexusDocs360 using Microsoft VibeVoice for real-time streaming speech synthesis.
+Text-to-Speech microservice for NouxCubeIA using Microsoft VibeVoice for real-time streaming speech synthesis.
 
 ## Features
 

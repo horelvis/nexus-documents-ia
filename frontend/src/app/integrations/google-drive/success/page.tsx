@@ -29,7 +29,7 @@ function GoogleDriveSuccessContent() {
           <CardTitle>Google Drive Connected</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p>Your Google Drive account is now linked. You can return to NexusDocs and start editing templates.</p>
+          <p>Your Google Drive account is now linked. You can return to NouxCubeIA and start editing templates.</p>
           <Button asChild>
             <Link href={templatesHref}>Back to Templates</Link>
           </Button>

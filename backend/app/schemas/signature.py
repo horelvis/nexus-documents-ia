@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
+
+from app.core.enums import SignerRole, AuthenticationMethod, SupportedLanguage
 
 # =====================================
 # SIGNATURE PROVIDER SCHEMAS
@@ -46,12 +48,15 @@ class SignatureProvider(SignatureProviderBase):
 class SignerBase(BaseModel):
     """Base schema for signers"""
     name: str = Field(..., min_length=1, max_length=100)
-    email: str = Field(..., pattern=r'^[^@]+@[^@]+\.[^@]+$')
+    email: EmailStr = Field(..., description="Signer email address")
     phone: Optional[str] = Field(None, max_length=20)
-    role: str = Field(default='signer', pattern='^(signer|viewer|approver)$')
+    role: SignerRole = Field(default=SignerRole.SIGNER, description="Signer role")
     order: int = Field(default=1, ge=1)
-    authentication_method: str = Field(default='email', pattern='^(email|sms|code)$')
-    language: Optional[str] = Field(None, pattern='^(en|es|fr|de|it|pt|nl)$')
+    authentication_method: AuthenticationMethod = Field(
+        default=AuthenticationMethod.EMAIL,
+        description="Authentication method for signing"
+    )
+    language: Optional[SupportedLanguage] = Field(None, description="Preferred language")
     success_url: Optional[str] = None
     error_url: Optional[str] = None
 

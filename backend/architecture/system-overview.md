@@ -1,4 +1,4 @@
-# Arquitectura General del Sistema NexusDocs360
+# Arquitectura General del Sistema NouxCubeIA
 
 ```mermaid
 graph TB

@@ -1,8 +1,8 @@
-# NexusDocs360 - Proyección Financiera a 3 Años
+# NouxCubeIA - Proyección Financiera a 3 Años
 
 ## Resumen Ejecutivo
 
-Este documento presenta la proyección financiera de NexusDocs360 para los próximos 3 años, basada en el modelo de suscripción SaaS con planes Basic y Pro, considerando los costes de infraestructura en Google Cloud Platform.
+Este documento presenta la proyección financiera de NouxCubeIA para los próximos 3 años, basada en el modelo de suscripción SaaS con planes Basic y Pro, considerando los costes de infraestructura en Google Cloud Platform.
 
 | Métrica | Valor |
 |---------|-------|
@@ -443,11 +443,11 @@ Cash Flow Acumulado ($K)
 | PandaDoc | $19/mes | $49/mes | Documentos + firma |
 | Notion AI | $20/mes | $20/mes | Solo IA, sin firma |
 | ChatPDF | $20/mes | - | Solo chat PDF |
-| **NexusDocs360** | **€19/mes** | **€49/mes** | **IA + Docs + Firma** |
+| **NouxCubeIA** | **€19/mes** | **€49/mes** | **IA + Docs + Firma** |
 
 ### 10.2 Diferenciadores de Valor
 
-| Feature | NexusDocs360 | Competencia |
+| Feature | NouxCubeIA | Competencia |
 |---------|--------------|-------------|
 | Emma AI (RAG 7 capas) | ✅ | Parcial |
 | Búsqueda semántica | ✅ | Parcial |

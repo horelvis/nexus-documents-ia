@@ -1,8 +1,8 @@
-# 🧪 Guía de Pruebas de Integración - NexusDocs360
+# 🧪 Guía de Pruebas de Integración - NouxCubeIA
 
 ## 📋 Resumen
 
-Esta guía documenta el sistema completo de pruebas de integración para NexusDocs360, incluyendo ejecución local, CI/CD con GitHub Actions, y mejores prácticas para desarrollo y testing.
+Esta guía documenta el sistema completo de pruebas de integración para NouxCubeIA, incluyendo ejecución local, CI/CD con GitHub Actions, y mejores prácticas para desarrollo y testing.
 
 ## 🎯 Tipos de Pruebas
 

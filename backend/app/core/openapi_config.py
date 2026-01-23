@@ -15,7 +15,7 @@ def custom_openapi():
         title=settings.SERVER_NAME,
         version="1.0.0",
         description="""
-        # NexusDocs360 - API de Gestión Documental Potenciada por IA 🧠
+        # NouxCubeIA - API de Gestión Documental Potenciada por IA 🧠
 
         La primera plataforma donde la Inteligencia Artificial transforma radicalmente la gestión documental empresarial.
 

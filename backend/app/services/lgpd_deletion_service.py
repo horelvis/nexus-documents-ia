@@ -472,7 +472,7 @@ class LGPDDeletionService:
         deletion_results = {}
 
         try:
-            collection_name = f"Nexus_{str(user.tenant_id).replace('-', '_')}_documents"
+            collection_name = f"Nouxcube_{str(user.tenant_id).replace('-', '_')}_documents"
 
             # Delete all documents by user from vector database
             # This would require implementing user-based deletion in WeaviateClient

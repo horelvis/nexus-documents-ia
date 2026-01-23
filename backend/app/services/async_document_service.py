@@ -7,6 +7,8 @@ import uuid
 import datetime
 import io
 import asyncio
+import base64
+import httpx
 from typing import List, Dict, Any, Optional
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,14 +16,12 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, Tag, Tenant, DocumentView, FolderMarker
+from app.db.models import Document, IndexedDocument, Tag, Tenant, DocumentView, FolderMarker
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.weaviate_client import weaviate_client
-from app.services.elasticsearch_client import elasticsearch_client
 from app.services.queue_service import queue_service
-from app.services.text_extraction_client import TextExtractionClient
 from app.services.langextract_client import langextract_client
 from app.services.folder_classification_service import classify_document as classify_document_folder
 from .document_classifier import classify_document_type
@@ -41,7 +41,6 @@ class AsyncDocumentService:
         self.user_id = user_id
         self.storage_service = None
         self.collection_name = None  # Weaviate collection name
-        self.elasticsearch_service = None  # NEW: Elasticsearch for hybrid search
         self._initialized = False
 
     async def _call_cag_query(
@@ -188,13 +187,156 @@ class AsyncDocumentService:
                         self.tenant_id, self.user_id, new_db
                     )
         
-        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
-        # Elasticsearch service is now a microservice - no local initialization needed
-        logger.info(f"✅ Elasticsearch microservice ready for tenant {self.tenant_id}")
-        self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
-        
+        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
+        # Weaviate service URL for IndexingPipeline
+        self.weaviate_service_url = getattr(settings, 'WEAVIATE_SERVICE_URL', 'http://weaviate-service:8000')
+        self.microservices_api_key = getattr(settings, 'MICROSERVICES_API_KEY', '')
+
         self._initialized = True
-    
+
+    async def _call_indexing_pipeline(
+        self,
+        document_id: str,
+        file_bytes: bytes,
+        filename: str,
+        mime_type: str,
+        metadata: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Call the unified IndexingPipeline via weaviate-service.
+
+        This replaces manual text extraction + Weaviate storage with a single
+        call that handles: text extraction, semantic chunking, embeddings, and storage.
+
+        Args:
+            document_id: UUID of the document
+            file_bytes: Raw file content
+            filename: Original filename
+            mime_type: MIME type of the file
+            metadata: Additional metadata to store
+
+        Returns:
+            Dict with success status, weaviate_id, chunks_count, etc.
+        """
+        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": self.microservices_api_key,
+            "X-Tenant-ID": str(self.tenant_id),
+        }
+
+        payload = {
+            "document_id": str(document_id),
+            "file_bytes_base64": file_base64,
+            "filename": filename,
+            "mime_type": mime_type,
+            "tenant_id": str(self.tenant_id),
+            "owner_id": str(self.user_id) if self.user_id else "",
+            "metadata": metadata or {},
+            "acl": {},  # ACL will be set later
+        }
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)
+        ) as client:
+            try:
+                logger.info(f"📤 Calling IndexingPipeline for document {document_id}")
+                response = await client.post(
+                    f"{self.weaviate_service_url}/weaviate/index/from-connector",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(
+                    f"✅ IndexingPipeline success for {document_id}: "
+                    f"weaviate_id={result.get('weaviate_id')}, "
+                    f"chunks={result.get('chunks_count', 0)}"
+                )
+                return result
+
+            except httpx.HTTPStatusError as e:
+                error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                logger.error(f"❌ IndexingPipeline error for {document_id}: {error_msg}")
+                return {"success": False, "error": error_msg}
+            except Exception as e:
+                logger.error(f"❌ IndexingPipeline exception for {document_id}: {e}")
+                return {"success": False, "error": str(e)}
+
+    async def _call_weaviate_search(
+        self,
+        query: str,
+        limit: int = 20,
+        user_id: Optional[str] = None,
+        user_role_ids: Optional[List[str]] = None,
+        is_admin: bool = False,
+        filters: Optional[Dict[str, Any]] = None,
+        search_type: str = "hybrid",
+    ) -> Dict[str, Any]:
+        """
+        Call Weaviate hybrid search to replace Elasticsearch.
+
+        Weaviate provides:
+        - Vector search (semantic similarity)
+        - Keyword search (BM25)
+        - Hybrid search (combines both)
+
+        Args:
+            query: Search query text
+            limit: Maximum results to return
+            user_id: User ID for ACL filtering
+            user_role_ids: User's role IDs for ACL filtering
+            is_admin: Admin bypass for ACL
+            filters: Additional filters (category, tags, dates)
+            search_type: "vector", "keyword", or "hybrid"
+
+        Returns:
+            Dict with results, total_results, search_time_ms
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": self.microservices_api_key,
+            "X-Tenant-ID": str(self.tenant_id),
+        }
+
+        payload = {
+            "query": query,
+            "limit": limit,
+            "tenant_id": str(self.tenant_id),
+            "user_id": user_id,
+            "user_role_ids": user_role_ids or [],
+            "is_admin": is_admin,
+            "filters": filters or {},
+            "search_type": search_type,
+        }
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0)
+        ) as client:
+            try:
+                logger.info(f"🔍 Weaviate hybrid search: '{query}' (type={search_type})")
+                response = await client.post(
+                    f"{self.weaviate_service_url}/weaviate/collections/{self.collection_name}/search",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(
+                    f"✅ Weaviate search returned {result.get('total_results', 0)} results "
+                    f"in {result.get('search_time_ms', 0)}ms"
+                )
+                return result
+
+            except httpx.HTTPStatusError as e:
+                error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                logger.error(f"❌ Weaviate search error: {error_msg}")
+                return {"results": [], "total_results": 0, "error": error_msg}
+            except Exception as e:
+                logger.error(f"❌ Weaviate search exception: {e}")
+                return {"results": [], "total_results": 0, "error": str(e)}
+
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
         """Validates the uploaded file"""
         if not file:
@@ -258,36 +400,26 @@ class AsyncDocumentService:
                     "search_engine": "acl_filtered"
                 }
 
-            # If we have a search term, REQUIRE Elasticsearch to work
+            # Use Weaviate hybrid search (vector + BM25) for text queries
             if search and search.strip():
-                if not self.elasticsearch_service:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Search functionality unavailable: Elasticsearch service not initialized"
-                    )
-
-                logger.info(f"🔍 Using Elasticsearch hybrid search for query: '{search}' (NO FALLBACK)")
-
-                # Prepare filters for Elasticsearch
-                es_filters = {}
+                # Build filters for Weaviate
+                weaviate_filters = {}
                 if category:
-                    es_filters["category"] = category
+                    weaviate_filters["category"] = category
                 if tags:
-                    es_filters["tags"] = tags
+                    weaviate_filters["tags"] = tags
                 if date_from:
-                    es_filters["date_from"] = date_from
+                    weaviate_filters["date_from"] = date_from
                 if date_to:
-                    es_filters["date_to"] = date_to
-                # ACL: Add document_ids filter for Elasticsearch
+                    weaviate_filters["date_to"] = date_to
+                # ACL: Add document_ids filter
                 if document_ids is not None:
-                    es_filters["document_ids"] = [str(doc_id) for doc_id in document_ids]
+                    weaviate_filters["document_ids"] = [str(doc_id) for doc_id in document_ids]
 
                 # Build user context for ACL filtering
-                from app.services.elasticsearch_client import SearchUserContext
-                user_context = None
+                user_role_ids = []
+                is_admin = False
                 if self.user_id:
-                    # Get user roles from database if needed
-                    user_role_ids = []
                     try:
                         from app.db.models import User
                         user_result = await db.execute(
@@ -296,111 +428,80 @@ class AsyncDocumentService:
                         user = user_result.scalars().first()
                         if user:
                             user_role_ids = [str(role.id) for role in user.roles] if user.roles else []
-                            user_context = SearchUserContext(
-                                user_id=self.user_id,
-                                role_ids=user_role_ids,
-                                is_admin=user.is_admin
-                            )
+                            is_admin = user.is_admin
                     except Exception as ctx_exc:
                         logger.warning(f"Could not build user context for ACL filtering: {ctx_exc}")
 
-                # Perform hybrid search via microservice with ACL filtering
-                es_results = await elasticsearch_client.hybrid_search(
-                    tenant_id=self.tenant_id,
+                # Call Weaviate hybrid search
+                search_result = await self._call_weaviate_search(
                     query=search,
                     limit=per_page * 2,  # Get more results to account for filtering
-                    filters=es_filters,
-                    user_context=user_context
+                    user_id=self.user_id,
+                    user_role_ids=user_role_ids,
+                    is_admin=is_admin,
+                    filters=weaviate_filters,
+                    search_type="hybrid",
                 )
-                
-                logger.info(f"✅ Elasticsearch returned {len(es_results)} results")
-                
-                # Extract document IDs from ES results
-                doc_ids = [result["document"]["id"] for result in es_results]
-                
-                # Get full document objects from database in the same order
-                if doc_ids:
-                    # Create case statement to preserve ES ranking order
-                    when_clauses = []
-                    for i, doc_id in enumerate(doc_ids):
-                        when_clauses.append((Document.id == doc_id, i))
-                    
-                    order_case = func.case(
-                        *when_clauses,
-                        else_=len(doc_ids)
-                    )
-                    
-                    # Apply pagination to the ordered ES results
-                    offset = (page - 1) * per_page
-                    paginated_doc_ids = doc_ids[offset:offset + per_page]
-                    
-                    if paginated_doc_ids:
-                        query = select(Document).filter(
-                            Document.id.in_(paginated_doc_ids),
-                            Document.tenant_id == self.tenant_id
-                        ).options(
-                            selectinload(Document.tags),
-                            selectinload(Document.creator)
-                        ).order_by(order_case)
-                        
-                        result = await db.execute(query)
-                        documents = result.scalars().all()
-                        
-                        # Build response with ES scores
-                        items = []
-                        es_scores = {res["document"]["id"]: res["score"] for res in es_results}
-                        
-                        for doc in documents:
-                            doc_dict = self._document_to_dict(doc)
-                            doc_dict["search_score"] = es_scores.get(str(doc.id), 0.0)
-                            doc_dict["search_matches"] = [
-                                match for res in es_results 
-                                if res["document"]["id"] == str(doc.id)
-                                for match in res.get("matches", [])
-                            ]
-                            items.append(doc_dict)
-                        
-                        return {
-                            "items": items,
-                            "total": len(doc_ids),
-                            "page": page,
-                            "per_page": per_page,
-                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
-                            "search_engine": "elasticsearch_hybrid"
-                        }
-                    else:
-                        # No results for this page
-                        return {
-                            "items": [],
-                            "total": len(doc_ids),
-                            "page": page,
-                            "per_page": per_page,
-                            "total_pages": (len(doc_ids) + per_page - 1) // per_page,
-                            "search_engine": "elasticsearch_hybrid"
-                        }
+
+                if search_result.get("error"):
+                    logger.warning(f"Weaviate search failed, falling back to SQL: {search_result.get('error')}")
+                    # Fall through to SQL search below
                 else:
-                    # No documents found - this is a valid result, not an error
+                    weaviate_results = search_result.get("results", [])
+                    total_results = search_result.get("total_results", len(weaviate_results))
+
+                    # Return Weaviate results directly (no PostgreSQL query needed)
+                    # Weaviate already has all document metadata
+                    offset = (page - 1) * per_page
+                    paginated_results = weaviate_results[offset:offset + per_page]
+
+                    items = []
+                    for res in paginated_results:
+                        # Convert Weaviate result to expected document format
+                        doc_dict = {
+                            "id": res.get("id"),
+                            "title": res.get("title", ""),
+                            "filename": res.get("title", ""),  # Weaviate uses title as filename
+                            "description": res.get("metadata", {}).get("description", ""),
+                            "content_preview": (res.get("content", "")[:500] + "...") if res.get("content") else "",
+                            "file_type": res.get("metadata", {}).get("file_type", ""),
+                            "file_size": res.get("metadata", {}).get("file_size"),
+                            "mime_type": res.get("metadata", {}).get("mime_type", ""),
+                            "category": res.get("document_type", ""),
+                            "tags": res.get("tags", []),
+                            "created_at": res.get("created_at"),
+                            "updated_at": res.get("updated_at"),
+                            "tenant_id": res.get("tenant_id"),
+                            "search_score": res.get("similarity_score", 0.0),
+                            "source": "weaviate",  # Indicate source for frontend
+                        }
+                        items.append(doc_dict)
+
                     return {
-                        "items": [],
-                        "total": 0,
+                        "items": items,
+                        "total": total_results,
                         "page": page,
                         "per_page": per_page,
-                        "total_pages": 0,
-                        "search_engine": "elasticsearch_hybrid"
+                        "total_pages": (total_results + per_page - 1) // per_page,
+                        "search_engine": "weaviate_hybrid"
                     }
-            
-            # Fallback to SQL search or when no search term provided
-            logger.info("Using SQL-based document search")
 
-            # Base query with ACL filter
+            # SQL search when no search term or Weaviate fails
+            logger.info("Using SQL-based document search (Document + IndexedDocument)")
+
+            # Base query with ACL filter for Document table
             base_filters = [Document.tenant_id == self.tenant_id]
+            # Base filters for IndexedDocument table (uses UUID for tenant_id)
+            indexed_base_filters = [IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)]
 
             # ACL: Filter by accessible document IDs
             if document_ids is not None:
                 base_filters.append(Document.id.in_(document_ids))
+                indexed_base_filters.append(IndexedDocument.id.in_(document_ids))
 
             # Folder filtering (Google Drive style)
             folder_items = []  # Subfolders to include at the beginning
+            current_folder = ""  # Initialize for later use
             if folder is not None:
                 # Normalize folder path
                 current_folder = folder.strip() if folder else ""
@@ -410,6 +511,7 @@ class AsyncDocumentService:
                 if current_folder:
                     # Filter documents in this specific folder only (not subfolders)
                     base_filters.append(Document.folder_path == current_folder)
+                    indexed_base_filters.append(IndexedDocument.external_path == current_folder)
                 else:
                     # Root folder: show documents with no folder or empty folder_path
                     base_filters.append(
@@ -419,11 +521,23 @@ class AsyncDocumentService:
                             Document.folder_path == "/"
                         )
                     )
+                    indexed_base_filters.append(
+                        or_(
+                            IndexedDocument.external_path.is_(None),
+                            IndexedDocument.external_path == "",
+                            IndexedDocument.external_path == "/"
+                        )
+                    )
 
                 # Get immediate subfolders as items (Google Drive style)
                 # Query to find distinct folder_path values that are direct children
                 from sqlalchemy import distinct, case, literal
+                from collections import defaultdict
 
+                # Collect subfolders from BOTH tables
+                folder_counts = defaultdict(int)
+
+                # === Document table subfolders ===
                 if current_folder:
                     # Find folders that start with current_folder/ but are only one level deeper
                     subfolder_query = (
@@ -450,12 +564,45 @@ class AsyncDocumentService:
                         .group_by(Document.folder_path)
                     )
 
+                # === IndexedDocument table subfolders ===
+                if current_folder:
+                    indexed_subfolder_query = (
+                        select(
+                            IndexedDocument.external_path,
+                            func.count(IndexedDocument.id).label("document_count")
+                        )
+                        .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
+                        .where(IndexedDocument.external_path.isnot(None))
+                        .where(IndexedDocument.external_path.startswith(current_folder + "/"))
+                        .group_by(IndexedDocument.external_path)
+                    )
+                else:
+                    indexed_subfolder_query = (
+                        select(
+                            IndexedDocument.external_path,
+                            func.count(IndexedDocument.id).label("document_count")
+                        )
+                        .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
+                        .where(IndexedDocument.external_path.isnot(None))
+                        .where(IndexedDocument.external_path != "")
+                        .where(IndexedDocument.external_path != "/")
+                        .group_by(IndexedDocument.external_path)
+                    )
+
                 # ACL: Filter subfolders by accessible document IDs
                 if document_ids is not None:
                     subfolder_query = subfolder_query.where(Document.id.in_(document_ids))
+                    indexed_subfolder_query = indexed_subfolder_query.where(IndexedDocument.id.in_(document_ids))
 
+                # Execute BOTH subfolder queries
                 subfolder_result = await db.execute(subfolder_query)
                 all_subpaths = subfolder_result.all()
+
+                indexed_subfolder_result = await db.execute(indexed_subfolder_query)
+                indexed_subpaths = indexed_subfolder_result.all()
+
+                # Combine results from both tables
+                all_subpaths = list(all_subpaths) + list(indexed_subpaths)
 
                 # Extract immediate children only
                 seen_folders = set()
@@ -476,17 +623,30 @@ class AsyncDocumentService:
                         seen_folders.add(immediate_child)
                         child_path = f"{current_folder}/{immediate_child}" if current_folder else f"/{immediate_child}"
 
-                        # Count documents in this subfolder (recursively)
-                        subfolder_count_query = (
+                        # Count documents in this subfolder (recursively) from BOTH tables
+                        # Document table count
+                        doc_count_query = (
                             select(func.count(Document.id))
                             .where(Document.tenant_id == self.tenant_id)
                             .where(Document.folder_path.startswith(child_path))
                         )
                         if document_ids is not None:
-                            subfolder_count_query = subfolder_count_query.where(Document.id.in_(document_ids))
+                            doc_count_query = doc_count_query.where(Document.id.in_(document_ids))
+                        doc_count_result = await db.execute(doc_count_query)
+                        doc_count = doc_count_result.scalar() or 0
 
-                        count_result = await db.execute(subfolder_count_query)
-                        subfolder_doc_count = count_result.scalar() or 0
+                        # IndexedDocument table count
+                        indexed_count_query = (
+                            select(func.count(IndexedDocument.id))
+                            .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
+                            .where(IndexedDocument.external_path.startswith(child_path))
+                        )
+                        if document_ids is not None:
+                            indexed_count_query = indexed_count_query.where(IndexedDocument.id.in_(document_ids))
+                        indexed_count_result = await db.execute(indexed_count_query)
+                        indexed_count = indexed_count_result.scalar() or 0
+
+                        subfolder_doc_count = doc_count + indexed_count
 
                         folder_items.append({
                             "id": f"folder:{child_path}",
@@ -561,46 +721,68 @@ class AsyncDocumentService:
                 # Sort folders alphabetically
                 folder_items.sort(key=lambda x: x["title"].lower())
 
-            query = select(Document).filter(
+            # === Query Document table ===
+            doc_query = select(Document).filter(
                 *base_filters
             ).options(
                 selectinload(Document.tags),
                 selectinload(Document.creator)
             )
 
-            # Apply filters
+            # === Query IndexedDocument table ===
+            indexed_query = select(IndexedDocument).filter(
+                *indexed_base_filters
+            )
+
+            # Apply filters to Document query
             if search:
-                query = query.filter(
+                doc_query = doc_query.filter(
                     or_(
                         Document.title.ilike(f"%{search}%"),
                         Document.description.ilike(f"%{search}%"),
                         Document.filename.ilike(f"%{search}%")
                     )
                 )
+                indexed_query = indexed_query.filter(
+                    or_(
+                        IndexedDocument.title.ilike(f"%{search}%"),
+                        IndexedDocument.description.ilike(f"%{search}%")
+                    )
+                )
 
             if category:
-                query = query.filter(Document.category == category)
+                doc_query = doc_query.filter(Document.category == category)
+                # IndexedDocument doesn't have category field, skip
 
             if tags:
-                # Join with tags
-                query = query.join(Document.tags).filter(
+                # Join with tags (only for Document table)
+                doc_query = doc_query.join(Document.tags).filter(
                     Tag.name.in_(tags)
                 )
+                # IndexedDocument doesn't have tags relation, skip
 
             if date_from:
                 date_from_obj = datetime.datetime.fromisoformat(date_from)
-                query = query.filter(Document.created_at >= date_from_obj)
+                doc_query = doc_query.filter(Document.created_at >= date_from_obj)
+                indexed_query = indexed_query.filter(IndexedDocument.created_at >= date_from_obj)
 
             if date_to:
                 date_to_obj = datetime.datetime.fromisoformat(date_to)
-                query = query.filter(Document.created_at <= date_to_obj)
+                doc_query = doc_query.filter(Document.created_at <= date_to_obj)
+                indexed_query = indexed_query.filter(IndexedDocument.created_at <= date_to_obj)
 
-            # Count total documents (not including folders)
-            count_query = select(func.count()).select_from(query.subquery())
-            total_result = await db.execute(count_query)
-            total_docs = total_result.scalar()
+            # Count total documents from BOTH tables
+            doc_count_query = select(func.count()).select_from(doc_query.subquery())
+            doc_count_result = await db.execute(doc_count_query)
+            doc_total = doc_count_result.scalar() or 0
 
-            # Total items = folders + documents
+            indexed_count_query = select(func.count()).select_from(indexed_query.subquery())
+            indexed_count_result = await db.execute(indexed_count_query)
+            indexed_total = indexed_count_result.scalar() or 0
+
+            total_docs = doc_total + indexed_total
+
+            # Total items = folders + documents from both tables
             total = len(folder_items) + total_docs
 
             # Pagination logic accounting for folders
@@ -610,17 +792,22 @@ class AsyncDocumentService:
             if page == 1:
                 # First page: show folders first, then documents
                 docs_to_fetch = per_page - len(folder_items)
-                query = query.offset(0).limit(max(0, docs_to_fetch)).order_by(Document.created_at.desc())
+                doc_query = doc_query.offset(0).limit(max(0, docs_to_fetch)).order_by(Document.created_at.desc())
+                indexed_query = indexed_query.offset(0).limit(max(0, docs_to_fetch)).order_by(IndexedDocument.created_at.desc())
             else:
                 # Other pages: adjust offset for folders shown on page 1
                 adjusted_offset = offset - len(folder_items)
-                query = query.offset(max(0, adjusted_offset)).limit(per_page).order_by(Document.created_at.desc())
+                doc_query = doc_query.offset(max(0, adjusted_offset)).limit(per_page).order_by(Document.created_at.desc())
+                indexed_query = indexed_query.offset(max(0, adjusted_offset)).limit(per_page).order_by(IndexedDocument.created_at.desc())
 
-            # Execute query
-            result = await db.execute(query)
-            documents = result.scalars().all()
+            # Execute BOTH queries
+            doc_result = await db.execute(doc_query)
+            documents = doc_result.scalars().all()
 
-            # Convert documents to dict with type="document"
+            indexed_result = await db.execute(indexed_query)
+            indexed_documents = indexed_result.scalars().all()
+
+            # Convert Document objects to dict with type="document"
             doc_items = []
             for doc in documents:
                 doc_dict = {
@@ -642,9 +829,24 @@ class AsyncDocumentService:
                         "id": str(doc.creator.id),
                         "email": doc.creator.email,
                         "full_name": doc.creator.full_name
-                    } if doc.creator else None
+                    } if doc.creator else None,
+                    "source": "upload"  # Indicate source for frontend
                 }
                 doc_items.append(doc_dict)
+
+            # Convert IndexedDocument objects to dict
+            for indexed_doc in indexed_documents:
+                doc_items.append(self._indexed_document_to_dict(indexed_doc))
+
+            # Sort combined results by created_at descending
+            doc_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+            # Apply pagination limit to combined results
+            if page == 1:
+                docs_limit = per_page - len(folder_items)
+            else:
+                docs_limit = per_page
+            doc_items = doc_items[:max(0, docs_limit)]
 
             # Combine: folders first (only on page 1), then documents
             if page == 1:
@@ -661,7 +863,11 @@ class AsyncDocumentService:
                 "search_engine": "sql",
                 "current_folder": folder if folder is not None else None,
                 "folder_count": len(folder_items) if page == 1 else 0,
-                "document_count": total_docs
+                "document_count": total_docs,
+                "breakdown": {
+                    "uploads": doc_total,
+                    "connectors": indexed_total
+                }
             }
             
         except Exception as e:
@@ -688,6 +894,42 @@ class AsyncDocumentService:
                 "email": doc.creator.email,
                 "full_name": doc.creator.full_name
             } if doc.creator else None
+        }
+
+    def _indexed_document_to_dict(self, doc: IndexedDocument) -> Dict[str, Any]:
+        """Convert IndexedDocument model (from connectors) to dictionary"""
+        # Map indexing_status to display string
+        status_map = {
+            "indexed": "Indexado",
+            "pending": "Pendiente",
+            "processing": "Procesando",
+            "failed": "Error"
+        }
+        indexed_status = status_map.get(doc.indexing_status, doc.indexing_status or "Pendiente")
+
+        return {
+            "id": str(doc.id),
+            "type": "document",
+            "title": doc.title,
+            "description": doc.description,
+            "filename": doc.title,  # IndexedDocument uses title as filename
+            "folder_path": doc.external_path,
+            "file_type": doc.file_extension,
+            "file_size": doc.size_bytes or 0,
+            "mime_type": doc.mime_type,
+            "indexed": indexed_status,
+            "category": None,  # IndexedDocument doesn't have category
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+            "tags": [],  # IndexedDocument doesn't have tags relation
+            "created_by": None,  # Would need to join with User table
+            # Connector-specific fields
+            "source": "connector",
+            "connector_type": doc.connector_type,
+            "connector_id": str(doc.connector_id) if doc.connector_id else None,
+            "external_id": doc.external_id,
+            "external_url": doc.external_url,
+            "weaviate_id": str(doc.weaviate_id) if doc.weaviate_id else None,
         }
     
     async def upload_document(
@@ -831,352 +1073,163 @@ class AsyncDocumentService:
             raise HTTPException(status_code=500, detail=str(e))
     
     async def _process_document_async(self, doc_info: dict, contents: bytes, file_ext: str):
-        """Process document in background"""
+        """
+        Process document in background using unified IndexingPipeline.
+
+        This method now uses the weaviate-service's IndexingPipeline for:
+        - Text extraction (via Tika)
+        - Semantic chunking
+        - Embedding generation
+        - Weaviate storage
+
+        After indexing, it performs additional enrichment:
+        - Auto-categorization via LangExtract
+        - Entity extraction
+        - Folder classification (Learn-First approach)
+        """
         doc_id = doc_info["id"]
         try:
-            logger.info(f"Starting async processing for document {doc_id}, file type: {file_ext}")
-            
-            # Extract text via microservice
-            extraction = await self.text_extraction_client.extract_text(
+            logger.info(f"🚀 Starting async processing for document {doc_id}, file type: {file_ext}")
+
+            # Get document metadata for IndexingPipeline
+            async with AsyncSessionLocal() as db:
+                stmt = (
+                    select(Document)
+                    .options(selectinload(Document.tags))
+                    .filter(Document.id == doc_id)
+                )
+                result = await db.execute(stmt)
+                doc = result.scalar_one_or_none()
+
+                if not doc:
+                    raise Exception("Document not found in database")
+
+                tags_list = [tag.name for tag in doc.tags] if doc.tags else []
+                metadata = {
+                    "file_type": file_ext,
+                    "filename": doc.filename,
+                    "title": doc.title or doc.filename,
+                    "description": doc.description,
+                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                    "file_size": doc.file_size,
+                    "mime_type": doc.mime_type,
+                    "category": doc.category,
+                    "tags": tags_list,
+                }
+                mime_type = doc.mime_type or "application/octet-stream"
+
+            # Call unified IndexingPipeline (handles extraction, chunking, embedding, storage)
+            pipeline_result = await self._call_indexing_pipeline(
+                document_id=doc_id,
                 file_bytes=contents,
                 filename=doc_info.get("filename"),
-                file_extension=file_ext,
+                mime_type=mime_type,
+                metadata=metadata,
             )
-            text = extraction.text
-            logger.info(
-                "Text extraction completed for %s, length=%s, language=%s",
-                doc_id,
-                len(text) if text else 0,
-                extraction.language,
-            )
-            
-            # Auto-classify document type
-            if text:
-                from app.services.document_classifier import classify_document_type
-                tipo_documento = classify_document_type(text[:4000])  # Simple keyword classifier
-                logger.info(f"Auto-classified document {doc_id} as: {tipo_documento}")
-            
-            if text:
-                try:
-                    # Limit text length for embedding generation to avoid timeouts
-                    # With all-minilm, we can process text faster but let's be conservative
-                    max_text_length = 30000  # Limit to ~30k characters for faster processing
-                    if len(text) > max_text_length:
-                        logger.warning(f"Text too long ({len(text)} chars), truncating to {max_text_length} for embeddings")
-                        text_for_embedding = text[:max_text_length]
-                    else:
-                        text_for_embedding = text
-                    
-                    # Note: Embeddings are generated by weaviate-service when storing the document
-                    logger.info(f"Document {doc_id} prepared for Weaviate (text length: {len(text_for_embedding)})")
-                except Exception as e:
-                    logger.error(f"Failed to prepare document {doc_id}: {e}")
-                    raise Exception(f"Document preparation failed: {str(e)}")
 
-                # Initialize variables that may be set in Weaviate block
-                metadata = {}
-                weaviate_success = False
-                weaviate_error = None
+            if not pipeline_result.get("success"):
+                error_msg = pipeline_result.get("error", "Unknown indexing error")
+                raise Exception(f"IndexingPipeline failed: {error_msg}")
 
-                try:
-                    # Get full document info for metadata before storing in vector DB
-                    async with AsyncSessionLocal() as db:
-                        stmt = (
-                            select(Document)
-                            .options(selectinload(Document.tags))
-                            .filter(Document.id == doc_id)
-                        )
-                        result = await db.execute(stmt)
-                        doc = result.scalar_one_or_none()
-                        
-                        if not doc:
-                            raise Exception("Document not found in database")
+            # Get extracted text preview for downstream operations
+            text_preview = pipeline_result.get("extracted_text_preview", "")
+            extraction_language = pipeline_result.get("extraction_language", "unknown")
+            chunk_count = pipeline_result.get("chunk_count", 0)
 
-                        tags_list = [tag.name for tag in doc.tags] if doc.tags else []
-                        metadata = {
-                            "file_type": file_ext,
-                            "tenant_id": self.tenant_id,
-                            "filename": doc.filename,
-                            "title": doc.title or doc.filename,
-                            "description": doc.description,
-                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                            "file_size": doc.file_size,
-                            "mime_type": doc.mime_type,
-                            "category": doc.category,
-                            "tags": tags_list,
-                        }
-                    
-                    # Store in Weaviate via microservice (it generates embeddings internally)
-                    logger.info(f"Storing document {doc_id} in Weaviate collection {self.collection_name}")
-                    weaviate_document = {
-                        "id": doc_id,
-                        "title": doc.title or doc.filename,
-                        "content": text_for_embedding,
-                        "metadata": metadata,
-                        "tenant_id": self.tenant_id,
-                        "document_type": doc.category or "general",
-                        "tags": tags_list,
-                    }
-                    await weaviate_client.add_document(self.collection_name, weaviate_document)
-                    logger.info(f"✅ Document {doc_id} stored in Weaviate")
-                    weaviate_success = True
-                    weaviate_error = None
-
-                    # Prepare tag information for downstream services
-                    tags_list = metadata.get("tags") or []
-                    metadata["tags"] = tags_list
-                    metadata["language"] = extraction.language
-                    metadata["text_extraction"] = {
-                        "language": extraction.language,
-                        "characters": extraction.characters,
-                        **(extraction.metadata or {}),
-                    }
-                except Exception as e:
-                    logger.error(f"Failed to store in vector DB for {doc_id}: {e}")
-                    weaviate_success = False
-                    weaviate_error = str(e)
-                    # Continue processing - Elasticsearch indexing will still be attempted
-                
-                # Update document status and perform routing in single session
-                async with AsyncSessionLocal() as db:
-                    stmt = select(Document).options(selectinload(Document.tags)).filter(Document.id == doc_id)
-                    result = await db.execute(stmt)
-                    doc = result.scalar_one_or_none()
-                    
-                    if doc:
-                        doc.indexed = IndexingStatus.PROCESSING
-                        # Auto-classify document type
-                        # Use langextract for labor classification
-                        try:
-                            labor_classif = await self.langextract_client.classify_labor_document(text[:4000])
-                            tipo_documento = labor_classif.get('tipo_documento', 'otro')
-                            logger.info(f"LangExtract classified {doc_id} as: {tipo_documento}")
-                        except Exception as e:
-                            logger.warning(f"LangExtract classification failed for {doc_id}: {e}, fallback 'otro'")
-                            tipo_documento = 'otro'
-                        
-                        # Generate summary instead of storing first 1000 chars
-                        summary = await self._generate_document_summary(text, doc_info["filename"])
-                        current_metadata = dict(doc.document_metadata or {})
-                        current_metadata["tipo_documento"] = tipo_documento
-                        current_metadata["text_extraction"] = metadata.get("text_extraction", {})
-                        if summary:
-                            current_metadata["summary"] = summary
-                            current_metadata.setdefault("text_preview", summary[:500])
-                        doc.document_metadata = current_metadata
-
-                        # Cache frequently accessed scalar fields to avoid lazy loads after commit
-                        cached_doc = {
-                            "title": doc.title,
-                            "filename": doc.filename,
-                            "description": doc.description,
-                            "file_type": doc.file_type,
-                            "category": doc.category,
-                            "tags": [tag.name for tag in doc.tags] if doc.tags else [],
-                            "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                            "file_size": doc.file_size,
-                            "mime_type": doc.mime_type,
-                            "tenant_id": str(doc.tenant_id),
-                            "created_by": str(doc.created_by) if doc.created_by else None,
-                        }
-
-                        await db.commit()
-                        logger.info(f"Document {doc_id} summary generated; starting search indexing pipeline")
-                        
-                        es_success = False
-                        es_error: Optional[str] = None
-
-                        logger.info(
-                            f"🔍 MANDATORY Elasticsearch indexing for document {doc_id} "
-                            f"(title: {cached_doc['title']})"
-                        )
-                        
-                        # Prepare metadata for Elasticsearch
-                        es_metadata = {
-                            "file_type": cached_doc["file_type"],
-                            "category": cached_doc["category"],
-                            "tags": cached_doc["tags"],
-                            "created_at": cached_doc["created_at"],
-                            "updated_at": cached_doc["updated_at"],
-                            "file_size": cached_doc["file_size"],
-                            "tenant_id": cached_doc["tenant_id"]
-                        }
-                        
-                        logger.debug(f"ES metadata for {doc_id}: {es_metadata}")
-
-                        # Get ACL data for the document
-                        from app.db.models import DocumentACL
-                        from datetime import datetime, timezone
-
-                        acl_user_ids = []
-                        acl_role_ids = []
-                        acl_everyone = False
-
-                        try:
-                            now = datetime.now(timezone.utc)
-                            acl_result = await db.execute(
-                                select(DocumentACL).filter(
-                                    and_(
-                                        DocumentACL.document_id == doc_id,
-                                        DocumentACL.tenant_id == uuid.UUID(self.tenant_id),
-                                        DocumentACL.can_view == True,
-                                        or_(
-                                            DocumentACL.expires_at.is_(None),
-                                            DocumentACL.expires_at > now
-                                        )
-                                    )
-                                )
-                            )
-                            acls = acl_result.scalars().all()
-
-                            for acl in acls:
-                                if acl.grantee_type == 'user' and acl.grantee_id:
-                                    acl_user_ids.append(str(acl.grantee_id))
-                                elif acl.grantee_type == 'role' and acl.grantee_id:
-                                    acl_role_ids.append(str(acl.grantee_id))
-                                elif acl.grantee_type == 'everyone':
-                                    acl_everyone = True
-                        except Exception as acl_exc:
-                            logger.warning(f"Could not fetch ACLs for document {doc_id}: {acl_exc}")
-                            # Default to everyone=True for backward compatibility with legacy documents
-                            acl_everyone = True
-
-                        try:
-                            es_success = await elasticsearch_client.index_document(
-                                tenant_id=self.tenant_id,
-                                doc_id=str(doc_id),
-                                title=cached_doc["title"],
-                                content=text[:5000],  # Index more content for better search
-                                description=cached_doc["description"],
-                                metadata=es_metadata,
-                                # ACL fields
-                                created_by=cached_doc["created_by"],
-                                acl_user_ids=acl_user_ids,
-                                acl_role_ids=acl_role_ids,
-                                acl_everyone=acl_everyone
-                            )
-                        except Exception as es_exc:
-                            es_error = str(es_exc)
-                            es_success = False
-                            logger.error(f"❌ Elasticsearch indexing exception for document {doc_id}: {es_error}")
-                        
-                        if es_success:
-                            logger.info(f"✅ Document {doc_id} successfully indexed in Elasticsearch")
-
-                            # Perform routing analysis in the same session
-                            await self._perform_routing_analysis(db, doc_info, text, file_ext)
-
-                            # Entity extraction moved to after auto-categorization (line ~877)
-                            # to avoid duplicate LangExtract calls
-                        else:
-                            logger.error(f"❌ Document {doc_id} failed to index in Elasticsearch")
-                        
-                        # Finalize indexing status based on both backends
-                        indexing_errors = []
-                        if not weaviate_success:
-                            indexing_errors.append(
-                                f"Weaviate: {weaviate_error or 'unknown error (see logs)'}"
-                            )
-                        if not es_success:
-                            indexing_errors.append(
-                                f"Elasticsearch: {es_error or 'unknown error (see logs)'}"
-                            )
-
-                        if indexing_errors:
-                            doc.indexed = IndexingStatus.INDEXING_ERROR
-                            doc.indexing_error = " | ".join(indexing_errors)
-                            await db.commit()
-                            logger.warning(
-                                f"Document {doc_id} marked as INDEXING_ERROR due to: {doc.indexing_error}"
-                            )
-                            try:
-                                await queue_service.enqueue_index_retry(
-                                    document_id=str(doc.id),
-                                    tenant_id=self.tenant_id,
-                                    user_id=self.user_id or (str(cached_doc["created_by"]) if cached_doc["created_by"] else None),
-                                    priority="high" if not es_success else "default"
-                                )
-                            except Exception as enqueue_error:
-                                logger.error(
-                                    f"Failed to enqueue indexing retry for {doc_id}: {enqueue_error}"
-                                )
-                        else:
-                            doc.indexed = IndexingStatus.INDEXED
-                            doc.indexing_error = None
-                            await db.commit()
-                            logger.info(
-                                f"Document {doc_id} fully indexed across Elasticsearch and Weaviate"
-                            )
-                
-                # Auto-categorize immediately via CAG/Elysia
-                try:
-                    category = await self._auto_categorize_document(
-                        doc_id,
-                        text_content=text_for_embedding,
-                        tenant_id=self.tenant_id,
-                        user_id=self.user_id,
-                        source="auto_ingest",
-                    )
-                    if category:
-                        logger.info(
-                            f"Document {doc_id} categorized automatically as '{category}'"
-                        )
-                except Exception as e:
-                    logger.warning(f"Auto-categorization failed for {doc_id}: {e}")
-
-                # Extract entities via LangExtract (generates visualization_html)
-                try:
-                    # Use CAG category or default to 'general'
-                    doc_type = category if category else "general"
-                    entity_result = await langextract_client.extract_entities(
-                        text=text_for_embedding[:50000],
-                        document_type=doc_type,
-                        filename=doc_info.get("filename"),
-                    )
-
-                    if entity_result.get("success"):
-                        async with AsyncSessionLocal() as db:
-                            stmt = select(Document).filter(Document.id == doc_id)
-                            result = await db.execute(stmt)
-                            doc = result.scalar_one_or_none()
-
-                            if doc:
-                                # Save extracted entities
-                                doc.extracted_entities = entity_result.get("extractions", [])
-
-                                # Save visualization_html and summary in document_metadata
-                                # IMPORTANT: Copy dict to trigger SQLAlchemy change detection for JSONB
-                                updated_metadata = dict(doc.document_metadata or {})
-                                updated_metadata["categorization"] = updated_metadata.get("categorization", {})
-                                updated_metadata["categorization"]["visualization_html"] = entity_result.get("visualization_html")
-                                updated_metadata["extraction_summary"] = entity_result.get("summary", {})
-                                doc.document_metadata = updated_metadata  # Reassign to trigger change
-
-                                await db.commit()
-                                logger.info(
-                                    f"Document {doc_id}: extracted {len(doc.extracted_entities)} entities with visualization"
-                                )
-                except Exception as e:
-                    logger.warning(f"Entity extraction failed for {doc_id}: {e}")
-
-                # Auto-classify document folder using RAG + LLM (Learn-First approach)
-                try:
-                    await self._auto_classify_folder(
-                        doc_id=doc_id,
-                        text_content=text_for_embedding,
-                        filename=doc_info.get("filename"),
-                        file_type=file_ext,
-                    )
-                except Exception as e:
-                    logger.warning(f"Folder classification failed for {doc_id}: {e}")
-
-                # Routing legacy deshabilitado
-            else:
+            if not text_preview:
                 logger.warning(f"No text extracted from document {doc_id}")
                 raise Exception("No text could be extracted from the document")
-            
+
+            logger.info(
+                f"✅ IndexingPipeline completed for {doc_id}: "
+                f"{chunk_count} chunks, language={extraction_language}"
+            )
+
+            # Update document status and metadata
+            async with AsyncSessionLocal() as db:
+                stmt = select(Document).options(selectinload(Document.tags)).filter(Document.id == doc_id)
+                result = await db.execute(stmt)
+                doc = result.scalar_one_or_none()
+
+                if doc:
+                    # Generate summary from text preview
+                    summary = await self._generate_document_summary(text_preview, doc_info["filename"])
+
+                    current_metadata = dict(doc.document_metadata or {})
+                    current_metadata["text_extraction"] = {
+                        "language": extraction_language,
+                        "chunk_count": chunk_count,
+                        "indexing_pipeline": "unified",
+                    }
+                    if summary:
+                        current_metadata["summary"] = summary
+                        current_metadata.setdefault("text_preview", summary[:500])
+                    doc.document_metadata = current_metadata
+
+                    # Mark as indexed (Weaviate only - ES deprecated)
+                    doc.indexed = IndexingStatus.INDEXED
+                    doc.indexing_error = None
+
+                    await db.commit()
+                    logger.info(f"✅ Document {doc_id} marked as INDEXED")
+
+            # Auto-categorize via LangExtract
+            category = None
+            try:
+                category = await self._auto_categorize_document(
+                    doc_id,
+                    text_content=text_preview,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    source="auto_ingest",
+                )
+                if category:
+                    logger.info(f"Document {doc_id} categorized as '{category}'")
+            except Exception as e:
+                logger.warning(f"Auto-categorization failed for {doc_id}: {e}")
+
+            # Extract entities via LangExtract
+            try:
+                doc_type = category if category else "general"
+                entity_result = await langextract_client.extract_entities(
+                    text=text_preview,
+                    document_type=doc_type,
+                    filename=doc_info.get("filename"),
+                )
+
+                if entity_result.get("success"):
+                    async with AsyncSessionLocal() as db:
+                        stmt = select(Document).filter(Document.id == doc_id)
+                        result = await db.execute(stmt)
+                        doc = result.scalar_one_or_none()
+
+                        if doc:
+                            doc.extracted_entities = entity_result.get("extractions", [])
+                            updated_metadata = dict(doc.document_metadata or {})
+                            updated_metadata["categorization"] = updated_metadata.get("categorization", {})
+                            updated_metadata["categorization"]["visualization_html"] = entity_result.get("visualization_html")
+                            updated_metadata["extraction_summary"] = entity_result.get("summary", {})
+                            doc.document_metadata = updated_metadata
+                            await db.commit()
+                            logger.info(
+                                f"Document {doc_id}: extracted {len(doc.extracted_entities)} entities"
+                            )
+            except Exception as e:
+                logger.warning(f"Entity extraction failed for {doc_id}: {e}")
+
+            # Auto-classify folder (Learn-First approach)
+            try:
+                await self._auto_classify_folder(
+                    doc_id=doc_id,
+                    text_content=text_preview,
+                    filename=doc_info.get("filename"),
+                    file_type=file_ext,
+                )
+            except Exception as e:
+                logger.warning(f"Folder classification failed for {doc_id}: {e}")
+
+            logger.info(f"🎉 Document {doc_id} processing completed successfully")
+
         except Exception as e:
             logger.error(f"Error processing document {doc_id}: {e}", exc_info=True)
             # Update error status
@@ -1184,7 +1237,7 @@ class AsyncDocumentService:
                 stmt = select(Document).filter(Document.id == doc_id)
                 result = await db.execute(stmt)
                 doc = result.scalar_one_or_none()
-                
+
                 if doc:
                     doc.indexed = IndexingStatus.INDEXING_ERROR
                     doc.indexing_error = str(e)
@@ -1192,7 +1245,11 @@ class AsyncDocumentService:
                     logger.info(f"Document {doc_id} marked as INDEXING_ERROR: {str(e)}")
     
     async def get_document(self, db: AsyncSession, doc_id: str) -> Document:
-        """Get single document by ID"""
+        """Get single document by ID from Document table.
+
+        Note: This method only searches the Document table (SaaS uploads).
+        For connector documents, use get_indexed_document() or get_any_document().
+        """
         stmt = select(Document).filter(
             Document.id == doc_id,
             Document.tenant_id == self.tenant_id
@@ -1200,14 +1257,73 @@ class AsyncDocumentService:
             selectinload(Document.tags),
             selectinload(Document.creator)
         )
-        
+
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
-        
+
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         return doc
+
+    async def get_indexed_document(self, db: AsyncSession, doc_id: str) -> IndexedDocument:
+        """Get single document by ID from IndexedDocument table (connector documents)."""
+        stmt = select(IndexedDocument).filter(
+            IndexedDocument.id == uuid.UUID(doc_id),
+            IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
+        )
+
+        result = await db.execute(stmt)
+        doc = result.scalar_one_or_none()
+
+        if not doc:
+            raise HTTPException(status_code=404, detail="IndexedDocument not found")
+
+        return doc
+
+    async def get_any_document(self, db: AsyncSession, doc_id: str) -> Dict[str, Any]:
+        """Get single document by ID from either Document or IndexedDocument table.
+
+        This method searches both tables and returns a unified dictionary format.
+        Use this for on-premise deployments where documents come from connectors.
+
+        Returns:
+            Dict with unified document format including 'source' field ('upload' or 'connector')
+        """
+        # First try Document table
+        doc_stmt = select(Document).filter(
+            Document.id == doc_id,
+            Document.tenant_id == self.tenant_id
+        ).options(
+            selectinload(Document.tags),
+            selectinload(Document.creator)
+        )
+
+        doc_result = await db.execute(doc_stmt)
+        doc = doc_result.scalar_one_or_none()
+
+        if doc:
+            result = self._document_to_dict(doc)
+            result["source"] = "upload"
+            return result
+
+        # Try IndexedDocument table
+        try:
+            indexed_stmt = select(IndexedDocument).filter(
+                IndexedDocument.id == uuid.UUID(doc_id),
+                IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
+            )
+
+            indexed_result = await db.execute(indexed_stmt)
+            indexed_doc = indexed_result.scalar_one_or_none()
+
+            if indexed_doc:
+                return self._indexed_document_to_dict(indexed_doc)
+        except ValueError:
+            # Invalid UUID format, skip IndexedDocument search
+            pass
+
+        raise HTTPException(status_code=404, detail="Document not found in either table")
     
     async def delete_document(self, db: AsyncSession, doc_id: str) -> Dict[str, Any]:
         """Delete a document"""
@@ -1575,34 +1691,52 @@ class AsyncDocumentService:
             raise HTTPException(status_code=500, detail="Error removing tag")
     
     async def mark_document_viewed(
-        self, 
-        document_id: str, 
+        self,
+        document_id: str,
         view_duration_seconds: int = None,
         scroll_percentage: float = None
     ) -> str:
         """
-        Mark document as viewed by current user
-        
+        Mark document as viewed by current user.
+
+        Searches both Document (SaaS uploads) and IndexedDocument (connector documents)
+        tables to support on-premise deployments.
+
         Args:
             document_id: ID of the document being viewed
             view_duration_seconds: Optional duration of view in seconds
             scroll_percentage: Optional percentage of document scrolled
-            
+
         Returns:
             view_id: ID of the created view record
         """
         try:
             async with AsyncSessionLocal() as db:
-                # Check if document exists and belongs to tenant
-                stmt = select(Document).filter(
+                # Check if document exists in Document table
+                doc_stmt = select(Document).filter(
                     Document.id == document_id,
                     Document.tenant_id == self.tenant_id
                 )
-                result = await db.execute(stmt)
-                document = result.scalar_one_or_none()
-                
+                doc_result = await db.execute(doc_stmt)
+                document = doc_result.scalar_one_or_none()
+
+                # If not found, check IndexedDocument table
                 if not document:
-                    raise HTTPException(status_code=404, detail="Document not found")
+                    try:
+                        indexed_stmt = select(IndexedDocument).filter(
+                            IndexedDocument.id == uuid.UUID(document_id),
+                            IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
+                        )
+                        indexed_result = await db.execute(indexed_stmt)
+                        indexed_doc = indexed_result.scalar_one_or_none()
+
+                        if not indexed_doc:
+                            raise HTTPException(status_code=404, detail="Document not found in either table")
+
+                        # IndexedDocument found - use it for the view record
+                        document = indexed_doc
+                    except ValueError:
+                        raise HTTPException(status_code=404, detail="Document not found")
                 
                 # Create or update document view record
                 view_record = DocumentView(

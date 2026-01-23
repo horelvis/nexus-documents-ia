@@ -421,22 +421,24 @@ class AgentRouterService:
         return any(ind in content for ind in financial_indicators)
     
     def _detect_personal_data(self, content: str) -> bool:
-        """Detect personal data presence"""
-        import re
-        
-        # Check for common PII patterns
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
-        ssn_pattern = r'\b\d{3}-\d{2}-\d{4}\b'
-        
-        has_email = bool(re.search(email_pattern, content))
-        has_phone = bool(re.search(phone_pattern, content))
-        has_ssn = bool(re.search(ssn_pattern, content))
-        
-        pii_keywords = ["date of birth", "social security", "passport", "driver license"]
-        has_pii_keywords = any(keyword in content for keyword in pii_keywords)
-        
-        return has_email or has_phone or has_ssn or has_pii_keywords
+        """Detect personal data presence using centralized PII patterns."""
+        from app.core.patterns import detect_pii
+
+        # Use centralized PII detection with international support
+        pii_result = detect_pii(
+            content,
+            check_email=True,
+            check_phone=True,
+            check_national_id=True,
+            check_financial=False,
+        )
+
+        # Also check for keyword indicators
+        pii_keywords = ["date of birth", "social security", "passport", "driver license",
+                        "fecha de nacimiento", "seguro social", "pasaporte", "carnet"]
+        has_pii_keywords = any(keyword in content.lower() for keyword in pii_keywords)
+
+        return pii_result.has_pii or has_pii_keywords
     
     def _detect_legal_clauses(self, content: str) -> bool:
         """Detect legal clauses presence"""

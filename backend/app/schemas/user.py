@@ -5,6 +5,8 @@ from pydantic import BaseModel, EmailStr, Field
 from .rbac import Role
 # from .billing import Subscription  # Removed - subscriptions handled by Stripe
 
+from app.core.enums import UserRole
+
 # Base schema for UserImage
 class UserImageBase(BaseModel):
     alt_text: Optional[str] = Field(None, example="User profile picture")
@@ -133,12 +135,12 @@ class UserWithStats(BaseModel):
 class UserInvite(BaseModel):
     """Schema for inviting new users"""
     email: EmailStr
-    role: str = Field(default="user", pattern="^(admin|user|viewer)$")
+    role: UserRole = Field(default=UserRole.USER, description="User role")
     name: Optional[str] = None
 
 class UserRoleUpdate(BaseModel):
     """Schema for updating user role"""
-    role: str = Field(..., pattern="^(admin|user|viewer)$")
+    role: UserRole = Field(..., description="New user role")
 
 class UserActivity(BaseModel):
     """User activity information"""

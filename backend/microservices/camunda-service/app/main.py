@@ -120,7 +120,7 @@ async def root():
     return {
         "service": settings.SERVICE_NAME,
         "version": settings.VERSION,
-        "description": "Camunda Workflow Service for NexusDocs360",
+        "description": "Camunda Workflow Service for NouxCubeIA",
         "endpoints": {
             "health": "/health",
             "docs": "/docs",

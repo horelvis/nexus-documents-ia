@@ -1,8 +1,8 @@
-# NexusDocs360 – Investor Overview
+# NouxCubeIA – Investor Overview
 
 ## Vision & Value Proposition
 - **Mission**: Convert every enterprise knowledge base into an intelligent, action-ready asset through autonomous document understanding.
-- **Pain Solved**: Most companies waste ~30% of knowledge-worker time searching, reconciling, or validating documents. NexusDocs360 unifies ingestion, AI comprehension, and workflow orchestration so legal, finance, and operations teams ship decisions in minutes instead of days.
+- **Pain Solved**: Most companies waste ~30% of knowledge-worker time searching, reconciling, or validating documents. NouxCubeIA unifies ingestion, AI comprehension, and workflow orchestration so legal, finance, and operations teams ship decisions in minutes instead of days.
 - **Why Now**: AI-native companies demand explainable, auditable automation. Our platform blends Retrieval-Augmented Generation (RAG), domain agents, and compliance tooling in a single multi-tenant stack deployable on any GCP project.
 
 ## Product Snapshot
@@ -128,7 +128,7 @@ We are raising to accelerate go-to-market (sales + onboarding), finalize enterpr
 - Additional connectors (SAP, Salesforce, Google Workspace) to drive expansion revenue.
 - Growth team for land-and-expand motions inside regulated industries.
 
-**Contact**: founders@nexusdocs360.app | Demo: https://pre.nexusdocs360.app
+**Contact**: founders@nouxcubeia.app | Demo: https://pre.nouxcubeia.app
 
 ---
 

@@ -267,19 +267,14 @@ JSON:"""
             )
 
     def _parse_llm_response(self, response: str) -> ClassificationResult:
-        """Parse LLM response, handling Qwen3's <think> tags."""
-        import json
-        import re
+        """Parse LLM response using centralized JSON extraction utility."""
+        from app.utils.json_extraction import extract_json_from_llm_response, clean_llm_response
 
-        # Remove <think>...</think> tags if present (Qwen3 thinking mode)
-        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-        clean_response = clean_response.strip()
+        # Use centralized extraction (handles <think> tags, code blocks, etc.)
+        data = extract_json_from_llm_response(response, default=None)
 
-        # Try to extract JSON from response
-        json_match = re.search(r'\{[^{}]*\}', clean_response, re.DOTALL)
-        if json_match:
+        if data and isinstance(data, dict):
             try:
-                data = json.loads(json_match.group())
                 return ClassificationResult(
                     carpeta=data.get("carpeta", "/Sin Clasificar"),
                     confianza=float(data.get("confianza", 0.5)),
@@ -287,10 +282,11 @@ JSON:"""
                     carpetas_alternativas=data.get("carpetas_alternativas", []),
                     es_carpeta_nueva=data.get("es_carpeta_nueva", False),
                 )
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to parse LLM JSON: {e}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Failed to parse classification data: {e}")
 
         # Fallback: couldn't parse
+        clean_response = clean_llm_response(response)
         return ClassificationResult(
             carpeta="/Sin Clasificar",
             confianza=0.0,

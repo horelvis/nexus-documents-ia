@@ -271,7 +271,7 @@ class PositionedReindexer:
                 return None
 
             # 3. Index chunks in Weaviate
-            collection_name = f"Nexus_{doc.tenant_id.replace('-', '_')}_documents"
+            collection_name = f"Nouxcube_{doc.tenant_id.replace('-', '_')}_documents"
 
             indexed_count = 0
             for i, chunk in enumerate(positioned_chunks):
@@ -339,7 +339,7 @@ class PositionedReindexer:
 
         # Optionally recreate collection
         if recreate and not self.dry_run:
-            collection_name = f"Nexus_{tenant_id.replace('-', '_')}_documents"
+            collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
             logger.info(f"Recreating collection: {collection_name}")
             # Delete and recreate collection via API
             try:

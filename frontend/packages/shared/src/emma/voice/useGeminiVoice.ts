@@ -106,7 +106,7 @@ export function useGeminiVoice({
       // 3. Get microphone (requires HTTPS or localhost)
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error(
-          'El micrófono requiere HTTPS. Accede a https://nexus-docs360.es:3000 o usa localhost.'
+          'El micrófono requiere HTTPS. Accede a https://nouxcube.local:3000 o usa localhost.'
         )
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })

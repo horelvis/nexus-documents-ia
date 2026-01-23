@@ -6,6 +6,7 @@ from .public_knowledge import router as public_knowledge_router
 from .knowledge import router as knowledge_router
 from .learning import router as learning_router
 from .sil import router as sil_router
+from .verified_generation import router as verified_router
 
 __all__ = [
     "weaviate_router",
@@ -14,4 +15,5 @@ __all__ = [
     "knowledge_router",
     "learning_router",
     "sil_router",
+    "verified_router",
 ]

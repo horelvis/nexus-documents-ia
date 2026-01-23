@@ -14,6 +14,7 @@ celery_app = Celery(
         "worker_app.tasks.indexing_tasks",
         "worker_app.tasks.channel_tasks",
         "worker_app.tasks.connector_tasks",
+        "worker_app.tasks.verification_tasks",
     ],
 )
 
@@ -25,6 +26,7 @@ celery_app.conf.update(
         "indexing.*": {"queue": "indexing"},
         "channels.*": {"queue": "channels"},
         "connectors.*": {"queue": "connectors"},
+        "verification.*": {"queue": "verification"},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,

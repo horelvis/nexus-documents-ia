@@ -20,7 +20,7 @@ from app.api.async_dependencies import (
     get_current_tenant_id_async,
     get_async_db
 )
-from app.db.models import User, Document as DBDocument, DocumentAnalysis
+from app.db.models import User, Document as DBDocument, IndexedDocument, DocumentAnalysis
 from app.schemas.analysis import (
     AnalysisStatus, AnalysisType,
     AnalysisQueueRequest, AnalysisBatchRequest,
@@ -50,6 +50,7 @@ async def queue_analysis(
     The analysis will be processed asynchronously.
     """
     # Verify document exists and belongs to tenant
+    # First try Document table (SaaS uploads)
     doc_result = await db.execute(
         select(DBDocument).where(
             and_(
@@ -60,10 +61,24 @@ async def queue_analysis(
     )
     document = doc_result.scalar_one_or_none()
 
+    # If not found, try IndexedDocument table (connector documents)
+    if not document:
+        indexed_result = await db.execute(
+            select(IndexedDocument).where(
+                and_(
+                    IndexedDocument.id == request.document_id,
+                    IndexedDocument.tenant_id == UUID(tenant_id)
+                )
+            )
+        )
+        indexed_doc = indexed_result.scalar_one_or_none()
+        if indexed_doc:
+            document = indexed_doc  # Use IndexedDocument
+
     if not document:
         raise HTTPException(
             status_code=404,
-            detail=f"Document {request.document_id} not found"
+            detail=f"Document {request.document_id} not found in either table"
         )
 
     # Check if there's already a pending/processing analysis for this document

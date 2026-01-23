@@ -2,7 +2,7 @@
 
 ## 📋 Resumen
 
-La interfaz de workflows de NexusDocs360 ahora está completamente integrada con **TemporalIO**, proporcionando una experiencia moderna y robusta para la gestión de procesos automatizados.
+La interfaz de workflows de NouxCubeIA ahora está completamente integrada con **TemporalIO**, proporcionando una experiencia moderna y robusta para la gestión de procesos automatizados.
 
 ## 🏗️ Arquitectura de Componentes
 

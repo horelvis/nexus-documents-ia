@@ -11,8 +11,14 @@ Key Principle:
 We embed the STRUCTURAL DESCRIPTION, not the document content.
 This allows semantic search to find structurally similar documents
 without having to embed and search through all the content.
+
+Implementation:
+Uses local sentence-transformers model (same as RAG pipeline) when
+EMBEDDING_PROVIDER=sentence-transformers, or falls back to HTTP embedding
+service if configured.
 """
 
+import asyncio
 import logging
 from typing import List, Optional
 import httpx
@@ -21,6 +27,48 @@ from .schemas import StructuralMetadata
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Global model cache (shared with weaviate_service)
+_embedding_model = None
+_embedding_model_lock = asyncio.Lock()
+
+
+async def _get_local_embedding_model():
+    """Get or load the local sentence-transformers model."""
+    global _embedding_model
+
+    if _embedding_model is not None:
+        return _embedding_model
+
+    async with _embedding_model_lock:
+        # Double-check after acquiring lock
+        if _embedding_model is not None:
+            return _embedding_model
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+
+            # Determine device
+            device = settings.embedding_device
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            elif device == "cuda" and not torch.cuda.is_available():
+                logger.warning("⚠️ CUDA requested but not available, falling back to CPU")
+                device = "cpu"
+
+            # Load model
+            model_name = settings.embedding_model
+            logger.info(f"🔄 Loading embedding model for SIL: {model_name} on {device}")
+
+            _embedding_model = SentenceTransformer(model_name, device=device)
+
+            logger.info(f"✅ Loaded embedding model for SIL: {model_name} on {device}")
+            return _embedding_model
+
+        except Exception as e:
+            logger.error(f"❌ Failed to load embedding model: {e}")
+            return None
 
 
 class StructuralEmbedder:
@@ -39,14 +87,25 @@ class StructuralEmbedder:
     def __init__(self):
         self._initialized = False
         self._embedding_url = settings.embedding_url
-        self._embedding_model = settings.embedding_model
+        self._embedding_model_name = settings.embedding_model
+        self._embedding_provider = settings.embedding_provider
 
     async def initialize(self) -> None:
         """Initialize the embedder."""
         if self._initialized:
             return
+
+        # Pre-load model if using local sentence-transformers
+        if self._embedding_provider == "sentence-transformers":
+            model = await _get_local_embedding_model()
+            if model:
+                logger.info("✅ StructuralEmbedder initialized with local sentence-transformers")
+            else:
+                logger.warning("⚠️ StructuralEmbedder: local model failed, will use fallback")
+        else:
+            logger.info(f"✅ StructuralEmbedder initialized with {self._embedding_provider}")
+
         self._initialized = True
-        logger.info("✅ StructuralEmbedder initialized")
 
     async def embed_structural_description(
         self,
@@ -149,7 +208,36 @@ class StructuralEmbedder:
         return query
 
     async def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding for a single text."""
+        """Generate embedding for a single text using configured provider."""
+        # Try local sentence-transformers first
+        if self._embedding_provider == "sentence-transformers":
+            return await self._generate_embedding_local(text)
+
+        # Fall back to HTTP service
+        return await self._generate_embedding_http(text)
+
+    async def _generate_embedding_local(self, text: str) -> Optional[List[float]]:
+        """Generate embedding using local sentence-transformers model."""
+        try:
+            model = await _get_local_embedding_model()
+            if model is None:
+                logger.warning("Local embedding model not available")
+                return None
+
+            # Run in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            embedding = await loop.run_in_executor(
+                None,
+                lambda: model.encode(text, convert_to_numpy=True).tolist()
+            )
+            return embedding
+
+        except Exception as e:
+            logger.error(f"Failed to generate local embedding: {e}")
+            return None
+
+    async def _generate_embedding_http(self, text: str) -> Optional[List[float]]:
+        """Generate embedding using HTTP embedding service (fallback)."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -171,14 +259,49 @@ class StructuralEmbedder:
                 return None
 
         except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
+            logger.error(f"Failed to generate HTTP embedding: {e}")
             return None
 
     async def _generate_embeddings_batch(
         self,
         texts: List[str],
     ) -> List[Optional[List[float]]]:
-        """Generate embeddings for multiple texts in batch."""
+        """Generate embeddings for multiple texts in batch using configured provider."""
+        # Try local sentence-transformers first
+        if self._embedding_provider == "sentence-transformers":
+            return await self._generate_embeddings_batch_local(texts)
+
+        # Fall back to HTTP service
+        return await self._generate_embeddings_batch_http(texts)
+
+    async def _generate_embeddings_batch_local(
+        self,
+        texts: List[str],
+    ) -> List[Optional[List[float]]]:
+        """Generate embeddings in batch using local sentence-transformers model."""
+        try:
+            model = await _get_local_embedding_model()
+            if model is None:
+                logger.warning("Local embedding model not available")
+                return [None] * len(texts)
+
+            # Run in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            embeddings = await loop.run_in_executor(
+                None,
+                lambda: [emb.tolist() for emb in model.encode(texts, convert_to_numpy=True)]
+            )
+            return embeddings
+
+        except Exception as e:
+            logger.error(f"Failed to generate local batch embeddings: {e}")
+            return [None] * len(texts)
+
+    async def _generate_embeddings_batch_http(
+        self,
+        texts: List[str],
+    ) -> List[Optional[List[float]]]:
+        """Generate embeddings in batch using HTTP embedding service (fallback)."""
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
@@ -199,7 +322,7 @@ class StructuralEmbedder:
                 return [None] * len(texts)
 
         except Exception as e:
-            logger.error(f"Failed to generate batch embeddings: {e}")
+            logger.error(f"Failed to generate HTTP batch embeddings: {e}")
             return [None] * len(texts)
 
 

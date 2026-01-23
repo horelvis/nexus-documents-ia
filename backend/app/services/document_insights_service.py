@@ -1,8 +1,9 @@
 # app/services/document_insights_service.py
 
 from sqlalchemy.sql import func, desc
+from sqlalchemy import or_
 from app.db.database import SessionLocal
-from app.db.models import Document, DocumentView, DocumentMetrics
+from app.db.models import Document, IndexedDocument, DocumentView, DocumentMetrics
 from app.core.config import settings
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
@@ -11,6 +12,21 @@ import logging
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _indexed_doc_to_dict(doc: IndexedDocument) -> Dict[str, Any]:
+    """Convert IndexedDocument to dictionary format compatible with Document."""
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "description": doc.description,
+        "created_at": doc.created_at,
+        "updated_at": doc.updated_at,
+        "format": doc.file_extension,
+        "size": doc.size_bytes or 0,
+        "source": "connector",
+        "connector_type": doc.connector_type,
+    }
 
 class DocumentInsightsService:
     def __init__(self, tenant_id, user_id=None):
@@ -141,7 +157,53 @@ class DocumentInsightsService:
                 })
             
             return results
-            
+
         except Exception as e:
             logger.error(f"Error en recomendaciones de respaldo: {str(e)}")
+            return []
+
+    def get_document_counts(self) -> Dict[str, int]:
+        """
+        Get document counts from both Document (uploads) and IndexedDocument (connectors).
+
+        Returns:
+            Dict with counts: {uploads, connectors, total}
+        """
+        try:
+            # Count from Document table
+            upload_count = self.db.query(func.count(Document.id))\
+                .filter(Document.tenant_id == self.tenant_id)\
+                .scalar() or 0
+
+            # Count from IndexedDocument table
+            connector_count = self.db.query(func.count(IndexedDocument.id))\
+                .filter(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))\
+                .scalar() or 0
+
+            return {
+                "uploads": upload_count,
+                "connectors": connector_count,
+                "total": upload_count + connector_count
+            }
+        except Exception as e:
+            logger.error(f"Error getting document counts: {str(e)}")
+            return {"uploads": 0, "connectors": 0, "total": 0}
+
+    def get_recent_connector_documents(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get recently indexed documents from connectors (IndexedDocument table).
+
+        This complements get_recently_viewed_documents which only works for
+        Document table entries.
+        """
+        try:
+            documents = self.db.query(IndexedDocument)\
+                .filter(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))\
+                .order_by(desc(IndexedDocument.created_at))\
+                .limit(limit)\
+                .all()
+
+            return [_indexed_doc_to_dict(doc) for doc in documents]
+        except Exception as e:
+            logger.error(f"Error getting recent connector documents: {str(e)}")
             return []

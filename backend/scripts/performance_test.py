@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Performance testing script for NexusDocs360 optimizations
+Performance testing script for NouxCubeIA optimizations
 """
 import asyncio
 import time
@@ -149,7 +149,7 @@ async def test_compression_performance():
 
 async def run_performance_tests():
     """Run all performance tests"""
-    print("🚀 NexusDocs360 Performance Test Suite")
+    print("🚀 NouxCubeIA Performance Test Suite")
     print("=" * 50)
 
     results = {}
@@ -191,7 +191,7 @@ def generate_report(results):
         return
 
     report = f"""
-# NexusDocs360 Performance Test Report
+# NouxCubeIA Performance Test Report
 
 ## Summary
 

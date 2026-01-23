@@ -278,10 +278,10 @@ export default function PortalPage() {
             <div className="flex items-center justify-center gap-2 pb-2">
               <img
                 src="/android-chrome-192x192.png"
-                alt="NexusDocs360"
+                alt="NouxCubeIA"
                 className="h-7 w-7"
               />
-              <span className="text-sm font-medium text-muted-foreground">NexusDocs360</span>
+              <span className="text-sm font-medium text-muted-foreground">NouxCubeIA</span>
             </div>
             {tenant?.logo_url && (
               <img
@@ -405,7 +405,7 @@ export default function PortalPage() {
             <div className="flex items-center gap-3">
               <img
                 src="/android-chrome-192x192.png"
-                alt="NexusDocs360"
+                alt="NouxCubeIA"
                 className="h-8 w-8"
               />
               {tenant?.logo_url && (

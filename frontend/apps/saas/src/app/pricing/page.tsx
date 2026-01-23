@@ -13,7 +13,7 @@ export default function PricingPage() {
   const handlePlanSelection = async (plan: Plan, isYearly: boolean = false) => {
     if (plan.id === 'enterprise') {
       // Open contact form or redirect to sales
-      window.location.href = 'mailto:sales@nexusdocs360.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información&body=Hola,%0A%0AEstoy%20interesado%20en%20el%20plan%20Enterprise%20de%20NexusDocs360.%0A%0ANombre%20de%20la%20empresa:%20%0ANúmero%20de%20usuarios:%20%0ARequerimientos%20específicos:%20%0A%0AGracias.'
+      window.location.href = 'mailto:sales@nouxcubeia.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información&body=Hola,%0A%0AEstoy%20interesado%20en%20el%20plan%20Enterprise%20de%20NouxCubeIA.%0A%0ANombre%20de%20la%20empresa:%20%0ANúmero%20de%20usuarios:%20%0ARequerimientos%20específicos:%20%0A%0AGracias.'
       return
     }
 

@@ -15,8 +15,9 @@ export const API_CONFIG = {
   TIMEOUT: 30000, // 30 seconds (default)
   EMMA_TIMEOUT: 180000, // 3 minutes for Emma AI (PlanningFlow with multiple agents)
   
-  // Microservice URLs (different ports)
-  WEAVIATE_SERVICE_URL: process.env.NEXT_PUBLIC_WEAVIATE_SERVICE_URL || 'http://192.168.1.58:8007',
+  // Microservice URLs - configure via environment variable
+  // NEXT_PUBLIC_WEAVIATE_SERVICE_URL must be set in .env.local or deployment config
+  WEAVIATE_SERVICE_URL: process.env.NEXT_PUBLIC_WEAVIATE_SERVICE_URL || 'http://localhost:8007',
   
   // Endpoints
   ENDPOINTS: {

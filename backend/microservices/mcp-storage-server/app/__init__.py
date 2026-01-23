@@ -2,7 +2,7 @@
 MCP Storage Server
 
 A Model Context Protocol (MCP) server that provides file storage operations
-for the NexusDocs360 platform. This server replaces the legacy storage-service
+for the NouxCubeIA platform. This server replaces the legacy storage-service
 microservice with a standardized MCP interface.
 
 Features:

@@ -4,12 +4,15 @@ from sqlalchemy import pool
 from alembic import context
 import os
 import sys
+import logging
 
 # Añadir el directorio padre al path para importar modelos
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.models import Base
 from app.core.config import settings
+
+logger = logging.getLogger("alembic.env")
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -23,6 +26,66 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = Base.metadata
+
+
+def get_version_locations():
+    """
+    Get migration version locations based on deployment mode.
+
+    This supports module-aware migrations:
+        - Core migrations (always applied)
+        - SaaS-specific migrations (only in saas mode)
+        - On-Premise-specific migrations (only in on_premise mode)
+
+    Directory structure (future):
+        alembic/versions/          <- default (all migrations for now)
+        alembic/versions/core/     <- shared migrations
+        alembic/versions/saas/     <- SaaS-only migrations
+        alembic/versions/on_premise/ <- On-premise-only migrations
+
+    Returns:
+        List of version location paths
+    """
+    base_dir = os.path.dirname(__file__)
+    default_location = os.path.join(base_dir, "versions")
+
+    # Check for module-specific migration folders
+    core_dir = os.path.join(base_dir, "versions", "core")
+    saas_dir = os.path.join(base_dir, "versions", "saas")
+    on_premise_dir = os.path.join(base_dir, "versions", "on_premise")
+
+    # Get deployment mode
+    deployment_mode = os.getenv("DEPLOYMENT_MODE", "on_premise").lower()
+
+    # If module-specific directories don't exist, use default
+    if not any(os.path.isdir(d) for d in [core_dir, saas_dir, on_premise_dir]):
+        return [default_location]
+
+    # Build version locations based on deployment mode
+    locations = []
+
+    # Core migrations are always included
+    if os.path.isdir(core_dir):
+        locations.append(core_dir)
+
+    # Add deployment-specific migrations
+    if deployment_mode == "saas" and os.path.isdir(saas_dir):
+        locations.append(saas_dir)
+    elif deployment_mode == "on_premise" and os.path.isdir(on_premise_dir):
+        locations.append(on_premise_dir)
+    elif deployment_mode == "custom":
+        # Custom mode: include both (developer can control via env vars)
+        if os.path.isdir(saas_dir):
+            locations.append(saas_dir)
+        if os.path.isdir(on_premise_dir):
+            locations.append(on_premise_dir)
+
+    # If no specific locations found, fallback to default
+    if not locations:
+        locations = [default_location]
+
+    logger.info(f"Migration version locations for {deployment_mode} mode: {locations}")
+    return locations
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

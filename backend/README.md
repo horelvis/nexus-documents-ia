@@ -479,7 +479,7 @@ WEAVIATE_URL=http://localhost:8080
 
 # Google Cloud Storage
 GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/service-account.json
-GCS_BUCKET_PREFIX=nexus-docs
+GCS_BUCKET_PREFIX=nouxcube-docs
 
 # Microservices
 MICROSERVICE_API_KEY=your-unified-api-key
@@ -713,7 +713,7 @@ cd backend/tests
 Helm charts available in `/deploy/kubernetes/`:
 
 ```bash
-helm install nexus-docs ./deploy/kubernetes/nexus-docs \
+helm install nouxcube ./deploy/kubernetes/nouxcube \
   --values ./deploy/kubernetes/values.prod.yaml
 ```
 
@@ -871,7 +871,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Documentation**: See `/docs` directory
 - **Issues**: GitHub Issues
 - **Discussions**: GitHub Discussions
-- **Email**: support@nexusdocs.com
+- **Email**: support@nouxcube.com
 
 ## Acknowledgments
 

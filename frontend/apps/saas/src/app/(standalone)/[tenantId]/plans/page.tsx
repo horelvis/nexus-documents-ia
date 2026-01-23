@@ -73,7 +73,7 @@ export default function TenantPlansPage() {
     try {
       if (plan.id === 'enterprise') {
         // Open contact form or redirect to sales
-        window.location.href = 'mailto:sales@nexusdocs360.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información'
+        window.location.href = 'mailto:sales@nouxcubeia.com?subject=Enterprise%20Plan%20-%20Solicitud%20de%20Información'
         return
       }
 
@@ -170,7 +170,7 @@ export default function TenantPlansPage() {
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
             {isInitialSelection
-              ? 'Elige el plan con el que comenzarás a trabajar en NexusDocs360. Siempre podrás cambiarlo más adelante.'
+              ? 'Elige el plan con el que comenzarás a trabajar en NouxCubeIA. Siempre podrás cambiarlo más adelante.'
               : 'Elige el plan perfecto para tu equipo. Sin contratos, cancela cuando quieras.'}
           </p>
         </div>
@@ -307,7 +307,7 @@ export default function TenantPlansPage() {
           <Button 
             variant="outline" 
             size="lg"
-            onClick={() => window.location.href = 'mailto:sales@nexusdocs360.com'}
+            onClick={() => window.location.href = 'mailto:sales@nouxcubeia.com'}
           >
             Contacta a Nuestro Equipo
           </Button>

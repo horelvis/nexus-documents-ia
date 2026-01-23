@@ -72,6 +72,7 @@ from .hierarchical_indexer import (
     hierarchical_indexer,
 )
 from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
+from .ocr_client import OCRClient, OCRResult, ocr_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
     AlignedBlock,
@@ -80,6 +81,18 @@ from app.services.text_alignment_service import (
 )
 from app.services.knowledge import KnowledgeExtractionService, get_knowledge_service
 from app.services.knowledge.schemas import KnowledgeExtractionResult
+
+# Contextual Retrieval (Anthropic pattern)
+try:
+    from .contextual_retrieval import (
+        contextual_retrieval,
+        ContextGenerationResult,
+        ContextualizedChunk,
+    )
+    CONTEXTUAL_RETRIEVAL_AVAILABLE = True
+except ImportError:
+    CONTEXTUAL_RETRIEVAL_AVAILABLE = False
+    contextual_retrieval = None
 
 # Conditional imports for multimodal support
 try:
@@ -131,6 +144,11 @@ class IndexingResult:
     analysis: Optional[DocumentAnalysis] = None
     chunks: List[DocumentChunk] = field(default_factory=list)
 
+    # Contextual Retrieval results (Anthropic pattern)
+    contextual_domain: Optional[str] = None  # Detected legal domain
+    contextual_laws: List[str] = field(default_factory=list)  # Applicable laws
+    contextual_prefix: Optional[str] = None  # Context prepended to chunks
+
     # Knowledge extraction results
     knowledge_result: Optional[KnowledgeExtractionResult] = None
 
@@ -148,6 +166,7 @@ class IndexingResult:
     extraction_time_ms: float = 0.0
     analysis_time_ms: float = 0.0
     chunking_time_ms: float = 0.0
+    contextual_time_ms: float = 0.0  # Contextual Retrieval processing
     knowledge_extraction_time_ms: float = 0.0
     summary_generation_time_ms: float = 0.0  # Hierarchical RAG
     visual_extraction_time_ms: float = 0.0
@@ -168,6 +187,11 @@ class IndexingResult:
             },
             "analysis": self.analysis.to_dict() if self.analysis else None,
             "chunk_count": len(self.chunks),
+            "contextual_retrieval": {
+                "domain": self.contextual_domain,
+                "applicable_laws": self.contextual_laws,
+                "context_prefix_length": len(self.contextual_prefix) if self.contextual_prefix else 0,
+            } if self.contextual_domain else None,
             "knowledge": {
                 "entities_count": self.knowledge_result.entities_count if self.knowledge_result else 0,
                 "relationships_count": self.knowledge_result.relationships_count if self.knowledge_result else 0,
@@ -183,6 +207,7 @@ class IndexingResult:
                 "extraction_ms": self.extraction_time_ms,
                 "analysis_ms": self.analysis_time_ms,
                 "chunking_ms": self.chunking_time_ms,
+                "contextual_ms": self.contextual_time_ms,
                 "knowledge_extraction_ms": self.knowledge_extraction_time_ms,
                 "visual_extraction_ms": self.visual_extraction_time_ms,
                 "total_ms": self.total_time_ms,
@@ -201,6 +226,7 @@ class IndexingPipeline:
     Pipeline stages:
     1. Extract text (textextract-service) - for binary files
     2. Analyze quality (DocumentIntelligence)
+    2.5. Enhanced OCR fallback (if quality < threshold)
     3. Clean text if needed
     4. Chunk document (SemanticChunker)
     5. Extract knowledge entities (KnowledgeExtractionService)
@@ -214,12 +240,15 @@ class IndexingPipeline:
         intelligence: Optional[DocumentIntelligence] = None,
         chunker: Optional[SemanticChunker] = None,
         knowledge_extractor: Optional[KnowledgeExtractionService] = None,
+        ocr_client_instance: Optional[OCRClient] = None,
     ):
         self.extractor = extractor or textextract_client
         self.intelligence = intelligence or document_intelligence
         self.chunker = chunker or semantic_chunker
         self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
         self._knowledge_extraction_enabled = True
+        # OCR client for enhanced OCR fallback
+        self._ocr_client = ocr_client_instance or ocr_client
         # Visual extractor for multimodal support
         self._visual_extractor = visual_extractor if MULTIMODAL_AVAILABLE else None
         self._embedding_service = multimodal_embedding_service if MULTIMODAL_AVAILABLE else None
@@ -303,11 +332,84 @@ class IndexingPipeline:
             f"language={extract_result.language}"
         )
 
+        # === Stage 1.5: Enhanced OCR Fallback ===
+        # Check if we should trigger enhanced OCR for scanned/low-quality PDFs
+        text_to_use = extract_result.text
+        extraction_method = "tika"
+        ocr_time = 0.0
+
+        if settings.enhanced_ocr_enabled and filename.lower().endswith('.pdf'):
+            # Quick quality check before full analysis
+            preliminary_analysis = self.intelligence.analyze(
+                extract_result.text,
+                {"page_count": extract_result.metadata.get("page_count", 0)}
+            )
+
+            if self.intelligence.should_trigger_enhanced_ocr(
+                preliminary_analysis,
+                metadata={**metadata, **extract_result.metadata},
+                min_confidence=settings.enhanced_ocr_quality_threshold,
+            ):
+                logger.info(
+                    f"[{document_id}] Triggering enhanced OCR "
+                    f"(quality={preliminary_analysis.quality.value}, "
+                    f"confidence={preliminary_analysis.confidence:.2f})"
+                )
+
+                ocr_start = time.time()
+                try:
+                    # Get OCR config based on analysis
+                    ocr_config = self.intelligence.get_enhanced_ocr_config(
+                        preliminary_analysis,
+                        metadata={**metadata, **extract_result.metadata},
+                    )
+
+                    # Parse languages from config
+                    ocr_languages = settings.enhanced_ocr_languages.split(",")
+
+                    ocr_result = await self._ocr_client.extract_with_ocr(
+                        file_bytes=file_bytes,
+                        languages=ocr_languages,
+                        use_hybrid=settings.enhanced_ocr_use_hybrid or ocr_config.get("use_hybrid", False),
+                        preprocess=ocr_config.get("preprocess", True),
+                        dpi=ocr_config.get("dpi", 300),
+                        tenant_id=tenant_id,
+                    )
+
+                    ocr_time = (time.time() - ocr_start) * 1000
+
+                    # Use OCR result if it's better quality
+                    if ocr_result.success and ocr_result.confidence > preliminary_analysis.confidence:
+                        text_to_use = ocr_result.text
+                        extraction_method = f"ocr_{ocr_result.engine}"
+                        logger.info(
+                            f"[{document_id}] Using OCR result: "
+                            f"{len(ocr_result.text)} chars, "
+                            f"confidence={ocr_result.confidence:.2f} (was {preliminary_analysis.confidence:.2f})"
+                        )
+                        warnings.append(
+                            f"Enhanced OCR applied: confidence improved from "
+                            f"{preliminary_analysis.confidence:.2f} to {ocr_result.confidence:.2f}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{document_id}] Keeping Tika result "
+                            f"(OCR confidence={ocr_result.confidence:.2f} <= Tika {preliminary_analysis.confidence:.2f})"
+                        )
+                        if ocr_result.warnings:
+                            warnings.extend(ocr_result.warnings)
+
+                except Exception as e:
+                    logger.warning(f"[{document_id}] Enhanced OCR failed (non-blocking): {e}")
+                    warnings.append(f"Enhanced OCR failed: {e}")
+                    ocr_time = (time.time() - ocr_start) * 1000
+
         # Add extraction metadata
         enriched_metadata = {
             **metadata,
             "filename": filename,
             "extraction_strategy": extraction_strategy,
+            "extraction_method": extraction_method,
             "detected_language": extract_result.language,
             **extract_result.metadata,
         }
@@ -315,7 +417,7 @@ class IndexingPipeline:
         # Continue with text processing (pass indexing strategy for adaptive chunking)
         result = await self._process_text_internal(
             document_id=document_id,
-            text=extract_result.text,
+            text=text_to_use,  # Use OCR text if it was better, otherwise Tika
             metadata=enriched_metadata,
             tenant_id=tenant_id,
             errors=errors,
@@ -324,10 +426,10 @@ class IndexingPipeline:
         )
 
         # Update timing
-        result.extracted_text = extract_result.text
+        result.extracted_text = text_to_use
         result.extraction_language = extract_result.language
-        result.extraction_characters = extract_result.characters
-        result.extraction_time_ms = extraction_time
+        result.extraction_characters = len(text_to_use)
+        result.extraction_time_ms = extraction_time + ocr_time  # Include OCR time if used
 
         # === Stage 5: Visual Content Extraction (if enabled) ===
         # Only for PDFs and when multimodal is available and enabled
@@ -477,23 +579,15 @@ class IndexingPipeline:
                 "confidence": analysis.confidence,
             }
 
-            # Apply chunking config from strategy if available
-            chunking_kwargs = {}
-            if indexing_strategy and indexing_strategy.get("chunking_config"):
-                config = indexing_strategy["chunking_config"]
-                if "target_chunk_size" in config:
-                    chunking_kwargs["target_chunk_size"] = config["target_chunk_size"]
-                if "max_chunk_size" in config:
-                    chunking_kwargs["max_chunk_size"] = config["max_chunk_size"]
-                if "overlap" in config:
-                    chunking_kwargs["overlap"] = config["overlap"]
+            # Note: SemanticChunker uses instance-level config (target_chunk_size, overlap)
+            # Strategy-based chunking config would require chunker reconfiguration
+            # For now, use chunker's default settings
 
-            # Chunk the document with strategy-aware parameters
+            # Chunk the document
             chunks = self.chunker.chunk_document(
                 text=text_for_chunking,
                 metadata=chunk_metadata,
                 document_type=doc_type,
-                **chunking_kwargs,
             )
 
             chunking_time = (time.time() - chunking_start) * 1000
@@ -526,7 +620,56 @@ class IndexingPipeline:
                 warnings=warnings,
             )
 
-        # === Stage 4: Knowledge Extraction ===
+        # === Stage 4: Contextual Retrieval (Anthropic pattern) ===
+        contextual_domain = None
+        contextual_laws = []
+        contextual_prefix = None
+        contextual_time = 0.0
+
+        if settings.contextual_retrieval_enabled and CONTEXTUAL_RETRIEVAL_AVAILABLE:
+            logger.info(f"[{document_id}] Applying contextual retrieval...")
+            contextual_start = time.time()
+
+            try:
+                # Analyze document to detect domain and applicable laws
+                context_result = await contextual_retrieval.analyze_document(
+                    document_id=document_id,
+                    text=text_for_chunking,
+                    metadata=metadata,
+                    tenant_id=tenant_id,
+                    use_llm=settings.contextual_retrieval_use_llm,
+                )
+
+                contextual_domain = context_result.domain.value
+                contextual_laws = [l.to_citation() for l in context_result.applicable_laws]
+                contextual_prefix = context_result.context_prefix
+
+                # Apply context to chunks - modify chunk text with context prefix
+                for chunk in chunks:
+                    # Prepend context to chunk text for embedding
+                    original_text = chunk.text
+                    chunk.text = f"{contextual_prefix} {original_text}"
+
+                    # Enrich chunk metadata with contextual info
+                    chunk.metadata["contextual_domain"] = contextual_domain
+                    chunk.metadata["contextual_laws"] = contextual_laws
+                    chunk.metadata["contextual_prefix_applied"] = True
+                    chunk.metadata["original_text_length"] = len(original_text)
+
+                contextual_time = (time.time() - contextual_start) * 1000
+
+                logger.info(
+                    f"[{document_id}] Applied contextual retrieval: "
+                    f"domain={contextual_domain}, laws={len(contextual_laws)}, "
+                    f"prefix={len(contextual_prefix)} chars, time={contextual_time:.1f}ms"
+                )
+
+            except Exception as e:
+                logger.warning(f"[{document_id}] Contextual retrieval failed (non-blocking): {e}")
+                warnings.append(f"Contextual retrieval failed: {e}")
+                contextual_time = (time.time() - contextual_start) * 1000
+
+        # === Stage 5: Knowledge Extraction ===
         knowledge_result = None
         knowledge_time = 0.0
 
@@ -605,10 +748,14 @@ class IndexingPipeline:
             tenant_id=tenant_id,
             analysis=analysis,
             chunks=chunks,
+            contextual_domain=contextual_domain,
+            contextual_laws=contextual_laws,
+            contextual_prefix=contextual_prefix,
             knowledge_result=knowledge_result,
             document_summary=document_summary,
             analysis_time_ms=analysis_time,
             chunking_time_ms=chunking_time,
+            contextual_time_ms=contextual_time,
             knowledge_extraction_time_ms=knowledge_time,
             summary_generation_time_ms=summary_time,
             success=True,

@@ -256,7 +256,7 @@ class SlackNotifier:
                     {"title": "Value", "value": f"{alert.value:.2f}", "short": True},
                     {"title": "Threshold", "value": f"{alert.threshold:.2f}", "short": True}
                 ],
-                "footer": "NexusDocs360 Monitoring",
+                "footer": "NouxCubeIA Monitoring",
                 "ts": alert.created_at.timestamp()
             }]
         }
@@ -283,7 +283,7 @@ class EmailNotifier:
         from email.mime.multipart import MIMEMultipart
 
         status = "RESOLVED" if resolved else "TRIGGERED"
-        subject = f"NexusDocs360 Alert {status}: {alert.name}"
+        subject = f"NouxCubeIA Alert {status}: {alert.name}"
 
         body = f"""
         Alert Details:

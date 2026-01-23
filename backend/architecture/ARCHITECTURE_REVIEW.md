@@ -1,4 +1,4 @@
-# Backend Architecture Review (NexusDocs360)
+# Backend Architecture Review (NouxCubeIA)
 
 Fecha: 2025-12-13
 

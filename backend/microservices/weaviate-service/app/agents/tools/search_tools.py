@@ -114,29 +114,40 @@ def _format_search_results(results: List[Any], max_results: int = 10, query: str
             "metadata": getattr(doc, "metadata", {}),
         })
 
-    # OpenCode-style interception: If multiple results, signal clarification needed
+    # Format results with clear document list at the top
+    # This ensures Emma can see and reproduce document names easily
+    doc_list_text = "\n".join([
+        f"  {i+1}. **{doc['title']}** (ID: {doc['id'][:8]}...)"
+        for i, doc in enumerate(formatted[:10])
+    ])
+
+    # If multiple results, return a clear text response with document list
     if len(formatted) > 1:
+        response_text = (
+            f"DOCUMENTOS ENCONTRADOS ({len(formatted)}):\n"
+            f"{doc_list_text}\n\n"
+            f"INSTRUCCIÓN: Muestra esta lista al usuario y pregunta cuál quiere analizar. "
+            f"SIEMPRE incluye los nombres de los documentos en tu respuesta."
+        )
+
         return json.dumps({
+            "message": response_text,
             "results": formatted,
             "count": len(formatted),
-            "_clarification_needed": True,
-            "_clarification": {
-                "_type": "clarification_request",
-                "question": f"Encontré {len(formatted)} documentos para '{query[:50]}...'. ¿Cuál deseas analizar?",
-                "header": "Selecciona documento",
-                "options": [
-                    {
-                        "label": doc["title"][:40] + ("..." if len(doc["title"]) > 40 else ""),
-                        "value": doc["id"],
-                        "description": doc["snippet"][:80] + "..." if len(doc["snippet"]) > 80 else doc["snippet"]
-                    }
-                    for doc in formatted[:8]  # Max 8 options for UI
-                ],
-                "multi_select": False,
-            }
+            "_action": "list_and_ask",
+            "_document_names": [doc["title"] for doc in formatted[:10]]
         }, ensure_ascii=False, indent=2)
 
-    return json.dumps(formatted, ensure_ascii=False, indent=2)
+    # Single result - return document details
+    if len(formatted) == 1:
+        doc = formatted[0]
+        return json.dumps({
+            "message": f"Encontré 1 documento: **{doc['title']}**",
+            "results": formatted,
+            "count": 1
+        }, ensure_ascii=False, indent=2)
+
+    return json.dumps({"message": "No se encontraron documentos", "results": [], "count": 0}, ensure_ascii=False)
 
 
 def _truncate_text(text: str, max_length: int = 300) -> str:
@@ -169,8 +180,9 @@ def _format_cross_collection_results(results: List[Dict[str, Any]], max_results:
     """
     Format results from cross-collection search.
 
-    OpenCode-style: When multiple results are found, includes a clarification
-    flag that signals the system to ask the user for selection.
+    Includes clear document list with names for conversation context.
+    This ensures follow-up questions like "cuáles son?" can be answered
+    from history without re-searching.
     """
     formatted = []
     for doc in results[:max_results]:
@@ -186,29 +198,41 @@ def _format_cross_collection_results(results: List[Dict[str, Any]], max_results:
             "metadata": doc.get("metadata", {}),
         })
 
-    # OpenCode-style interception: If multiple results, signal clarification needed
+    # Format results with clear document list at the top
+    # This ensures Emma can see and reproduce document names easily
+    doc_list_text = "\n".join([
+        f"  {i+1}. **{doc['title']}** ({doc['source_type']}, ID: {doc['id'][:8]}...)"
+        for i, doc in enumerate(formatted[:10])
+    ])
+
+    # If multiple results, return a clear text response with document list
     if len(formatted) > 1:
+        response_text = (
+            f"DOCUMENTOS ENCONTRADOS ({len(formatted)}):\n"
+            f"{doc_list_text}\n\n"
+            f"INSTRUCCIÓN: Muestra esta lista completa de documentos al usuario. "
+            f"SIEMPRE incluye los nombres de los documentos en tu respuesta. "
+            f"GUARDA estos nombres porque el usuario puede preguntar 'cuáles son' después."
+        )
+
         return json.dumps({
+            "message": response_text,
             "results": formatted,
             "count": len(formatted),
-            "_clarification_needed": True,
-            "_clarification": {
-                "_type": "clarification_request",
-                "question": f"Encontré {len(formatted)} documentos para '{query[:50]}...'. ¿Cuál deseas analizar?",
-                "header": "Selecciona documento",
-                "options": [
-                    {
-                        "label": doc["title"][:40] + ("..." if len(doc["title"]) > 40 else ""),
-                        "value": doc["id"],
-                        "description": f"[{doc['source_type']}] " + (doc["snippet"][:60] + "..." if len(doc["snippet"]) > 60 else doc["snippet"])
-                    }
-                    for doc in formatted[:8]  # Max 8 options for UI
-                ],
-                "multi_select": False,
-            }
+            "_action": "list_and_ask",
+            "_document_names": [doc["title"] for doc in formatted[:10]]
         }, ensure_ascii=False, indent=2)
 
-    return json.dumps(formatted, ensure_ascii=False, indent=2)
+    # Single result - return document details
+    if len(formatted) == 1:
+        doc = formatted[0]
+        return json.dumps({
+            "message": f"Encontré 1 documento: **{doc['title']}** ({doc['source_type']})",
+            "results": formatted,
+            "count": 1
+        }, ensure_ascii=False, indent=2)
+
+    return json.dumps({"message": "No se encontraron documentos", "results": [], "count": 0}, ensure_ascii=False)
 
 
 # =============================================================================
@@ -1001,6 +1025,132 @@ Returns JSON with combined results from both tenant documents and legal referenc
 # Tool Registration Exports
 # =============================================================================
 
+# =============================================================================
+# SIL Query Tool - Structural Intelligence Layer
+# =============================================================================
+
+@register_tool('sil_query')
+class SILQueryTool(BaseTool):
+    """
+    Query the Structural Intelligence Layer (SIL) for document metadata and relationships.
+
+    This tool answers structural questions WITHOUT reading document content:
+    - "How many documents do I have?" → COUNT from graph
+    - "List all contracts" → LIST from metadata
+    - "Do we have an expediente for ACME?" → EXISTS check
+    - "Where is the Q3 report?" → LOCATION from structure
+
+    Uses Apache AGE graph database for Cypher queries.
+    Saves 70-90% of tokens compared to traditional RAG for structural queries.
+    """
+
+    description = '''Query the Structural Intelligence Layer for document metadata and structure.
+
+Use this for questions about:
+- Document counts ("how many documents/contracts/invoices do I have?")
+- Document lists ("list all contracts", "show expedientes")
+- Existence checks ("do we have a document about X?")
+- Location/structure ("where is document Y?", "what's in folder Z?")
+- Metadata queries ("documents from client ACME", "contracts from 2024")
+
+Returns structured answer with document count, list, or existence confirmation.
+Does NOT read document content - use get_document_content for that.'''
+
+    parameters = [
+        {
+            'name': 'query',
+            'type': 'string',
+            'description': 'The structural query in natural language (e.g., "how many contracts do I have?")',
+            'required': True
+        },
+        {
+            'name': 'tenant_id',
+            'type': 'string',
+            'description': 'Tenant ID for data isolation',
+            'required': True
+        },
+        {
+            'name': 'include_content_preview',
+            'type': 'boolean',
+            'description': 'Include brief content preview in results (default: false)',
+            'required': False
+        }
+    ]
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        """Execute SIL structural query."""
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        query = params.get('query')
+        tenant_id = params.get('tenant_id')
+        include_preview = params.get('include_content_preview', False)
+
+        return _run_async(self._sil_query(
+            query=query,
+            tenant_id=tenant_id,
+            include_preview=include_preview
+        ))
+
+    async def _sil_query(
+        self,
+        query: str,
+        tenant_id: str,
+        include_preview: bool = False,
+    ) -> str:
+        """Async implementation of SIL query."""
+        try:
+            from app.services.sil import pre_llm_engine
+
+            # Initialize SIL engine
+            await pre_llm_engine.initialize()
+
+            # Process query through SIL
+            result = await pre_llm_engine.process_query(
+                query=query,
+                tenant_id=tenant_id,
+            )
+
+            # Build response
+            response = {
+                "success": True,
+                "reasoning_type": result.type.value if hasattr(result.type, 'value') else str(result.type),
+                "requires_rag": result.requires_rag,
+                "explanation": result.reasoning_explanation,
+            }
+
+            # Include structural context
+            if result.structural_context:
+                ctx = result.structural_context
+                response["structural_context"] = {
+                    "query_type": ctx.query_type,
+                    "document_count": ctx.document_count,
+                    "document_titles": ctx.document_titles[:10] if ctx.document_titles else [],
+                    "result": ctx.query_result,
+                }
+
+            # Include target documents if focused RAG needed
+            if result.target_document_ids:
+                response["target_documents"] = result.target_document_ids[:20]
+
+            # Add processing time
+            response["processing_time_ms"] = result.processing_time_ms
+
+            return json.dumps(response, ensure_ascii=False)
+
+        except Exception as e:
+            logger.error(f"SIL query error: {e}", exc_info=True)
+            return json.dumps({
+                "success": False,
+                "error": str(e),
+                "fallback_to_rag": True
+            }, ensure_ascii=False)
+
+
+# =============================================================================
+# Tool Registration Exports
+# =============================================================================
+
 # List of all tool classes for easy import
 SEARCH_TOOLS = [
     SemanticSearchTool,
@@ -1009,6 +1159,7 @@ SEARCH_TOOLS = [
     SearchByMetadataTool,
     SearchPublicKnowledgeTool,
     SearchWithLegalContextTool,
+    SILQueryTool,
 ]
 
 # Tool names for function_list in Assistant (must match @register_tool names)
@@ -1019,6 +1170,7 @@ SEARCH_TOOL_NAMES = [
     'nexus_search_by_metadata',
     'nexus_search_public_knowledge',
     'nexus_search_with_legal_context',
+    'sil_query',
 ]
 
 

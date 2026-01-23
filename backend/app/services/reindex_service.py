@@ -24,7 +24,7 @@ class ReindexService:
     def __init__(self, tenant_id: str = None, user_id: str = None):
         self.tenant_id = tenant_id or settings.DEFAULT_TENANT
         self.user_id = user_id
-        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
+        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
         self.storage_service = StorageServiceFactory.create_storage_service(
             tenant_id=self.tenant_id,
             user_id=self.user_id

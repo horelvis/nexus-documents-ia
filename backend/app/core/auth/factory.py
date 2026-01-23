@@ -228,6 +228,10 @@ class AuthProviderFactory:
         return {
             "provider": "oidc",
             "issuer": os.getenv("OIDC_ISSUER", ""),
+            # Internal issuer for fetching JWKS (Docker internal DNS)
+            # Use this when issuer hostname differs from internal service name
+            # Example: issuer=http://localhost:8080/realms/x, internal=http://keycloak:8080/realms/x
+            "internal_issuer": os.getenv("OIDC_INTERNAL_ISSUER", ""),
             "client_id": os.getenv("OIDC_CLIENT_ID", ""),
             "client_secret": os.getenv("OIDC_CLIENT_SECRET", ""),
             "scopes": os.getenv("OIDC_SCOPES", "openid profile email").split(),

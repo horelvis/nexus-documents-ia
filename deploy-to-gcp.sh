@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-click deployment script for NexusDocs360 to GCP
+# One-click deployment script for NouxCubeIA to GCP
 
 set -e
 
@@ -19,9 +19,9 @@ fi
 PROJECT_ID="${1:-${GCP_PROJECT_ID:-nexus-document-prod}}"
 REGION="${2:-${GCP_REGION:-europe-west1}}"
 ZONE="${3:-${GCP_ZONE:-europe-west1-b}}"
-DOMAIN="${DOMAIN:-nexusdocs.com}"
+DOMAIN="${DOMAIN:-nouxcube.ai}"
 
-echo -e "${GREEN}🚀 NexusDocs360 - GCP Deployment${NC}"
+echo -e "${GREEN}🚀 NouxCubeIA - GCP Deployment${NC}"
 echo -e "${GREEN}===========================================${NC}"
 echo ""
 echo -e "Project ID: ${YELLOW}$PROJECT_ID${NC}"
@@ -40,7 +40,7 @@ fi
 echo -e "${YELLOW}📋 Setting up GCP project...${NC}"
 if ! gcloud projects describe $PROJECT_ID &>/dev/null; then
     echo -e "${YELLOW}Creating project $PROJECT_ID...${NC}"
-    gcloud projects create $PROJECT_ID --name="NexusDocs360"
+    gcloud projects create $PROJECT_ID --name="NouxCubeIA"
     echo -e "${GREEN}✓ Project created${NC}"
 fi
 gcloud config set project $PROJECT_ID
@@ -88,8 +88,8 @@ echo -e "${GREEN}✅ Deployment Complete!${NC}"
 echo -e "${GREEN}=====================${NC}"
 echo ""
 echo -e "${YELLOW}📍 DNS Configuration:${NC}"
-echo -e "  Frontend: app.nexusdocs.com → ${GREEN}$FRONTEND_IP${NC}"
-echo -e "  API: api.nexusdocs.com → ${GREEN}$API_IP${NC}"
+echo -e "  Frontend: app.nouxcube.ai → ${GREEN}$FRONTEND_IP${NC}"
+echo -e "  API: api.nouxcube.ai → ${GREEN}$API_IP${NC}"
 echo ""
 echo -e "${YELLOW}🔗 Temporary URLs (before DNS):${NC}"
 echo -e "  Frontend: ${GREEN}$FRONTEND_URL${NC}"
@@ -103,6 +103,6 @@ echo ""
 echo -e "${YELLOW}🚀 Next Steps:${NC}"
 echo "  1. Configure DNS records as shown above"
 echo "  2. Wait for SSL certificates (15-30 min after DNS)"
-echo "  3. Test application at https://app.nexusdocs.com"
+echo "  3. Test application at https://app.nouxcube.ai"
 echo "  4. Monitor logs and metrics"
 echo ""

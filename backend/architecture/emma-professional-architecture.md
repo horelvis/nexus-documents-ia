@@ -896,7 +896,7 @@ export function EmmaVoiceChat({ sessionId, tenantId }: Props) {
   useEffect(() => {
     const token = getAuthToken(); // JWT
     const ws = new WebSocket(
-      `wss://api.nexusdocs360.app/voice/ws/${sessionId}?token=${token}`
+      `wss://api.nouxcubeia.app/voice/ws/${sessionId}?token=${token}`
     );
 
     ws.onopen = () => {

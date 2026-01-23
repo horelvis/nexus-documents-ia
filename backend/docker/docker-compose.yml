@@ -8,6 +8,9 @@ services:
     # API expone puerto para el host; otros servicios internos no lo necesitan
     ports:
       - "0.0.0.0:8000:8000"
+    # Allow access to host's local network (for Alfresco, etc.)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -22,7 +25,7 @@ services:
       background-worker:
         condition: service_started
       podcast-service:
-        condition: service_healthy
+        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -55,6 +58,9 @@ services:
       - ../alembic.ini:/app/alembic.ini:ro
       - ../migrations:/app/migrations:ro
       - ../tests:/app/tests:ro
+      # Modular architecture: core and modules directories
+      - ../core:/app/core:ro
+      - ../modules:/app/modules:ro
       # Montar credentials para desarrollo (ruta corrected a la carpeta raíz)
       - ../../credentials:/app/credentials:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
@@ -116,6 +122,9 @@ services:
         condition: service_healthy
     networks:
       - backend-network
+    # Allow access to host's local network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
@@ -194,21 +203,61 @@ services:
       timeout: 10s
       retries: 3
 
+  # =============================================================================
+  # Apache Tika - Document Text Extraction
+  # =============================================================================
+  # Extracts text from PDFs, Word docs, Excel, PowerPoint, etc.
+  # Used by textextract-service for document indexing
+  tika:
+    image: apache/tika:3.1.0.0
+    networks:
+      - backend-network
+    # Healthcheck disabled - Tika image has no curl/wget
+    # Service is verified via textextract-service health
+    restart: unless-stopped
+
+  # TextExtract Service - Document Text Extraction API
+  # Wraps Apache Tika with a REST API for text extraction
+  textextract-service:
+    build:
+      context: ../microservices/textextract-service
+      dockerfile: Dockerfile
+    depends_on:
+      - tika
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TIKA_URL=http://tika:9998
+    volumes:
+      - ../microservices/textextract-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Weaviate Service - DEVELOPMENT MODE
-  # Multimodal RAG with unified text+image embeddings
-  # Uses Qwen3-VL-Embedding-2B for cross-modal search capabilities
+  # RAG with local sentence-transformers embeddings
+  # Uses BAAI/bge-m3 loaded locally for high-quality text embeddings (1024 dim, multilingual)
   weaviate-service:
     build:
       context: ../microservices/weaviate-service
       dockerfile: Dockerfile
-    # Servicio interno, no se expone fuera de la red Docker
+    # Exponer para desarrollo y testing de endpoints verificados
+    ports:
+      - "8007:8000"
     depends_on:
       weaviate:
         condition: service_healthy
       vllm:
         condition: service_healthy
-      qwen3-vl-embedding:
-        condition: service_healthy
+      textextract-service:
+        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -216,33 +265,33 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_URL=http://weaviate:8080
+      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      # Main backend URL for SIL reindex service
+      - MAIN_BACKEND_URL=${MAIN_BACKEND_URL:-http://api:8000}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
       # vLLM Configuration (PRIMARY - high-throughput GPU inference)
-      # Model: Qwen3-4B-Thinking-2507 - Extended reasoning with automatic thinking mode
-      # ~10GB VRAM (FP16 with 32K context), coexists with multimodal embedding (~5GB)
+      # Model: Qwen3-4B - Stable text-only model for RAG
+      # ~8GB VRAM (BF16 with 16K context), coexists with embedding service (~2GB)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}
-      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-true}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       # LLM Configuration
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
-      # Embedding Configuration (Qwen3-VL-Embedding-2B - Multimodal)
-      # Model: Qwen/Qwen3-VL-Embedding-2B (1024 dim, text + images)
-      # Replaces TEI/bge-m3 with unified multimodal embeddings
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-qwen3-vl}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      # Embedding Configuration (BGE-M3 - Local Sentence Transformers)
+      # Model: BAAI/bge-m3 (1024 dim, multilingual, text-only)
+      # Loaded directly in weaviate-service using sentence-transformers library
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence-transformers}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
-      - EMBEDDING_URL=${EMBEDDING_URL:-http://qwen3-vl-embedding:8000/v1}
-      # Multimodal is now enabled by default (single unified embedding model)
-      - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-true}
-      - MULTIMODAL_EMBEDDING_URL=${MULTIMODAL_EMBEDDING_URL:-http://qwen3-vl-embedding:8000/v1}
-      - MULTIMODAL_EMBEDDING_MODEL=${MULTIMODAL_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
-      - MULTIMODAL_EMBEDDING_DIMENSIONS=${MULTIMODAL_EMBEDDING_DIMENSIONS:-1024}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      # Multimodal disabled - BGE-M3 is text-only
+      - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-false}
       # Reranker uses local CrossEncoder (ms-marco-MiniLM-L-6-v2) in multi_stage_retriever.py
       # No external reranker service needed
       # Agent Framework settings (Qwen-Agent)
@@ -263,6 +312,9 @@ services:
       - ../microservices/weaviate-service/app:/app/app:ro
       # Montar archivos de configuración de prompts (editable sin rebuild)
       - ../microservices/weaviate-service/config:/app/config:ro
+      # Persistent cache for HuggingFace models (BGE-M3, FastEmbed, CrossEncoder)
+      # Prevents re-downloading ~3GB of models on container restart
+      - huggingface_cache:/root/.cache/huggingface
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     # GPU access for CrossEncoder reranker (sentence-transformers)
     deploy:
@@ -377,55 +429,25 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Qwen3-VL-Embedding-2B - MULTIMODAL EMBEDDING SERVICE (ENABLED)
+  # BGE-M3 - EXTERNAL EMBEDDING SERVICE (DISABLED - using local sentence-transformers)
   # =============================================================================
-  # Model: Qwen/Qwen3-VL-Embedding-2B (2B params, 1024 dim output)
-  # Capabilities:
-  #   - Unified text + image embeddings in same vector space
-  #   - Cross-modal search: text queries find relevant images/diagrams
-  #   - PDF visual content: tables, charts, diagrams, screenshots
-  # VRAM: ~5GB (weights + minimal KV cache for short sequences)
-  # API: vLLM OpenAI-compatible /v1/embeddings endpoint
-  # Docs: https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B
-  #
-  # RECOMMENDED CONFIGURATION (Multimodal RAG):
-  #   LLM: Qwen3-4B-Thinking-2507 (45% VRAM = ~11GB)
-  #   Embedding: Qwen3-VL-Embedding-2B (20% VRAM = ~5GB)
-  #   Total: ~65% = ~16GB of 24GB, leaves ~8GB buffer
-  qwen3-vl-embedding:
-    # Custom vLLM image with transformers 4.57+ for Qwen3 model support
-    build:
-      context: ./vllm-custom
-      dockerfile: Dockerfile
-    image: vllm-custom:latest
+  # Model: BAAI/bge-m3 (568M params, 1024 dim output)
+  # NOTE: This service is DISABLED by default. Embeddings are handled locally
+  # by weaviate-service using sentence-transformers.
+  # Enable with: docker compose --profile external-embedding up
+  embedding-service:
+    profiles: ["external-embedding"]  # Only start with explicit profile
+    image: michaelf34/infinity:0.0.68-trt-onnx
     depends_on:
       vllm:
-        condition: service_healthy  # Wait for vLLM to be healthy before starting
+        condition: service_healthy
     networks:
       - backend-network
     volumes:
-      - embedding_cache:/root/.cache/huggingface
+      - embedding_cache:/app/.cache
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - VLLM_LOGGING_LEVEL=INFO
-      - NVIDIA_DISABLE_REQUIRE=1
-      - CUDA_VISIBLE_DEVICES=0
-    # Embedding mode configuration - OPTIMIZED FOR COEXISTENCE:
-    # --gpu-memory-utilization 0.20: ~5GB, coexists with LLM (45%)
-    # --max-model-len 512: embeddings only need short sequences
-    # Model weights: ~4.2GB, leaves ~0.8GB for minimal KV cache
-    # Combined with vLLM (45%): Total ~65% = 16GB, leaves ~8GB buffer
-    command:
-      - "--model"
-      - "${EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}"
-      - "--max-model-len"
-      - "512"
-      - "--gpu-memory-utilization"
-      - "0.20"
-      - "--trust-remote-code"
-      - "--enforce-eager"
-      - "--port"
-      - "8000"
+    command: ["v2", "--model-id", "BAAI/bge-m3", "--port", "8000", "--device", "cuda"]
     deploy:
       resources:
         reservations:
@@ -442,30 +464,26 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Qwen3-4B-Thinking-2507 - PRIMARY LLM SERVER (Extended Reasoning)
+  # Qwen3-4B - PRIMARY LLM SERVER (Text Generation)
   # =============================================================================
-  # Model: Qwen/Qwen3-4B-Thinking-2507
+  # Model: Qwen/Qwen3-4B
   # Optimized for on-premise with 24GB VRAM (RTX 4090)
   # Capabilities:
-  #   - Extended reasoning: Automatic <think>...</think> blocks for complex tasks
-  #   - 256K native context (use 32K for VRAM efficiency with embedding model)
-  #   - Text-only model (no vision) - use with multimodal embedding for images
-  # VRAM: ~10GB (FP16 with 32K context)
-  # Context: 256K native, 32K recommended when coexisting with embedding model
+  #   - High-quality text generation for RAG and document analysis
+  #   - 32K context window (configurable via VLLM_MAX_MODEL_LEN)
+  #   - Text-only model - efficient and stable
+  # VRAM: ~8GB (BF16 with 16K context)
+  # Context: 32K native, 16K recommended for efficient coexistence with embedding
   # API: OpenAI-compatible /v1/chat/completions
-  # Docs: https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507
+  # Docs: https://huggingface.co/Qwen/Qwen3-4B
   #
-  # RECOMMENDED CONFIGURATION (Multimodal RAG):
-  #   LLM: Qwen3-4B-Thinking-2507 (~10GB) - Extended reasoning for document analysis
-  #   Embedding: Qwen3-VL-Embedding-2B (~5GB) - Unified text+image embeddings
-  #   Total: ~15GB of 24GB VRAM
-  #   Benefits: Cross-modal search (text queries find images), thinking mode
+  # RECOMMENDED CONFIGURATION (Text-only RAG):
+  #   LLM: Qwen3-4B (~8GB) - Stable text generation for document analysis
+  #   Embedding: BGE-M3 (~2GB) - Multilingual text embeddings
+  #   Total: ~10GB of 24GB VRAM
+  #   Benefits: More VRAM headroom for batching, stable inference
   vllm:
-    # Custom vLLM image with transformers 4.57+ for Qwen3 model support
-    build:
-      context: ./vllm-custom
-      dockerfile: Dockerfile
-    image: vllm-custom:latest
+    image: vllm/vllm-openai:latest
     networks:
       - backend-network
     volumes:
@@ -475,26 +493,26 @@ services:
       - VLLM_LOGGING_LEVEL=INFO
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
-    # Qwen3-4B-Thinking-2507 configuration:
-    # - Text-only model with automatic thinking mode
-    # - Qwen-Agent handles tool parsing internally
+    # Qwen3-4B configuration:
+    # - Text-only model, stable and efficient
+    # - Tool calling enabled for Emma v2 (native async client)
     # VRAM Budget (RTX 4090 24GB):
     #   - LLM weights: ~8GB
-    #   - KV cache (32K context): ~2GB
-    #   - Embedding model: ~5GB (Qwen3-VL-Embedding-2B)
-    #   - Total: ~15GB, leaves ~9GB buffer for batching
-    # NOTE: Reduced to 32K context to coexist with multimodal embedding
-    # For full 256K context, disable multimodal embedding or use external API
+    #   - KV cache (16K context): ~2GB
+    #   - Embedding model: ~2GB (BGE-M3)
+    #   - Total: ~12GB, leaves ~12GB buffer for batching
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
+      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
       - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-32768}"
+      - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
-      - "0.70"
+      - "0.50"
       - "--trust-remote-code"
-      # Removed --enforce-eager to allow cudagraph optimization
-      # Note: reasoning-parser removed since Qwen3-4B base doesn't use thinking mode
+      # Enable tool calling for Emma v2 (native async client)
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "hermes"
     deploy:
       resources:
         reservations:
@@ -649,8 +667,9 @@ services:
       - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-keycloak}
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
       # Hostname configuration
-      - KC_HOSTNAME=nexus-docs360.es
+      - KC_HOSTNAME=nouxcube.local
       - KC_HOSTNAME_STRICT=false
+      - KC_HOSTNAME_STRICT_BACKCHANNEL=false
       - KC_HTTP_ENABLED=true
       - KC_PROXY_HEADERS=xforwarded
       # Health and metrics
@@ -698,6 +717,7 @@ volumes:
   weaviate_data:
   vllm_cache:  # Cache for LLM model (vLLM service)
   embedding_cache:  # Cache for embedding model (multimodal embeddings service)
+  huggingface_cache:  # Cache for HuggingFace models (BGE-M3, FastEmbed, CrossEncoder, spaCy)
   tts_model_cache:  # Cache for VibeVoice TTS models
   keycloak_data:  # KeyCloak PostgreSQL data
   podcast_temp:  # Temporary audio files for podcast generation

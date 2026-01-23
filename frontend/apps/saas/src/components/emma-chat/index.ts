@@ -7,6 +7,12 @@ export { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
 // Display Components
 export { ThinkingIndicator } from "./displays/Generic/ThinkingIndicator"
 export { WorkflowProgress } from "./displays/Generic/WorkflowProgress"
+export { DelegationBadge } from "./displays/Generic/DelegationBadge"
+export { StreamingTextDisplay } from "./displays/Generic/StreamingTextDisplay"
+export { AgentProcessPanel, getReasoningConfig } from "./displays/Generic/AgentProcessPanel"
+
+// Document Components
+export { PDFPreviewModal, type PreviewDocument } from "./displays/Document/PDFPreviewModal"
 
 // Voice Mode Components
 export {
@@ -32,6 +38,15 @@ export type {
   DocumentInfo,
   ChainOfThoughtData,
   DisplayRendererProps,
+  ProgressStage,
+  DelegationInfo,
+  WorkflowStep,
+  ClarificationOption,
+  ClarificationData,
+  // Agent process types
+  ReasoningType,
+  LegalContext,
+  AgentProcessInfo,
 } from "./types"
 
 // Voice Types

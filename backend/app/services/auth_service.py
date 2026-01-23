@@ -220,15 +220,38 @@ class AuthService:
             logger.debug(f"Linked existing user by email: {str(user_by_email.id)[:8]}...")
             return user_by_email
 
-        # Create new user with new tenant (organization)
-        user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
-        tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
+        # Get or create tenant based on deployment mode
+        from app.core.config import settings
 
-        user_tenant = AuthService.create_tenant(
-            db=db,
-            name=tenant_name,
-            description=f"Organization for {full_name or email}"
-        )
+        if settings.SINGLE_TENANT_MODE:
+            # Single-tenant mode: use the default tenant
+            from uuid import UUID
+            default_tenant_id = UUID(settings.DEFAULT_TENANT_ID)
+            user_tenant = db.query(Tenant).filter(Tenant.id == default_tenant_id).first()
+
+            if not user_tenant:
+                # Create default tenant if it doesn't exist (first user registration)
+                user_tenant = Tenant(
+                    id=default_tenant_id,
+                    name=settings.DEFAULT_TENANT_NAME,
+                    slug=settings.DEFAULT_TENANT_SLUG,
+                    settings={"deployment_mode": "single_tenant"}
+                )
+                db.add(user_tenant)
+                db.flush()
+                logger.info(f"Created default tenant for single-tenant mode: {user_tenant.name}")
+
+            logger.debug(f"Single-tenant mode: assigning user to '{user_tenant.name}'")
+        else:
+            # Multi-tenant mode: create new tenant (organization) per user
+            user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
+            tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
+
+            user_tenant = AuthService.create_tenant(
+                db=db,
+                name=tenant_name,
+                description=f"Organization for {full_name or email}"
+            )
 
         # Create user with 30-day trial
         trial_end_date = datetime.now(timezone.utc) + timedelta(days=30)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script para ejecutar validación completa del sistema NexusDocs360
+Script para ejecutar validación completa del sistema NouxCubeIA
 ====================================================================
 
 Este script ejecuta una suite completa de tests que valida:
@@ -25,7 +25,7 @@ import time
 
 def print_header():
     """Imprimir header del script"""
-    print("🚀 NexusDocs360 - Validación Completa del Sistema")
+    print("🚀 NouxCubeIA - Validación Completa del Sistema")
     print("=" * 60)
     print(f"⏰ Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()

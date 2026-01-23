@@ -3,7 +3,7 @@
 Migration Script: Rename Channel Collections to New Format.
 
 This script migrates Weaviate collections from the legacy format:
-    Nexus_{tenant_id}__documents
+    Nouxcube_{tenant_id}__documents
 
 To the new channel-specific format:
     nexus_{tenant_id}_channel_{channel_id}
@@ -72,10 +72,10 @@ def is_legacy_channel_collection(name: str) -> bool:
     """
     Check if a collection uses the legacy naming format.
 
-    Legacy format: Nexus_{tenant_uuid}__documents (note double underscore)
+    Legacy format: Nouxcube_{tenant_uuid}__documents (note double underscore)
     """
     import re
-    # Pattern: Nexus_{uuid}__documents (case-insensitive, double underscore)
+    # Pattern: Nouxcube_{uuid}__documents (case-insensitive, double underscore)
     pattern = r"^nexus_[a-f0-9_]+__documents$"
     return bool(re.match(pattern, name.lower()))
 

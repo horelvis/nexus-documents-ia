@@ -358,7 +358,7 @@ function PostSignUpContent() {
               </Button>
               
               <p className="text-xs text-center text-muted-foreground">
-                Si el problema persiste, contacta a soporte: support@nexusdocs360.app
+                Si el problema persiste, contacta a soporte: support@nouxcubeia.app
               </p>
             </div>
           )}

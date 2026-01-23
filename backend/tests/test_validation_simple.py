@@ -1,5 +1,5 @@
 """
-Test de Validación Simple - NexusDocs360
+Test de Validación Simple - NouxCubeIA
 =======================================
 
 Test básico que valida los servicios disponibles sin depender de la API principal.
@@ -33,7 +33,7 @@ class TestValidationSimple:
             import psycopg2
             host = os.getenv("POSTGRES_SERVER", "localhost")
             port = self._get_env_int("POSTGRES_PORT", 5432)
-            database = os.getenv("POSTGRES_DB", "nexusdocs360")
+            database = os.getenv("POSTGRES_DB", "nouxcubeia")
             user = os.getenv("POSTGRES_USER", "nexus_user")
             password = os.getenv("POSTGRES_PASSWORD", "nexus_password")
             conn = psycopg2.connect(
@@ -218,7 +218,7 @@ class TestValidationSimple:
 
 def run_simple_validation():
     """Ejecutar validación simple"""
-    print("🚀 NexusDocs360 - Validación Simple de Servicios")
+    print("🚀 NouxCubeIA - Validación Simple de Servicios")
     print("=" * 60)
     print(f"⏰ Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()

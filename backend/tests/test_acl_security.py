@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ACL Security Tests for NexusDocs360
+ACL Security Tests for NouxCubeIA
 
 Tests the defense-in-depth ACL architecture:
 1. Semantic cache user isolation
@@ -439,7 +439,7 @@ async def main():
     """Run all ACL security tests"""
     logger.info("="*60)
     logger.info("ACL SECURITY TEST SUITE")
-    logger.info("NexusDocs360 Defense-in-Depth Architecture")
+    logger.info("NouxCubeIA Defense-in-Depth Architecture")
     logger.info("="*60)
 
     # Run tests

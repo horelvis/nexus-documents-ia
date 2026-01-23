@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup and test monitoring system for NexusDocs360
+Setup and test monitoring system for NouxCubeIA
 """
 import asyncio
 import json
@@ -23,7 +23,7 @@ setup_logging()
 
 async def test_monitoring_system():
     """Test all monitoring components"""
-    print("🔍 Testing NexusDocs360 Monitoring System")
+    print("🔍 Testing NouxCubeIA Monitoring System")
     print("=" * 50)
 
     results = {}
@@ -115,7 +115,7 @@ def generate_monitoring_config():
     print("
 📄 Generating Monitoring Configuration..."    # Prometheus configuration
     prometheus_config = f"""
-# NexusDocs360 Prometheus Configuration
+# NouxCubeIA Prometheus Configuration
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -125,13 +125,13 @@ rule_files:
   # - "second_rules.yml"
 
 scrape_configs:
-  - job_name: 'nexusdocs360'
+  - job_name: 'nouxcubeia'
     static_configs:
       - targets: ['localhost:{settings.SERVER_PORT or 8000}']
     metrics_path: '/metrics'
     scrape_interval: 30s
 
-  - job_name: 'nexusdocs360-health'
+  - job_name: 'nouxcubeia-health'
     static_configs:
       - targets: ['localhost:{settings.SERVER_PORT or 8000}']
     metrics_path: '/health/detailed'
@@ -140,10 +140,10 @@ scrape_configs:
 
     # Alert manager configuration
     alertmanager_config = """
-# NexusDocs360 AlertManager Configuration
+# NouxCubeIA AlertManager Configuration
 global:
   smtp_smarthost: 'localhost:587'
-  smtp_from: 'alerts@nexusdocs360.com'
+  smtp_from: 'alerts@nouxcubeia.com'
 
 route:
   group_by: ['alertname']
@@ -159,14 +159,14 @@ route:
 receivers:
 - name: 'team'
   email_configs:
-  - to: 'team@nexusdocs360.com'
+  - to: 'team@nouxcubeia.com'
   slack_configs:
   - api_url: 'YOUR_SLACK_WEBHOOK_URL'
     channel: '#alerts'
 
 - name: 'team-critical'
   email_configs:
-  - to: 'team@nexusdocs360.com'
+  - to: 'team@nouxcubeia.com'
   slack_configs:
   - api_url: 'YOUR_SLACK_WEBHOOK_URL'
     channel: '#critical'
@@ -175,8 +175,8 @@ receivers:
     # Grafana dashboard configuration (JSON)
     grafana_dashboard = {
         "dashboard": {
-            "title": "NexusDocs360 Monitoring",
-            "tags": ["nexusdocs360", "monitoring"],
+            "title": "NouxCubeIA Monitoring",
+            "tags": ["nouxcubeia", "monitoring"],
             "timezone": "browser",
             "panels": [
                 {
@@ -229,7 +229,7 @@ receivers:
 def print_monitoring_guide():
     """Print monitoring setup guide"""
     print("
-📚 NexusDocs360 Monitoring Setup Guide"    print("=" * 50)
+📚 NouxCubeIA Monitoring Setup Guide"    print("=" * 50)
 
     print("
 1. 📊 PROMETHEUS SETUP:"    print("   # Start Prometheus with generated config"    print("   ./prometheus --config.file=monitoring-config/prometheus.yml"    print("   # Access at: http://localhost:9090"

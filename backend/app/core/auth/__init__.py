@@ -1,5 +1,5 @@
 """
-Authentication module for NexusDocs360.
+Authentication module for NouxCubeIA.
 
 This module provides unified authentication functionality:
 - Pluggable auth providers (Clerk, OIDC, SAML, LDAP)

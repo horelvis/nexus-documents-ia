@@ -74,6 +74,10 @@ from .schemas import (
     StructuralEntities,
     FolderSemantics,
     DocumentRelationship,
+    LegalContext,
+    # Enum types
+    SemanticType,
+    DomainType,
     # Intent and reasoning types
     IntentType,
     ReasoningType,
@@ -116,6 +120,34 @@ from .rag_integration import (
     SILResult,
     RAGMode,
 )
+from .sil_reindex_service import (
+    SILReindexService,
+    sil_reindex_service,
+)
+
+# Legal Knowledge Graph
+from .legal_graph_service import (
+    LegalGraphService,
+    legal_graph,
+    LegalLaw,
+    LegalArticle,
+    LegalDomain,
+    LawStatus,
+)
+
+# Graph Provider Abstraction
+from .graph import (
+    GraphProvider,
+    GraphNode,
+    GraphEdge,
+    NodeLabel,
+    EdgeLabel,
+    QueryResult,
+    AGEProvider,
+    Neo4jProvider,
+    get_graph_provider,
+    close_graph_provider,
+)
 
 __all__ = [
     # Main engine
@@ -144,6 +176,11 @@ __all__ = [
     "StructuralEntities",
     "FolderSemantics",
     "DocumentRelationship",
+    "LegalContext",
+    # Enum types
+    "SemanticType",
+    "DomainType",
+    # Intent and reasoning
     "IntentType",
     "ReasoningType",
     "Intent",
@@ -169,4 +206,25 @@ __all__ = [
     "sil_rag_integration",
     "SILResult",
     "RAGMode",
+    # Reindex service
+    "SILReindexService",
+    "sil_reindex_service",
+    # Legal Knowledge Graph
+    "LegalGraphService",
+    "legal_graph",
+    "LegalLaw",
+    "LegalArticle",
+    "LegalDomain",
+    "LawStatus",
+    # Graph Provider Abstraction
+    "GraphProvider",
+    "GraphNode",
+    "GraphEdge",
+    "NodeLabel",
+    "EdgeLabel",
+    "QueryResult",
+    "AGEProvider",
+    "Neo4jProvider",
+    "get_graph_provider",
+    "close_graph_provider",
 ]

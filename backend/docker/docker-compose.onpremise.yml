@@ -1,0 +1,348 @@
+# Docker Compose for On-Premise deployment
+# Minimal services required for SIL and RAG functionality
+#
+# Usage:
+#   docker compose -f docker-compose.onpremise.yml up -d
+#
+# Services:
+#   - db: PostgreSQL with Apache AGE for knowledge graph
+#   - redis: Cache and session storage
+#   - weaviate: Vector database for embeddings
+#   - weaviate-service: RAG pipeline + SIL (Structural Intelligence Layer)
+#   - vllm: GPU inference for LLM
+#   - api: Main backend API (optional, for UI integration)
+
+services:
+  # =============================================================================
+  # PostgreSQL with Apache AGE - Graph Database Extension
+  # =============================================================================
+  db:
+    image: apache/age:release_PG15_1.6.0
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_SERVER: db
+      POSTGRES_USER: ${POSTGRES_USER:-nexus_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nexus_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    networks:
+      - backend-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Redis - Cache and Session Storage
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - backend-network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Weaviate - Vector Database
+  # =============================================================================
+  weaviate:
+    image: semitechnologies/weaviate:1.28.3
+    ports:
+      - "8080:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: ''
+      CLUSTER_HOSTNAME: 'node1'
+    networks:
+      - backend-network
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/meta"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # vLLM - GPU Inference Server (Qwen3-4B)
+  # =============================================================================
+  vllm:
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8001:8000"
+    networks:
+      - backend-network
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+      - NVIDIA_DISABLE_REQUIRE=1
+      - CUDA_VISIBLE_DEVICES=0
+    command:
+      - "--model"
+      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
+      - "--max-model-len"
+      - "${VLLM_MAX_MODEL_LEN:-32768}"
+      - "--gpu-memory-utilization"
+      - "0.70"
+      - "--trust-remote-code"
+      # Enable tool calling for Emma v2 (native async client)
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "hermes"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    restart: unless-stopped
+
+  # =============================================================================
+  # Apache Tika - Document Text Extraction
+  # =============================================================================
+  tika:
+    image: apache/tika:3.1.0.0
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # TextExtract Service - Text Extraction API
+  # =============================================================================
+  textextract-service:
+    build:
+      context: ../microservices/textextract-service
+      dockerfile: Dockerfile
+    depends_on:
+      - tika
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TIKA_URL=http://tika:9998
+    volumes:
+      - ../microservices/textextract-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Weaviate Service - RAG Pipeline + SIL
+  # =============================================================================
+  weaviate-service:
+    build:
+      context: ../microservices/weaviate-service
+      dockerfile: Dockerfile
+    ports:
+      - "8007:8000"
+    depends_on:
+      weaviate:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      textextract-service:
+        condition: service_started
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - WEAVIATE_URL=http://weaviate:8080
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+      # vLLM Configuration
+      - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      # Embedding Configuration (BGE-M3 local)
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence-transformers}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-false}
+      # Agent settings
+      - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
+      - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
+      - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
+      # Suppress warnings
+      - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
+    volumes:
+      - ../microservices/weaviate-service/app:/app/app:ro
+      - ../microservices/weaviate-service/config:/app/config:ro
+      - huggingface_cache:/root/.cache/huggingface
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Main API - Backend for UI integration
+  # =============================================================================
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      weaviate-service:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - SIGNATURE_ENCRYPTION_KEY=${SIGNATURE_ENCRYPTION_KEY}
+      - ALLOW_ALL_CORS=true
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
+      - REDIS_HOST=redis
+      - WEAVIATE_URL=http://weaviate:8080
+      - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}
+      - DEPLOYMENT_MODE=on_premise
+      # OIDC/KeyCloak Configuration
+      - OIDC_ISSUER=${OIDC_ISSUER:-http://nouxcube.local:8085/realms/nouxcube}
+      - OIDC_INTERNAL_ISSUER=${OIDC_INTERNAL_ISSUER:-http://keycloak:8080/realms/nouxcube}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-nouxcube-backend}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-nouxcube-backend-secret-change-in-production}
+      - OIDC_AUDIENCE=${OIDC_AUDIENCE:-nouxcube-frontend}
+    volumes:
+      - ../app:/app/app:ro
+      - ../scripts:/app/scripts:ro
+      - ../alembic:/app/alembic:ro
+      - ../alembic.ini:/app/alembic.ini:ro
+      - ../core:/app/core:ro
+      - ../modules:/app/modules:ro
+      - ../../credentials:/app/credentials:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # =============================================================================
+  # KeyCloak - OAuth/OIDC Server for SSO
+  # =============================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    ports:
+      - "8085:8080"
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
+      - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-keycloak}
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
+      # Keycloak 26 hostname configuration
+      # KC_HOSTNAME sets the public hostname that will be used in all URLs (including tokens)
+      - KC_HOSTNAME=http://nouxcube.local:8085
+      - KC_HTTP_ENABLED=true
+      - KC_PROXY_HEADERS=xforwarded
+      - KC_HEALTH_ENABLED=true
+      - KC_METRICS_ENABLED=true
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    command: start-dev
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\n\r\n' >&3;cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=${KEYCLOAK_DB_USER:-keycloak}
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
+    volumes:
+      - keycloak_data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USER:-keycloak} -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  backend-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  weaviate_data:
+  vllm_cache:
+  huggingface_cache:
+  keycloak_data:

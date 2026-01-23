@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Security audit script for NexusDocs360
+Security audit script for NouxCubeIA
 """
 import json
 import logging
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def run_security_audit():
     """Run comprehensive security audit"""
-    print("🔒 NexusDocs360 Security Audit")
+    print("🔒 NouxCubeIA Security Audit")
     print("=" * 50)
 
     validator = SecurityValidator()

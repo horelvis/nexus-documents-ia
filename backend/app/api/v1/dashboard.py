@@ -10,7 +10,7 @@ from uuid import UUID
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
-from app.db.models import User, Document, DocumentView, DocumentShare
+from app.db.models import User, Document, DocumentView, DocumentShare, IndexedDocument
 from app.schemas.dashboard import (
     DashboardStats, 
     DocumentTrend, 
@@ -31,11 +31,18 @@ async def get_dashboard_stats(
     tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
-    Get aggregated dashboard statistics for the current tenant
+    Get aggregated dashboard statistics for the current tenant.
+
+    Combines stats from both:
+    - Document table (direct uploads via web UI)
+    - IndexedDocument table (documents from connectors like Alfresco, SharePoint)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     tenant_uuid = UUID(tenant_id)
-    
-    # Get document statistics
+
+    # Get Document table statistics (direct uploads)
     doc_stats = await db.execute(
         select(
             func.count(Document.id).label('total'),
@@ -46,11 +53,31 @@ async def get_dashboard_stats(
         ).where(Document.tenant_id == tenant_uuid)
     )
     doc_result = doc_stats.one()
-    
-    # Log for debugging
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"Document stats for tenant {tenant_id}: total_size={doc_result.total_size}, total={doc_result.total}")
+
+    # Get IndexedDocument table statistics (connector documents)
+    indexed_doc_stats = await db.execute(
+        select(
+            func.count(IndexedDocument.id).label('total'),
+            func.sum(case((IndexedDocument.indexing_status == 'indexed', 1), else_=0)).label('processed'),
+            func.sum(case((IndexedDocument.indexing_status.in_(['pending', 'processing']), 1), else_=0)).label('processing'),
+            func.sum(case((IndexedDocument.indexing_status == 'failed', 1), else_=0)).label('error'),
+            func.coalesce(func.sum(IndexedDocument.size_bytes), 0).label('total_size')
+        ).where(IndexedDocument.tenant_id == tenant_uuid)
+    )
+    indexed_result = indexed_doc_stats.one()
+
+    # Combine totals from both tables
+    total_documents = (doc_result.total or 0) + (indexed_result.total or 0)
+    processed_documents = (doc_result.processed or 0) + (indexed_result.processed or 0)
+    processing_documents = (doc_result.processing or 0) + (indexed_result.processing or 0)
+    error_documents = (doc_result.error or 0) + (indexed_result.error or 0)
+    total_storage = (doc_result.total_size or 0) + (indexed_result.total_size or 0)
+
+    logger.info(
+        f"Dashboard stats for tenant {tenant_id}: "
+        f"documents={doc_result.total or 0} + indexed={indexed_result.total or 0} = {total_documents}, "
+        f"storage={total_storage}"
+    )
     
     # Get active users (users who accessed documents in last 30 days)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
@@ -64,10 +91,12 @@ async def get_dashboard_stats(
         )
     )
     active_users = active_users_query.scalar() or 0
-    
-    # Get recent uploads (last 7 days)
+
+    # Get recent uploads (last 7 days) - from both tables
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    recent_uploads_query = await db.execute(
+
+    # Recent from Document table
+    recent_docs_query = await db.execute(
         select(func.count(Document.id))
         .where(
             and_(
@@ -76,11 +105,26 @@ async def get_dashboard_stats(
             )
         )
     )
-    recent_uploads = recent_uploads_query.scalar() or 0
-    
+    recent_docs = recent_docs_query.scalar() or 0
+
+    # Recent from IndexedDocument table
+    recent_indexed_query = await db.execute(
+        select(func.count(IndexedDocument.id))
+        .where(
+            and_(
+                IndexedDocument.tenant_id == tenant_uuid,
+                IndexedDocument.created_at >= seven_days_ago
+            )
+        )
+    )
+    recent_indexed = recent_indexed_query.scalar() or 0
+    recent_uploads = recent_docs + recent_indexed
+
     # Calculate trends (compare with previous period)
-    # Documents trend
+    # Documents trend - from both tables
     fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
+
+    # Previous period from Document table
     prev_period_docs = await db.execute(
         select(func.count(Document.id))
         .where(
@@ -91,7 +135,22 @@ async def get_dashboard_stats(
             )
         )
     )
-    prev_docs_count = prev_period_docs.scalar() or 0
+    prev_docs = prev_period_docs.scalar() or 0
+
+    # Previous period from IndexedDocument table
+    prev_period_indexed = await db.execute(
+        select(func.count(IndexedDocument.id))
+        .where(
+            and_(
+                IndexedDocument.tenant_id == tenant_uuid,
+                IndexedDocument.created_at >= fourteen_days_ago,
+                IndexedDocument.created_at < seven_days_ago
+            )
+        )
+    )
+    prev_indexed = prev_period_indexed.scalar() or 0
+
+    prev_docs_count = prev_docs + prev_indexed
     current_docs_count = recent_uploads
     
     docs_trend = 0.0
@@ -100,8 +159,8 @@ async def get_dashboard_stats(
     elif current_docs_count > 0:
         docs_trend = 100.0
     
-    # Storage trend (compare total size growth)
-    storage_week_ago = await db.execute(
+    # Storage trend (compare total size growth) - from both tables
+    storage_week_ago_docs = await db.execute(
         select(func.coalesce(func.sum(Document.file_size), 0))
         .where(
             and_(
@@ -110,8 +169,21 @@ async def get_dashboard_stats(
             )
         )
     )
-    prev_storage = storage_week_ago.scalar() or 0
-    current_storage = doc_result.total_size or 0
+    prev_docs_storage = storage_week_ago_docs.scalar() or 0
+
+    storage_week_ago_indexed = await db.execute(
+        select(func.coalesce(func.sum(IndexedDocument.size_bytes), 0))
+        .where(
+            and_(
+                IndexedDocument.tenant_id == tenant_uuid,
+                IndexedDocument.created_at < seven_days_ago
+            )
+        )
+    )
+    prev_indexed_storage = storage_week_ago_indexed.scalar() or 0
+
+    prev_storage = prev_docs_storage + prev_indexed_storage
+    current_storage = total_storage
     
     storage_trend = 0.0
     if prev_storage > 0:
@@ -137,18 +209,18 @@ async def get_dashboard_stats(
     elif active_users > 0:
         users_trend = 100.0
     
-    # Processing success rate trend
+    # Processing success rate trend (using combined totals)
     processed_trend = 0.0
-    if doc_result.total > 0:
-        success_rate = (doc_result.processed / doc_result.total) * 100
+    if total_documents > 0:
+        success_rate = (processed_documents / total_documents) * 100
         processed_trend = success_rate - 90.0  # Assuming 90% is baseline
-    
+
     return DashboardStats(
-        total_documents=doc_result.total or 0,
-        processed_documents=doc_result.processed or 0,
-        processing_documents=doc_result.processing or 0,
-        error_documents=doc_result.error or 0,
-        total_storage_bytes=doc_result.total_size or 0,
+        total_documents=total_documents,
+        processed_documents=processed_documents,
+        processing_documents=processing_documents,
+        error_documents=error_documents,
+        total_storage_bytes=total_storage,
         active_users=active_users,
         recent_uploads=recent_uploads,
         trends={
@@ -277,8 +349,8 @@ async def get_analytics_trends(
     days = {"7d": 7, "30d": 30, "90d": 90}[period]
     start_date = datetime.utcnow() - timedelta(days=days)
     
-    # Get document uploads by date
-    uploads_by_date = await db.execute(
+    # Get document uploads by date - from Document table
+    uploads_docs = await db.execute(
         select(
             func.date(Document.created_at).label('date'),
             func.count(Document.id).label('count')
@@ -292,6 +364,30 @@ async def get_analytics_trends(
         .group_by(func.date(Document.created_at))
         .order_by(func.date(Document.created_at))
     )
+
+    # Get document uploads by date - from IndexedDocument table
+    uploads_indexed = await db.execute(
+        select(
+            func.date(IndexedDocument.created_at).label('date'),
+            func.count(IndexedDocument.id).label('count')
+        )
+        .where(
+            and_(
+                IndexedDocument.tenant_id == tenant_uuid,
+                IndexedDocument.created_at >= start_date
+            )
+        )
+        .group_by(func.date(IndexedDocument.created_at))
+        .order_by(func.date(IndexedDocument.created_at))
+    )
+
+    # Combine uploads from both tables
+    from collections import defaultdict
+    uploads_by_date_combined = defaultdict(int)
+    for row in uploads_docs:
+        uploads_by_date_combined[str(row.date)] += row.count
+    for row in uploads_indexed:
+        uploads_by_date_combined[str(row.date)] += row.count
     
     # Get views by date
     views_by_date = await db.execute(
@@ -309,8 +405,8 @@ async def get_analytics_trends(
         .order_by(func.date(DocumentView.viewed_at))
     )
     
-    # Get storage growth
-    storage_by_date = await db.execute(
+    # Get storage growth - from Document table
+    storage_docs = await db.execute(
         select(
             func.date(Document.created_at).label('date'),
             func.coalesce(func.sum(Document.file_size), 0).label('size')
@@ -324,11 +420,34 @@ async def get_analytics_trends(
         .group_by(func.date(Document.created_at))
         .order_by(func.date(Document.created_at))
     )
-    
+
+    # Get storage growth - from IndexedDocument table
+    storage_indexed = await db.execute(
+        select(
+            func.date(IndexedDocument.created_at).label('date'),
+            func.coalesce(func.sum(IndexedDocument.size_bytes), 0).label('size')
+        )
+        .where(
+            and_(
+                IndexedDocument.tenant_id == tenant_uuid,
+                IndexedDocument.created_at >= start_date
+            )
+        )
+        .group_by(func.date(IndexedDocument.created_at))
+        .order_by(func.date(IndexedDocument.created_at))
+    )
+
+    # Combine storage from both tables
+    storage_by_date_combined = defaultdict(int)
+    for row in storage_docs:
+        storage_by_date_combined[str(row.date)] += row.size or 0
+    for row in storage_indexed:
+        storage_by_date_combined[str(row.date)] += row.size or 0
+
     # Format results
-    uploads_data = {str(row.date): row.count for row in uploads_by_date}
+    uploads_data = dict(uploads_by_date_combined)
     views_data = {str(row.date): row.count for row in views_by_date}
-    storage_data = {str(row.date): row.size or 0 for row in storage_by_date}
+    storage_data = dict(storage_by_date_combined)
     
     # Get most accessed documents
     top_documents = await db.execute(

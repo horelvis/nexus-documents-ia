@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import and_, or_, func, desc, select
 
 from app.db.models import (
-    Document, DocumentShare, DocumentShareAccessLog, 
+    Document, IndexedDocument, DocumentShare, DocumentShareAccessLog,
     DocumentShareRecipient, User, DocumentMetrics
 )
 from app.schemas.document_share import (
@@ -55,6 +55,7 @@ class DocumentShareService:
         """Create a new document share"""
         try:
             # Verify document exists and belongs to tenant
+            # First try Document table (SaaS uploads)
             result = await self.db.execute(
                 select(Document).filter(
                     and_(
@@ -64,6 +65,21 @@ class DocumentShareService:
                 )
             )
             document = result.scalar_one_or_none()
+
+            # If not found, try IndexedDocument table (connector documents)
+            if not document:
+                indexed_result = await self.db.execute(
+                    select(IndexedDocument).filter(
+                        and_(
+                            IndexedDocument.id == document_id,
+                            IndexedDocument.tenant_id == self.tenant_id
+                        )
+                    )
+                )
+                indexed_doc = indexed_result.scalar_one_or_none()
+                if indexed_doc:
+                    # Use IndexedDocument as the source
+                    document = indexed_doc
 
             if not document:
                 raise ValueError("Document not found or access denied")

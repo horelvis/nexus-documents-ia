@@ -527,6 +527,9 @@ class ConnectorIndexResponse(BaseModel):
     entities_count: int = 0
     error: Optional[str] = None
     processing_time_ms: float = 0.0
+    # Text preview for downstream operations (categorization, entity extraction)
+    extracted_text_preview: Optional[str] = None  # First 5000 chars
+    extraction_language: Optional[str] = None
 
 
 @router.post("/index/from-connector", response_model=ConnectorIndexResponse)
@@ -625,7 +628,7 @@ async def index_from_connector(
         # Store chunks in Weaviate
         from app.schemas.weaviate import DocumentCreate
 
-        collection_name = f"Nexus_{request.tenant_id.replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{request.tenant_id.replace('-', '_')}_documents"
 
         # Ensure collection exists
         await weaviate_service.ensure_collection_exists(collection_name)
@@ -642,8 +645,13 @@ async def index_from_connector(
 
         # Create document with chunks and learned context
         doc_create = DocumentCreate(
-            document_id=request.document_id,
-            content=result.extracted_text[:10000] if result.extracted_text else "",  # First 10k chars
+            id=request.document_id,
+            title=request.filename,
+            tenant_id=request.tenant_id,
+            content=result.extracted_text[:30000] if result.extracted_text else "",  # First 30k chars (unified with upload flow)
+            owner_user_id=request.owner_id,
+            external_id=request.metadata.get("external_id", "") if request.metadata else "",
+            source_type="connector",
             metadata={
                 **metadata,
                 "filename": request.filename,
@@ -680,18 +688,25 @@ async def index_from_connector(
 
         logger.info(
             f"✅ Indexed connector document: {request.filename} → "
-            f"Weaviate ID: {weaviate_result.weaviate_id}, "
+            f"Weaviate ID: {weaviate_result.id}, "
             f"{len(result.chunks)} chunks, {processing_time:.0f}ms"
         )
+
+        # Prepare text preview for downstream operations (categorization, etc.)
+        text_preview = None
+        if result.extracted_text:
+            text_preview = result.extracted_text[:5000]
 
         return ConnectorIndexResponse(
             success=True,
             document_id=request.document_id,
-            weaviate_id=str(weaviate_result.weaviate_id) if weaviate_result.weaviate_id else None,
+            weaviate_id=str(weaviate_result.id) if weaviate_result.id else None,
             collection=collection_name,
             chunk_count=len(result.chunks),
             entities_count=result.knowledge_result.entities_count if result.knowledge_result else 0,
             processing_time_ms=processing_time,
+            extracted_text_preview=text_preview,
+            extraction_language=result.extraction_language,
         )
 
     except Exception as e:

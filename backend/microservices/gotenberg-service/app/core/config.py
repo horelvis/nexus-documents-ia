@@ -25,22 +25,22 @@ class Settings(BaseSettings):
     # Gotenberg configuration (local instance in same container)
     GOTENBERG_BASE_URL: str = os.getenv("GOTENBERG_BASE_URL", "http://localhost:3000")
     
-    # File processing configuration
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
+    # File processing configuration - Max upload size in bytes (default: 50MB)
+    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))
     ALLOWED_EXTENSIONS: List[str] = [
         "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
         "txt", "md", "html", "htm", "rtf", "odt", "ods", "odp"
     ]
-    
-    # Image processing for thumbnails
-    THUMBNAIL_WIDTH: int = 400
-    THUMBNAIL_HEIGHT: int = 600
-    THUMBNAIL_QUALITY: int = 85
-    
-    # Conversion settings
-    PDF_CONVERSION_TIMEOUT: int = 30  # seconds
-    CACHE_ENABLED: bool = True
-    CACHE_TTL: int = 3600  # 1 hour
+
+    # Image processing for thumbnails (configurable via env vars)
+    THUMBNAIL_WIDTH: int = int(os.getenv("THUMBNAIL_WIDTH", "400"))
+    THUMBNAIL_HEIGHT: int = int(os.getenv("THUMBNAIL_HEIGHT", "600"))
+    THUMBNAIL_QUALITY: int = int(os.getenv("THUMBNAIL_QUALITY", "85"))
+
+    # Conversion settings (configurable via env vars)
+    PDF_CONVERSION_TIMEOUT: int = int(os.getenv("PDF_CONVERSION_TIMEOUT", "30"))  # seconds
+    CACHE_ENABLED: bool = os.getenv("CACHE_ENABLED", "true").lower() == "true"
+    CACHE_TTL: int = int(os.getenv("CACHE_TTL", "3600"))  # default: 1 hour
     
     # Default tenant
     DEFAULT_TENANT: str = "default"

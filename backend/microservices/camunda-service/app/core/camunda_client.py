@@ -61,7 +61,7 @@ class CamundaClient:
         name: str,
         bpmn_xml: str,
         tenant_id: str = None,
-        source: str = "NexusDocs360"
+        source: str = "NouxCubeIA"
     ) -> dict:
         """
         Deploy a BPMN process definition.

@@ -120,9 +120,11 @@ class SILEngine:
             intent = await self._detector.detect_intent(query)
             breakdown["intent_detection_ms"] = (time.time() - intent_start) * 1000
 
+            # Get intent type value (handle both enum and string due to use_enum_values=True)
+            intent_type_str = intent.type.value if hasattr(intent.type, 'value') else intent.type
             logger.info(
                 f"🧠 SIL Processing: '{query[:50]}...' "
-                f"→ Intent: {intent.type.value} (confidence: {intent.confidence:.2f})"
+                f"→ Intent: {intent_type_str} (confidence: {intent.confidence:.2f})"
             )
 
             # Step 2: Process through reasoning engine
@@ -235,7 +237,10 @@ class SILEngine:
         if ctx.query_type == "count":
             count = qr.get("count", ctx.document_count)
             if intent.entities.document_types:
-                doc_type = intent.entities.document_types[0].value
+                # Handle both enum and string values (due to use_enum_values=True in Pydantic)
+                doc_type = intent.entities.document_types[0]
+                if hasattr(doc_type, 'value'):
+                    doc_type = doc_type.value
                 return f"Hay {count} {doc_type}(s)."
             return f"Se encontraron {count} documentos."
 
@@ -261,8 +266,10 @@ class SILEngine:
         """Log a summary of SIL processing."""
         reasoning = result.reasoning_result
 
+        # Handle both enum and string values (due to use_enum_values=True in Pydantic)
+        reasoning_type_str = reasoning.type.value if hasattr(reasoning.type, 'value') else reasoning.type
         summary_parts = [
-            f"  Type: {reasoning.type.value}",
+            f"  Type: {reasoning_type_str}",
             f"  Requires RAG: {reasoning.requires_rag}",
             f"  Time: {result.total_processing_time_ms:.0f}ms",
         ]

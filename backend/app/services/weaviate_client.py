@@ -486,6 +486,31 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Public knowledge get document failed | doc_id=%s error=%s", doc_id, e)
             raise
 
+    async def public_knowledge_extract_entities(
+        self,
+        limit: int = 100,
+        category: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract knowledge entities from public documents into Knowledge Graph.
+
+        Processes existing public documents (legislation, etc.) and extracts
+        entities for semantic search and entity-based queries.
+        """
+        try:
+            params = {"limit": limit}
+            if category:
+                params["category"] = category
+            logger.info("🧠 Extracting knowledge from public documents | limit=%s", limit)
+            return await self.post_json(
+                "/public-knowledge/extract-knowledge",
+                params=params,
+                timeout=600.0  # Can take a while for many documents
+            )
+        except Exception as e:
+            logger.exception("❌ Public knowledge extraction failed | error=%s", e)
+            raise
+
     # =========================================================================
     # ACL & CACHE SECURITY OPERATIONS
     # =========================================================================
@@ -735,6 +760,279 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json("/learning/flush", json={}, params=params)
         except Exception as e:
             logger.exception("❌ Failed to flush learning data | error=%s", e)
+            raise
+
+    # =========================================================================
+    # STRUCTURAL INTELLIGENCE LAYER (SIL) OPERATIONS
+    # =========================================================================
+
+    async def sil_query(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute SIL structural query"""
+        try:
+            logger.debug("Calling SIL query | query=%s", query_data.get("query", "")[:50])
+            ctx = self._extract_context_headers(query_data)
+            return await self.post_json(
+                "/sil/query",
+                json=query_data,
+                tenant_id=ctx["tenant_id"],
+                user_id=ctx["user_id"],
+                request_id=ctx["request_id"],
+                timeout=60.0,
+            )
+        except Exception as e:
+            logger.exception("❌ SIL query failed | error=%s", e)
+            raise
+
+    async def sil_index_structural(self, index_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Index structural metadata for a document"""
+        try:
+            logger.debug("Indexing structural metadata | document_id=%s", index_data.get("document_id"))
+            return await self.post_json("/sil/index-structural", json=index_data, timeout=30.0)
+        except Exception as e:
+            logger.exception("❌ SIL index structural failed | error=%s", e)
+            raise
+
+    async def sil_get_structure(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Get structural metadata for a document"""
+        try:
+            params = {"tenant_id": tenant_id}
+            logger.debug("Getting structural metadata | document_id=%s", document_id)
+            return await self.get_json(f"/sil/structure/{document_id}", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get structural metadata | document_id=%s error=%s", document_id, e)
+            raise
+
+    async def sil_graph_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """Get SIL graph statistics"""
+        try:
+            params = {"tenant_id": tenant_id}
+            logger.debug("Getting SIL graph stats | tenant_id=%s", tenant_id)
+            return await self.get_json("/sil/graph/stats", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get SIL graph stats | error=%s", e)
+            raise
+
+    async def sil_search_structural(
+        self,
+        query: str,
+        tenant_id: str,
+        limit: int = 10,
+        semantic_type: Optional[str] = None,
+        domain: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Search structural documents by semantic similarity"""
+        try:
+            params = {
+                "query": query,
+                "tenant_id": tenant_id,
+                "limit": limit,
+            }
+            if semantic_type:
+                params["semantic_type"] = semantic_type
+            if domain:
+                params["domain"] = domain
+
+            logger.debug("Searching structural documents | query=%s", query[:50])
+            return await self.post_json("/sil/search-structural", params=params)
+        except Exception as e:
+            logger.exception("❌ SIL structural search failed | error=%s", e)
+            raise
+
+    async def sil_get_folder_contents(
+        self,
+        folder_path: str,
+        tenant_id: str,
+        include_subfolders: bool = False
+    ) -> Dict[str, Any]:
+        """Get contents of a structural folder"""
+        try:
+            params = {
+                "tenant_id": tenant_id,
+                "include_subfolders": str(include_subfolders).lower(),
+            }
+            logger.debug("Getting folder contents | path=%s", folder_path)
+            return await self.get_json(f"/sil/folder/{folder_path}", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get folder contents | folder=%s error=%s", folder_path, e)
+            raise
+
+    async def sil_get_related_documents(
+        self,
+        document_id: str,
+        tenant_id: str,
+        relationship_type: Optional[str] = None,
+        max_depth: int = 2
+    ) -> Dict[str, Any]:
+        """Get documents related to a given document"""
+        try:
+            params = {
+                "tenant_id": tenant_id,
+                "max_depth": max_depth,
+            }
+            if relationship_type:
+                params["relationship_type"] = relationship_type
+
+            logger.debug("Getting related documents | document_id=%s", document_id)
+            return await self.get_json(f"/sil/related/{document_id}", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get related documents | document_id=%s error=%s", document_id, e)
+            raise
+
+    async def sil_mark_document_removed(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Mark a document as removed in the structural graph"""
+        try:
+            params = {"tenant_id": tenant_id}
+            logger.debug("Marking document as removed | document_id=%s", document_id)
+            response = await self.delete(f"/sil/structure/{document_id}", params=params)
+            if response.status_code < 400:
+                return await response.json()
+            return {"success": False, "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            logger.exception("❌ Failed to mark document removed | document_id=%s error=%s", document_id, e)
+            raise
+
+    async def sil_clear_graph(self, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+        """Clear the structural graph"""
+        try:
+            params = {}
+            if tenant_id:
+                params["tenant_id"] = tenant_id
+            logger.info("🔄 Clearing SIL graph | tenant_id=%s", tenant_id or "ALL")
+            response = await self.delete("/sil/graph/clear", params=params)
+            if response.status_code < 400:
+                return await response.json()
+            return {"success": False, "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            logger.exception("❌ Failed to clear SIL graph | error=%s", e)
+            raise
+
+    async def sil_get_document_ids(
+        self,
+        tenant_id: Optional[str] = None,
+        limit: int = 10000
+    ) -> Dict[str, Any]:
+        """Get list of document IDs already indexed in the graph"""
+        try:
+            params = {"limit": limit}
+            if tenant_id:
+                params["tenant_id"] = tenant_id
+            logger.debug("Getting indexed document IDs | tenant_id=%s", tenant_id)
+            return await self.get_json("/sil/graph/document-ids", params=params)
+        except Exception as e:
+            logger.exception("❌ Failed to get document IDs | error=%s", e)
+            raise
+
+    async def sil_reindex(self, reindex_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Re-index documents to the structural graph"""
+        try:
+            logger.info(
+                "🔄 Starting SIL reindex | tenant_id=%s full_reindex=%s",
+                reindex_data.get("tenant_id"),
+                reindex_data.get("full_reindex", False)
+            )
+            return await self.post_json("/sil/reindex", json=reindex_data, timeout=300.0)
+        except Exception as e:
+            logger.exception("❌ SIL reindex failed | error=%s", e)
+            raise
+
+    # =========================================================================
+    # BOE LEGISLATION OPERATIONS (Public Knowledge Indexing)
+    # =========================================================================
+
+    async def boe_list_presets(self) -> List[Dict[str, Any]]:
+        """List available BOE legislation presets"""
+        try:
+            logger.debug("Listing BOE presets")
+            return await self.get_json("/boe/presets")
+        except Exception as e:
+            logger.exception("❌ Failed to list BOE presets | error=%s", e)
+            raise
+
+    async def boe_get_preset(self, preset_name: str) -> Dict[str, Any]:
+        """Get details of a specific preset"""
+        try:
+            logger.debug("Getting BOE preset | preset=%s", preset_name)
+            return await self.get_json(f"/boe/presets/{preset_name}")
+        except Exception as e:
+            logger.exception("❌ Failed to get BOE preset | preset=%s error=%s", preset_name, e)
+            raise
+
+    async def boe_download_legislation(self, boe_id: str, index: bool = True) -> Dict[str, Any]:
+        """Download and index a specific BOE legislation"""
+        try:
+            logger.info("📥 Downloading BOE legislation | boe_id=%s", boe_id)
+            return await self.post_json(
+                "/boe/download",
+                json={"boe_id": boe_id, "index_to_weaviate": index},
+                timeout=120.0
+            )
+        except Exception as e:
+            logger.exception("❌ BOE download failed | boe_id=%s error=%s", boe_id, e)
+            raise
+
+    async def boe_download_preset(self, preset_name: str, index: bool = True) -> List[Dict[str, Any]]:
+        """Download all legislation in a preset"""
+        try:
+            logger.info("📥 Downloading BOE preset | preset=%s", preset_name)
+            return await self.post_json(
+                "/boe/download/preset",
+                json={"preset": preset_name, "index_to_weaviate": index},
+                timeout=600.0  # Can take a while for large presets
+            )
+        except Exception as e:
+            logger.exception("❌ BOE preset download failed | preset=%s error=%s", preset_name, e)
+            raise
+
+    async def boe_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search BOE for legislation"""
+        try:
+            params = {"query": query, "limit": limit}
+            return await self.get_json("/boe/search", params=params)
+        except Exception as e:
+            logger.exception("❌ BOE search failed | error=%s", e)
+            raise
+
+    async def boe_get_legislation_info(self, boe_id: str) -> Dict[str, Any]:
+        """Get information about a BOE legislation document"""
+        try:
+            return await self.get_json(f"/boe/legislation/{boe_id}")
+        except Exception as e:
+            logger.exception("❌ Failed to get BOE legislation info | boe_id=%s error=%s", boe_id, e)
+            raise
+
+    async def boe_sync_legislation(self, boe_id: str, force: bool = False) -> Dict[str, Any]:
+        """Sync a specific legislation with BOE and detect changes"""
+        try:
+            params = {"force": str(force).lower()}
+            logger.info("🔄 Syncing BOE legislation | boe_id=%s", boe_id)
+            return await self.post_json(f"/boe/sync/{boe_id}", params=params, timeout=120.0)
+        except Exception as e:
+            logger.exception("❌ BOE sync failed | boe_id=%s error=%s", boe_id, e)
+            raise
+
+    async def boe_sync_all(self) -> List[Dict[str, Any]]:
+        """Sync all tracked legislation and detect changes"""
+        try:
+            logger.info("🔄 Syncing all BOE legislation")
+            return await self.post_json("/boe/sync/all", timeout=600.0)
+        except Exception as e:
+            logger.exception("❌ BOE sync all failed | error=%s", e)
+            raise
+
+    async def boe_get_all_legislation_ids(self) -> Dict[str, Any]:
+        """Get all BOE IDs across all presets"""
+        try:
+            return await self.get_json("/boe/all-legislation-ids")
+        except Exception as e:
+            logger.exception("❌ Failed to get all BOE legislation IDs | error=%s", e)
+            raise
+
+    async def boe_get_pending_updates(self) -> List[Dict[str, Any]]:
+        """Get list of legislation with pending updates"""
+        try:
+            return await self.get_json("/boe/updates")
+        except Exception as e:
+            logger.exception("❌ Failed to get pending BOE updates | error=%s", e)
             raise
 
 

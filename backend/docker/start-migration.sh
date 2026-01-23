@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Starting NexusDocs360 Migration: Qdrant -> Weaviate + Elysia"
+echo "🚀 Starting NouxCubeIA Migration: Qdrant -> Weaviate + Elysia"
 echo "================================================================="
 
 # Check if .env file exists
@@ -97,4 +97,4 @@ echo "  5. When ready, set MIGRATION_MODE=weaviate_only in .env and restart"
 
 echo ""
 echo "✅ Advanced Elysia Integration Complete!"
-echo "🚀 NexusDocs360 now features decision trees, 10+ specialized tools, and intelligent routing!"
+echo "🚀 NouxCubeIA now features decision trees, 10+ specialized tools, and intelligent routing!"

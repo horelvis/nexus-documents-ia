@@ -97,7 +97,7 @@ class UnifiedIndexingService:
         )
         self.weaviate_api_key = (
             weaviate_api_key or
-            getattr(settings, 'INTERNAL_API_KEY', None)
+            getattr(settings, 'MICROSERVICES_API_KEY', None)
         )
 
         # Configuration
@@ -483,7 +483,7 @@ class UnifiedIndexingService:
             indexing_strategy = await self._get_indexing_strategy(
                 db=db,
                 connector_id=connector.id,
-                document_type=indexed_doc.custom_metadata.get("alfresco_node_type") if indexed_doc.custom_metadata else None,
+                document_type=indexed_doc.source_metadata.get("alfresco_node_type") if indexed_doc.source_metadata else None,
                 mime_type=indexed_doc.mime_type,
             )
 
@@ -597,12 +597,12 @@ class UnifiedIndexingService:
                     learned_context["folder_confidence"] = folder_context.confidence
 
             # 2. Get normalized metadata with property weights
-            if indexed_doc.custom_metadata:
+            if indexed_doc.source_metadata:
                 metadata_service = MetadataIntelligenceService(db)
                 normalized = await metadata_service.get_normalized_metadata(
                     connector_id=connector_id,
-                    raw_metadata=indexed_doc.custom_metadata,
-                    document_type=indexed_doc.custom_metadata.get("alfresco_node_type"),
+                    raw_metadata=indexed_doc.source_metadata,
+                    document_type=indexed_doc.source_metadata.get("alfresco_node_type"),
                 )
                 learned_context["property_weights"] = normalized.get("weights", {})
                 learned_context["normalized_properties"] = normalized.get("properties", {})
@@ -623,14 +623,14 @@ class UnifiedIndexingService:
                     logger.warning(f"Failed to fetch associations for {indexed_doc.external_id}: {e}")
 
             # 4. Get semantic type from content model
-            if indexed_doc.custom_metadata and indexed_doc.custom_metadata.get("alfresco_node_type"):
+            if indexed_doc.source_metadata and indexed_doc.source_metadata.get("alfresco_node_type"):
                 from app.db.models import ConnectorContentModel
                 cm_result = await db.execute(
                     select(ConnectorContentModel).where(ConnectorContentModel.connector_id == connector_id)
                 )
                 content_model = cm_result.scalar_one_or_none()
                 if content_model and content_model.type_semantics:
-                    node_type = indexed_doc.custom_metadata.get("alfresco_node_type")
+                    node_type = indexed_doc.source_metadata.get("alfresco_node_type")
                     type_semantics = content_model.type_semantics.get(node_type, {})
                     learned_context["semantic_type"] = type_semantics.get("semantic_type")
                     learned_context["domain"] = type_semantics.get("domain")
@@ -769,7 +769,7 @@ class UnifiedIndexingService:
         ) as client:
             try:
                 response = await client.post(
-                    f"{self.weaviate_service_url}/index/from-connector",
+                    f"{self.weaviate_service_url}/weaviate/index/from-connector",
                     headers=headers,
                     json=payload,
                 )
@@ -858,12 +858,16 @@ class UnifiedIndexingService:
             existing_doc.size_bytes = document.size_bytes
             existing_doc.source_modified_at = document.source_modified_at
             existing_doc.updated_at = datetime.now(timezone.utc)
+            # Update source_metadata with connector-specific metadata (Alfresco properties, etc.)
+            if document.custom_metadata:
+                existing_doc.source_metadata = document.custom_metadata
             return {"new": 0, "updated": 1}
         else:
             # Create new
             new_doc = IndexedDocument(
                 tenant_id=connector.tenant_id,
                 connector_id=connector.id,
+                connector_type=document.connector_type.value if document.connector_type else None,
                 external_id=document.external_id,
                 external_url=document.external_url,
                 external_path=document.external_path,
@@ -874,6 +878,8 @@ class UnifiedIndexingService:
                 mime_type=document.mime_type,
                 file_extension=document.file_extension,
                 size_bytes=document.size_bytes,
+                # Store ALL connector-specific metadata (Alfresco properties, aspects, etc.)
+                source_metadata=document.custom_metadata if document.custom_metadata else None,
                 source_created_at=document.source_created_at,
                 source_modified_at=document.source_modified_at,
                 indexing_status="pending",

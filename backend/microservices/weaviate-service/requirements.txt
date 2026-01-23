@@ -27,6 +27,18 @@ sentence-transformers>=2.2.2
 torch>=1.11.0
 numpy>=1.24.0
 
+# NLP for Structural Intelligence Layer (SIL)
+# spaCy: Lemmatization, NER, POS tagging
+# Install models after: python -m spacy download es_core_news_md && python -m spacy download en_core_web_md
+spacy>=3.7.0
+
+# rapidfuzz: Fast fuzzy string matching for typo tolerance
+rapidfuzz>=3.5.0
+
+# transformers: Zero-shot classification
+# Note: Uses MiniLM-based models for speed (not full LLMs)
+transformers>=4.36.0
+
 # Semantic Router - Fast intent classification via embeddings
 # Use base package (no [local]) to avoid llama-cpp build dependency
 semantic-router>=0.0.50
@@ -34,6 +46,14 @@ semantic-router>=0.0.50
 # FastEmbed - ONNX-optimized embeddings for ultra-low latency (~1-3ms vs ~10ms)
 # Uses quantized models and ONNX Runtime for 10-15x speedup over sentence-transformers
 fastembed>=0.4.0
+
+# SetFit - Few-shot fine-tuning for intent classification
+# NexusRouter uses SetFit for trainable ML-based intent classification
+# Requires minimal training data (8-16 examples per class)
+# Documentation: https://github.com/huggingface/setfit
+setfit>=1.0.0
+datasets>=2.14.0  # HuggingFace datasets for SetFit training
+scikit-learn>=1.3.0  # Required for metrics (F1 score, etc.)
 
 # Database and storage
 asyncpg>=0.29.0

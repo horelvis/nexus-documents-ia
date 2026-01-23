@@ -1,8 +1,8 @@
-# NexusDocs360 – Resumen para Inversores
+# NouxCubeIA – Resumen para Inversores
 
 ## Visión y Propuesta de Valor
 - **Misión**: Convertir el conocimiento empresarial en un activo inteligente listo para la acción mediante comprensión documental autónoma.
-- **Problema que resolvemos**: Las compañías pierden ~30 % del tiempo de su talento buscando o validando documentos. NexusDocs360 unifica ingestión, IA y orquestación de flujos para que legal, finanzas y operaciones tomen decisiones en minutos.
+- **Problema que resolvemos**: Las compañías pierden ~30 % del tiempo de su talento buscando o validando documentos. NouxCubeIA unifica ingestión, IA y orquestación de flujos para que legal, finanzas y operaciones tomen decisiones en minutos.
 - **Por qué ahora**: Las empresas nativas de IA exigen automatización explicable y auditable. Nuestra plataforma combina RAG, agentes especializados y herramientas de cumplimiento en un stack multi-tenant desplegable en cualquier proyecto de GCP.
 
 ## Fotografía del Producto
@@ -127,7 +127,7 @@ Buscamos capital para acelerar go-to-market, completar certificaciones (SOC 2,
 - Conectores adicionales (SAP, Salesforce, Google Workspace) para expansión.
 - Equipo de crecimiento que impulse estrategias land-and-expand en industrias reguladas.
 
-**Contacto**: founders@nexusdocs360.app | Demo: https://pre.nexusdocs360.app
+**Contacto**: founders@nouxcubeia.app | Demo: https://pre.nouxcubeia.app
 
 ---
 

@@ -1,5 +1,5 @@
 """
-Unified Search Service for NexusDocs360.
+Unified Search Service for NouxCubeIA.
 
 This service provides a unified interface for document search that can use
 either Elasticsearch (when enabled) or Weaviate's native hybrid search

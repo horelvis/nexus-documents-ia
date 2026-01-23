@@ -1,6 +1,6 @@
 # Original Landing Page Backup
 
-Este directorio contiene una copia de respaldo de la landing page original de NexusDocs360 antes de la migración a nexus-theme.
+Este directorio contiene una copia de respaldo de la landing page original de NouxCubeIA antes de la migración a nexus-theme.
 
 La estructura original de la landing page (landing-header, landing-footer, hero-section, etc.) se ha movido aquí para mantener el código seguro mientras se implementa la nueva versión.
 

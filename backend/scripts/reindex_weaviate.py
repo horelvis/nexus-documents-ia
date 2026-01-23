@@ -3,7 +3,7 @@
 Weaviate Reindexer Script
 
 Reindexes documents from PostgreSQL into Weaviate with proper tenant separation.
-Each tenant gets their own collection: Nexus_{tenant_id}_documents
+Each tenant gets their own collection: Nouxcube_{tenant_id}_documents
 
 The script fetches document content from Elasticsearch (where it's already indexed)
 and reindexes it into Weaviate for semantic search with Elysia.
@@ -61,7 +61,7 @@ def normalize_tenant_id(tenant_id: str) -> str:
 
 def get_collection_name(tenant_id: str) -> str:
     """Get Weaviate collection name for tenant"""
-    return f"Nexus_{normalize_tenant_id(tenant_id)}_documents"
+    return f"Nouxcube_{normalize_tenant_id(tenant_id)}_documents"
 
 
 class WeaviateReindexer:

@@ -298,7 +298,7 @@ def vacuum_tables(db: Session):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Herramienta de limpieza de documentos para NexusDocs360',
+        description='Herramienta de limpieza de documentos para NouxCubeIA',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:

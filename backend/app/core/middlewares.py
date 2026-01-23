@@ -194,11 +194,11 @@ def configure_trusted_hosts(app) -> None:
             _host_from_url(str(getattr(settings, "SERVER_HOST", "") or "")),
         ]
         trusted_hosts = [
-            "nexusdocs360.app",
-            "www.nexusdocs360.app",
-            "api.nexusdocs360.app",
-            "nexus-docs360.es",
-            "www.nexus-docs360.es",
+            "nouxcubeia.app",
+            "www.nouxcubeia.app",
+            "api.nouxcubeia.app",
+            "nouxcube.local",
+            "www.nouxcube.local",
             *[h for h in configured_hosts if h],
         ]
         trusted_hosts = sorted(set(trusted_hosts))

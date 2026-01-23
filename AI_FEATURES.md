@@ -1,8 +1,8 @@
-# 🧠 NexusDocs360 - Emma AI: Asistente Inteligente de Nueva Generación
+# 🧠 NouxCubeIA - Emma AI: Asistente Inteligente de Nueva Generación
 
 ## 🚀 Visión General
 
-NexusDocs360 ha evolucionado hacia **Emma AI**, un asistente inteligente construido sobre **Microsoft AutoGen 0.4.8+** que representa la próxima generación de interacción con documentos. Emma utiliza técnicas avanzadas de IA multi-agente para proporcionar respuestas contextuales, ejecutar tareas complejas y acceder a información en tiempo real.
+NouxCubeIA ha evolucionado hacia **Emma AI**, un asistente inteligente construido sobre **Microsoft AutoGen 0.4.8+** que representa la próxima generación de interacción con documentos. Emma utiliza técnicas avanzadas de IA multi-agente para proporcionar respuestas contextuales, ejecutar tareas complejas y acceder a información en tiempo real.
 
 ## 🤖 Emma AI: Arquitectura y Capacidades
 
@@ -192,7 +192,7 @@ Emma está construida sobre **Microsoft AutoGen 0.4.8+**, un framework avanzado 
 - [ ] Realidad Aumentada para visualización de datos
 - [ ] Brain-Computer Interface para control por pensamiento
 
-## 💡 Por Qué NexusDocs360 es Diferente
+## 💡 Por Qué NouxCubeIA es Diferente
 
 1. **IA-First Architecture**: Diseñado desde cero para IA, no adaptado
 2. **Multi-Model Approach**: Usa el mejor modelo para cada tarea
@@ -202,4 +202,4 @@ Emma está construida sobre **Microsoft AutoGen 0.4.8+**, un framework avanzado 
 
 ---
 
-*NexusDocs360 - No solo gestionamos documentos, los hacemos pensar.*
+*NouxCubeIA - No solo gestionamos documentos, los hacemos pensar.*

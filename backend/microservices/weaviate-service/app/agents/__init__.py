@@ -1,5 +1,5 @@
 """
-Microsoft Agent Framework Integration for NexusDocs360
+Microsoft Agent Framework Integration for NouxCubeIA
 
 This module provides multi-agent orchestration using Microsoft's Agent Framework,
 enabling advanced document intelligence capabilities:
@@ -88,6 +88,42 @@ from .emma_coordinator import (
     reset_emma_coordinator,
 )
 
+# Emma v2 - Redesigned agent with SIL integration and minimal prompts
+from .emma_v2 import (
+    EmmaV2,
+    EmmaV2Config,
+    EmmaV2Result,
+    ExecutionContext,
+    get_emma_v2,
+    reset_emma_v2,
+)
+from .domain_router import DomainRouter, DomainType, domain_router
+from .dynamic_prompt_loader import (
+    DynamicPromptLoader,
+    dynamic_prompt_loader,
+    get_system_prompt_for_domain,
+)
+from .llm_client import (
+    LLMClient,
+    LLMConfig,
+    LLMProvider,
+    LLMResponse,
+    create_llm_client_from_settings,
+    get_llm_client,
+)
+
+# Skill Loader - Agent Skills Framework (filesystem-based procedural knowledge)
+from .skill_loader import (
+    Skill,
+    SkillMatch,
+    SkillLoader,
+    skill_loader,
+    get_skill,
+    match_skills,
+    get_skill_instructions,
+    reload_skills,
+)
+
 __all__ = [
     # Configuration
     "AgentConfig",
@@ -121,6 +157,37 @@ __all__ = [
     "get_emma_coordinator",
     "initialize_emma_coordinator",
     "reset_emma_coordinator",
+    # Emma v2 (Redesigned with SIL integration)
+    "EmmaV2",
+    "EmmaV2Config",
+    "EmmaV2Result",
+    "ExecutionContext",
+    "get_emma_v2",
+    "reset_emma_v2",
+    # Domain Router
+    "DomainRouter",
+    "DomainType",
+    "domain_router",
+    # Dynamic Prompt Loader
+    "DynamicPromptLoader",
+    "dynamic_prompt_loader",
+    "get_system_prompt_for_domain",
+    # LLM Client (async native)
+    "LLMClient",
+    "LLMConfig",
+    "LLMProvider",
+    "LLMResponse",
+    "create_llm_client_from_settings",
+    "get_llm_client",
+    # Skill Loader (Agent Skills Framework)
+    "Skill",
+    "SkillMatch",
+    "SkillLoader",
+    "skill_loader",
+    "get_skill",
+    "match_skills",
+    "get_skill_instructions",
+    "reload_skills",
 ]
 
 

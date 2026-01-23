@@ -1,8 +1,8 @@
-# ACL (Access Control List) Architecture - NexusDocs360
+# ACL (Access Control List) Architecture - NouxCubeIA
 
 ## Overview
 
-NexusDocs360 implements document-level Access Control Lists (ACL) across all services to ensure that users can only access documents they have permission to view. This document describes the ACL architecture, data flow, and implementation details.
+NouxCubeIA implements document-level Access Control Lists (ACL) across all services to ensure that users can only access documents they have permission to view. This document describes the ACL architecture, data flow, and implementation details.
 
 ## Table of Contents
 

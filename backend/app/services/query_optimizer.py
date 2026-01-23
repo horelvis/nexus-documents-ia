@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload, subqueryload, Load
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.sql import Select
 
-from app.db.models import Document, User, Tenant, DocumentView, Tag
+from app.db.models import Document, IndexedDocument, User, Tenant, DocumentView, Tag
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,16 @@ class QueryOptimizer:
         """
         Get tenant statistics with optimized queries.
         Uses subqueries to avoid multiple round trips.
+        Includes both Document (uploads) and IndexedDocument (connectors).
         """
-        # Subquery for document count
+        # Subquery for Document count (SaaS uploads)
         doc_count_subquery = select(func.count(Document.id)).where(
             Document.tenant_id == tenant_id
+        ).scalar_subquery()
+
+        # Subquery for IndexedDocument count (connector documents)
+        indexed_count_subquery = select(func.count(IndexedDocument.id)).where(
+            IndexedDocument.tenant_id == uuid.UUID(tenant_id)
         ).scalar_subquery()
 
         # Subquery for user count
@@ -100,14 +107,20 @@ class QueryOptimizer:
         # Execute all subqueries in one go
         query = select(
             doc_count_subquery.label('document_count'),
+            indexed_count_subquery.label('indexed_document_count'),
             user_count_subquery.label('user_count'),
             views_subquery.label('total_views_30d')
         )
 
         result = self.db.execute(query).first()
 
+        doc_count = result.document_count or 0
+        indexed_count = result.indexed_document_count or 0
+
         return {
-            'document_count': result.document_count or 0,
+            'document_count': doc_count + indexed_count,  # Total from both tables
+            'upload_count': doc_count,  # Document table only
+            'connector_count': indexed_count,  # IndexedDocument table only
             'user_count': result.user_count or 0,
             'total_views_30d': result.total_views_30d or 0
         }

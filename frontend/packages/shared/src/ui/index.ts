@@ -1,7 +1,7 @@
 /**
  * UI Components (shadcn/ui based)
  *
- * Shared UI primitives for all NexusDocs360 applications.
+ * Shared UI primitives for all NouxCubeIA applications.
  */
 
 export * from './accordion'

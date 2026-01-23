@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.db.models import User, Document, Tenant, DocumentShare, SignatureRequest
+from app.db.models import User, Document, IndexedDocument, Tenant, DocumentShare, SignatureRequest
 from app.services.async_document_service import AsyncDocumentService
 from app.services.search_service import SearchService
 from app.services.vector_service_direct import VectorServiceDirect
@@ -534,46 +534,89 @@ class VirtualAssistantAgent:
     
     async def _get_statistics(self, context: AgentContext) -> Dict[str, Any]:
         """
-        Get tenant statistics
+        Get tenant statistics.
+
+        Combines counts from both Document (uploads) and IndexedDocument (connectors).
         """
-        # Document count
+        from datetime import timedelta
+
+        tenant_uuid = UUID(context.tenant_id) if isinstance(context.tenant_id, str) else context.tenant_id
+
+        # Document count from Document table (direct uploads)
         doc_count_query = select(func.count(Document.id)).where(
-            Document.tenant_id == context.tenant_id
+            Document.tenant_id == tenant_uuid
         )
         doc_count_result = await context.db_session.execute(doc_count_query)
-        total_documents = doc_count_result.scalar() or 0
-        
-        # Recent documents (last 30 days)
-        from datetime import timedelta
+        doc_uploads = doc_count_result.scalar() or 0
+
+        # Document count from IndexedDocument table (connector documents)
+        idx_count_query = select(func.count(IndexedDocument.id)).where(
+            IndexedDocument.tenant_id == tenant_uuid
+        )
+        idx_count_result = await context.db_session.execute(idx_count_query)
+        idx_documents = idx_count_result.scalar() or 0
+
+        total_documents = doc_uploads + idx_documents
+
+        # Recent documents (last 30 days) - from both tables
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        recent_query = select(func.count(Document.id)).where(
-            Document.tenant_id == context.tenant_id,
+
+        recent_docs_query = select(func.count(Document.id)).where(
+            Document.tenant_id == tenant_uuid,
             Document.created_at >= thirty_days_ago
         )
-        recent_result = await context.db_session.execute(recent_query)
-        recent_documents = recent_result.scalar() or 0
-        
-        # Shared documents
+        recent_docs_result = await context.db_session.execute(recent_docs_query)
+        recent_docs = recent_docs_result.scalar() or 0
+
+        recent_idx_query = select(func.count(IndexedDocument.id)).where(
+            IndexedDocument.tenant_id == tenant_uuid,
+            IndexedDocument.created_at >= thirty_days_ago
+        )
+        recent_idx_result = await context.db_session.execute(recent_idx_query)
+        recent_idx = recent_idx_result.scalar() or 0
+
+        recent_documents = recent_docs + recent_idx
+
+        # Shared documents (only from Document table - IndexedDocument uses different sharing)
         shared_query = select(func.count(DocumentShare.id)).join(
             Document, DocumentShare.document_id == Document.id
-        ).where(Document.tenant_id == context.tenant_id)
+        ).where(Document.tenant_id == tenant_uuid)
         shared_result = await context.db_session.execute(shared_query)
         shared_documents = shared_result.scalar() or 0
-        
+
         # Pending signatures
         signatures_query = select(func.count(SignatureRequest.id)).where(
-            SignatureRequest.tenant_id == context.tenant_id,
+            SignatureRequest.tenant_id == tenant_uuid,
             SignatureRequest.status == "pending"
         )
         signatures_result = await context.db_session.execute(signatures_query)
         pending_signatures = signatures_result.scalar() or 0
-        
+
+        # Calculate storage estimate
+        doc_size_query = select(func.coalesce(func.sum(Document.file_size), 0)).where(
+            Document.tenant_id == tenant_uuid
+        )
+        doc_size_result = await context.db_session.execute(doc_size_query)
+        doc_storage = doc_size_result.scalar() or 0
+
+        idx_size_query = select(func.coalesce(func.sum(IndexedDocument.size_bytes), 0)).where(
+            IndexedDocument.tenant_id == tenant_uuid
+        )
+        idx_size_result = await context.db_session.execute(idx_size_query)
+        idx_storage = idx_size_result.scalar() or 0
+
+        total_storage_mb = (doc_storage + idx_storage) / (1024 * 1024)
+
         return {
             "total_documents": total_documents,
             "recent_documents": recent_documents,
             "shared_documents": shared_documents,
             "pending_signatures": pending_signatures,
-            "storage_used": f"{total_documents * 0.5:.1f} MB"  # Estimate
+            "storage_used": f"{total_storage_mb:.1f} MB",
+            "breakdown": {
+                "uploads": doc_uploads,
+                "connectors": idx_documents
+            }
         }
     
     async def _prepare_signature_request(self, parameters: Dict[str, Any], context: AgentContext) -> Dict[str, Any]:

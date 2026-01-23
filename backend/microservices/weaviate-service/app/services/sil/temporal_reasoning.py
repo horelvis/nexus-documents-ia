@@ -16,9 +16,10 @@ The temporal graph maintains history, not just current state.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta
 from collections import defaultdict
+from enum import Enum
 
 from .schemas import (
     Intent,
@@ -31,6 +32,25 @@ from .cypher_builder import CypherBuilder, cypher_builder
 from ...services.knowledge.age_graph_service import AGEKnowledgeGraphService, age_knowledge_graph
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_value(obj: Union[Enum, str, None]) -> str:
+    """Safely get the value from an enum or return the string directly.
+
+    IMPORTANT: Check Enum BEFORE str because string enums (class X(str, Enum))
+    satisfy both isinstance(obj, str) and isinstance(obj, Enum), but we need
+    to use .value for correct extraction.
+    """
+    if obj is None:
+        return ""
+    # Check Enum FIRST - string enums (str, Enum) satisfy both str and Enum checks
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, str):
+        return obj
+    if hasattr(obj, 'value'):
+        return obj.value
+    return str(obj)
 
 
 class TemporalReasoningEngine:
@@ -150,7 +170,7 @@ class TemporalReasoningEngine:
                 where_clauses.append(f"({' OR '.join(folder_conditions)})")
 
             if hasattr(entities, 'document_types') and entities.document_types:
-                types_str = ", ".join(f"'{t.value}'" for t in entities.document_types)
+                types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in entities.document_types)
                 where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         where_clause = " AND ".join(where_clauses)
@@ -309,7 +329,7 @@ class TemporalReasoningEngine:
                 where_clauses.append(f"({' OR '.join(folder_conditions)})")
 
             if hasattr(entities, 'document_types') and entities.document_types:
-                types_str = ", ".join(f"'{t.value}'" for t in entities.document_types)
+                types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in entities.document_types)
                 where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         where_clause = " AND ".join(where_clauses)

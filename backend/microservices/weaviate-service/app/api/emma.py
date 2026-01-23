@@ -1163,62 +1163,49 @@ IMPORTANTE: Para cada hallazgo, incluye una cita textual EXACTA del documento (c
 
 
 def _parse_analysis_json(answer: str) -> Optional[dict]:
-    """Parse JSON from Emma's response using multiple strategies."""
+    """Parse JSON from Emma's response using centralized extraction utility."""
+    # Import from shared utilities (handles thinking tags, code blocks, common fixes)
+    try:
+        from app.utils.json_extraction import extract_json_from_llm_response
+        return extract_json_from_llm_response(answer, default=None)
+    except ImportError:
+        # Fallback for when running in microservice context
+        pass
+
+    # Inline fallback implementation for microservice isolation
     import json
     import re
 
     def clean_json_string(s: str) -> str:
         """Clean JSON string by fixing common LLM issues."""
-        # Remove control characters except \n, \r, \t
         s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', s)
-        # Fix trailing commas before ] or }
         s = re.sub(r',\s*([}\]])', r'\1', s)
-        # Fix newlines inside strings (replace with space)
-        # This is tricky - we need to find strings and fix them
-        # Simple approach: replace literal newlines in quoted strings
-        def fix_string_newlines(match):
-            content = match.group(1)
-            # Replace actual newlines with \n escape or space
-            content = content.replace('\n', ' ').replace('\r', ' ')
-            # Remove multiple spaces
-            content = re.sub(r' +', ' ', content)
-            return f'"{content}"'
-        # Match strings and fix newlines inside them
-        s = re.sub(r'"([^"]*(?:\\"[^"]*)*)"', fix_string_newlines, s)
         return s
 
-    # Strategy 1: Direct JSON parse
+    # Remove thinking tags
+    cleaned = re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL)
+
+    # Try direct parse
     try:
-        return json.loads(answer.strip())
+        return json.loads(cleaned.strip())
     except json.JSONDecodeError:
         pass
 
-    # Strategy 2: Extract from markdown code block
-    json_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', answer)
+    # Extract from code block
+    json_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned)
     if json_block:
         try:
-            cleaned = clean_json_string(json_block.group(1))
-            return json.loads(cleaned)
+            return json.loads(clean_json_string(json_block.group(1)))
         except json.JSONDecodeError:
             pass
 
-    # Strategy 3: Find JSON object and clean it
-    json_match = re.search(r'\{[\s\S]*\}', answer)
+    # Find JSON object
+    json_match = re.search(r'\{[\s\S]*\}', cleaned)
     if json_match:
         try:
-            json_str = clean_json_string(json_match.group())
-            return json.loads(json_str)
+            return json.loads(clean_json_string(json_match.group()))
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON parse failed after cleaning: {e}")
-            # Strategy 4: Try to parse with more aggressive cleaning
-            try:
-                # Remove all newlines and extra spaces
-                json_str = re.sub(r'\s+', ' ', json_match.group())
-                json_str = clean_json_string(json_str)
-                return json.loads(json_str)
-            except json.JSONDecodeError as e2:
-                logger.warning(f"JSON parse failed (aggressive): {e2}")
-                logger.debug(f"Attempted JSON: {json_str[:500]}...")
+            logger.warning(f"JSON parse failed: {e}")
 
     return None
 

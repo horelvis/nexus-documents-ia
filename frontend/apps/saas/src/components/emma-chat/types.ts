@@ -85,6 +85,65 @@ export interface WorkflowStep {
   error?: string
 }
 
+// Stage types for progress tracking
+export type ProgressStage = 'init' | 'loading_document' | 'analyzing' | 'context_preparation' | 'thinking' | 'searching' | 'generating'
+
+// SIL Reasoning types
+export type ReasoningType =
+  | 'STRUCTURAL'      // Direct answer from graph (count, exists, location)
+  | 'STRUCTURAL_COUNT'
+  | 'STRUCTURAL_EXISTS'
+  | 'STRUCTURAL_LOCATION'
+  | 'TEMPORAL'        // Time-based queries
+  | 'MULTIHOP'        // Graph traversal
+  | 'LEGAL'           // Legal knowledge graph
+  | 'LEGAL_ENRICHED'  // RAG + legal context
+  | 'SEMANTIC'        // Traditional RAG
+  | 'FOCUSED_RAG'     // RAG on specific documents
+  | 'FULL_RAG'        // Full corpus RAG
+
+// Legal context from SIL
+export interface LegalContext {
+  applicable_laws: Array<{
+    law_id: string
+    name: string
+    boe_id?: string
+    relevance: number
+  }>
+  relevant_articles?: Array<{
+    article_number: string
+    law_name: string
+    summary?: string
+  }>
+  legal_domain?: string
+  compliance_hints?: string[]
+}
+
+// Agent process information (for UI display)
+export interface AgentProcessInfo {
+  reasoning_type?: ReasoningType
+  reasoning_message?: string
+  tokens_saved?: number
+  tokens_used?: number
+  legal_context?: LegalContext
+  active_tools: Array<{
+    name: string
+    status: 'pending' | 'running' | 'completed' | 'error'
+    message?: string
+    elapsed_ms?: number
+  }>
+  sil_used: boolean
+  execution_time_ms?: number
+}
+
+// Delegation event data (when Emma uses tools)
+export interface DelegationInfo {
+  agent: string
+  message: string
+  elapsedMs?: number
+  timestamp?: Date
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -113,6 +172,12 @@ export interface EmmaMessage {
     agent?: string
     plan_id?: string
     workflow_steps?: WorkflowStep[]
+    // Enhanced progress tracking
+    stage?: ProgressStage
+    stageMessage?: string
+    delegations?: DelegationInfo[]
+    streamingText?: string
+    isStreaming?: boolean
     // Error handling fields (i18n keys)
     errorType?: string
     errorTitleKey?: string
@@ -121,6 +186,8 @@ export interface EmmaMessage {
     failedQuery?: string
     // Human-in-the-Loop clarification fields
     clarification?: ClarificationData
+    // Agent process information
+    process_info?: AgentProcessInfo
   }
   suggestions?: string[]
   isStreaming?: boolean

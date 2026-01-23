@@ -1,5 +1,5 @@
 /**
- * Feature Flags Client for NexusDocs360 Frontend
+ * Feature Flags Client for NouxCubeIA Frontend
  *
  * Fetches and caches feature flag state from the backend.
  * Used to conditionally render UI components based on deployment mode.

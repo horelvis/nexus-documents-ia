@@ -123,16 +123,55 @@ class BOELegislationDownloader:
         "mercantil": [
             "BOE-A-2010-10544",  # Ley de Sociedades de Capital
             "BOE-A-1885-6627",   # Código de Comercio
+            "BOE-A-2007-5909",   # Ley de Sociedades Profesionales
         ],
         "fiscal": [
+            "BOE-A-2003-23186",  # Ley General Tributaria (LGT)
             "BOE-A-2006-20764",  # Ley del IRPF
             "BOE-A-2014-12328",  # Ley del Impuesto sobre Sociedades
             "BOE-A-1992-28740",  # Ley del IVA
+            "BOE-A-2012-14696",  # Reglamento de Facturación
         ],
         "administrativo": [
             "BOE-A-2015-10565",  # LPACAP
             "BOE-A-2015-10566",  # LRJSP
             "BOE-A-2017-12902",  # Ley de Contratos del Sector Público
+        ],
+        # === NUEVOS PRESETS PARA EMPRESAS ===
+        "compliance": [
+            "BOE-A-2010-6737",   # Ley de Prevención del Blanqueo de Capitales (LPBC)
+            "BOE-A-1995-25444",  # Código Penal (responsabilidad personas jurídicas)
+            "BOE-A-2020-11218",  # Ley Concursal (insolvencia)
+            "BOE-A-2019-2364",   # Ley de Secretos Empresariales
+            "BOE-A-2015-8147",   # Ley de Auditoría de Cuentas
+        ],
+        "propiedad_intelectual": [
+            "BOE-A-1996-8930",   # Ley de Propiedad Intelectual (LPI)
+            "BOE-A-2001-23093",  # Ley de Marcas
+            "BOE-A-2015-11929",  # Ley de Patentes
+        ],
+        "comercio_consumidores": [
+            "BOE-A-2007-20555",  # LGDCU (Consumidores y Usuarios)
+            "BOE-A-1991-628",    # Ley de Competencia Desleal (LCD)
+            "BOE-A-1996-1072",   # Ley de Ordenación del Comercio Minorista (LOCM)
+            "BOE-A-2013-12888",  # Ley de Garantía de la Unidad de Mercado (LGUM)
+            "BOE-A-2002-13758",  # Ley de Servicios de la Sociedad de la Información (LSSI)
+        ],
+        "emprendimiento": [
+            "BOE-A-2013-10074",  # Ley de Emprendedores
+            "BOE-A-2022-15818",  # Ley Crea y Crece (factura electrónica B2B)
+            "BOE-A-2022-23042",  # Ley de Startups
+        ],
+        "inmobiliario": [
+            "BOE-A-1994-26003",  # Ley de Arrendamientos Urbanos (LAU)
+            "BOE-A-2019-6635",   # Reforma LAU 2019 (vivienda)
+            "BOE-A-1960-10906",  # Ley de Propiedad Horizontal
+            "BOE-A-1946-2453",   # Ley Hipotecaria
+            "BOE-A-2019-3814",   # Ley de Crédito Inmobiliario
+        ],
+        "contabilidad": [
+            "BOE-A-2007-19884",  # Plan General de Contabilidad
+            "BOE-A-2007-19966",  # PGC Pymes
         ],
     }
 
@@ -141,11 +180,11 @@ class BOELegislationDownloader:
         self.api_key = api_key or "dev_microservice_key_12345"
         self.headers_xml = {
             'Accept': 'application/xml',
-            'User-Agent': 'NexusDocs-BOE-Downloader/1.0'
+            'User-Agent': 'NouxCubeIA-BOE-Downloader/1.0'
         }
         self.headers_json = {
             'Accept': 'application/json',
-            'User-Agent': 'NexusDocs-BOE-Downloader/1.0'
+            'User-Agent': 'NouxCubeIA-BOE-Downloader/1.0'
         }
 
     async def download_legislation(self, boe_id: str) -> Optional[LegislationDocument]:
@@ -503,13 +542,19 @@ Ejemplos:
   python boe_legislation_downloader.py --id BOE-A-2015-11430 --no-index
 
 Presets disponibles:
-  - laboral: Estatuto de los Trabajadores, PRL, Ley de Igualdad, etc.
+  - laboral: Estatuto de los Trabajadores, PRL, Ley de Igualdad, LETA, etc.
   - proteccion_datos: LOPDGDD
   - educacion: LOMLOE, LOE, LOU
   - civil: Código Civil, LEC
-  - mercantil: Ley de Sociedades de Capital, Código de Comercio
-  - fiscal: IRPF, IS, IVA
+  - mercantil: Ley de Sociedades de Capital, Código de Comercio, Sociedades Profesionales
+  - fiscal: LGT, IRPF, IS, IVA, Reglamento de Facturación
   - administrativo: LPACAP, LRJSP, Contratos del Sector Público
+  - compliance: Blanqueo de Capitales, Código Penal, Ley Concursal, Secretos Empresariales
+  - propiedad_intelectual: LPI, Marcas, Patentes
+  - comercio_consumidores: LGDCU, Competencia Desleal, LOCM, LSSI
+  - emprendimiento: Ley de Emprendedores, Crea y Crece, Ley de Startups
+  - inmobiliario: LAU, Propiedad Horizontal, Ley Hipotecaria, Crédito Inmobiliario
+  - contabilidad: Plan General Contabilidad, PGC Pymes
         """
     )
 

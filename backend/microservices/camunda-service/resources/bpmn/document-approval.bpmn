@@ -6,8 +6,8 @@
                   xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   id="Definitions_DocumentApproval"
-                  targetNamespace="http://nexusdocs360.com/bpmn"
-                  exporter="NexusDocs360"
+                  targetNamespace="http://nouxcube.ai/bpmn"
+                  exporter="NouxCubeIA"
                   exporterVersion="1.0.0">
 
   <bpmn:process id="document-approval" name="Document Approval Workflow" isExecutable="true">

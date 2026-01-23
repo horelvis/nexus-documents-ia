@@ -14,8 +14,13 @@ sys.path.insert(0, '/app')
 
 from app.services.agent_router_service import AgentRouterService
 
-# Database configuration
-DATABASE_URL = "postgresql+asyncpg://postgres:password@db:5432/nexus_db"
+# Database configuration - Use environment variable (required)
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("ASYNC_DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is required. "
+        "Set it to: postgresql+asyncpg://user:password@host:port/dbname"
+    )
 
 # Create async engine
 engine = create_async_engine(DATABASE_URL, echo=False)

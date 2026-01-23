@@ -1,6 +1,6 @@
 # Stripe Products Setup Guide
 
-This guide explains how to set up Stripe products for NexusDocs360 with the new trial-based pricing structure.
+This guide explains how to set up Stripe products for NouxCubeIA with the new trial-based pricing structure.
 
 ## Overview
 

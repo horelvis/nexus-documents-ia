@@ -1,5 +1,5 @@
 {
-  "name": "nexusdocs360",
+  "name": "nouxcubeia",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -8,10 +8,10 @@
   ],
   "scripts": {
     "dev": "turbo dev",
-    "dev:emma": "turbo dev --filter=@nexus/emma",
+    "dev:on-premise": "turbo dev --filter=@nexus/on-premise",
     "dev:saas": "turbo dev --filter=@nexus/saas",
     "build": "turbo build",
-    "build:emma": "turbo build --filter=@nexus/emma",
+    "build:on-premise": "turbo build --filter=@nexus/on-premise",
     "build:saas": "turbo build --filter=@nexus/saas",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",

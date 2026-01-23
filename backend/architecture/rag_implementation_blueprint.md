@@ -1,6 +1,6 @@
 # Plano de Implementación RAG Basado en Lecciones del Caso Clínico
 
-Documento de referencia para evolucionar la arquitectura RAG de NexusDocs360 tomando como base el artículo “Everyone Builds RAG Backwards” (experiencia real en sector salud) y las recomendaciones internas derivadas.
+Documento de referencia para evolucionar la arquitectura RAG de NouxCubeIA tomando como base el artículo “Everyone Builds RAG Backwards” (experiencia real en sector salud) y las recomendaciones internas derivadas.
 
 ---
 
@@ -23,7 +23,7 @@ Documento de referencia para evolucionar la arquitectura RAG de NexusDocs360 tom
 
 ---
 
-## 2. Recomendaciones de Adaptación para NexusDocs360
+## 2. Recomendaciones de Adaptación para NouxCubeIA
 
 > Nota: este documento describe un “north star”. En paralelo, se han incorporado **mejoras pragmáticas** dentro del `weaviate-service` para capturar beneficios inmediatos (especialmente en control/reducción de tokens de contexto) sin re-implementar toda la arquitectura propuesta.
 
@@ -123,7 +123,7 @@ Configuración ya disponible en `weaviate-service`:
 ## 5. Conclusiones
 
 - El fracaso descrito en el artículo coincide con dolores que hemos visto al escalar nuestra plataforma: pérdida de relevancia, citas débiles y falta de señales de confianza.
-- Adoptar las cinco capas (inteligencia de documentos, inteligencia de consulta, recuperación multi-etapa, ensamblado estructurado y validación) alinea la arquitectura de NexusDocs360 con las mejores prácticas observadas en producción para dominios altamente regulados.
+- Adoptar las cinco capas (inteligencia de documentos, inteligencia de consulta, recuperación multi-etapa, ensamblado estructurado y validación) alinea la arquitectura de NouxCubeIA con las mejores prácticas observadas en producción para dominios altamente regulados.
 - El roadmap incremental permite validar cada capa antes de la siguiente, controlando latencia y costos mientras elevamos la precisión y la confianza del usuario final.
 
 > **Próximo paso recomendado**: iniciar un spike de Document/Query Intelligence en un subconjunto de documentos legales para medir mejora de recall/precision y establecer las bases del resto del plan.

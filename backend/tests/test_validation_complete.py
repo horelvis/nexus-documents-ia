@@ -1,5 +1,5 @@
 """
-Test de Validación Completo - NexusDocs360
+Test de Validación Completo - NouxCubeIA
 ==========================================
 
 Este test valida la integración completa del sistema incluyendo:
@@ -28,7 +28,7 @@ from app.services.auth_service import AuthService
 
 
 class TestValidationComplete:
-    """Suite completa de validación del sistema NexusDocs360"""
+    """Suite completa de validación del sistema NouxCubeIA"""
 
     def _get_env_int(self, name: str, default: int) -> int:
         try:
@@ -374,7 +374,7 @@ class TestValidationComplete:
 # Función para ejecutar la validación completa
 def run_complete_validation():
     """Ejecutar validación completa del sistema"""
-    print("🚀 Iniciando Validación Completa de NexusDocs360")
+    print("🚀 Iniciando Validación Completa de NouxCubeIA")
     print("=" * 60)
 
     # Ejecutar tests con pytest

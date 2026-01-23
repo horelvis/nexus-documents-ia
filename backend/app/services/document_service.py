@@ -61,7 +61,7 @@ class DocumentService:
             
         self.user_id = user_id
         self.embedding_service = EmbeddingService(self.tenant_id)
-        self.collection_name = f"Nexus_{self.tenant_id.replace('-', '_')}_documents"
+        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:

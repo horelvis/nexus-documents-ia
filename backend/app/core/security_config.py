@@ -46,13 +46,13 @@ if not ENCRYPTION_KEY and not settings.DEBUG:
 
 # CORS security - strict origins for production
 PRODUCTION_CORS_ORIGINS = [
-    "https://nexusdocs360.app",
-    "https://www.nexusdocs360.app",
-    "https://api.nexusdocs360.app",
-    "https://nexus-docs360.es",
-    "https://www.nexus-docs360.es",
-    "https://nexus-docs360.es:3000",
-    "https://www.nexus-docs360.es:3000",
+    "https://nouxcubeia.app",
+    "https://www.nouxcubeia.app",
+    "https://api.nouxcubeia.app",
+    "https://nouxcube.local",
+    "https://www.nouxcube.local",
+    "https://nouxcube.local:3000",
+    "https://www.nouxcube.local:3000",
 ]
 
 # Development CORS origins (more permissive but still secure)

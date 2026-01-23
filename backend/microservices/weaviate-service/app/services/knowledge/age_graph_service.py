@@ -802,28 +802,30 @@ class AGEKnowledgeGraphService:
         try:
             async with self._get_connection() as conn:
                 # Count entities by type
+                # Note: Using 'total' instead of 'count' as alias to avoid conflict
+                # with the reserved word 'count' in PostgreSQL/Apache AGE
                 cypher_entities = f"""
                     MATCH (e:Entity {{tenant_id: '{tenant_id}'}})
-                    RETURN e.entity_type AS type, count(e) AS count
+                    RETURN e.entity_type AS entity_type, count(e) AS total
                 """
 
                 entity_results = await self._execute_cypher(
-                    conn, cypher_entities, [("type", "text"), ("count", "int")]
+                    conn, cypher_entities, [("entity_type", "text"), ("total", "int")]
                 )
 
-                type_counts = {r["type"]: r["count"] for r in entity_results}
+                type_counts = {r["entity_type"]: r["total"] for r in entity_results}
                 total_entities = sum(type_counts.values())
 
                 # Count relationships
                 cypher_edges = f"""
                     MATCH (s:Entity {{tenant_id: '{tenant_id}'}})-[r:RELATED_TO]->(t)
-                    RETURN count(r) AS count
+                    RETURN count(r) AS total
                 """
 
                 edge_results = await self._execute_cypher(
-                    conn, cypher_edges, [("count", "int")]
+                    conn, cypher_edges, [("total", "int")]
                 )
-                total_edges = edge_results[0].get("count", 0) if edge_results else 0
+                total_edges = edge_results[0].get("total", 0) if edge_results else 0
 
                 return {
                     "enabled": True,

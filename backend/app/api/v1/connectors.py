@@ -9,9 +9,15 @@ from math import ceil
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+
+# Background worker URL for task dispatch
+BACKGROUND_WORKER_URL = getattr(settings, 'BACKGROUND_TASKS_URL', 'http://background-worker:8100')
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
@@ -512,6 +518,249 @@ async def get_connector_stats(
 # Sync Endpoints
 # =============================================================================
 
+@router.post("/{connector_id}/sync-model")
+async def sync_content_model(
+    connector_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Discover and sync the content model (types, aspects, properties) from Alfresco.
+
+    This should be called BEFORE syncing documents to ensure all custom properties
+    are discovered and can be properly indexed.
+
+    The discovered model is stored in ConnectorContentModel and includes:
+    - content_types: All content types with their properties
+    - aspects: All aspects with their properties
+    - property_definitions: Flat dict of all property definitions
+    - custom namespaces detected (exp:, pmreg:, etc.)
+
+    Returns:
+        Summary of discovered model elements
+    """
+    from datetime import datetime, timezone
+    from app.db.models import ConnectorContentModel
+
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "alfresco":
+        raise HTTPException(status_code=400, detail="Content model sync only supported for Alfresco connectors")
+
+    if not connector.is_active:
+        raise HTTPException(status_code=400, detail="Connector is not active")
+
+    # Import and create adapter
+    from app.services.connectors.alfresco import AlfrescoAdapter
+
+    try:
+        adapter = AlfrescoAdapter(connector, connector.config)
+        content_model = await adapter.fetch_content_model()
+
+        # Convert types list to dict keyed by type ID
+        types_dict = {t["id"]: t for t in content_model.get("types", [])}
+        aspects_dict = {a["id"]: a for a in content_model.get("aspects", [])}
+
+        # Check if content model already exists for this connector
+        existing_model = await db.execute(
+            select(ConnectorContentModel)
+            .where(ConnectorContentModel.connector_id == connector_id)
+        )
+        model_record = existing_model.scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+
+        if model_record:
+            # Update existing
+            model_record.content_types = types_dict
+            model_record.aspects = aspects_dict
+            model_record.property_definitions = content_model.get("properties", {})
+            model_record.association_types = content_model.get("association_types", {})
+            model_record.discovery_method = "public_api"
+            model_record.last_updated_at = now
+        else:
+            # Create new
+            model_record = ConnectorContentModel(
+                connector_id=connector_id,
+                tenant_id=UUID(tenant_id),
+                content_types=types_dict,
+                aspects=aspects_dict,
+                property_definitions=content_model.get("properties", {}),
+                association_types=content_model.get("association_types", {}),
+                discovery_method="public_api",
+                discovered_at=now,
+            )
+            db.add(model_record)
+
+        await db.commit()
+
+        logger.info(
+            f"Content model synced for connector {connector_id}: "
+            f"{len(types_dict)} types, {len(aspects_dict)} aspects, "
+            f"{len(content_model.get('properties', {}))} properties"
+        )
+
+        return {
+            "status": "success",
+            "connector_id": str(connector_id),
+            "model_id": str(model_record.id),
+            "model_summary": {
+                "types_count": len(types_dict),
+                "aspects_count": len(aspects_dict),
+                "properties_count": len(content_model.get("properties", {})),
+                "association_types_count": len(content_model.get("association_types", {})),
+                "custom_namespaces": content_model.get("custom_namespaces", []),
+            },
+            "message": "Content model discovered and saved to ConnectorContentModel",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync content model for connector {connector_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync content model: {str(e)}"
+        )
+
+
+@router.get("/{connector_id}/model")
+async def get_content_model(
+    connector_id: UUID,
+    include_properties: bool = Query(True, description="Include full property definitions"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Get the discovered content model for a connector.
+
+    Returns the full schema including types, aspects, properties,
+    and associations that were discovered during sync-model.
+    """
+    from app.db.models import ConnectorContentModel
+
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    # Get content model from separate table
+    model_result = await db.execute(
+        select(ConnectorContentModel)
+        .where(ConnectorContentModel.connector_id == connector_id)
+    )
+    content_model = model_result.scalar_one_or_none()
+
+    if not content_model:
+        raise HTTPException(
+            status_code=404,
+            detail="Content model not yet discovered. Call POST /sync-model first."
+        )
+
+    response = {
+        "connector_id": str(connector_id),
+        "connector_name": connector.name,
+        "model_id": str(content_model.id),
+        "discovery_method": content_model.discovery_method,
+        "discovered_at": content_model.discovered_at.isoformat() if content_model.discovered_at else None,
+        "last_updated_at": content_model.last_updated_at.isoformat() if content_model.last_updated_at else None,
+        "types": content_model.content_types,
+        "aspects": content_model.aspects,
+        "association_types": content_model.association_types,
+    }
+
+    if include_properties:
+        response["property_definitions"] = content_model.property_definitions
+
+    # Also include semantic enrichments if available
+    if content_model.type_semantics:
+        response["type_semantics"] = content_model.type_semantics
+    if content_model.property_semantics:
+        response["property_semantics"] = content_model.property_semantics
+
+    return response
+
+
+@router.post("/{connector_id}/sync-folders")
+async def sync_folders(
+    connector_id: UUID,
+    root_node_id: str = Query("-root-", description="Root folder node ID to start from"),
+    max_depth: int = Query(10, description="Maximum folder depth to crawl"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Sync folders with their properties from Alfresco.
+
+    Recursively crawls the folder structure starting from root_node_id
+    and captures all folder properties based on the discovered content model.
+
+    Returns:
+        List of folders with their properties
+    """
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "alfresco":
+        raise HTTPException(status_code=400, detail="Folder sync only supported for Alfresco connectors")
+
+    if not connector.is_active:
+        raise HTTPException(status_code=400, detail="Connector is not active")
+
+    from app.services.connectors.alfresco import AlfrescoAdapter
+
+    try:
+        adapter = AlfrescoAdapter(connector, connector.config)
+        folders = await adapter.list_all_folders_recursive(
+            root_node_id=root_node_id,
+            max_depth=max_depth,
+        )
+
+        # TODO: Store folders in database table (indexed_folders)
+        # For now, return the folder list directly
+
+        return {
+            "status": "success",
+            "connector_id": str(connector_id),
+            "folders_count": len(folders),
+            "folders": folders,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync folders for connector {connector_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync folders: {str(e)}"
+        )
+
+
 @router.post("/{connector_id}/sync")
 async def trigger_connector_sync(
     connector_id: UUID,
@@ -549,25 +798,37 @@ async def trigger_connector_sync(
     if not connector.is_active:
         raise HTTPException(status_code=400, detail="Connector is not active")
 
-    # Dispatch Celery task
+    # Dispatch task via background-worker HTTP API
     try:
-        from worker_app.tasks.connector_tasks import sync_and_index_connector_task
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{BACKGROUND_WORKER_URL}/tasks/connector/sync",
+                json={
+                    "connector_id": str(connector_id),
+                    "full_sync": full_sync,
+                    "batch_size": 10,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
+            response.raise_for_status()
+            result = response.json()
+            task_id = result.get("job_id", "unknown")
 
-        task = sync_and_index_connector_task.delay(
-            str(connector_id),
-            full_sync=full_sync,
-            batch_size=10,
-        )
-
-        logger.info(f"Triggered sync for connector {connector_id}, task_id={task.id}")
+        logger.info(f"Triggered sync for connector {connector_id}, task_id={task_id}")
 
         return {
             "status": "queued",
-            "task_id": task.id,
+            "task_id": task_id,
             "connector_id": str(connector_id),
             "message": f"Sync {'(full)' if full_sync else '(incremental)'} queued for processing",
         }
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to queue sync task: {e.response.text}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue sync task: {e.response.text}"
+        )
     except Exception as e:
         logger.error(f"Failed to queue sync task: {e}")
         raise HTTPException(
@@ -634,29 +895,41 @@ async def trigger_index_pending(
             "message": "No pending documents to index",
         }
 
-    # Dispatch Celery task
+    # Dispatch task via background-worker HTTP API
     try:
-        from worker_app.tasks.connector_tasks import index_pending_documents_task
-
-        task = index_pending_documents_task.delay(
-            str(connector_id),
-            batch_size=batch_size,
-            max_documents=max_documents,
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{BACKGROUND_WORKER_URL}/tasks/connector/index-pending",
+                json={
+                    "connector_id": str(connector_id),
+                    "batch_size": batch_size,
+                    "max_documents": max_documents,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
+            response.raise_for_status()
+            result = response.json()
+            task_id = result.get("job_id", "unknown")
 
         logger.info(
             f"Triggered index-pending for connector {connector_id}, "
-            f"pending={pending_count}, task_id={task.id}"
+            f"pending={pending_count}, task_id={task_id}"
         )
 
         return {
             "status": "queued",
-            "task_id": task.id,
+            "task_id": task_id,
             "connector_id": str(connector_id),
             "pending_count": pending_count,
             "message": f"Indexing {pending_count} pending documents",
         }
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to queue index task: {e.response.text}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue index task: {e.response.text}"
+        )
     except Exception as e:
         logger.error(f"Failed to queue index task: {e}")
         raise HTTPException(
@@ -742,3 +1015,79 @@ async def get_pending_documents(
         page_size=page_size,
         total_pages=ceil(total / page_size) if total > 0 else 1,
     )
+
+
+@router.get("/indexed-documents")
+async def get_all_indexed_documents(
+    tenant_id: str = Query(..., description="Tenant ID"),
+    status: Optional[str] = Query("indexed", description="Filter by indexing status"),
+    limit: Optional[int] = Query(1000, ge=1, le=5000, description="Maximum documents to return"),
+    connector_id: Optional[UUID] = Query(None, description="Filter by connector ID"),
+    x_api_key: Optional[str] = Query(None, alias="X-API-Key", description="Microservice API key"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Get all indexed documents for a tenant (internal API for SIL reindexing).
+
+    This endpoint is used by the SIL (Structural Intelligence Layer) service
+    to fetch documents that need to be indexed to the structural graph.
+
+    Returns documents from IndexedDocument table (connector-sourced documents).
+
+    Authentication: Accepts either user auth (via middleware) or X-API-Key header
+    for internal microservice calls.
+    """
+    # Validate API key for internal service calls
+    if x_api_key:
+        expected_key = settings.MICROSERVICES_API_KEY
+        if x_api_key != expected_key:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    from app.db.models import IndexedDocument
+    from typing import List, Dict, Any
+
+    # Build query for indexed documents
+    query = (
+        select(IndexedDocument)
+        .where(IndexedDocument.tenant_id == UUID(tenant_id))
+    )
+
+    # Filter by status if provided
+    if status:
+        query = query.where(IndexedDocument.indexing_status == status)
+
+    # Filter by connector if provided
+    if connector_id:
+        query = query.where(IndexedDocument.connector_id == connector_id)
+
+    # Apply limit
+    query = query.order_by(IndexedDocument.created_at.desc()).limit(limit)
+
+    result = await db.execute(query)
+    documents = result.scalars().all()
+
+    # Return in format expected by SIL service
+    return {
+        "documents": [
+            {
+                "id": str(doc.id),
+                "connector_id": str(doc.connector_id) if doc.connector_id else None,
+                "external_id": doc.external_id,
+                "external_path": doc.external_path,
+                "title": doc.title,
+                "description": doc.description,
+                "mime_type": doc.mime_type,
+                "file_extension": doc.file_extension,
+                "size_bytes": doc.size_bytes,
+                "source_metadata": doc.source_metadata or {},
+                "learned_context": doc.learned_context or {},
+                "weaviate_id": str(doc.weaviate_id) if doc.weaviate_id else None,
+                "indexing_status": doc.indexing_status,
+                "source_created_at": doc.source_created_at.isoformat() if doc.source_created_at else None,
+                "source_modified_at": doc.source_modified_at.isoformat() if doc.source_modified_at else None,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            }
+            for doc in documents
+        ],
+        "total": len(documents),
+        "tenant_id": tenant_id,
+    }

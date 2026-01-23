@@ -284,7 +284,7 @@ def get_context_root(filename: str = "emma_prompts.yaml") -> str:
     prompts - both for agents and the RAG pipeline.
 
     This provides a consistent foundation that defines:
-    - What NexusDocs360 is (EDMS - Enterprise Document Management System)
+    - What NouxCubeIA is (EDMS - Enterprise Document Management System)
     - The discipline of Records Management (capture, classification, retention, etc.)
     - ISO 15489 principles (authenticity, reliability, integrity, usability)
     - Emma's role and the value she provides

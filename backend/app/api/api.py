@@ -83,6 +83,15 @@ internal_router.include_router(
     prefix="/google-drive-tokens",
     tags=["internal-google-drive-tokens"],
 )
+
+# Internal connectors API for SIL reindex service
+from app.api.v1 import internal_connectors
+internal_router.include_router(
+    internal_connectors.router,
+    prefix="/connectors",
+    tags=["internal-connectors"],
+)
+
 api_router.include_router(internal_router)
 
 # Teams management routes

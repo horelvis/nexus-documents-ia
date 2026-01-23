@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     )
     debug: bool = DEBUG_DEFAULT
 
+    # ==========================================================================
+    # Deployment Mode: Single-tenant vs Multi-tenant
+    # ==========================================================================
+    # For on-premise: SINGLE_TENANT_MODE=true (all users share one tenant)
+    # For SaaS: SINGLE_TENANT_MODE=false (one tenant per organization)
+    single_tenant_mode: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
+    default_tenant_id: str = os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+    default_tenant_name: str = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
+
     # Weaviate configuration
     weaviate_url: str = os.getenv("WEAVIATE_URL", "http://weaviate:8080")
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY", "")  # For cloud instances
@@ -64,26 +73,26 @@ class Settings(BaseSettings):
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
 
     # ==========================================================================
-    # Embedding configuration (Qwen3-VL-Embedding-2B - Multimodal)
+    # Embedding configuration (BGE-M3 - Local Sentence Transformers)
     # ==========================================================================
-    # Primary Provider: qwen3-vl (Qwen3-VL-Embedding-2B via vLLM)
-    # Features: Unified vector space for text + images/diagrams/tables
-    # Alternative providers: tei (deprecated), sentence-transformers (local)
-    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "qwen3-vl")
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-VL-Embedding-2B")
+    # Primary Provider: sentence-transformers (local, no external service needed)
+    # Model: BAAI/bge-m3 - high-quality multilingual embeddings (1024 dim)
+    # Alternative providers: infinity (external), vllm (external)
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "sentence-transformers")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
-    embedding_url: str = os.getenv("EMBEDDING_URL", "http://qwen3-vl-embedding:8000/v1")
-    # Legacy: TEI URL (deprecated - use qwen3-vl instead)
+    embedding_url: str = os.getenv("EMBEDDING_URL", "http://embedding-service:8000")
+    # Sentence Transformers device (cuda or cpu)
+    embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cuda")
+    # Legacy: TEI URL (deprecated)
     tei_url: str = os.getenv("TEI_URL", "http://text-embeddings-inference:8080")
-    # Legacy: Sentence Transformers device (only if provider=sentence-transformers)
-    embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cpu")
 
-    # Multimodal Embedding - NOW ENABLED BY DEFAULT
-    # Uses same Qwen3-VL-Embedding-2B model for both text and images
-    # Provides unified vector space for cross-modal search (text → images, images → text)
-    multimodal_embedding_enabled: bool = os.getenv("MULTIMODAL_EMBEDDING_ENABLED", "true").lower() == "true"
-    multimodal_embedding_url: str = os.getenv("MULTIMODAL_EMBEDDING_URL", "http://qwen3-vl-embedding:8000/v1")
-    multimodal_embedding_model: str = os.getenv("MULTIMODAL_EMBEDDING_MODEL", "Qwen/Qwen3-VL-Embedding-2B")
+    # Multimodal Embedding - DISABLED BY DEFAULT (BGE-M3 is text-only)
+    # Enable for cross-modal search (text → images, images → text)
+    # Requires external multimodal embedding service
+    multimodal_embedding_enabled: bool = os.getenv("MULTIMODAL_EMBEDDING_ENABLED", "false").lower() == "true"
+    multimodal_embedding_url: str = os.getenv("MULTIMODAL_EMBEDDING_URL", "http://embedding-service:8000")
+    multimodal_embedding_model: str = os.getenv("MULTIMODAL_EMBEDDING_MODEL", "BAAI/bge-m3")
     multimodal_embedding_dimensions: int = int(os.getenv("MULTIMODAL_EMBEDDING_DIMENSIONS", "1024"))
     # Visual content extraction settings
     multimodal_extract_tables: bool = os.getenv("MULTIMODAL_EXTRACT_TABLES", "true").lower() == "true"
@@ -94,6 +103,16 @@ class Settings(BaseSettings):
     multimodal_render_dpi: int = int(os.getenv("MULTIMODAL_RENDER_DPI", "150"))  # 150-300 DPI for quality
     multimodal_max_image_size: int = int(os.getenv("MULTIMODAL_MAX_IMAGE_SIZE", "1024"))  # Max dimension in pixels
     multimodal_image_format: str = os.getenv("MULTIMODAL_IMAGE_FORMAT", "png")  # png or jpeg
+
+    # ==========================================================================
+    # Enhanced OCR for Scanned PDFs
+    # ==========================================================================
+    # Triggered when document_intelligence detects low quality extraction
+    # Uses EasyOCR (GPU) with Tesseract (CPU) fallback
+    enhanced_ocr_enabled: bool = os.getenv("ENHANCED_OCR_ENABLED", "true").lower() == "true"
+    enhanced_ocr_quality_threshold: float = float(os.getenv("ENHANCED_OCR_QUALITY_THRESHOLD", "0.60"))
+    enhanced_ocr_languages: str = os.getenv("ENHANCED_OCR_LANGUAGES", "es,en")
+    enhanced_ocr_use_hybrid: bool = os.getenv("ENHANCED_OCR_USE_HYBRID", "false").lower() == "true"
 
     # Performance settings
     batch_size: int = int(os.getenv("BATCH_SIZE", "100"))
@@ -178,6 +197,16 @@ class Settings(BaseSettings):
     rag_summary_max_children_combine: int = int(os.getenv("RAG_SUMMARY_MAX_CHILDREN_COMBINE", "10"))  # Max children summaries to combine
 
     # ==========================================================================
+    # RAG Pipeline - Contextual Retrieval (Anthropic Pattern)
+    # ==========================================================================
+    # Based on Anthropic's Contextual Retrieval research showing 35-67% improvement
+    # Prepends legal/domain context to chunks BEFORE embedding
+    # This moves domain knowledge from prompts (4250 tokens) into chunks
+    contextual_retrieval_enabled: bool = os.getenv("CONTEXTUAL_RETRIEVAL_ENABLED", "true").lower() == "true"
+    contextual_retrieval_use_llm: bool = os.getenv("CONTEXTUAL_RETRIEVAL_USE_LLM", "false").lower() == "true"  # LLM-enhanced context
+    contextual_retrieval_max_context_length: int = int(os.getenv("CONTEXTUAL_RETRIEVAL_MAX_CONTEXT_LENGTH", "300"))  # Max chars for context prefix
+
+    # ==========================================================================
     # RAG Pipeline - Knowledge Graph (Apache AGE)
     # ==========================================================================
     # Knowledge Graph - Apache AGE (PostgreSQL extension) for persistent graph storage
@@ -185,6 +214,15 @@ class Settings(BaseSettings):
     # Fallback: NetworkX in-memory + Redis (set RAG_GRAPH_USE_AGE=false)
     rag_knowledge_graph_enabled: bool = os.getenv("RAG_KNOWLEDGE_GRAPH_ENABLED", "true").lower() == "true"
     rag_graph_use_age: bool = os.getenv("RAG_GRAPH_USE_AGE", "true").lower() == "true"  # Use Apache AGE backend
+
+    # PostgreSQL connection for Apache AGE (graph database)
+    # Uses same database as main app, with AGE extension enabled
+    postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
+    postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
+    postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
+    postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
+    age_graph_name: str = os.getenv("AGE_GRAPH_NAME", "knowledge_graph")
     rag_graph_max_neighbors: int = int(os.getenv("RAG_GRAPH_MAX_NEIGHBORS", "10"))  # Max neighbors in traversal
     rag_graph_traversal_depth: int = int(os.getenv("RAG_GRAPH_TRAVERSAL_DEPTH", "2"))  # Cypher path depth
     rag_graph_redis_prefix: str = os.getenv("RAG_GRAPH_REDIS_PREFIX", "kg:")  # Redis key prefix (fallback)
@@ -244,7 +282,7 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
 
     # Collection naming (tenant isolation)
-    collection_prefix: str = "Nexus_"
+    collection_prefix: str = "Nouxcube_"
     default_collection: str = "documents"
 
     # Agent Framework configuration
@@ -270,6 +308,19 @@ class Settings(BaseSettings):
     # Learning and feedback
     enable_feedback_learning: bool = os.getenv("ENABLE_FEEDBACK_LEARNING", "true").lower() == "true"
     feedback_storage_days: int = int(os.getenv("FEEDBACK_STORAGE_DAYS", "30"))
+
+    # ==========================================================================
+    # Verified Generation Settings (Agent Self-Verifies Pattern)
+    # ==========================================================================
+    # Stop-and-go verification where each claim is validated against Weaviate
+    # before being accepted into the final document.
+    verified_max_claims: int = int(os.getenv("VERIFIED_MAX_CLAIMS", "20"))
+    verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.3"))
+    verified_timeout_seconds: int = int(os.getenv("VERIFIED_TIMEOUT_SECONDS", "45"))
+    verified_confidence_threshold: float = float(os.getenv("VERIFIED_CONFIDENCE_THRESHOLD", "0.7"))
+    verified_max_correction_attempts: int = int(os.getenv("VERIFIED_MAX_CORRECTION_ATTEMPTS", "2"))
+    verified_auto_accept_corrections: bool = os.getenv("VERIFIED_AUTO_ACCEPT_CORRECTIONS", "true").lower() == "true"
+    verified_cache_ttl_seconds: int = int(os.getenv("VERIFIED_CACHE_TTL_SECONDS", "3600"))
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 # revision identifiers, used by Alembic.
 revision = 'add_lgpd_deletion_audit'
-down_revision = None  # Set this to the actual previous revision
+down_revision = '6f6ae23807be'  # Initial migration (creates users table)
 branch_labels = None
 depends_on = None
 

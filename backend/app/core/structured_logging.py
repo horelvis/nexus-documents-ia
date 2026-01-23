@@ -62,7 +62,7 @@ class StructuredLogger:
         """Get base fields for all log entries"""
         return {
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'service': 'nexusdocs360',
+            'service': 'nouxcubeia',
             'version': '1.0.0',
             'environment': 'development' if settings.DEBUG else 'production',
             'request_id': getattr(self._context, 'request_id', str(uuid.uuid4())),
@@ -277,7 +277,7 @@ class RequestContextMiddleware:
 
 
 # Global logger instance
-structured_logger = StructuredLogger("nexusdocs360")
+structured_logger = StructuredLogger("nouxcubeia")
 
 # Convenience functions
 def get_logger(name: str) -> StructuredLogger:

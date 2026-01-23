@@ -31,6 +31,7 @@ from app.schemas.connector import (
     GoogleWorkspaceConfig,
     S3Config,
     AzureBlobConfig,
+    DatabaseConfig,
 )
 
 from .base import (
@@ -42,6 +43,7 @@ from .base import (
     ConnectorRateLimitError,
 )
 from .alfresco import AlfrescoAdapter
+from .database import DatabaseAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ logger = logging.getLogger(__name__)
 # Registry of adapter classes by connector type
 _ADAPTER_REGISTRY: Dict[str, Type[ConnectorAdapter]] = {
     "alfresco": AlfrescoAdapter,
+    "database": DatabaseAdapter,
     # Future adapters:
     # "sharepoint": SharePointAdapter,
     # "onedrive": OneDriveAdapter,
@@ -174,4 +177,5 @@ __all__ = [
     "ConnectorRateLimitError",
     # Adapters
     "AlfrescoAdapter",
+    "DatabaseAdapter",
 ]

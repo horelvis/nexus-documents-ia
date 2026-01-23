@@ -353,6 +353,15 @@ class WeaviateService:
                     logger.warning("⚠️ Embedding model not available, falling back to BM25 only")
                     self.embedding_model = None
 
+            # Initialize SIL structural collection with the Weaviate client
+            try:
+                from app.services.sil import structural_collection
+                structural_collection.set_client(self.client)
+                await structural_collection.initialize()
+                logger.info("✅ SIL StructuralDocument collection initialized")
+            except Exception as sil_error:
+                logger.warning(f"⚠️ SIL StructuralDocument collection init skipped: {sil_error}")
+
             self._initialized = True
 
         except Exception as e:
@@ -608,7 +617,7 @@ class WeaviateService:
         """Get the knowledge collection name for a tenant"""
         # Sanitize tenant_id for collection name (alphanumeric only)
         safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
-        return f"Nexus_{safe_tenant}_knowledge"
+        return f"Nouxcube_{safe_tenant}_knowledge"
 
     async def create_knowledge_collection(self, tenant_id: str) -> Dict[str, Any]:
         """
@@ -961,7 +970,7 @@ class WeaviateService:
     def get_visual_collection_name(self, tenant_id: str) -> str:
         """Get the visual content collection name for a tenant"""
         safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
-        return f"Nexus_{safe_tenant}_visual"
+        return f"Nouxcube_{safe_tenant}_visual"
 
     async def create_visual_collection(self, tenant_id: str) -> Dict[str, Any]:
         """
@@ -1555,24 +1564,33 @@ class WeaviateService:
             # Build filters for tenant isolation using v4 API
             tenant_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(search_request.tenant_id)
 
-            # Apply combined access control (channel + document ACL) if user_id is provided
-            # This ensures users only see documents that pass BOTH:
-            # 1. Channel access control:
-            #    - Regular uploads (no channel)
-            #    - Tenant-wide channel documents
-            #    - Their own personal channel documents
-            # 2. Document-level ACL:
-            #    - acl_everyone=True (default for legacy docs)
-            #    - User is in acl_user_ids
-            #    - User's role is in acl_role_ids
-            #    - User is the document owner
-            if search_request.user_id:
+            # Apply access control if user_id is provided
+            # Three modes depending on include_channels flag:
+            # 1. include_channels=True (default): Combined channel + document ACL filter
+            #    - Requires channel_id, owner_user_id properties in collection schema
+            #    - Full access control for collections with channel support
+            # 2. include_channels=False: Skip access filters entirely
+            #    - For collections without ACL properties (owner_user_id, channel_id, etc.)
+            #    - Relies on tenant_id isolation only
+            #    - Safe for legacy collections with basic properties
+            include_channels = getattr(search_request, 'include_channels', True)
+            is_admin = getattr(search_request, 'is_admin', False)
+
+            if is_admin:
+                # Admin users bypass ACL checks - only tenant isolation
+                combined_filters = tenant_filter
+            elif search_request.user_id and include_channels:
+                # Full combined filter (channel + ACL) - requires ACL properties in schema
                 access_filter = self._build_combined_access_filter(
                     user_id=search_request.user_id,
                     user_role_ids=search_request.user_role_ids
                 )
                 combined_filters = tenant_filter & access_filter
             else:
+                # Skip access filter - tenant isolation only
+                # Used when:
+                # - No user_id provided (anonymous/system access)
+                # - include_channels=False (collection lacks ACL properties)
                 combined_filters = tenant_filter
 
             # Add additional filters if provided
@@ -1976,17 +1994,17 @@ class WeaviateService:
             response = collection.query.fetch_objects(
                 filters=doc_filter,
                 limit=500,  # Max chunks to retrieve
-                return_properties=["content", "chunk_index", "document_id", "title", "document_type"],
+                return_properties=["content", "char_start", "document_id", "title", "document_type", "source_type"],
             )
 
             if not response.objects:
                 logger.warning(f"⚠️ No chunks found for document {document_id}")
                 return None
 
-            # Sort chunks by chunk_index
+            # Sort chunks by char_start (character position) for proper ordering
             chunks = sorted(
                 response.objects,
-                key=lambda x: x.properties.get("chunk_index", 0) or 0
+                key=lambda x: x.properties.get("char_start", 0) or 0
             )
 
             # Get document info from first chunk
@@ -2181,7 +2199,7 @@ class WeaviateService:
         handling multiple naming conventions:
         - nexus_{tenant_id}_documents (main document collection)
         - nexus_{tenant_id}_channel_{channel_id} (channel-specific collections)
-        - Nexus_{tenant_id}__documents (legacy format with double underscore)
+        - Nouxcube_{tenant_id}__documents (legacy format with double underscore)
 
         Args:
             tenant_id: The tenant UUID (with or without dashes)
@@ -2286,7 +2304,7 @@ class WeaviateService:
                 # Apply ACL filtering if not admin and collection has ACL properties
                 if not is_admin and user_id:
                     collection_has_acl = "acl_user_ids" in prop_names
-                    acl_filter = self._build_acl_filter(
+                    acl_filter = self._build_document_access_filter(
                         user_id=user_id,
                         user_role_ids=user_role_ids,
                         collection_has_acl=collection_has_acl

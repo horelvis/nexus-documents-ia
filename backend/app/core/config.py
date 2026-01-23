@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
+    # Token expiration: default 8 days (11520 minutes)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 8)))
     SERVER_NAME: str = "Document Management API"
     SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
@@ -29,56 +30,52 @@ class Settings(BaseSettings):
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
     
     # Production/Staging URLs
-    STAGING_FRONTEND_URL: str = "https://pre.nexusdocs360.app"
-    STAGING_API_URL: str = "https://api.pre.nexusdocs360.app"
+    STAGING_FRONTEND_URL: str = "https://pre.nouxcubeia.app"
+    STAGING_API_URL: str = "https://api.pre.nouxcubeia.app"
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
+    # ==========================================================================
+    # DEPLOYMENT MODE: Single Tenant vs Multi-Tenant
+    # ==========================================================================
+    # For on-premise deployments: SINGLE_TENANT_MODE=true (recommended)
+    #   - One tenant for the entire organization
+    #   - All users auto-assigned to the single tenant
+    #   - Simpler configuration and management
+    #   - Access control via roles and document ACLs
+    #
+    # For SaaS deployments: SINGLE_TENANT_MODE=false
+    #   - Multiple organizations, each with their own tenant
+    #   - Complete data isolation between tenants
+    #   - Tenant creation on user registration
+    SINGLE_TENANT_MODE: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
+
+    # Default tenant configuration (used when SINGLE_TENANT_MODE=true)
+    # This tenant is created automatically on first startup
+    DEFAULT_TENANT_ID: str = os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+    DEFAULT_TENANT_NAME: str = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
+    DEFAULT_TENANT_SLUG: str = os.getenv("DEFAULT_TENANT_SLUG", "nouxcube")
+
     # Database bootstrap behavior
     # In production, prefer running migrations in the deployment pipeline.
     DB_AUTO_MIGRATE: bool = os.getenv("DB_AUTO_MIGRATE", "true" if DEBUG else "false").lower() == "true"
     
-    # CORS - Valores por defecto para desarrollo
-    # CORS Origins - Configuración para desarrollo con IPs dinámicas
+    # CORS Configuration
+    # Set ALLOW_ALL_CORS=true for development with dynamic IPs
+    # For production, configure BACKEND_CORS_ORIGINS via environment variable
     ALLOW_ALL_CORS: bool = os.getenv("ALLOW_ALL_CORS", "false").lower() == "true"
-    
+
+    # Default CORS origins - safe localhost only
+    # Add additional origins via BACKEND_CORS_ORIGINS env var (comma-separated)
+    # Example: BACKEND_CORS_ORIGINS=http://192.168.1.50:3000,https://app.example.com
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
         "http://localhost:3000",
         "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000", 
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
         "http://localhost:8000",
+        "http://127.0.0.1:3000",
         "http://127.0.0.1:8000",
-        "http://192.168.1.47:3000",
-        "http://192.168.1.47:3001",
-        "http://192.168.1.47:3002",
-        "http://192.168.1.47:8000",
-        "http://192.168.1.45:3000",
-        "http://192.168.1.45:3001",
-        "http://192.168.1.45:3002",
-        "http://192.168.1.45:8000",
-        "http://192.168.1.54:3000",
-        "http://192.168.1.54:3001",
-        "http://192.168.1.54:3002",
-        "http://192.168.1.54:8000",
-        "http://192.168.1.35:3000",
-        "http://192.168.1.35:3001",
-        "http://192.168.1.35:3002",
-        "http://192.168.1.35:8000",
-        "http://192.168.1.58:3000",
-        "http://192.168.1.58:3001",
-        "http://192.168.1.58:3002",
-        "http://192.168.1.58:8000",
-        "http://nexus-docs360.es",
-        "http://nexus-docs360.es:3000",
-        "http://nexus-docs360.es:3001",
-        "https://nexus-docs360.es",
-        "https://nexus-docs360.es:3000",
-        "https://nexus-docs360.es:3001",
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -172,9 +169,9 @@ class Settings(BaseSettings):
     GCS_BUCKET_NAME: str
     GCS_CREDENTIALS: Optional[str] = None
     GCS_PROJECT_ID: Optional[str] = None
-    GCS_REGION: str = "europe-west1"  # Región por defecto
-    # Tiempo de validez para URLs firmadas (segundos)
-    SIGNED_URL_EXPIRATION: int = 300
+    GCS_REGION: str = os.getenv("GCS_REGION", "europe-west1")
+    # Signed URL expiration in seconds (default: 5 minutes)
+    SIGNED_URL_EXPIRATION: int = int(os.getenv("SIGNED_URL_EXPIRATION", "300"))
     # Cloud Run detection
     IS_CLOUD_RUN: bool = os.getenv("K_SERVICE", None) is not None
     
@@ -203,6 +200,11 @@ class Settings(BaseSettings):
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
 
+    # Identity Document Processing (GDPR-compliant)
+    IDENTITY_DOC_ENABLED: bool = os.getenv("IDENTITY_DOC_ENABLED", "true").lower() == "true"
+    IDENTITY_DOC_RETENTION_DAYS: int = int(os.getenv("IDENTITY_DOC_RETENTION_DAYS", "90"))
+    IDENTITY_DOC_REQUIRE_CONSENT: bool = os.getenv("IDENTITY_DOC_REQUIRE_CONSENT", "true").lower() == "true"
+
     TEMPLATE_EDITOR_SERVICE_URL: str = os.getenv(
         "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
     )
@@ -214,7 +216,7 @@ class Settings(BaseSettings):
     VLLM_MODEL: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-14B-FP8")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-    EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
     # Google Gemini (for Emma Voice Mode)
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
@@ -224,12 +226,13 @@ class Settings(BaseSettings):
     # Gotenberg Service (direct container)
     GOTENBERG_BASE_URL: str = "http://gotenberg:3000"
     
-    # Procesamiento de Documentos
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB por defecto
+    # Document Processing - Max upload size in bytes (default: 50MB)
+    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))
     # Store as string to avoid JSON parsing issues
     _ALLOWED_EXTENSIONS: str = "pdf,docx,txt,md,csv,xlsx,png,jpg,jpeg,gif,bmp,tiff,webp,json,odt"
-    CHUNK_SIZE: int = 2000
-    CHUNK_OVERLAP: int = 200
+    # Text chunking configuration for RAG
+    CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "2000"))
+    CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "200"))
     
     @property
     def ALLOWED_EXTENSIONS(self) -> List[str]:

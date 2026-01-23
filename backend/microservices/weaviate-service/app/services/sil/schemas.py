@@ -16,6 +16,14 @@ from datetime import datetime
 # =============================================================================
 
 
+class TargetEntity(str, Enum):
+    """What type of entity the query is about."""
+
+    DOCUMENT = "document"  # Query about documents
+    FOLDER = "folder"  # Query about folders/expedientes/cases
+    BOTH = "both"  # Query about both (e.g., "documents in folder X")
+
+
 class IntentType(str, Enum):
     """Type of query intent for routing."""
 
@@ -25,6 +33,13 @@ class IntentType(str, Enum):
     STRUCTURAL_LIST = "structural_list"  # "List all contracts for client Y"
     STRUCTURAL_EXISTS = "structural_exists"  # "Is there a contract with ACME?"
     STRUCTURAL_LOCATION = "structural_location"  # "Where is the ACME contract?"
+
+    # Folder/structure queries - about folders, cases, expedientes
+    FOLDER_COUNT = "folder_count"  # "How many expedientes/cases do we have?"
+    FOLDER_LIST = "folder_list"  # "List all expedientes for client X"
+    FOLDER_EXISTS = "folder_exists"  # "Is there an expediente for ACME?"
+    FOLDER_CONTENTS = "folder_contents"  # "What's in expediente X?"
+    FOLDER_BROWSE = "folder_browse"  # "Show me the folder structure"
 
     # Temporal queries - require temporal graph traversal
     TEMPORAL_POINT = "temporal_point"  # "What was the state on Jan 1?"
@@ -44,6 +59,12 @@ class IntentType(str, Enum):
     # Full RAG queries - need full corpus search
     CONTENT_GENERAL = "content_general"  # "What contracts mention penalties?"
     CONTENT_COMPLEX = "content_complex"  # Complex analysis requiring many docs
+
+    # Legal queries - leverage Legal Knowledge Graph
+    LEGAL_APPLICABILITY = "legal_applicability"  # "What laws apply to this contract?"
+    LEGAL_COMPLIANCE = "legal_compliance"  # "Does this comply with RGPD?"
+    LEGAL_REFERENCE = "legal_reference"  # "What does Art. 34 ET say about..."
+    LEGAL_DOCUMENT_LAWS = "legal_document_laws"  # "What laws govern this document?"
 
     # Unknown/fallback
     UNKNOWN = "unknown"
@@ -69,6 +90,10 @@ class ReasoningType(str, Enum):
 
     # Hybrid - structural context + focused RAG
     HYBRID = "hybrid"  # Combine structural + content
+
+    # Legal - queries about laws and legal applicability
+    LEGAL = "legal"  # Answered from Legal Knowledge Graph
+    LEGAL_ENRICHED = "legal_enriched"  # Structural + legal context
 
 
 # =============================================================================
@@ -114,6 +139,30 @@ class SemanticType(str, Enum):
     USER_MANUAL = "user_manual"
     API_DOC = "api_doc"
     ARCHITECTURE = "architecture"
+
+    # General
+    GENERAL = "general"
+    UNKNOWN = "unknown"
+
+
+class FolderType(str, Enum):
+    """Semantic type of a folder (what kind of grouping it represents)."""
+
+    # Case/matter folders (expedientes)
+    CASE = "case"  # Legal case, project case
+    CLIENT_FOLDER = "client_folder"  # All docs for a client
+    PROJECT = "project"  # Project folder
+    MATTER = "matter"  # Legal matter
+
+    # Organizational folders
+    DEPARTMENT = "department"  # Department folder
+    YEAR = "year"  # Year-based folder
+    ARCHIVE = "archive"  # Archived items
+
+    # Document type containers
+    CONTRACTS_FOLDER = "contracts_folder"
+    INVOICES_FOLDER = "invoices_folder"
+    REPORTS_FOLDER = "reports_folder"
 
     # General
     GENERAL = "general"
@@ -211,8 +260,10 @@ class StructuralMetadata(BaseModel):
 
     # Location in hierarchy
     folder_path: str = ""
+    folder_hierarchy: List[str] = Field(default_factory=list)  # e.g., ["/", "/Contracts", "/Contracts/ACME"]
     folder_semantics: Optional[FolderSemantics] = None
     site_id: Optional[str] = None
+    site_name: Optional[str] = None
     connector_id: Optional[str] = None
 
     # Key properties (extracted from metadata, NOT content)
@@ -272,7 +323,11 @@ class StructuralEntities(BaseModel):
     client_names: List[str] = Field(default_factory=list)
     folder_names: List[str] = Field(default_factory=list)
     document_types: List[SemanticType] = Field(default_factory=list)
+    folder_types: List[FolderType] = Field(default_factory=list)
     domains: List[DomainType] = Field(default_factory=list)
+
+    # Target entity type (what is the query about?)
+    target_entity: TargetEntity = TargetEntity.DOCUMENT
 
     # Temporal markers
     years: List[int] = Field(default_factory=list)
@@ -282,6 +337,8 @@ class StructuralEntities(BaseModel):
     count_requested: bool = False
     list_requested: bool = False
     exists_check: bool = False
+    contents_requested: bool = False  # "what's in folder X"
+    browse_requested: bool = False  # "show me the structure"
 
     # Relationship hints
     relationship_hints: List[str] = Field(default_factory=list)  # "related to", "version of"
@@ -336,6 +393,9 @@ class Intent(BaseModel):
 
     type: IntentType = IntentType.UNKNOWN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    # Target entity type (document, folder, or both)
+    target_entity: TargetEntity = TargetEntity.DOCUMENT
 
     # Extracted structural entities
     entities: StructuralEntities = Field(default_factory=StructuralEntities)
@@ -439,6 +499,84 @@ class StructuralContext(BaseModel):
         return "\n".join(parts)
 
 
+class LegalContext(BaseModel):
+    """
+    Legal context from the Legal Knowledge Graph.
+
+    Provides information about applicable laws, articles, and legal domain
+    without requiring RAG access to legal documents.
+    """
+
+    # Query type
+    query_type: str = ""  # applicability, compliance, reference, document_laws
+
+    # Applicable laws
+    applicable_laws: List[Dict[str, Any]] = Field(default_factory=list)
+    # Each: {boe_id, title, short_name, domain, status}
+
+    # Relevant articles
+    relevant_articles: List[Dict[str, Any]] = Field(default_factory=list)
+    # Each: {article_id, law_boe_id, article_number, title, summary, key_concepts}
+
+    # Legal domain detected
+    legal_domain: Optional[str] = None  # labor, fiscal, privacy, etc.
+
+    # Specific law being referenced (if any)
+    referenced_law: Optional[Dict[str, Any]] = None
+    referenced_article: Optional[Dict[str, Any]] = None
+
+    # Compliance hints
+    compliance_requirements: List[str] = Field(default_factory=list)
+    potential_issues: List[str] = Field(default_factory=list)
+
+    # Confidence in legal context
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    def to_context_string(self) -> str:
+        """Format as string for LLM context."""
+        parts = ["## Contexto Legal\n"]
+
+        if self.legal_domain:
+            parts.append(f"**Dominio legal:** {self.legal_domain}")
+
+        if self.applicable_laws:
+            parts.append(f"\n**Legislación aplicable:**")
+            for law in self.applicable_laws[:5]:
+                parts.append(
+                    f"  - {law.get('short_name', 'N/A')}: {law.get('title', 'Sin título')}"
+                )
+                if law.get('boe_id'):
+                    parts.append(f"    BOE: {law['boe_id']}")
+            if len(self.applicable_laws) > 5:
+                parts.append(f"  ... y {len(self.applicable_laws) - 5} más")
+
+        if self.relevant_articles:
+            parts.append(f"\n**Artículos relevantes:**")
+            for art in self.relevant_articles[:5]:
+                law_name = art.get('law_short_name', art.get('law_boe_id', ''))
+                parts.append(f"  - Art. {art.get('article_number', 'N/A')} {law_name}")
+                if art.get('summary'):
+                    parts.append(f"    {art['summary'][:100]}...")
+            if len(self.relevant_articles) > 5:
+                parts.append(f"  ... y {len(self.relevant_articles) - 5} más")
+
+        if self.referenced_law:
+            parts.append(f"\n**Ley referenciada:**")
+            parts.append(f"  {self.referenced_law.get('short_name')}: {self.referenced_law.get('title')}")
+
+        if self.compliance_requirements:
+            parts.append(f"\n**Requisitos de cumplimiento:**")
+            for req in self.compliance_requirements[:5]:
+                parts.append(f"  • {req}")
+
+        if self.potential_issues:
+            parts.append(f"\n**⚠️ Posibles problemas:**")
+            for issue in self.potential_issues[:3]:
+                parts.append(f"  • {issue}")
+
+        return "\n".join(parts)
+
+
 class TemporalResult(BaseModel):
     """Result of temporal reasoning."""
 
@@ -495,6 +633,9 @@ class ReasoningResult(BaseModel):
 
     # For MULTIHOP reasoning
     multihop_result: Optional[MultiHopResult] = None
+
+    # For LEGAL reasoning
+    legal_context: Optional[LegalContext] = None
 
     # For FOCUSED_RAG reasoning
     target_document_ids: List[str] = Field(default_factory=list)

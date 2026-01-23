@@ -1,6 +1,6 @@
-# CLAUDE.md - NexusDocs360 Project Guidelines
+# CLAUDE.md - NouxCubeIA Project Guidelines
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in the NexusDocs360 repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in the NouxCubeIA repository.
 
 ## Development Commands
 
@@ -74,7 +74,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 ## Architecture Overview
 
 ### System Design
-**NexusDocs360** is a **multi-tenant intelligent document management system** with a microservices architecture that provides a 360-degree view of organizational documents:
+**NouxCubeIA** is a **multi-tenant intelligent document management system** with a microservices architecture that provides a 360-degree view of organizational documents:
 
 **Backend**: FastAPI with Python 3.9+, using async/await patterns throughout
 **Frontend**: Next.js 15 with App Router, TypeScript, and Clerk authentication
@@ -177,6 +177,45 @@ interface LoginResponse {
 - **Background Worker** (port 8100): Async task processing with Celery
 - **Camunda Service** (port 8080): BPMN workflow orchestration for document pipelines
 - **LangExtract Service** (port 8009): Structured document extraction with LLM providers
+
+#### Modular Architecture (SaaS vs On-Premise)
+
+> **📖 Full Documentation**: [`backend/architecture/MODULAR_ARCHITECTURE.md`](backend/architecture/MODULAR_ARCHITECTURE.md)
+
+The codebase supports different deployment modes through a modular architecture:
+
+```
+backend/
+├── core/                    # Shared core (always loaded)
+│   └── acl/                 # ACL abstraction (ACLProvider, ACLProviderFactory)
+│
+├── modules/
+│   ├── on_premise/          # On-Premise module (DEPLOYMENT_MODE=on_premise)
+│   │   ├── acl/provider.py  # JSONBACLProvider (uses IndexedDocument JSONB)
+│   │   └── module.py        # Module registration
+│   │
+│   └── saas/                # SaaS module (DEPLOYMENT_MODE=saas)
+│       ├── acl/provider.py  # TableACLProvider (uses DocumentACL table)
+│       └── module.py        # Module registration
+│
+└── app/main.py              # Loads module based on DEPLOYMENT_MODE
+```
+
+**Key Differences:**
+
+| Feature | SaaS | On-Premise |
+|---------|------|------------|
+| Auth | Clerk | OIDC/SAML |
+| ACL | DocumentACL table | JSONB in IndexedDocument |
+| Documents | `documents` table | `indexed_documents` table |
+| Billing | Stripe | None |
+| Features | Signatures, Site Portal | Connectors (Alfresco, SharePoint) |
+
+**Configuration:**
+```bash
+# Set deployment mode in .env
+DEPLOYMENT_MODE=on_premise  # or: saas, custom
+```
 
 #### Database Schema Highlights
 - **Multi-tenant models**: All core entities have tenant_id foreign keys
@@ -459,7 +498,7 @@ result = await orchestrator.execute(
 ```
 
 **Supported LLM Providers:**
-- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-4B-Thinking)
+- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-4B)
 - `LLM_PROVIDER=ollama` - Legacy local models (llama3.2, qwen2.5, mistral)
 - `LLM_PROVIDER=openai` - Fallback to GPT-4o, GPT-4o-mini
 - `LLM_PROVIDER=anthropic` - Fallback to Claude 3.5 Sonnet, Claude 3 Opus
@@ -467,50 +506,49 @@ result = await orchestrator.execute(
 
 #### Recommended Model Configuration (RTX 4090 24GB)
 
-**Multimodal RAG Configuration (RECOMMENDED):**
+**Text-Only RAG Configuration (RECOMMENDED):**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  RECOMMENDED: Multimodal RAG with Cross-Modal Search        │
+│  RECOMMENDED: Text-Only RAG with BGE-M3 Embeddings          │
 ├─────────────────────────────────────────────────────────────┤
-│  LLM: Qwen/Qwen3-4B-Thinking-2507                           │
-│    • VRAM: ~10GB (45% allocation)                           │
-│    • Context: 32K tokens (reduced from 256K for VRAM)       │
-│    • Features: Extended reasoning with <think> blocks       │
-│    • Docs: https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507│
+│  LLM: Qwen/Qwen3-4B                                         │
+│    • VRAM: ~8GB (35% allocation)                            │
+│    • Context: 16K tokens (configurable up to 32K)           │
+│    • Features: Stable text generation for RAG               │
+│    • Docs: https://huggingface.co/Qwen/Qwen3-4B             │
 ├─────────────────────────────────────────────────────────────┤
-│  Embedding: Qwen/Qwen3-VL-Embedding-2B                      │
-│    • VRAM: ~5GB (20% allocation)                            │
+│  Embedding: BAAI/bge-m3                                     │
+│    • VRAM: ~2GB (10% allocation)                            │
 │    • Dimensions: 1024                                       │
-│    • Features: Unified text + image embedding space         │
-│    • Cross-modal: Text queries find images/diagrams         │
-│    • Docs: https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B│
+│    • Features: Multilingual (100+ languages)                │
+│    • Excellent for Spanish/English document retrieval       │
+│    • Docs: https://huggingface.co/BAAI/bge-m3               │
 ├─────────────────────────────────────────────────────────────┤
-│  Total VRAM: ~15GB (65% of 24GB)                            │
-│  Buffer: ~9GB for batching and concurrent requests          │
+│  Total VRAM: ~10GB (45% of 24GB)                            │
+│  Buffer: ~14GB for batching and concurrent requests         │
 └─────────────────────────────────────────────────────────────┘
 
 PDF Processing Pipeline:
   ✅ Text extraction → Chunking → Text embedding
-  ✅ Images/Tables/Diagrams → Visual extraction → Multimodal embedding
-  ✅ Cross-modal search: "find diagrams about X" works
+  ✅ Multilingual support (Spanish/English)
+  ✅ High-quality semantic search
 ```
 
-**Alternative: Text-Only Configuration (Maximum Context):**
+**Alternative: Extended Context Configuration:**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  ALTERNATIVE: Maximum Context (no image embedding)          │
+│  ALTERNATIVE: Maximum Context (larger LLM)                  │
 ├─────────────────────────────────────────────────────────────┤
-│  LLM: Qwen/Qwen3-4B-Thinking-2507                           │
-│    • VRAM: ~16GB (70% allocation)                           │
-│    • Context: 256K tokens (full native)                     │
+│  LLM: Qwen/Qwen3-8B                                         │
+│    • VRAM: ~16GB (65% allocation)                           │
+│    • Context: 32K tokens                                    │
 ├─────────────────────────────────────────────────────────────┤
-│  Embedding: Qwen/Qwen3-Embedding-0.6B (text-only)           │
-│    • VRAM: ~1.2GB                                           │
+│  Embedding: BAAI/bge-m3                                     │
+│    • VRAM: ~2GB                                             │
 │    • Dimensions: 1024                                       │
-│    • Text-only (no image embedding)                         │
 ├─────────────────────────────────────────────────────────────┤
-│  Set: MULTIMODAL_EMBEDDING_ENABLED=false                    │
-│  Use with: docker compose profiles (disable qwen3-vl-embed) │
+│  Set: VLLM_MODEL=Qwen/Qwen3-8B                              │
+│  Set: VLLM_MAX_MODEL_LEN=32768                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -519,19 +557,20 @@ PDF Processing Pipeline:
 # Environment variables for vLLM (docker-compose.yml)
 VLLM_ENABLED=true
 VLLM_BASE_URL=http://vllm:8000/v1
-VLLM_MODEL=Qwen/Qwen3-4B-Thinking-2507
-VLLM_MAX_MODEL_LEN=32768  # 32K for multimodal setup, 262144 for text-only
+VLLM_MODEL=Qwen/Qwen3-4B
+VLLM_MAX_MODEL_LEN=16384  # 16K default, up to 32K available
 HF_TOKEN=your_huggingface_token  # Required for Qwen3
 
-# Multimodal Embedding (Qwen3-VL-Embedding-2B)
-EMBEDDING_PROVIDER=qwen3-vl
-EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-2B
-EMBEDDING_URL=http://qwen3-vl-embedding:8000/v1
-MULTIMODAL_EMBEDDING_ENABLED=true
+# Text Embedding (BGE-M3 - Local Sentence Transformers)
+EMBEDDING_PROVIDER=sentence-transformers
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_DEVICE=cuda  # or cpu for non-GPU
 
-# NOTE: Uses vllm-qwen3vl image (vLLM + transformers 4.57+)
+# NOTE: Embeddings are loaded directly in weaviate-service
+# No external embedding service needed - simpler and more reliable
 # Hardware: RTX 4090 (24GB VRAM)
-# Total VRAM: LLM(45%) + Embedding(20%) = 65% = ~16GB
+# Total VRAM: LLM(50%) + Local Embedding(~2GB) = ~14GB
 ```
 
 **vLLM Server API Endpoints:**
@@ -558,21 +597,22 @@ The vLLM server exposes multiple APIs beyond the OpenAI-compatible interface:
 # Check available models
 curl http://localhost:8000/v1/models | jq
 
-# Test chat completion with thinking mode
+# Test chat completion
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-4B-Thinking-2507",
+    "model": "Qwen/Qwen3-4B",
     "messages": [{"role": "user", "content": "Explain step by step: What is 25 * 4?"}],
     "max_tokens": 1000,
-    "temperature": 0.6
+    "temperature": 0.7
   }'
 
-# Test multimodal embedding
-curl http://localhost:8001/v1/embeddings \
+# Test BGE-M3 embedding (embedding-service runs on internal port)
+# From inside Docker network:
+curl http://embedding-service:8000/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-VL-Embedding-2B",
+    "model": "BAAI/bge-m3",
     "input": ["This is a test document about contracts"]
   }'
 

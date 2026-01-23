@@ -1,4 +1,4 @@
-# NexusDocs360 - Intelligent Document Management Platform
+# NouxCubeIA - Intelligent Document Management Platform
 
 <div align="center">
   <h3>Where AI Transforms Documents into Decisions</h3>
@@ -14,7 +14,7 @@
 
 ## Overview
 
-**NexusDocs360** is the next generation of enterprise document management, where Artificial Intelligence is not just a feature, but the core that radically transforms how organizations interact with their information. Our platform uses advanced AI to automate 80% of document tasks, allowing teams to focus on strategic decisions while AI handles operational complexity.
+**NouxCubeIA** is the next generation of enterprise document management, where Artificial Intelligence is not just a feature, but the core that radically transforms how organizations interact with their information. Our platform uses advanced AI to automate 80% of document tasks, allowing teams to focus on strategic decisions while AI handles operational complexity.
 
 ### Key Features
 
@@ -41,7 +41,7 @@
 
 ## Deployment Options
 
-NexusDocs360 offers two deployment models to fit your organization's needs:
+NouxCubeIA offers two deployment models to fit your organization's needs:
 
 ### SaaS vs On-Premise Comparison
 
@@ -70,7 +70,7 @@ NexusDocs360 offers two deployment models to fit your organization's needs:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           NexusDocs360 Architecture                          │
+│                           NouxCubeIA Architecture                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────┐    │
@@ -159,7 +159,7 @@ Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** (OpenMan
 ### Option 1: SaaS (Recommended for Quick Start)
 
 ```bash
-# Sign up at https://app.nexusdocs360.com
+# Sign up at https://app.nouxcubeia.com
 # No installation required - start in minutes
 ```
 
@@ -241,13 +241,13 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## Support
 
-- Documentation: [docs.nexusdocs360.com](https://docs.nexusdocs360.com)
-- Issues: [GitHub Issues](https://github.com/your-org/nexusdocs360/issues)
-- Email: support@nexusdocs360.com
+- Documentation: [docs.nouxcubeia.com](https://docs.nouxcubeia.com)
+- Issues: [GitHub Issues](https://github.com/your-org/nouxcubeia/issues)
+- Email: support@nouxcubeia.com
 
 ---
 
 <div align="center">
-  <h3>NexusDocs360 - Where AI Transforms Every Document into Competitive Advantage</h3>
-  <p>Powered by vLLM + Microsoft Agent Framework | Made with AI by the NexusDocs360 Team</p>
+  <h3>NouxCubeIA - Where AI Transforms Every Document into Competitive Advantage</h3>
+  <p>Powered by vLLM + Microsoft Agent Framework | Made with AI by the NouxCubeIA Team</p>
 </div>

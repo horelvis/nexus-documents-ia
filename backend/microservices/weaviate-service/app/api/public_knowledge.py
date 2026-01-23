@@ -220,3 +220,200 @@ def _get_jurisdiction_description(jurisdiction: Jurisdiction) -> str:
         Jurisdiction.REGIONAL: "Legislación autonómica / regional"
     }
     return descriptions.get(jurisdiction, "")
+
+
+# ============================================================================
+# Knowledge Extraction from Public Documents
+# ============================================================================
+
+@router.post("/extract-knowledge")
+async def extract_knowledge_from_public_documents(
+    limit: int = Query(100, ge=1, le=1000, description="Max documents to process"),
+    category: Optional[PublicDocumentCategory] = Query(None, description="Filter by category"),
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Extract knowledge entities from public documents into the Knowledge Graph.
+
+    This processes existing public documents (guidelines, references, etc.) and extracts
+    entities like: articles, terms, references, organizations, dates.
+
+    The extracted entities are stored in the Knowledge Graph collection
+    for semantic search and entity-based queries.
+
+    **Note**: For legislation (BOE laws), use the Legal Graph instead.
+    Legislation is indexed directly to Apache AGE via /boe/download endpoint,
+    which creates legal_law nodes with proper law-to-law relationships.
+
+    Requires API key authentication (admin only).
+    """
+    # Legislation uses the Legal Graph directly - not entity extraction
+    if category == PublicDocumentCategory.LEGISLATION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Legislation uses law-to-law relationships in the Legal Graph (Apache AGE). "
+                "Use POST /boe/download to index laws with their relationships. "
+                "For existing legislation, run: python scripts/sync_public_knowledge_to_legal_graph.py"
+            )
+        )
+
+    try:
+        from app.services.knowledge import get_knowledge_service
+        from app.services.weaviate_service import WeaviateService
+        import re
+        import uuid
+
+        logger.info(f"🧠 Starting knowledge extraction from public documents | limit={limit}")
+
+        # Initialize services
+        await public_knowledge_service.initialize()
+        knowledge_service = get_knowledge_service()
+        await knowledge_service.initialize()
+
+        weaviate_service = WeaviateService()
+        await weaviate_service.initialize()
+
+        # Get public documents
+        search_request = PublicSearchRequest(
+            query="*",
+            limit=limit,
+            categories=[category] if category else None,
+            search_type="keyword"
+        )
+
+        # Use a simple search to get documents
+        documents = await public_knowledge_service.search(search_request)
+
+        results = {
+            "total_documents": len(documents.results),
+            "processed": 0,
+            "entities_extracted": 0,
+            "errors": 0,
+            "details": []
+        }
+
+        # Define entity patterns for Spanish legal documents
+        entity_patterns = {
+            "articulo": r"(?:Artículo|Art\.)\s+(\d+(?:\.\d+)?(?:\s*bis|\s*ter)?)",
+            "ley": r"(?:Ley\s+(?:Orgánica\s+)?\d+/\d{4})",
+            "real_decreto": r"(?:Real\s+Decreto(?:-ley)?\s+\d+/\d{4})",
+            "fecha": r"\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+\d{4}",
+            "boe_referencia": r"BOE-[A-Z]-\d{4}-\d+",
+            "organizacion": r"(?:Ministerio\s+de\s+[\w\s]+|Agencia\s+[\w\s]+|Instituto\s+[\w\s]+)",
+            "concepto_legal": r"(?:derecho\s+a\s+[\w\s]+|obligación\s+de\s+[\w\s]+|deber\s+de\s+[\w\s]+)",
+        }
+
+        for doc in documents.results:
+            try:
+                doc_id = doc.id
+                content = doc.content[:50000] if doc.content else ""  # Limit content size
+
+                if not content:
+                    continue
+
+                extracted_entities = []
+                seen_values = set()
+
+                # Extract entities using patterns
+                for entity_type, pattern in entity_patterns.items():
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        value = match if isinstance(match, str) else match[0] if match else None
+                        if value and len(value) > 2:
+                            normalized = value.lower().strip()
+                            if normalized not in seen_values:
+                                seen_values.add(normalized)
+                                extracted_entities.append({
+                                    "type": entity_type,
+                                    "value": value.strip(),
+                                    "class_name": entity_type,
+                                })
+
+                # Also extract key terms from keywords/topics
+                if doc.keywords:
+                    for kw in doc.keywords[:10]:
+                        if kw and len(kw) > 2:
+                            normalized = kw.lower().strip()
+                            if normalized not in seen_values:
+                                seen_values.add(normalized)
+                                extracted_entities.append({
+                                    "type": "termino",
+                                    "value": kw,
+                                    "class_name": "termino",
+                                })
+
+                if not extracted_entities:
+                    continue
+
+                # Use a pseudo tenant_id for public documents
+                public_tenant = "public_knowledge"
+
+                # Store entities in Knowledge Graph via Weaviate
+                for entity in extracted_entities[:50]:  # Limit per document
+                    try:
+                        entity_id = str(uuid.uuid4())
+
+                        # Map type to standard entity types
+                        type_mapping = {
+                            "articulo": "clause",
+                            "ley": "reference",
+                            "real_decreto": "reference",
+                            "fecha": "date",
+                            "boe_referencia": "reference",
+                            "organizacion": "organization",
+                            "concepto_legal": "concept",
+                            "termino": "term",
+                        }
+
+                        entity_type = type_mapping.get(entity["type"], "concept")
+
+                        # Add to Weaviate knowledge collection
+                        await weaviate_service.add_knowledge_entity(
+                            tenant_id=public_tenant,
+                            entity_id=entity_id,
+                            entity_type=entity_type,
+                            entity_value=entity["value"],
+                            context_text=f"Extraído de: {doc.title[:100] if doc.title else 'documento público'}",
+                            entity_label=entity["value"],
+                            domain="legal",
+                            source_document_id=doc_id,
+                            confidence=0.85,
+                            attributes={
+                                "source": "public_knowledge",
+                                "category": doc.category.value if doc.category else "legislation",
+                                "jurisdiction": doc.jurisdiction.value if doc.jurisdiction else "spain",
+                                "boe_id": doc.boe_id if hasattr(doc, 'boe_id') else None,
+                            },
+                            acl_everyone=True  # Public documents are accessible to everyone
+                        )
+
+                        results["entities_extracted"] += 1
+
+                    except Exception as entity_error:
+                        logger.warning(f"Failed to store entity: {entity_error}")
+                        continue
+
+                results["processed"] += 1
+                results["details"].append({
+                    "document_id": doc_id,
+                    "title": doc.title[:50] if doc.title else None,
+                    "entities_count": min(len(extracted_entities), 50),
+                })
+
+            except Exception as doc_error:
+                logger.warning(f"Failed to process document {doc.id}: {doc_error}")
+                results["errors"] += 1
+                continue
+
+        logger.info(
+            f"✅ Knowledge extraction complete: "
+            f"{results['processed']} documents, "
+            f"{results['entities_extracted']} entities"
+        )
+
+        return results
+
+    except Exception as e:
+        logger.error(f"❌ Knowledge extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

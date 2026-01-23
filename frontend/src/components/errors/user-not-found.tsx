@@ -50,7 +50,7 @@ export function UserNotFound({ onRetry }: UserNotFoundProps) {
       t('userNotFound.supportEmail.body', { email, clerkId, time })
     )
 
-    window.open(`mailto:support@nexusdocs.com?subject=${subject}&body=${body}`)
+    window.open(`mailto:support@nouxcube.com?subject=${subject}&body=${body}`)
   }
 
   return (

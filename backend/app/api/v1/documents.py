@@ -96,11 +96,15 @@ async def list_documents(
     - If folder is "": Returns documents in root folder + subfolders as items
     - If folder is "/path": Returns documents in that folder + subfolders as items
     """
-    # Get list of document IDs user can access
-    acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
-    accessible_doc_ids = await acl_service.get_documents_user_can_access(
-        db, permission=Permission.VIEW, user=current_user
-    )
+    # When searching with Weaviate, let Weaviate handle ACL filtering directly
+    # (Weaviate receives user_id, user_role_ids, is_admin for filtering)
+    # Only do PostgreSQL ACL check for non-search requests
+    accessible_doc_ids = None
+    if not search or not search.strip():
+        acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
+        accessible_doc_ids = await acl_service.get_documents_user_can_access(
+            db, permission=Permission.VIEW, user=current_user
+        )
 
     return await document_service.get_documents(
         db=db,
@@ -111,7 +115,7 @@ async def list_documents(
         date_from=date_from,
         date_to=date_to,
         category=category,
-        document_ids=accessible_doc_ids,  # Filter by accessible documents
+        document_ids=accessible_doc_ids,  # None for search (Weaviate handles ACL)
         folder=folder  # Filter by folder path
     )
 
@@ -970,3 +974,207 @@ async def get_document_facets(
     except Exception as e:
         logger.error(f"Failed to get document facets: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve facets: {str(e)}")
+
+
+# ========================================
+# IDENTITY DOCUMENT PROCESSING
+# ========================================
+
+@router.post("/process-identity")
+async def process_identity_document(
+    file: UploadFile = File(...),
+    document_type: Optional[str] = Form(default=None, description="dni, nie, passport, driver_license"),
+    consent_given: bool = Form(..., description="User consent for PII processing (required)"),
+    purpose: str = Form(default="identity_verification", description="Purpose for processing"),
+    retention_days: int = Form(default=90, ge=1, le=365, description="Days to retain extracted data"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Process an identity document (DNI, NIE, Passport, Driver's License) and extract structured data.
+
+    GDPR Compliance:
+    - Requires explicit consent_given=True to process
+    - All access is logged for audit purposes
+    - Data is automatically deleted after retention_days (default 90)
+    - NO cloud APIs used - all processing is local
+
+    Args:
+        file: Image or PDF of the identity document
+        document_type: Expected document type (auto-detected if not provided)
+        consent_given: User consent for PII processing (REQUIRED)
+        purpose: Purpose for processing (e.g., 'identity_verification', 'kyc')
+        retention_days: Days to retain extracted data (GDPR compliance)
+
+    Returns:
+        Extracted identity document data with confidence scores
+    """
+    from datetime import datetime, timedelta
+    from app.schemas.identity_document import (
+        IdentityDocumentResponse,
+        IdentityDocumentExtraction,
+        IdentityDocumentType,
+    )
+
+    # GDPR: Require explicit consent
+    if not consent_given:
+        raise HTTPException(
+            status_code=400,
+            detail="Consent is required to process identity documents. "
+            "Set consent_given=true to proceed."
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    filename = file.filename or "identity_document"
+    file_size = len(contents)
+
+    logger.info(
+        f"Identity document processing | user={current_user.id} tenant={tenant_id} "
+        f"file={filename} size={file_size} type={document_type or 'auto'} purpose={purpose}"
+    )
+
+    # Audit log: PII access initiated
+    audit_entry = {
+        "action": "identity_extraction_started",
+        "user_id": str(current_user.id),
+        "tenant_id": tenant_id,
+        "timestamp": datetime.utcnow().isoformat(),
+        "purpose": purpose,
+        "filename": filename,
+        "ip_address": None,  # Would be extracted from request in production
+    }
+    logger.info(f"AUDIT: {audit_entry}")
+
+    try:
+        # Call langextract-service for identity document extraction
+        langextract_url = os.getenv(
+            "LANGEXTRACT_SERVICE_URL",
+            "http://langextract-service:8000"
+        )
+        api_key = settings.MICROSERVICES_API_KEY
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{langextract_url}/api/v1/extraction/identity/extract",
+                headers={
+                    "X-API-Key": api_key,
+                    "X-Tenant-ID": tenant_id,
+                },
+                files={"file": (filename, contents)},
+                data={
+                    "document_type": document_type or "",
+                    "consent_given": "true",
+                    "purpose": purpose,
+                },
+            )
+
+            if response.status_code != 200:
+                error_detail = response.text
+                try:
+                    error_json = response.json()
+                    error_detail = error_json.get("detail", response.text)
+                except Exception:
+                    pass
+
+                logger.error(f"Identity extraction failed: {response.status_code} - {error_detail}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Identity extraction failed: {error_detail}"
+                )
+
+            result = response.json()
+
+        # Calculate retention date
+        retention_until = datetime.utcnow() + timedelta(days=retention_days)
+
+        # Store extraction result in database (if successful)
+        extraction_id = None
+        if result.get("success"):
+            try:
+                from app.db.models import Base
+                from sqlalchemy import text
+
+                # Insert into identity_document_extractions table
+                insert_sql = text("""
+                    INSERT INTO identity_document_extractions (
+                        tenant_id, document_type, issuing_country,
+                        extracted_data, confidence_score, ocr_engine,
+                        retention_until, consent_purpose, created_by
+                    ) VALUES (
+                        :tenant_id, :document_type, :issuing_country,
+                        :extracted_data, :confidence_score, :ocr_engine,
+                        :retention_until, :consent_purpose, :created_by
+                    ) RETURNING id
+                """)
+
+                import json
+                extracted_data = {
+                    "full_name": result.get("full_name"),
+                    "first_name": result.get("first_name"),
+                    "last_name": result.get("last_name"),
+                    "document_number": result.get("document_number"),
+                    "date_of_birth": result.get("date_of_birth"),
+                    "expiration_date": result.get("expiration_date"),
+                    "nationality": result.get("nationality"),
+                    "gender": result.get("gender"),
+                    "mrz_data": result.get("mrz_data"),
+                    "license_categories": result.get("license_categories"),
+                }
+
+                db_result = await db.execute(
+                    insert_sql,
+                    {
+                        "tenant_id": tenant_id,
+                        "document_type": result.get("document_type", "unknown"),
+                        "issuing_country": result.get("issuing_country"),
+                        "extracted_data": json.dumps(extracted_data),
+                        "confidence_score": result.get("confidence_score", 0.0),
+                        "ocr_engine": result.get("ocr_engine", "doctr"),
+                        "retention_until": retention_until,
+                        "consent_purpose": purpose,
+                        "created_by": str(current_user.id),
+                    }
+                )
+                await db.commit()
+
+                row = db_result.fetchone()
+                if row:
+                    extraction_id = str(row[0])
+
+            except Exception as db_error:
+                logger.warning(f"Failed to store identity extraction in database: {db_error}")
+                # Non-blocking - continue with response
+
+        # Audit log: PII extraction completed
+        audit_complete = {
+            "action": "identity_extraction_completed",
+            "user_id": str(current_user.id),
+            "tenant_id": tenant_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "extraction_id": extraction_id,
+            "document_type": result.get("document_type"),
+            "confidence_score": result.get("confidence_score"),
+            "retention_until": retention_until.isoformat(),
+        }
+        logger.info(f"AUDIT: {audit_complete}")
+
+        return {
+            "success": result.get("success", False),
+            "extraction": result,
+            "retention_until": retention_until.isoformat(),
+            "extraction_id": extraction_id,
+            "gdpr_notice": f"Data will be automatically deleted after {retention_days} days.",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Identity document processing failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Identity document processing failed: {str(e)}"
+        )

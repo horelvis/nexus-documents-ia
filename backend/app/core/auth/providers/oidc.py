@@ -62,6 +62,9 @@ class OIDCAuthProvider(AuthProvider):
         super().__init__(config)
 
         self.issuer = config.get("issuer", "").rstrip("/")
+        # Internal issuer for fetching discovery/JWKS (Docker internal DNS)
+        # Falls back to issuer if not specified
+        self.internal_issuer = config.get("internal_issuer", "").rstrip("/") or self.issuer
         self.client_id = config.get("client_id", "")
         self.client_secret = config.get("client_secret", "")
         self.scopes = config.get("scopes", ["openid", "profile", "email"])
@@ -94,26 +97,38 @@ class OIDCAuthProvider(AuthProvider):
             raise ProviderInitializationError("OIDC issuer URL is required")
 
         try:
-            # Fetch discovery document
-            discovery_url = f"{self.issuer}/.well-known/openid-configuration"
-            logger.info(f"Fetching OIDC discovery from {discovery_url}")
+            # Fetch discovery document using internal issuer (Docker DNS)
+            # This allows token validation to use public issuer while
+            # fetching JWKS from internal Docker network
+            discovery_url = f"{self.internal_issuer}/.well-known/openid-configuration"
+            logger.info(f"Fetching OIDC discovery from {discovery_url} (token issuer: {self.issuer})")
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(discovery_url)
                 response.raise_for_status()
                 self._discovery = response.json()
 
-            # Extract endpoints
-            self._jwks_url = self._discovery.get("jwks_uri")
-            self._token_endpoint = self._discovery.get("token_endpoint")
+            # Extract endpoints - replace public issuer with internal for Docker DNS
+            def to_internal_url(url: str) -> str:
+                """Replace public issuer hostname with internal issuer for Docker networking."""
+                if url and self.issuer and self.internal_issuer and self.issuer != self.internal_issuer:
+                    return url.replace(self.issuer, self.internal_issuer)
+                return url
+
+            self._jwks_url = to_internal_url(self._discovery.get("jwks_uri", ""))
+            self._token_endpoint = to_internal_url(self._discovery.get("token_endpoint", ""))
+            # Keep authorization and end_session with public URLs (browser redirects)
             self._authorization_endpoint = self._discovery.get("authorization_endpoint")
-            self._userinfo_endpoint = self._discovery.get("userinfo_endpoint")
+            self._userinfo_endpoint = to_internal_url(self._discovery.get("userinfo_endpoint", ""))
             self._end_session_endpoint = self._discovery.get("end_session_endpoint")
 
             if not self._jwks_url:
                 raise ProviderInitializationError("JWKS URI not found in discovery")
 
-            # Initialize JWKS client
+            logger.info(f"JWKS URL (internal): {self._jwks_url}")
+            logger.info(f"Token endpoint (internal): {self._token_endpoint}")
+
+            # Initialize JWKS client with internal URL
             self._jwks_client = PyJWKClient(self._jwks_url)
 
             self._initialized = True

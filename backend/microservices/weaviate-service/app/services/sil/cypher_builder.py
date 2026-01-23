@@ -14,8 +14,9 @@ Query Types:
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from enum import Enum
 
 from .schemas import (
     Intent,
@@ -24,10 +25,34 @@ from .schemas import (
     TemporalMarkers,
     MultiHopQuery,
     SemanticType,
+    FolderType,
     DomainType,
+    TargetEntity,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_value(obj: Union[Enum, str, None]) -> str:
+    """Safely get the value from an enum or return the string directly.
+
+    This handles the case where Pydantic's use_enum_values=True has already
+    converted an enum to its string value.
+
+    IMPORTANT: Check Enum BEFORE str because string enums (class X(str, Enum))
+    satisfy both isinstance(obj, str) and isinstance(obj, Enum), but we need
+    to use .value for correct extraction.
+    """
+    if obj is None:
+        return ""
+    # Check Enum FIRST - string enums (str, Enum) satisfy both str and Enum checks
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, str):
+        return obj
+    if hasattr(obj, 'value'):
+        return obj.value
+    return str(obj)
 
 
 class CypherBuilder:
@@ -77,11 +102,19 @@ class CypherBuilder:
         """
         # Route to appropriate query builder
         builders = {
+            # Document queries
             IntentType.STRUCTURAL_COUNT: self._build_count_query,
             IntentType.STRUCTURAL_LIST: self._build_list_query,
             IntentType.STRUCTURAL_EXISTS: self._build_exists_query,
             IntentType.STRUCTURAL_LOCATION: self._build_location_query,
             IntentType.STRUCTURAL: self._build_general_structural_query,
+            # Folder queries
+            IntentType.FOLDER_COUNT: self._build_folder_count_query,
+            IntentType.FOLDER_LIST: self._build_folder_list_query,
+            IntentType.FOLDER_EXISTS: self._build_folder_exists_query,
+            IntentType.FOLDER_CONTENTS: self._build_folder_contents_query,
+            IntentType.FOLDER_BROWSE: self._build_folder_browse_query,
+            # Temporal queries
             IntentType.TEMPORAL_POINT: self._build_temporal_point_query,
             IntentType.TEMPORAL_RANGE: self._build_temporal_range_query,
             IntentType.TEMPORAL_EVOLUTION: self._build_temporal_evolution_query,
@@ -104,16 +137,22 @@ class CypherBuilder:
         → MATCH (d:structural_document) WHERE d.tenant_id = 'X' AND ...
           RETURN count(d)
         """
-        where_clauses = [f"d.tenant_id = '{tenant_id}'"]
+        where_clauses = [
+            f"d.tenant_id = '{tenant_id}'",
+            # Only count active documents (valid_to = '' or NULL means active)
+            "(d.valid_to = '' OR d.valid_to IS NULL)",
+        ]
+
+        logger.info(f"🔍 Building count query with entities: types={intent.entities.document_types}, domains={intent.entities.domains}, clients={intent.entities.client_names}")
 
         # Add semantic type filter
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         # Add domain filter
         if intent.entities.domains:
-            domains_str = ", ".join(f"'{d.value}'" for d in intent.entities.domains)
+            domains_str = ", ".join(f"'{_get_enum_value(d)}'" for d in intent.entities.domains)
             where_clauses.append(f"d.domain IN [{domains_str}]")
 
         # Add client filter (in key_properties or folder path)
@@ -143,11 +182,13 @@ class CypherBuilder:
 
         where_clause = " AND ".join(where_clauses)
 
-        return f"""
+        query = f"""
             MATCH (d:{self.VERTEX_DOCUMENT})
             WHERE {where_clause}
             RETURN count(d) as total
         """
+        logger.info(f"🔍 Generated count query: {query}")
+        return query
 
     def _build_list_query(self, intent: Intent, tenant_id: str) -> str:
         """
@@ -156,15 +197,18 @@ class CypherBuilder:
         Example: "Show me all contracts from 2024"
         → Returns list of document titles, types, and paths
         """
-        where_clauses = [f"d.tenant_id = '{tenant_id}'"]
+        where_clauses = [
+            f"d.tenant_id = '{tenant_id}'",
+            "(d.valid_to = '' OR d.valid_to IS NULL)",  # Only active documents
+        ]
 
         # Same filters as count query
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         if intent.entities.domains:
-            domains_str = ", ".join(f"'{d.value}'" for d in intent.entities.domains)
+            domains_str = ", ".join(f"'{_get_enum_value(d)}'" for d in intent.entities.domains)
             where_clauses.append(f"d.domain IN [{domains_str}]")
 
         if intent.entities.client_names:
@@ -216,7 +260,7 @@ class CypherBuilder:
         where_clauses = [f"d.tenant_id = '{tenant_id}'"]
 
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         if intent.entities.client_names:
@@ -229,12 +273,13 @@ class CypherBuilder:
 
         where_clause = " AND ".join(where_clauses)
 
+        # Note: "exists" is a reserved word in PostgreSQL/AGE, use "doc_exists" instead
         return f"""
             MATCH (d:{self.VERTEX_DOCUMENT})
             WHERE {where_clause}
             RETURN
-                CASE WHEN count(d) > 0 THEN true ELSE false END as exists,
-                count(d) as count
+                CASE WHEN count(d) > 0 THEN true ELSE false END as doc_exists,
+                count(d) as total
             LIMIT 1
         """
 
@@ -248,7 +293,7 @@ class CypherBuilder:
         where_clauses = [f"d.tenant_id = '{tenant_id}'"]
 
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         if intent.entities.client_names:
@@ -280,6 +325,251 @@ class CypherBuilder:
         """Build a general structural query when specific type isn't clear."""
         return self._build_list_query(intent, tenant_id)
 
+    # =========================================================================
+    # FOLDER/EXPEDIENTE QUERIES
+    # =========================================================================
+
+    def _build_folder_count_query(self, intent: Intent, tenant_id: str) -> str:
+        """
+        Build a COUNT query for folders/expedientes.
+
+        Example: "How many expedientes do we have?"
+        → MATCH (f:structural_folder) WHERE f.tenant_id = 'X' RETURN count(f)
+        """
+        where_clauses = [f"f.tenant_id = '{tenant_id}'"]
+
+        logger.info(f"🗂️ Building folder count query with entities: clients={intent.entities.client_names}, folders={intent.entities.folder_names}, folder_types={intent.entities.folder_types}")
+
+        # Filter by folder type (expediente, case, project, etc.)
+        if intent.entities.folder_types:
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.folder_types)
+            where_clauses.append(f"f.folder_type IN [{types_str}]")
+
+        # Filter by client
+        if intent.entities.client_names:
+            client_conditions = []
+            for client in intent.entities.client_names:
+                client_safe = self._escape_string(client)
+                client_conditions.append(f"f.prop_client = '{client_safe}'")
+                client_conditions.append(f"f.name CONTAINS '{client_safe}'")
+                client_conditions.append(f"f.path CONTAINS '{client_safe}'")
+            where_clauses.append(f"({' OR '.join(client_conditions)})")
+
+        # Filter by year
+        if intent.entities.years:
+            year_conditions = []
+            for year in intent.entities.years:
+                year_conditions.append(f"f.prop_year = '{year}'")
+                year_conditions.append(f"f.name CONTAINS '{year}'")
+            where_clauses.append(f"({' OR '.join(year_conditions)})")
+
+        # Filter by domain
+        if intent.entities.domains:
+            domains_str = ", ".join(f"'{_get_enum_value(d)}'" for d in intent.entities.domains)
+            where_clauses.append(f"f.domain IN [{domains_str}]")
+
+        where_clause = " AND ".join(where_clauses)
+
+        query = f"""
+            MATCH (f:{self.VERTEX_FOLDER})
+            WHERE {where_clause}
+            RETURN count(f) as total
+        """
+        logger.info(f"🗂️ Generated folder count query: {query}")
+        return query
+
+    def _build_folder_list_query(self, intent: Intent, tenant_id: str) -> str:
+        """
+        Build a LIST query for folders/expedientes.
+
+        Example: "List all expedientes for client ACME"
+        → Returns list of folder names, types, and paths
+        """
+        where_clauses = [f"f.tenant_id = '{tenant_id}'"]
+
+        # Filter by folder type
+        if intent.entities.folder_types:
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.folder_types)
+            where_clauses.append(f"f.folder_type IN [{types_str}]")
+
+        # Filter by client
+        if intent.entities.client_names:
+            client_conditions = []
+            for client in intent.entities.client_names:
+                client_safe = self._escape_string(client)
+                client_conditions.append(f"f.prop_client = '{client_safe}'")
+                client_conditions.append(f"f.name CONTAINS '{client_safe}'")
+                client_conditions.append(f"f.path CONTAINS '{client_safe}'")
+            where_clauses.append(f"({' OR '.join(client_conditions)})")
+
+        # Filter by year
+        if intent.entities.years:
+            year_conditions = []
+            for year in intent.entities.years:
+                year_conditions.append(f"f.prop_year = '{year}'")
+                year_conditions.append(f"f.name CONTAINS '{year}'")
+            where_clauses.append(f"({' OR '.join(year_conditions)})")
+
+        # Filter by domain
+        if intent.entities.domains:
+            domains_str = ", ".join(f"'{_get_enum_value(d)}'" for d in intent.entities.domains)
+            where_clauses.append(f"f.domain IN [{domains_str}]")
+
+        # Filter by specific folder names
+        if intent.entities.folder_names:
+            name_conditions = []
+            for name in intent.entities.folder_names:
+                name_safe = self._escape_string(name)
+                name_conditions.append(f"f.name CONTAINS '{name_safe}'")
+                name_conditions.append(f"f.path CONTAINS '{name_safe}'")
+            where_clauses.append(f"({' OR '.join(name_conditions)})")
+
+        where_clause = " AND ".join(where_clauses)
+
+        return f"""
+            MATCH (f:{self.VERTEX_FOLDER})
+            WHERE {where_clause}
+            RETURN
+                f.folder_id as folder_id,
+                f.name as name,
+                f.path as path,
+                f.folder_type as folder_type,
+                f.domain as domain,
+                f.document_count as document_count,
+                f.prop_client as client,
+                f.created_at as created_at
+            ORDER BY f.name ASC
+            LIMIT 50
+        """
+
+    def _build_folder_exists_query(self, intent: Intent, tenant_id: str) -> str:
+        """
+        Build an EXISTS query for folders/expedientes.
+
+        Example: "Is there an expediente for ACME?"
+        """
+        where_clauses = [f"f.tenant_id = '{tenant_id}'"]
+
+        # Filter by folder type
+        if intent.entities.folder_types:
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.folder_types)
+            where_clauses.append(f"f.folder_type IN [{types_str}]")
+
+        # Filter by client
+        if intent.entities.client_names:
+            client_conditions = []
+            for client in intent.entities.client_names:
+                client_safe = self._escape_string(client)
+                client_conditions.append(f"f.prop_client = '{client_safe}'")
+                client_conditions.append(f"f.name CONTAINS '{client_safe}'")
+                client_conditions.append(f"f.path CONTAINS '{client_safe}'")
+            where_clauses.append(f"({' OR '.join(client_conditions)})")
+
+        # Filter by specific folder names
+        if intent.entities.folder_names:
+            name_conditions = []
+            for name in intent.entities.folder_names:
+                name_safe = self._escape_string(name)
+                name_conditions.append(f"f.name CONTAINS '{name_safe}'")
+                name_conditions.append(f"f.path CONTAINS '{name_safe}'")
+            where_clauses.append(f"({' OR '.join(name_conditions)})")
+
+        where_clause = " AND ".join(where_clauses)
+
+        return f"""
+            MATCH (f:{self.VERTEX_FOLDER})
+            WHERE {where_clause}
+            RETURN
+                CASE WHEN count(f) > 0 THEN true ELSE false END as folder_exists,
+                count(f) as total
+            LIMIT 1
+        """
+
+    def _build_folder_contents_query(self, intent: Intent, tenant_id: str) -> str:
+        """
+        Build a CONTENTS query for folders/expedientes.
+
+        Example: "What's in expediente ACME?"
+        → Returns folder info + list of documents it contains
+        """
+        where_clauses = [f"f.tenant_id = '{tenant_id}'"]
+
+        # Filter by client
+        if intent.entities.client_names:
+            client_conditions = []
+            for client in intent.entities.client_names:
+                client_safe = self._escape_string(client)
+                client_conditions.append(f"f.prop_client = '{client_safe}'")
+                client_conditions.append(f"f.name CONTAINS '{client_safe}'")
+                client_conditions.append(f"f.path CONTAINS '{client_safe}'")
+            where_clauses.append(f"({' OR '.join(client_conditions)})")
+
+        # Filter by specific folder names
+        if intent.entities.folder_names:
+            name_conditions = []
+            for name in intent.entities.folder_names:
+                name_safe = self._escape_string(name)
+                name_conditions.append(f"f.name CONTAINS '{name_safe}'")
+                name_conditions.append(f"f.path CONTAINS '{name_safe}'")
+            where_clauses.append(f"({' OR '.join(name_conditions)})")
+
+        where_clause = " AND ".join(where_clauses)
+
+        # Query returns folder + its documents
+        return f"""
+            MATCH (f:{self.VERTEX_FOLDER})
+            WHERE {where_clause}
+            OPTIONAL MATCH (f)-[:{self.EDGE_CONTAINS}]->(d:{self.VERTEX_DOCUMENT})
+            WHERE d.tenant_id = '{tenant_id}'
+            RETURN
+                f.folder_id as folder_id,
+                f.name as folder_name,
+                f.path as folder_path,
+                f.folder_type as folder_type,
+                f.document_count as total_documents,
+                collect({{
+                    document_id: d.document_id,
+                    title: d.prop_title,
+                    type: d.semantic_type,
+                    created_at: d.created_at
+                }}) as documents
+            LIMIT 10
+        """
+
+    def _build_folder_browse_query(self, intent: Intent, tenant_id: str) -> str:
+        """
+        Build a BROWSE query to show folder structure.
+
+        Example: "Show me the folder structure"
+        → Returns folder hierarchy
+        """
+        where_clauses = [f"f.tenant_id = '{tenant_id}'"]
+
+        # If specific folder names, start from there
+        if intent.entities.folder_names:
+            name_conditions = []
+            for name in intent.entities.folder_names:
+                name_safe = self._escape_string(name)
+                name_conditions.append(f"f.path STARTS WITH '{name_safe}'")
+            where_clauses.append(f"({' OR '.join(name_conditions)})")
+
+        where_clause = " AND ".join(where_clauses)
+
+        return f"""
+            MATCH (f:{self.VERTEX_FOLDER})
+            WHERE {where_clause}
+            RETURN
+                f.folder_id as folder_id,
+                f.name as name,
+                f.path as path,
+                f.folder_type as folder_type,
+                f.domain as domain,
+                f.document_count as document_count,
+                f.parent_folder_id as parent_id
+            ORDER BY f.path ASC
+            LIMIT 100
+        """
+
     def _build_temporal_point_query(self, intent: Intent, tenant_id: str) -> str:
         """
         Build a temporal point-in-time query.
@@ -298,7 +588,7 @@ class CypherBuilder:
 
         # Add other entity filters
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         if intent.entities.folder_names:
@@ -344,7 +634,7 @@ class CypherBuilder:
 
         # Add other filters
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         if intent.entities.folder_names:
@@ -389,7 +679,7 @@ class CypherBuilder:
             where_clauses.append(f"({' OR '.join(folder_conditions)})")
 
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         where_clause = " AND ".join(where_clauses)
@@ -437,7 +727,7 @@ class CypherBuilder:
             )
 
         if intent.entities.document_types:
-            types_str = ", ".join(f"'{t.value}'" for t in intent.entities.document_types)
+            types_str = ", ".join(f"'{_get_enum_value(t)}'" for t in intent.entities.document_types)
             where_clauses.append(f"d.semantic_type IN [{types_str}]")
 
         where_clause = " AND ".join(where_clauses)

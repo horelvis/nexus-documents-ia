@@ -1,8 +1,8 @@
-# 🧪 Backend Testing Suite - NexusDocs360
+# 🧪 Backend Testing Suite - NouxCubeIA
 
 ## 📋 Resumen
 
-Suite completa de pruebas para el backend de NexusDocs360, incluyendo tests unitarios, de integración, performance y validación del sistema.
+Suite completa de pruebas para el backend de NouxCubeIA, incluyendo tests unitarios, de integración, performance y validación del sistema.
 
 ## 🎯 Tipos de Pruebas
 
@@ -355,8 +355,8 @@ def test_user(db_session, test_tenant):
 
 ### Canales de Comunicación
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/nexusdocs360/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/nexusdocs360/discussions)
+- **Issues**: [GitHub Issues](https://github.com/your-org/nouxcubeia/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/nouxcubeia/discussions)
 - **Slack**: #testing-channel
 
 ### Reportar Problemas
