@@ -744,6 +744,8 @@ services:
       # ClickHouse connection (required for v3)
       - CLICKHOUSE_MIGRATION_URL=clickhouse://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:9000/${LANGFUSE_CLICKHOUSE_DB:-langfuse}
       - CLICKHOUSE_URL=http://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:8123
+      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}
       # Authentication secrets (generate with: openssl rand -base64 32)
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-please-change-this-secret-in-production}
       - SALT=${LANGFUSE_SALT:-please-change-this-salt-in-production}
