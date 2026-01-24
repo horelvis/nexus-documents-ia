@@ -367,6 +367,8 @@ services:
       - CLICKHOUSE_URL=http://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:8123
       - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}
+      # Single-node mode (no Zookeeper/cluster)
+      - CLICKHOUSE_CLUSTER_ENABLED=false
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-please-change-this-secret-in-production}
       - SALT=${LANGFUSE_SALT:-please-change-this-salt-in-production}
       - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
