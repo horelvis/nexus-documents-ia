@@ -68,6 +68,12 @@ python-multipart>=0.0.9  # For Form data handling in FastAPI
 structlog>=23.2.0
 loguru>=0.7.0
 
+# LLM Observability - Langfuse (self-hosted)
+# Tracing, sessions, generations, scores for Emma v2 agent
+# Dashboard: http://localhost:3002
+# Documentation: https://langfuse.com/docs
+langfuse>=2.36.0
+
 # Qwen-Agent Framework
 # Multi-agent orchestration optimized for Qwen models (Qwen3-VL)
 # Features: Function calling, MCP support, Code Interpreter, RAG

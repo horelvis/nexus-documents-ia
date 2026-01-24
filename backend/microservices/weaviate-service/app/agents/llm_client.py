@@ -55,6 +55,8 @@ from typing import (
 
 import httpx
 
+from app.core.langfuse_config import langfuse_context, observe
+
 logger = logging.getLogger(__name__)
 
 
@@ -322,6 +324,7 @@ class LLMClient:
 
         return body
 
+    @observe(as_type="generation", name="llm.chat")
     async def chat(
         self,
         messages: List[Dict[str, Any]],
@@ -342,6 +345,18 @@ class LLMClient:
         client = await self._get_client()
         body = self._build_request_body(messages, tools, stream=False, **kwargs)
 
+        # Update Langfuse with generation details
+        langfuse_context.update_current_observation(
+            input=messages,
+            metadata={
+                "model": self.config.model,
+                "provider": self.config.provider.value,
+                "temperature": kwargs.get("temperature", self.config.temperature),
+                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+                "tools_count": len(tools) if tools else 0,
+            },
+        )
+
         start_time = time.time()
 
         try:
@@ -354,13 +369,40 @@ class LLMClient:
             latency_ms = (time.time() - start_time) * 1000
             data = response.json()
 
-            return LLMResponse.from_openai(data, latency_ms)
+            result = LLMResponse.from_openai(data, latency_ms)
+
+            # Update Langfuse with response details
+            langfuse_context.update_current_observation(
+                output=result.content,
+                metadata={
+                    "finish_reason": result.finish_reason,
+                    "has_tool_calls": result.has_tool_calls,
+                    "tool_calls": [tc.name for tc in result.tool_calls] if result.tool_calls else [],
+                    "latency_ms": latency_ms,
+                },
+                usage={
+                    "input": result.usage.get("prompt_tokens", 0),
+                    "output": result.usage.get("completion_tokens", 0),
+                    "total": result.usage.get("total_tokens", 0),
+                } if result.usage else None,
+                model=result.model or self.config.model,
+            )
+
+            return result
 
         except httpx.HTTPStatusError as e:
             logger.error(f"LLM API error: {e.response.status_code} - {e.response.text}")
+            langfuse_context.update_current_observation(
+                level="ERROR",
+                status_message=f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+            )
             raise
         except httpx.TimeoutException:
             logger.error(f"LLM request timed out after {self.config.timeout}s")
+            langfuse_context.update_current_observation(
+                level="ERROR",
+                status_message=f"Timeout after {self.config.timeout}s",
+            )
             raise
 
     async def chat_stream(
@@ -389,6 +431,29 @@ class LLMClient:
         """
         client = await self._get_client()
         body = self._build_request_body(messages, tools, stream=True, **kwargs)
+
+        # Create a generation span for streaming
+        parent = langfuse_context.get_current_observation()
+        generation = None
+        if parent:
+            try:
+                generation = parent.generation(
+                    name="llm.chat_stream",
+                    input=messages,
+                    metadata={
+                        "model": self.config.model,
+                        "provider": self.config.provider.value,
+                        "streaming": True,
+                        "tools_count": len(tools) if tools else 0,
+                    },
+                    model=self.config.model,
+                )
+                langfuse_context.push_observation(generation)
+            except Exception as e:
+                logger.debug(f"Failed to create generation span: {e}")
+
+        start_time = time.time()
+        total_content = ""
 
         try:
             async with client.stream(
@@ -426,6 +491,22 @@ class LLMClient:
                                     raw_arguments=current_tool_call.get("arguments", ""),
                                 )
                             )
+
+                        # Finalize Langfuse generation
+                        if generation:
+                            latency_ms = (time.time() - start_time) * 1000
+                            try:
+                                generation.update(
+                                    output=accumulated_content,
+                                    metadata={
+                                        "latency_ms": latency_ms,
+                                        "has_tool_calls": current_tool_call is not None,
+                                    },
+                                )
+                                generation.end()
+                            except Exception:
+                                pass
+                            langfuse_context.pop_observation()
 
                         yield StreamEvent(event_type="done")
                         return
@@ -501,12 +582,33 @@ class LLMClient:
 
         except httpx.HTTPStatusError as e:
             logger.error(f"LLM stream error: {e.response.status_code}")
+            if generation:
+                try:
+                    generation.update(level="ERROR", status_message=str(e))
+                    generation.end()
+                except Exception:
+                    pass
+                langfuse_context.pop_observation()
             yield StreamEvent(event_type="error", error=str(e))
         except httpx.TimeoutException:
             logger.error("LLM stream timed out")
+            if generation:
+                try:
+                    generation.update(level="ERROR", status_message="Timeout")
+                    generation.end()
+                except Exception:
+                    pass
+                langfuse_context.pop_observation()
             yield StreamEvent(event_type="error", error="Request timed out")
         except Exception as e:
             logger.error(f"LLM stream error: {e}")
+            if generation:
+                try:
+                    generation.update(level="ERROR", status_message=str(e))
+                    generation.end()
+                except Exception:
+                    pass
+                langfuse_context.pop_observation()
             yield StreamEvent(event_type="error", error=str(e))
 
     async def validate_connection(self) -> tuple[bool, str]:

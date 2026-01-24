@@ -58,6 +58,12 @@ from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 import redis.asyncio as redis
 
+from app.core.langfuse_config import (
+    langfuse_context,
+    observe,
+    score_emma_result,
+    trace_emma_query,
+)
 from .llm_client import (
     LLMClient,
     LLMConfig,
@@ -226,6 +232,7 @@ class EmmaV2:
         self._initialized = True
         logger.info("✅ Emma v2 initialized")
 
+    @observe(name="emma.execute")
     async def execute(
         self,
         query: str,
@@ -250,6 +257,19 @@ class EmmaV2:
         """
         start_time = time.time()
         await self.initialize()
+
+        # Update Langfuse observation with execution context
+        langfuse_context.update_current_observation(
+            session_id=context.thread_id,
+            user_id=context.user_id,
+            metadata={
+                "tenant_id": context.tenant_id,
+                "is_admin": context.is_admin,
+                "sil_enabled": self.config.enable_sil_fast_path,
+                "domain_routing_enabled": self.config.enable_domain_routing,
+            },
+            input={"query": query},
+        )
 
         # Create tool context
         tool_ctx = ToolContext(
@@ -295,8 +315,32 @@ class EmmaV2:
         if context.thread_id:
             await self._save_to_history(context.thread_id, query, result.answer)
 
+        # Step 6: Score the result for Langfuse analytics
+        score_emma_result(
+            tokens_saved=result.tokens_saved,
+            sil_answered=result.sil_answered,
+            iterations=result.iterations,
+            tools_called=result.tools_called,
+            latency_ms=result.latency_ms,
+        )
+
+        # Update Langfuse with output
+        langfuse_context.update_current_observation(
+            output={
+                "answer": result.answer[:500] + "..." if len(result.answer) > 500 else result.answer,
+                "domain": result.domain.value,
+                "sil_answered": result.sil_answered,
+                "tokens_saved": result.tokens_saved,
+            },
+            metadata={
+                "domain": result.domain.value,
+                "skills_used": result.skills_used,
+            },
+        )
+
         return result
 
+    @observe(name="emma.execute_stream")
     async def execute_stream(
         self,
         query: str,
@@ -323,6 +367,18 @@ class EmmaV2:
         """
         start_time = time.time()
         await self.initialize()
+
+        # Update Langfuse observation with execution context
+        langfuse_context.update_current_observation(
+            session_id=context.thread_id,
+            user_id=context.user_id,
+            metadata={
+                "tenant_id": context.tenant_id,
+                "streaming": True,
+                "sil_enabled": self.config.enable_sil_fast_path,
+            },
+            input={"query": query},
+        )
 
         tool_ctx = ToolContext(
             tenant_id=context.tenant_id,
@@ -521,19 +577,43 @@ class EmmaV2:
         """Stream SIL response using LLM for natural formatting."""
         ctx = result.structural_context
 
+        # Get dynamic terminology based on entity type
+        entity_type = getattr(ctx, 'entity_type', 'document')
+        if ctx.details and ctx.details.get('entity_type'):
+            entity_type = ctx.details['entity_type']
+
+        # Get tenant-specific container terms if available
+        custom_singular = ctx.details.get("container_term_singular") if ctx.details else None
+        custom_plural = ctx.details.get("container_term_plural") if ctx.details else None
+
+        # Terminology based on entity type (domain-agnostic)
+        # Folders could be: expedientes, proyectos, clientes, obras, pacientes, etc.
+        if entity_type == "folder":
+            terms = {
+                "singular": custom_singular or "carpeta",
+                "plural": custom_plural or "carpetas"
+            }
+        elif entity_type == "both":
+            terms = {"singular": "elemento", "plural": "elementos"}
+        else:  # document
+            terms = {"singular": "documento", "plural": "documentos"}
+
         # Build structural context for LLM
         context_parts = [
             f"Tipo de consulta: {ctx.query_type}",
-            f"Total de documentos: {ctx.document_count}",
+            f"Tipo de entidad: {terms['plural']}",
+            f"Total de {terms['plural']}: {ctx.document_count}",
         ]
 
         if ctx.query_result:
             if "count" in ctx.query_result:
                 context_parts.append(f"Conteo: {ctx.query_result['count']}")
+            if "entity" in ctx.query_result:
+                context_parts.append(f"Tipo de entidad consultada: {ctx.query_result['entity']}")
 
         if ctx.document_titles:
             titles = ctx.document_titles[:10]
-            context_parts.append("Documentos:\n" + "\n".join(f"  - {t}" for t in titles))
+            context_parts.append(f"{terms['plural'].capitalize()}:\n" + "\n".join(f"  - {t}" for t in titles))
             if ctx.document_count > 10:
                 context_parts.append(f"  ... y {ctx.document_count - 10} más")
 
@@ -542,12 +622,19 @@ class EmmaV2:
 
         structural_context = "\n".join(context_parts)
 
-        system_prompt = """Eres Emma, asistente inteligente de documentos. Responde de forma natural, amigable y conversacional.
+        # Dynamic system prompt based on entity type (domain-agnostic)
+        system_prompt = f"""Eres Emma, asistente inteligente de gestión documental. Responde de forma natural, amigable y conversacional.
+
+IMPORTANTE - TIPO DE ENTIDAD:
+- El usuario está consultando sobre **{terms['plural']}**.
+- Si el tipo es "carpeta" o similar, es una ESTRUCTURA ORGANIZATIVA que agrupa documentos.
+- Si el tipo es "documento", es un ARCHIVO individual con contenido.
 
 INSTRUCCIONES:
 - Usa SOLO la información estructural proporcionada. NO inventes datos.
 - Proporciona respuestas COMPLETAS y DETALLADAS, no solo el número.
-- Incluye contexto relevante: tipos de documentos, ubicaciones, ejemplos si los hay.
+- Usa la terminología exacta que aparece en el contexto: "{terms['singular']}" / "{terms['plural']}".
+- Incluye contexto relevante: ubicaciones, ejemplos si los hay.
 - Ofrece sugerencias de acciones relacionadas.
 - Responde en español con tono profesional pero cercano.
 - La respuesta debe tener entre 2-4 oraciones como mínimo."""
@@ -557,7 +644,7 @@ INSTRUCCIONES:
 Información estructural:
 {structural_context}
 
-Responde de forma completa y útil. No solo des el número, explica qué tipo de documentos son y sugiere qué más podría interesar al usuario."""
+Responde de forma completa y útil usando la terminología del contexto ({terms['plural']}). Sugiere qué más podría interesar al usuario."""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -605,6 +692,7 @@ Responde de forma completa y útil. No solo des el número, explica qué tipo de
                 }
             }
 
+    @observe(name="emma.sil_fast_path")
     async def _try_sil_fast_path(
         self,
         query: str,
@@ -616,6 +704,9 @@ Responde de forma completa y útil. No solo des el número, explica qué tipo de
         Returns result if query is structural (count, list, exists, location).
         Returns None if content-based RAG is needed.
         """
+        langfuse_context.update_current_observation(
+            input={"query": query, "tenant_id": tenant_id}
+        )
         try:
             from app.services.sil.schemas import ReasoningType
 
@@ -666,10 +757,31 @@ Responde de forma completa y útil. No solo des el número, explica qué tipo de
         if not ctx:
             return result.reasoning_explanation or "Consulta procesada."
 
+        # Get dynamic terminology based on entity type
+        entity_type = getattr(ctx, 'entity_type', 'document')
+        if ctx.details and ctx.details.get('entity_type'):
+            entity_type = ctx.details['entity_type']
+
+        # Get tenant-specific container terms if available
+        custom_singular = ctx.details.get("container_term_singular") if ctx.details else None
+        custom_plural = ctx.details.get("container_term_plural") if ctx.details else None
+
+        # Terminology based on entity type (domain-agnostic)
+        # Folders could be: expedientes, proyectos, clientes, obras, pacientes, etc.
+        if entity_type == "folder":
+            singular = custom_singular or "carpeta"
+            plural = custom_plural or "carpetas"
+            terms = {"singular": singular, "plural": plural, "found": f"{plural.capitalize()} encontrados"}
+        elif entity_type == "both":
+            terms = {"singular": "elemento", "plural": "elementos", "found": "Elementos encontrados"}
+        else:  # document
+            terms = {"singular": "documento", "plural": "documentos", "found": "Documentos encontrados"}
+
         # Build structural context for LLM
         context_parts = [
             f"Tipo de consulta: {ctx.query_type}",
-            f"Total de documentos encontrados: {ctx.document_count}",
+            f"Tipo de entidad: {terms['plural']}",
+            f"Total de {terms['plural']} encontrados: {ctx.document_count}",
         ]
 
         # Add query result details
@@ -678,11 +790,13 @@ Responde de forma completa y útil. No solo des el número, explica qué tipo de
                 context_parts.append(f"Conteo exacto: {ctx.query_result['count']}")
             if "exists" in ctx.query_result:
                 context_parts.append(f"Existe: {'Sí' if ctx.query_result['exists'] else 'No'}")
+            if "entity" in ctx.query_result:
+                context_parts.append(f"Tipo de entidad consultada: {ctx.query_result['entity']}")
 
-        # Add document titles (max 10)
+        # Add titles (max 10)
         if ctx.document_titles:
             titles = ctx.document_titles[:10]
-            context_parts.append(f"Documentos encontrados:\n" + "\n".join(f"  - {t}" for t in titles))
+            context_parts.append(f"{terms['found']}:\n" + "\n".join(f"  - {t}" for t in titles))
             if ctx.document_count > 10:
                 context_parts.append(f"  ... y {ctx.document_count - 10} más")
 
@@ -693,19 +807,25 @@ Responde de forma completa y útil. No solo des el número, explica qué tipo de
         # Add types breakdown if available
         if hasattr(ctx, 'types_breakdown') and ctx.types_breakdown:
             types_str = ", ".join(f"{k}: {v}" for k, v in ctx.types_breakdown.items())
-            context_parts.append(f"Tipos de documento: {types_str}")
+            context_parts.append(f"Tipos: {types_str}")
 
         structural_context = "\n".join(context_parts)
 
-        # Prompt for LLM interpretation (~200-400 tokens input)
-        system_prompt = """Eres Emma, asistente inteligente de documentos. Responde de forma natural, amigable y conversacional.
+        # Dynamic system prompt based on entity type (domain-agnostic)
+        system_prompt = f"""Eres Emma, asistente inteligente de gestión documental. Responde de forma natural, amigable y conversacional.
+
+IMPORTANTE - TIPO DE ENTIDAD:
+- El usuario está consultando sobre **{terms['plural']}**.
+- Si el tipo es "carpeta" o similar, es una ESTRUCTURA ORGANIZATIVA que agrupa documentos.
+- Si el tipo es "documento", es un ARCHIVO individual con contenido.
 
 INSTRUCCIONES:
 - Usa SOLO la información estructural proporcionada. NO inventes datos.
 - Proporciona respuestas COMPLETAS y DETALLADAS, no solo el número.
-- Incluye contexto relevante: tipos de documentos, ubicaciones, fechas si están disponibles.
-- Si hay documentos listados, menciona algunos ejemplos representativos.
-- Ofrece sugerencias de acciones relacionadas (buscar más específico, filtrar por tipo, etc.).
+- Usa la terminología exacta que aparece en el contexto: "{terms['singular']}" / "{terms['plural']}".
+- Incluye contexto relevante: ubicaciones, fechas si están disponibles.
+- Si hay {terms['plural']} listados, menciona algunos ejemplos representativos.
+- Ofrece sugerencias de acciones relacionadas.
 - Responde en español con tono profesional pero cercano.
 - La respuesta debe tener entre 2-4 oraciones como mínimo."""
 
@@ -714,7 +834,7 @@ INSTRUCCIONES:
 Información estructural obtenida:
 {structural_context}
 
-Responde de forma completa y útil basándote en esta información. No solo des el número, explica qué tipo de documentos son, dónde están ubicados si lo sabes, y sugiere qué más podría querer saber el usuario."""
+Responde de forma completa y útil basándote en esta información. Usa la terminología del contexto ({terms['plural']}) y sugiere qué más podría querer saber el usuario."""
 
         try:
             # Use LLM for natural interpretation
@@ -737,9 +857,32 @@ Responde de forma completa y útil basándote en esta información. No solo des 
 
     def _format_sil_answer_fallback(self, ctx, result) -> str:
         """Fallback template-based formatting if LLM fails."""
-        if ctx.query_type == "count":
+        # Get dynamic terminology based on entity type
+        entity_type = getattr(ctx, 'entity_type', 'document')
+        if ctx.details and ctx.details.get('entity_type'):
+            entity_type = ctx.details['entity_type']
+
+        # Get tenant-specific container terms if available
+        custom_singular = ctx.details.get("container_term_singular") if ctx.details else None
+        custom_plural = ctx.details.get("container_term_plural") if ctx.details else None
+
+        # Terminology based on entity type (domain-agnostic)
+        if entity_type == "folder":
+            singular = custom_singular or "carpeta"
+            plural = custom_plural or "carpetas"
+        elif entity_type == "both":
+            singular, plural = "elemento", "elementos"
+        else:  # document
+            singular, plural = "documento", "documentos"
+
+        # Handle folder-specific query types
+        if ctx.query_type in ("folder_count", "folder_list", "folder_exists", "folder_contents"):
+            singular = custom_singular or "carpeta"
+            plural = custom_plural or "carpetas"
+
+        if ctx.query_type in ("count", "folder_count"):
             count = ctx.query_result.get("count", ctx.document_count) if ctx.query_result else ctx.document_count
-            response = f"Tienes **{count} documento(s)** en tu repositorio."
+            response = f"Tienes **{count} {plural if count != 1 else singular}** en tu repositorio."
 
             # Add type breakdown if available
             if hasattr(ctx, 'types_breakdown') and ctx.types_breakdown:
@@ -750,33 +893,45 @@ Responde de forma completa y útil basándote en esta información. No solo des 
             if ctx.folder_hierarchy:
                 response += f" Están organizados principalmente en: {ctx.folder_hierarchy[0]}."
 
-            response += " ¿Te gustaría que busque algún tipo específico de documento?"
+            response += f" ¿Te gustaría que busque algún tipo específico de {singular}?"
             return response
 
-        if ctx.query_type == "exists":
+        if ctx.query_type in ("exists", "folder_exists"):
             exists = ctx.query_result.get("exists", ctx.document_count > 0) if ctx.query_result else ctx.document_count > 0
             if exists:
-                response = f"Sí, encontré **{ctx.document_count} documento(s)** que coinciden con tu búsqueda."
+                response = f"Sí, encontré **{ctx.document_count} {plural if ctx.document_count != 1 else singular}** que coinciden con tu búsqueda."
                 if ctx.document_titles:
                     sample = ctx.document_titles[:3]
                     response += f" Por ejemplo: {', '.join(sample)}."
                 response += " ¿Necesitas más detalles sobre alguno?"
                 return response
-            return "No encontré documentos que coincidan con tu búsqueda. ¿Podrías reformular la consulta o ser más específico?"
+            return f"No encontré {plural} que coincidan con tu búsqueda. ¿Podrías reformular la consulta o ser más específico?"
 
-        if ctx.query_type == "list" and ctx.document_titles:
+        if ctx.query_type in ("list", "folder_list") and ctx.document_titles:
             titles = ctx.document_titles[:10]
             titles_str = "\n".join(f"• {t}" for t in titles)
             more = f"\n... y **{ctx.document_count - 10} más**" if ctx.document_count > 10 else ""
-            response = f"Encontré **{ctx.document_count} documento(s)**:\n\n{titles_str}{more}"
-            response += "\n\n¿Te gustaría que analice alguno de estos documentos?"
+            response = f"Encontré **{ctx.document_count} {plural if ctx.document_count != 1 else singular}**:\n\n{titles_str}{more}"
+            if entity_type == "folder":
+                response += f"\n\n¿Te gustaría ver el contenido de alguno de estos {plural}?"
+            else:
+                response += f"\n\n¿Te gustaría que analice alguno de estos {plural}?"
+            return response
+
+        if ctx.query_type == "folder_contents":
+            folder_name = ctx.query_result.get("folder_name", "") if ctx.query_result else ""
+            response = f"El expediente **{folder_name}** contiene **{ctx.document_count} documento(s)**."
+            if ctx.document_titles:
+                sample = ctx.document_titles[:5]
+                response += f" Incluye: {', '.join(sample)}."
+            response += " ¿Necesitas más detalles sobre algún documento?"
             return response
 
         if ctx.query_type == "location" and ctx.folder_hierarchy:
             path = " → ".join(ctx.folder_hierarchy)
-            return f"Los documentos están ubicados en: **{path}**. ¿Necesitas explorar esta carpeta o buscar algo específico dentro?"
+            return f"Los {plural} están ubicados en: **{path}**. ¿Necesitas explorar esta carpeta o buscar algo específico dentro?"
 
-        return result.reasoning_explanation or f"Encontré **{ctx.document_count} documento(s)** en tu repositorio. ¿En qué puedo ayudarte?"
+        return result.reasoning_explanation or f"Encontré **{ctx.document_count} {plural if ctx.document_count != 1 else singular}** en tu repositorio. ¿En qué puedo ayudarte?"
 
     async def _build_messages(
         self,
@@ -850,6 +1005,7 @@ Responde de forma completa y útil basándote en esta información. No solo des 
 
         return messages
 
+    @observe(name="emma.agentic_loop")
     async def _agentic_loop(
         self,
         messages: List[Dict[str, Any]],
@@ -863,6 +1019,12 @@ Responde de forma completa y útil basándote en esta información. No solo des 
         1. LLM returns a response without tool calls
         2. Maximum iterations reached
         """
+        langfuse_context.update_current_observation(
+            metadata={
+                "domain": domain.value,
+                "max_iterations": self.config.max_iterations,
+            }
+        )
         tools_called = []
 
         for iteration in range(self.config.max_iterations):
@@ -871,6 +1033,14 @@ Responde de forma completa y útil basándote en esta información. No solo des 
 
             # If no tool calls, we're done
             if not response.has_tool_calls:
+                # Update Langfuse with final output
+                langfuse_context.update_current_observation(
+                    output={
+                        "answer": response.content[:500] + "..." if len(response.content) > 500 else response.content,
+                        "iterations": iteration + 1,
+                        "tools_called": tools_called,
+                    }
+                )
                 return EmmaV2Result(
                     success=True,
                     answer=response.content,

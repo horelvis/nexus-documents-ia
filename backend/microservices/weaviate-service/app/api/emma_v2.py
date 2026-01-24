@@ -29,6 +29,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.core.langfuse_config import (
+    flush_langfuse,
+    langfuse_context,
+    score_emma_result,
+    trace_context,
+    trace_emma_query,
+)
 from app.core.security import verify_api_key
 from app.agents.emma_v2 import (
     EmmaV2,
@@ -159,40 +166,66 @@ async def emma_v2_query(
             detail="Emma v2 is not enabled. Set EMMA_V2_ENABLED=true",
         )
 
-    try:
-        emma = await get_emma_v2()
+    # Build context
+    thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
 
-        # Build context
-        thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
-        context = ExecutionContext(
-            tenant_id=query.tenant_id,
-            user_id=query.user_id,
-            thread_id=thread_id,
-        )
+    # Create Langfuse trace for this query
+    with trace_context(
+        name="emma.query",
+        session_id=thread_id,
+        user_id=query.user_id,
+        metadata={
+            "tenant_id": query.tenant_id,
+            "sil_enabled": query.enable_sil,
+            "domain_routing_enabled": query.enable_domain_routing,
+        },
+        input={"query": query.query},
+        tags=["emma-v2", "api"],
+    ) as trace:
+        try:
+            emma = await get_emma_v2()
 
-        # Configure Emma based on request
-        emma.config.enable_sil_fast_path = query.enable_sil
-        emma.config.enable_domain_routing = query.enable_domain_routing
+            context = ExecutionContext(
+                tenant_id=query.tenant_id,
+                user_id=query.user_id,
+                thread_id=thread_id,
+            )
 
-        # Execute query
-        result = await emma.execute(query.query, context)
+            # Configure Emma based on request
+            emma.config.enable_sil_fast_path = query.enable_sil
+            emma.config.enable_domain_routing = query.enable_domain_routing
 
-        return EmmaV2Response(
-            success=result.success,
-            answer=result.answer,
-            domain=result.domain.value,
-            tools_called=result.tools_called,
-            iterations=result.iterations,
-            sil_answered=result.sil_answered,
-            tokens_saved=result.tokens_saved,
-            latency_ms=result.latency_ms,
-            thread_id=result.thread_id,
-            metadata=result.metadata,
-        )
+            # Execute query
+            result = await emma.execute(query.query, context)
 
-    except Exception as e:
-        logger.error(f"Emma v2 query error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+            # Update trace with output
+            if trace:
+                trace.update(
+                    output={
+                        "answer": result.answer[:500] + "..." if len(result.answer) > 500 else result.answer,
+                        "domain": result.domain.value,
+                        "sil_answered": result.sil_answered,
+                    }
+                )
+
+            return EmmaV2Response(
+                success=result.success,
+                answer=result.answer,
+                domain=result.domain.value,
+                tools_called=result.tools_called,
+                iterations=result.iterations,
+                sil_answered=result.sil_answered,
+                tokens_saved=result.tokens_saved,
+                latency_ms=result.latency_ms,
+                thread_id=result.thread_id,
+                metadata=result.metadata,
+            )
+
+        except Exception as e:
+            logger.error(f"Emma v2 query error: {e}", exc_info=True)
+            if trace:
+                trace.update(level="ERROR", status_message=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/query/stream")
@@ -236,10 +269,48 @@ async def emma_v2_query_stream(
         )
 
     async def generate_sse() -> AsyncGenerator[str, None]:
-        try:
-            emma = await get_emma_v2()
+        """
+        Generate SSE events, transforming Emma v2 internal events to frontend format.
 
-            thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
+        Emma v2 internal → Frontend expected:
+        - content → token (with text field)
+        - thinking → progress (with stage='thinking')
+        - tool_call → delegation (with tool field)
+        - tool_result → step_complete
+        - done → complete (with answer, success, tools_used)
+        - error → error
+        """
+        thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
+
+        # Create Langfuse trace for this streaming query
+        trace = trace_emma_query(
+            query=query.query,
+            tenant_id=query.tenant_id,
+            user_id=query.user_id,
+            thread_id=thread_id,
+        )
+        if trace:
+            trace.update(metadata={"streaming": True})
+            langfuse_context.push_observation(trace)
+
+        try:
+            logger.info(f"[Emma v2 Stream] Starting for tenant={query.tenant_id}, query={query.query[:50]}...")
+
+            # Send start event
+            yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis...', 'progress': 0})}\n\n"
+            await asyncio.sleep(0)
+
+            try:
+                emma = await get_emma_v2()
+                logger.info("[Emma v2 Stream] Emma instance created")
+            except Exception as init_err:
+                logger.error(f"[Emma v2 Stream] Failed to create Emma instance: {init_err}")
+                yield f"event: error\ndata: {json.dumps({'error': f'Error inicializando Emma: {str(init_err)}'})}\n\n"
+                return
+
+            yield f"event: progress\ndata: {json.dumps({'message': 'Emma inicializada...', 'stage': 'init', 'progress': 5})}\n\n"
+            await asyncio.sleep(0)
+
             context = ExecutionContext(
                 tenant_id=query.tenant_id,
                 user_id=query.user_id,
@@ -249,19 +320,124 @@ async def emma_v2_query_stream(
             emma.config.enable_sil_fast_path = query.enable_sil
             emma.config.enable_domain_routing = query.enable_domain_routing
 
-            async for event in emma.execute_stream(query.query, context):
-                event_type = event.get("type", "message")
-                event_data = {k: v for k, v in event.items() if k != "type"}
+            # Send progress event
+            yield f"event: progress\ndata: {json.dumps({'message': 'Procesando consulta...', 'stage': 'context_preparation', 'progress': 10})}\n\n"
+            await asyncio.sleep(0)
 
-                sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                yield sse_message
+            logger.info(f"[Emma v2 Stream] Starting execute_stream loop (SIL={query.enable_sil})")
+            event_count = 0
+            has_complete = False
 
-                # Force immediate flush
-                await asyncio.sleep(0)
+            try:
+                async for event in emma.execute_stream(query.query, context):
+                    event_count += 1
+                    event_type = event.get("type", "message")
+                    logger.debug(f"[Emma v2 Stream] Event {event_count}: {event_type}")
+
+                    # Transform events to frontend expected format
+                    if event_type == "content":
+                        # content → token (text streaming)
+                        frontend_data = {
+                            "text": event.get("content", ""),
+                            "token": event.get("content", ""),
+                        }
+                        yield f"event: token\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "thinking":
+                        # thinking → progress with stage
+                        frontend_data = {
+                            "message": "Razonando...",
+                            "stage": "thinking",
+                            "text": event.get("content", ""),
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_call":
+                        # tool_call → delegation
+                        tool_name = event.get("name", "unknown")
+                        frontend_data = {
+                            "tool": tool_name,
+                            "message": f"Ejecutando {tool_name}...",
+                            "stage": "searching" if "search" in tool_name.lower() else "analyzing",
+                            "process_info": event.get("process_info", {}),
+                        }
+                        yield f"event: delegation\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_result":
+                        # tool_result → step_complete
+                        tool_name = event.get("name", "unknown")
+                        frontend_data = {
+                            "tool": tool_name,
+                            "message": f"{tool_name} completado",
+                            "process_info": event.get("process_info", {}),
+                        }
+                        yield f"event: step_complete\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "done":
+                        # done → complete
+                        has_complete = True
+                        result = event.get("result", {})
+                        frontend_data = {
+                            "success": result.get("success", True),
+                            "answer": result.get("answer", ""),
+                            "tools_used": result.get("tools_called", []),
+                            "execution_time_ms": result.get("latency_ms", 0),
+                            "session_id": result.get("thread_id", thread_id),
+                            "process_info": result.get("process_info", {}),
+                            "final_result": result,
+                        }
+                        yield f"event: complete\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "error":
+                        # error stays as error
+                        frontend_data = {"error": event.get("error", "Unknown error")}
+                        yield f"event: error\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    else:
+                        # Unknown event types → progress
+                        event_data = {k: v for k, v in event.items() if k != "type"}
+                        event_data["message"] = event_data.get("message", f"Procesando ({event_type})...")
+                        yield f"event: progress\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                    # Force immediate flush after each event
+                    await asyncio.sleep(0)
+
+                # After loop: Check if we got events
+                logger.info(f"[Emma v2 Stream] Loop finished with {event_count} events, has_complete={has_complete}")
+                if event_count == 0:
+                    logger.warning("[Emma v2 Stream] No events received from execute_stream!")
+                    if trace:
+                        trace.update(level="WARNING", status_message="No events received")
+                    yield f"event: error\ndata: {json.dumps({'error': 'No se recibieron eventos del procesamiento'})}\n\n"
+                elif not has_complete:
+                    logger.warning("[Emma v2 Stream] Stream ended without 'done' event")
+
+                # Finalize trace on success
+                if trace and has_complete:
+                    trace.update(
+                        output={"event_count": event_count, "completed": has_complete}
+                    )
+
+            except Exception as stream_err:
+                import traceback
+                error_details = traceback.format_exc()
+                logger.error(f"[Emma v2 Stream] Error in execute_stream: {stream_err}\n{error_details}")
+                if trace:
+                    trace.update(level="ERROR", status_message=str(stream_err))
+                yield f"event: error\ndata: {json.dumps({'error': f'Error en procesamiento: {str(stream_err)}'})}\n\n"
 
         except Exception as e:
-            logger.error(f"Emma v2 stream error: {e}", exc_info=True)
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Emma v2 stream error: {e}\n{error_details}")
+            if trace:
+                trace.update(level="ERROR", status_message=str(e))
+            yield f"event: error\ndata: {json.dumps({'error': str(e), 'details': error_details[:500]})}\n\n"
+        finally:
+            # Cleanup: pop trace from context and flush
+            if trace:
+                langfuse_context.pop_observation()
+                flush_langfuse()
 
     return StreamingResponse(
         generate_sse(),

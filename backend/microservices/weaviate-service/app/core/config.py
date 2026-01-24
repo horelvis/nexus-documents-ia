@@ -329,6 +329,24 @@ class Settings(BaseSettings):
         "true" if DEBUG_DEFAULT else "false"
     ).lower() == "true"
 
+    # ==========================================================================
+    # Langfuse Observability (LLM Tracing & Analytics)
+    # ==========================================================================
+    # Self-hosted LLM observability platform for monitoring Emma v2 agent
+    # Dashboard: http://localhost:3002
+    # Docs: https://langfuse.com/docs
+    langfuse_enabled: bool = os.getenv("LANGFUSE_ENABLED", "true").lower() == "true"
+    langfuse_host: str = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
+    langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+    # Batching settings for performance
+    langfuse_flush_at: int = int(os.getenv("LANGFUSE_FLUSH_AT", "10"))  # Flush after N events
+    langfuse_flush_interval: float = float(os.getenv("LANGFUSE_FLUSH_INTERVAL", "5"))  # Flush every N seconds
+    # Sampling (1.0 = trace all requests, 0.1 = 10% sampling)
+    langfuse_sample_rate: float = float(os.getenv("LANGFUSE_SAMPLE_RATE", "1.0"))
+    # Debug mode (verbose logging)
+    langfuse_debug: bool = os.getenv("LANGFUSE_DEBUG", "false").lower() == "true"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

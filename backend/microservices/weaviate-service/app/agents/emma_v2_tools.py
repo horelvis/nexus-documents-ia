@@ -34,8 +34,11 @@ Architecture:
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
+
+from app.core.langfuse_config import langfuse_context, observe
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +88,18 @@ Returns document list with titles, snippets, and relevance scores.""",
 
 READ_DOCUMENT_TOOL = {
     "name": "read_document",
-    "description": """Read the full content of a specific document by its ID.
+    "description": """Read the full content of a specific DOCUMENT (file) by its ID.
 Use this AFTER search when you need to examine document contents in detail.
-Returns the complete text content of the document.""",
+Returns the complete text content of the document.
+
+IMPORTANT: This tool is for DOCUMENTS (files like PDFs, Word docs), NOT for folders/containers.
+For folders, projects, clients, or other container structures, use 'sil_query' instead.""",
     "parameters": {
         "type": "object",
         "properties": {
             "document_id": {
                 "type": "string",
-                "description": "The unique identifier of the document to read"
+                "description": "The unique identifier of the document (file) to read"
             },
             "include_metadata": {
                 "type": "boolean",
@@ -134,16 +140,29 @@ Can analyze contracts, identify risks, extract obligations, etc.""",
 
 SIL_QUERY_TOOL = {
     "name": "sil_query",
-    "description": """Query the Structural Intelligence Layer for document metadata and relationships.
-Use this for structural questions like counts, locations, and relationships.
-Examples: "How many contracts?", "Where is the ACME contract?", "Documents from 2024"
+    "description": """Query the Structural Intelligence Layer for documents, folders, and their relationships.
+Use this for:
+- Structural questions: counts, locations, relationships
+- Folders/containers: "Show folder X", "What's in project Y?", "List all clients"
+- Document listings: "Documents from 2024", "Contracts for client ACME"
+
+IMPORTANT: Use this tool for CONTAINERS (folders, projects, clients, cases, etc.), NOT read_document.
+Containers are organizational structures that hold documents, not documents themselves.
+The specific terminology varies by organization (expedientes, proyectos, clientes, obras, etc.)
+
+Examples:
+- "How many [folders/projects/clients] in 2006?" → sil_query
+- "Show [folder/project/client] ABC-123" → sil_query
+- "What documents are in [folder/project] X?" → sil_query
+- "Where is contract Y?" → sil_query
+
 This tool can answer WITHOUT reading document content, making it very fast.""",
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Natural language query about document structure/metadata"
+                "description": "Natural language query about documents, folders/containers, or structure"
             },
             "include_content_preview": {
                 "type": "boolean",
@@ -304,12 +323,62 @@ async def execute_tool(
             error=f"Unknown tool: {tool_name}",
         )
 
+    # Create a span for this tool execution
+    parent = langfuse_context.get_current_observation()
+    span = None
+    if parent:
+        try:
+            span = parent.span(
+                name=f"tool.{tool_name}",
+                input=arguments,
+                metadata={
+                    "tenant_id": context.tenant_id,
+                    "user_id": context.user_id,
+                },
+            )
+            langfuse_context.push_observation(span)
+        except Exception as e:
+            logger.debug(f"Failed to create tool span: {e}")
+
+    start_time = time.time()
+
     try:
         executor = _tool_executors[tool_name]
         result = await executor(arguments, context)
+
+        # Update span with result
+        if span:
+            latency_ms = (time.time() - start_time) * 1000
+            try:
+                span.update(
+                    output=result.data if result.success else {"error": result.error},
+                    metadata={
+                        "success": result.success,
+                        "latency_ms": latency_ms,
+                    },
+                    level="ERROR" if not result.success else "DEFAULT",
+                )
+                span.end()
+            except Exception:
+                pass
+            langfuse_context.pop_observation()
+
         return result
     except Exception as e:
         logger.error(f"Tool execution error ({tool_name}): {e}", exc_info=True)
+
+        # Update span with error
+        if span:
+            try:
+                span.update(
+                    level="ERROR",
+                    status_message=str(e),
+                )
+                span.end()
+            except Exception:
+                pass
+            langfuse_context.pop_observation()
+
         return ToolResult(
             success=False,
             data=None,
@@ -539,10 +608,17 @@ async def execute_sil_query(args: Dict[str, Any], ctx: ToolContext) -> ToolResul
         # Include structural context
         if result.structural_context:
             ctx_data = result.structural_context
+            # Get entity type (folder, document, or both)
+            entity_type = getattr(ctx_data, 'entity_type', 'document')
+            if ctx_data.details and ctx_data.details.get('entity_type'):
+                entity_type = ctx_data.details['entity_type']
+
             response_data["structural_context"] = {
                 "query_type": ctx_data.query_type,
+                "entity_type": entity_type,  # folder, document, or both
                 "document_count": ctx_data.document_count,
                 "document_titles": ctx_data.document_titles[:10],
+                "folder_hierarchy": ctx_data.folder_hierarchy,
                 "result": ctx_data.query_result,
             }
 

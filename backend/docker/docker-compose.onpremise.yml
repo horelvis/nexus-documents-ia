@@ -11,6 +11,7 @@
 #   - weaviate-service: RAG pipeline + SIL (Structural Intelligence Layer)
 #   - vllm: GPU inference for LLM
 #   - api: Main backend API (optional, for UI integration)
+#   - langfuse: LLM observability & tracing (http://localhost:3002)
 
 services:
   # =============================================================================
@@ -203,6 +204,14 @@ services:
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
       - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
+      # Langfuse Observability Configuration (Emma v2 agent tracing)
+      # Dashboard: http://localhost:3002
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-true}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_FLUSH_AT=${LANGFUSE_FLUSH_AT:-10}
+      - LANGFUSE_FLUSH_INTERVAL=${LANGFUSE_FLUSH_INTERVAL:-5}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
     volumes:
@@ -335,6 +344,78 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # =============================================================================
+  # Langfuse - LLM Observability & Tracing (Self-Hosted)
+  # =============================================================================
+  # Open source LLM observability platform for monitoring Emma v2 agent
+  # Dashboard: http://localhost:3002
+  # Docs: https://langfuse.com/docs/self-hosting
+  langfuse:
+    image: langfuse/langfuse:latest
+    ports:
+      - "3002:3000"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+    networks:
+      - backend-network
+    environment:
+      - DATABASE_URL=postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse}
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:9000/${LANGFUSE_CLICKHOUSE_DB:-langfuse}
+      - CLICKHOUSE_URL=http://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:8123
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-please-change-this-secret-in-production}
+      - SALT=${LANGFUSE_SALT:-please-change-this-salt-in-production}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      - NEXTAUTH_URL=${LANGFUSE_URL:-http://localhost:3002}
+      - TELEMETRY_ENABLED=${LANGFUSE_TELEMETRY:-false}
+      - NEXT_PUBLIC_SIGN_UP_DISABLED=${LANGFUSE_SIGNUP_DISABLED:-false}
+      - LOG_LEVEL=${LANGFUSE_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${LANGFUSE_DB_NAME:-langfuse}
+      - POSTGRES_USER=${LANGFUSE_DB_USER:-langfuse}
+      - POSTGRES_PASSWORD=${LANGFUSE_DB_PASSWORD:-langfuse}
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-langfuse} -d ${LANGFUSE_DB_NAME:-langfuse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    environment:
+      - CLICKHOUSE_DB=${LANGFUSE_CLICKHOUSE_DB:-langfuse}
+      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
 networks:
   backend-network:
     driver: bridge
@@ -346,3 +427,5 @@ volumes:
   vllm_cache:
   huggingface_cache:
   keycloak_data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
