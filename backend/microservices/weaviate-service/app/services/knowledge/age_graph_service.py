@@ -280,6 +280,56 @@ class AGEKnowledgeGraphService:
             logger.error(f"Cypher query failed: {e}\nQuery: {cypher_query}")
             raise
 
+    async def execute_cypher(self, sql_query: str) -> List[Dict[str, Any]]:
+        """
+        Execute a raw SQL query with embedded Cypher and return results.
+
+        This is the public API for executing arbitrary Cypher queries.
+        The query should be a complete SQL statement with the cypher() function call.
+
+        Example:
+            result = await graph.execute_cypher('''
+                SELECT * FROM cypher('knowledge_graph', $$
+                    MATCH (n:entity) RETURN n.name as name, count(n) as cnt
+                $$) as (name agtype, cnt agtype)
+            ''')
+
+        Args:
+            sql_query: Complete SQL query with embedded Cypher
+
+        Returns:
+            List of result dictionaries with column names as keys
+        """
+        async with self._get_connection() as conn:
+            try:
+                rows = await conn.fetch(sql_query)
+                results = []
+
+                for row in rows:
+                    result = {}
+                    # Use column names from the query result
+                    for col_name in row.keys():
+                        value = row[col_name]
+                        if value is not None:
+                            # Parse agtype JSON
+                            if isinstance(value, str):
+                                try:
+                                    parsed = json.loads(value)
+                                    result[col_name] = parsed
+                                except json.JSONDecodeError:
+                                    result[col_name] = value
+                            else:
+                                result[col_name] = value
+                        else:
+                            result[col_name] = None
+                    results.append(result)
+
+                return results
+
+            except Exception as e:
+                logger.error(f"Cypher query failed: {e}\nQuery: {sql_query}")
+                raise
+
     async def add_entity(
         self,
         tenant_id: str,

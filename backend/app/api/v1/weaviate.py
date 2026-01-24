@@ -115,6 +115,102 @@ async def emma_health():
     return await weaviate_client.emma_health()
 
 
+# ============================================================================
+# EMMA V2 ENDPOINTS (New architecture with SIL integration)
+# ============================================================================
+
+@router.post("/emma/v2/query")
+async def emma_v2_query(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Proxy Emma v2 queries to Weaviate service with ACL context.
+
+    Emma v2 features:
+    - SIL fast path for structural queries (70-90% token savings)
+    - Domain-specific dynamic prompts
+    - Improved expedientes/folder counting
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        body["is_admin"] = current_user.is_admin
+
+        logger.debug(f"🧠 Emma v2 query with ACL: user={current_user.id}, admin={body['is_admin']}")
+
+        return await weaviate_client.emma_v2_query(body)
+    except HTTPClientError as e:
+        logger.error(f"❌ Emma v2 service error: {e}")
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        logger.error("⏱️ Emma v2 service timeout")
+        raise HTTPException(status_code=504, detail="Emma v2 service timeout")
+    except Exception as e:
+        logger.error(f"❌ Emma v2 proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emma/v2/query/stream")
+async def emma_v2_query_stream(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Proxy Emma v2 streaming queries to Weaviate service with ACL context.
+
+    Returns Server-Sent Events (SSE) with progress updates during analysis.
+    Emma v2 includes SIL integration for structural queries.
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
+        body["is_admin"] = current_user.is_admin
+
+        async def stream_sse() -> AsyncGenerator[bytes, None]:
+            """Stream SSE events from Weaviate service to client."""
+            import asyncio
+            async with weaviate_client.stream_client(timeout=300.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{weaviate_client.base_url}/emma/v2/query/stream",
+                    json=body,
+                    headers={
+                        **weaviate_client.get_stream_headers(),
+                        "Content-Type": "application/json",
+                    },
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"❌ Emma v2 stream error: {response.status_code} - {error_text}")
+                        yield f"event: error\ndata: {{\"error\": \"Service error: {response.status_code}\"}}\n\n".encode()
+                        return
+
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+                        await asyncio.sleep(0)
+
+        return StreamingResponse(
+            stream_sse(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Emma v2 stream proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/emma/tools")
 async def emma_list_tools():
     """List available Emma AI tools"""

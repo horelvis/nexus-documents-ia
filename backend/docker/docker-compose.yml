@@ -623,7 +623,18 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # API Key for podcast-service config (uses PODCAST_ prefix)
+      - PODCAST_API_KEY=${MICROSERVICES_API_KEY}
       # vLLM for script generation
+      - PODCAST_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - PODCAST_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      # TTS Service URL (with prefix for config.py)
+      - PODCAST_TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
+      # Storage service URL
+      - PODCAST_STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8000}
+      # Main API for status updates
+      - PODCAST_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
+      # Legacy env vars (without prefix)
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
       - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}
       # TTS Service for audio synthesis

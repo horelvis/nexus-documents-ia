@@ -351,14 +351,23 @@ class PreLLMReasoningEngine:
         - FOLDER_CONTENTS: "What's in expediente X?"
         - FOLDER_BROWSE: "Show me the folder structure"
         """
+        # Get tenant-specific container terminology (learned from data)
+        from app.services.tenant_knowledge_service import tenant_knowledge_service
+        try:
+            singular, plural = await tenant_knowledge_service.get_primary_container_terminology(tenant_id)
+        except Exception:
+            singular, plural = "carpeta", "carpetas"
+
         # Build and execute Cypher query for folders
         cypher_query = self._builder.build_query(intent, tenant_id)
         cypher_result = await self._execute_cypher(cypher_query, tenant_id)
 
-        # Build folder-specific context
+        # Build folder-specific context with learned terminology
         structural_context = self._build_folder_context(
             intent=intent,
             cypher_result=cypher_result,
+            container_singular=singular,
+            container_plural=plural,
         )
 
         # For FOLDER_CONTENTS, we might need to include document info
@@ -385,9 +394,20 @@ class PreLLMReasoningEngine:
         self,
         intent: Intent,
         cypher_result: CypherQueryResult,
+        container_singular: str = "carpeta",
+        container_plural: str = "carpetas",
     ) -> StructuralContext:
         """Build context specifically for folder queries."""
         context = StructuralContext()
+        # Set entity_type for dynamic terminology in to_context_string()
+        context.entity_type = "folder"
+
+        # Store learned terminology for downstream use
+        context.details = {
+            "entity_type": "folder",
+            "container_term_singular": container_singular,
+            "container_term_plural": container_plural,
+        }
 
         # Determine query type based on intent
         intent_type = _get_enum_value(intent.type)
@@ -395,17 +415,17 @@ class PreLLMReasoningEngine:
         if intent.type == IntentType.FOLDER_COUNT:
             context.query_type = "folder_count"
             if cypher_result.count is not None:
-                context.query_result = {"count": cypher_result.count, "entity": "expedientes"}
+                context.query_result = {"count": cypher_result.count, "entity": container_plural}
             elif cypher_result.rows and "total" in cypher_result.rows[0]:
-                context.query_result = {"count": cypher_result.rows[0]["total"], "entity": "expedientes"}
+                context.query_result = {"count": cypher_result.rows[0]["total"], "entity": container_plural}
             else:
-                context.query_result = {"count": cypher_result.row_count, "entity": "expedientes"}
+                context.query_result = {"count": cypher_result.row_count, "entity": container_plural}
 
         elif intent.type == IntentType.FOLDER_LIST:
             context.query_type = "folder_list"
             context.query_result = {
                 "count": cypher_result.row_count,
-                "entity": "expedientes",
+                "entity": container_plural,
                 "items": cypher_result.rows[:20],
             }
 
@@ -417,7 +437,7 @@ class PreLLMReasoningEngine:
             context.query_result = {
                 "exists": exists,
                 "count": cypher_result.row_count,
-                "entity": "expediente",
+                "entity": container_singular,
             }
 
         elif intent.type == IntentType.FOLDER_CONTENTS:
@@ -463,12 +483,12 @@ class PreLLMReasoningEngine:
 
         context.folder_hierarchy = list(set(folder_paths))[:10]
 
-        # Store folder details
-        context.details = {
+        # Merge folder details into existing details (preserve terminology!)
+        # IMPORTANT: Don't overwrite - context.details already has container_term_* from earlier
+        context.details.update({
             "folder_names": list(set(folder_names))[:10],
-            "entity_type": "folder",
             "intent_type": intent_type,
-        }
+        })
 
         return context
 

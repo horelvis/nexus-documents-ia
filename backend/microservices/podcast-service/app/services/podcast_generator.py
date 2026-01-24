@@ -333,7 +333,10 @@ class PodcastGenerator:
             "storage_healthy": False,
         }
 
-        # Check vLLM
+        # Headers for authenticated services
+        auth_headers = {"X-API-Key": settings.api_key} if settings.api_key else {}
+
+        # Check vLLM (no auth required)
         try:
             response = await self.client.get(
                 f"{settings.vllm_base_url}/models",
@@ -343,20 +346,22 @@ class PodcastGenerator:
         except Exception:
             pass
 
-        # Check TTS
+        # Check TTS (requires API key)
         try:
             response = await self.client.get(
                 f"{settings.tts_service_url}/api/v1/tts/health",
+                headers=auth_headers,
                 timeout=5.0,
             )
             health["tts_healthy"] = response.status_code == 200
         except Exception:
             pass
 
-        # Check Storage
+        # Check Storage (requires API key)
         try:
             response = await self.client.get(
                 f"{settings.storage_service_url}/health",
+                headers=auth_headers,
                 timeout=5.0,
             )
             health["storage_healthy"] = response.status_code == 200

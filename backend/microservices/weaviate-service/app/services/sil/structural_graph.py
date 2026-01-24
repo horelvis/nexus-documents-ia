@@ -328,6 +328,71 @@ class StructuralGraphService:
             logger.error(f"Failed to add structural document {document_id}: {e}")
             return False
 
+    def _infer_folder_properties(self, folder_name: str, folder_path: str) -> dict:
+        """
+        Infer folder properties from name and path patterns.
+
+        This is connector-agnostic - works with any folder structure.
+        Detects expedientes, years, clients based on naming patterns.
+        """
+        import re
+        props = {}
+
+        name_lower = folder_name.lower()
+        path_lower = folder_path.lower()
+
+        # Detect folder type from common patterns
+        folder_type_patterns = {
+            "case": ["expediente", "case", "caso", "expedient"],
+            "project": ["project", "proyecto", "proyect"],
+            "client": ["client", "cliente", "customer"],
+            "year": None,  # Will check separately
+            "contracts": ["contrato", "contract", "contratos", "contracts"],
+            "invoices": ["factura", "invoice", "facturas", "invoices"],
+            "legal": ["legal", "juridico", "jurídico"],
+            "hr": ["rrhh", "hr", "recursos humanos", "human resources"],
+        }
+
+        for folder_type, patterns in folder_type_patterns.items():
+            if patterns:
+                if any(p in name_lower for p in patterns):
+                    props["folder_type"] = folder_type
+                    break
+
+        # Detect year folder (pure year or year in name)
+        year_match = re.search(r'\b(19\d{2}|20\d{2})\b', folder_name)
+        if year_match:
+            props["prop_year"] = year_match.group(1)
+            # If folder name IS just a year, mark as year type
+            if folder_name.strip() == year_match.group(1):
+                props["folder_type"] = "year"
+
+        # Also check path for year if not in name
+        if "prop_year" not in props:
+            year_in_path = re.search(r'/(19\d{2}|20\d{2})/', path_lower)
+            if year_in_path:
+                props["prop_year"] = year_in_path.group(1)
+
+        # Detect expediente/case ID pattern (e.g., C-2006-00009, EXP-2024-001)
+        expediente_patterns = [
+            r'^([A-Z]{1,3}[-_]\d{4}[-_]\d+)$',  # C-2006-00009
+            r'^(EXP[-_]\d{4}[-_]\d+)$',          # EXP-2024-001
+            r'^(\d{4}[-_][A-Z]{1,3}[-_]\d+)$',  # 2024-EXP-001
+        ]
+        for pattern in expediente_patterns:
+            if re.match(pattern, folder_name, re.IGNORECASE):
+                props["folder_type"] = "case"
+                props["reference_number"] = folder_name
+                break
+
+        # Extract potential client name from path
+        # Common patterns: /clients/ACME/, /clientes/ClientName/
+        client_match = re.search(r'/(?:client(?:e)?s?|customer)/([^/]+)/', path_lower)
+        if client_match:
+            props["prop_client"] = client_match.group(1).title()
+
+        return props
+
     async def _ensure_folder_hierarchy(
         self,
         conn,
@@ -351,13 +416,20 @@ class StructuralGraphService:
             current_path = "/" + "/".join(parts[:i+1])
             folder_id = f"folder:{tenant_id}:{current_path}"
 
-            # Create folder node
+            # Infer properties from folder name and path
+            inferred_props = self._infer_folder_properties(part, current_path)
+
+            # Create folder node with enriched properties
             folder_props = {
                 "folder_id": folder_id,
                 "name": part,
                 "path": current_path,
                 "depth": i + 1,
                 "created_at": now,
+                "folder_type": inferred_props.get("folder_type", "general"),
+                "prop_year": inferred_props.get("prop_year", ""),
+                "prop_client": inferred_props.get("prop_client", ""),
+                "reference_number": inferred_props.get("reference_number", ""),
             }
 
             node = StructuralNode(

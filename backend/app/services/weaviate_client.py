@@ -322,6 +322,22 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Emma query failed | error=%s", e)
             raise
 
+    async def emma_v2_query(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute Emma v2 AI query with SIL integration"""
+        try:
+            logger.debug("Calling Emma v2 query | payload_keys=%s", list(query_data.keys()))
+            ctx = self._extract_context_headers(query_data)
+            return await self.post_json(
+                "/emma/v2/query",
+                json=query_data,
+                tenant_id=ctx["tenant_id"],
+                user_id=ctx["user_id"],
+                request_id=ctx["request_id"],
+            )
+        except Exception as e:
+            logger.exception("❌ Emma v2 query failed | error=%s", e)
+            raise
+
     async def emma_health(self) -> Dict[str, Any]:
         """Check Emma AI service health"""
         try:

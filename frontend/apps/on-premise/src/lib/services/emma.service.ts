@@ -178,8 +178,8 @@ const normalizedBaseUrl = (API_CONFIG.BASE_URL || '').replace(/\/$/, '')
 const BASE_API_URL = `${normalizedBaseUrl}${API_CONFIG.API_V1}`
 // For SSE streaming, use direct backend URL to bypass Next.js proxy buffering
 const STREAMING_API_URL = `${API_CONFIG.STREAMING_BASE_URL}/api/v1`
-const EMMA_QUERY_PATH = '/weaviate/emma/query'
-const EMMA_QUERY_STREAM_PATH = '/weaviate/emma/query/stream'
+const EMMA_QUERY_PATH = '/weaviate/emma/v2/query'
+const EMMA_QUERY_STREAM_PATH = '/weaviate/emma/v2/query/stream'
 const EMMA_TOOLS_PATH = '/weaviate/emma/tools'
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, useEmmaTimeout = false) => {

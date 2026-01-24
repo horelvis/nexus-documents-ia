@@ -2,9 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install minimal system dependencies
+# Install system dependencies for OCR
+# - tesseract-ocr: OCR engine (fallback)
+# - tesseract-ocr-spa/eng: Language data for Spanish and English
+# - poppler-utils: PDF to image conversion (pdftoppm)
+# - libxcb1, libgl1, libglib2.0-0: Required by EasyOCR/OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-spa \
+    tesseract-ocr-eng \
+    poppler-utils \
+    libxcb1 \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements

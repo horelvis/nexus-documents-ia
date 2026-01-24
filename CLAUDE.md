@@ -77,7 +77,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 **NouxCubeIA** is a **multi-tenant intelligent document management system** with a microservices architecture that provides a 360-degree view of organizational documents:
 
 **Backend**: FastAPI with Python 3.9+, using async/await patterns throughout
-**Frontend**: Next.js 15 with App Router, TypeScript, and Clerk authentication
+**Frontend**: Next.js 15 with App Router, TypeScript, and OIDC/SAML authentication
 **Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
 **Storage**: Google Cloud Storage for files
 **AI/ML**: vLLM (GPU inference) + Microsoft Agent Framework for multi-agent orchestration (Emma AI)
@@ -88,39 +88,26 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 - Complete tenant isolation at database and storage levels
 - Tenant-specific settings and quotas in models
 - Tenant context passed through dependency injection in FastAPI endpoints
-- Authentication via Clerk with tenant association
+- Authentication via OIDC/SAML providers (KeyCloak, Azure AD, Okta)
 
-#### Authentication Architecture (Clerk + Stripe)
+#### Authentication Architecture (On-Premise OIDC/SAML)
 
-**Authentication Flow (NO JIT Provisioning):**
+**Authentication Flow (JIT Provisioning Supported):**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  LOGIN FLOW                                                  │
+│  LOGIN FLOW (OIDC/SAML)                                     │
 ├─────────────────────────────────────────────────────────────┤
-│  1. User → <SignIn /> Clerk component                        │
-│  2. Clerk authenticates → JWT token                          │
-│  3. Frontend → POST /api/v1/auth/login (Bearer token)        │
+│  1. User → Login page → Redirect to IdP                      │
+│  2. IdP authenticates → JWT/SAML assertion                   │
+│  3. Frontend → POST /api/v1/auth/callback (token)            │
 │  4. Backend:                                                 │
-│     ├── Validates JWT against Clerk JWKS                     │
-│     ├── Finds user by clerk_user_id                          │
-│     ├── NOT FOUND → 401 "User not registered"                │
-│     ├── FOUND → Queries Stripe for subscription              │
-│     └── Calculates permissions based on plan                 │
-│  5. Backend → { user, subscription, permissions, tenant_id } │
+│     ├── Validates token against IdP JWKS/metadata            │
+│     ├── Extracts user info (email, groups, attributes)       │
+│     ├── JIT: Creates user if not exists (from IdP groups)    │
+│     ├── Maps IdP groups → Application roles                  │
+│     └── Returns session with permissions                     │
+│  5. Backend → { user, permissions, tenant_id }               │
 │  6. Frontend stores state, redirects to dashboard            │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│  REGISTRATION FLOW (via Clerk webhook)                       │
-├─────────────────────────────────────────────────────────────┤
-│  1. User → <SignUp /> Clerk component                        │
-│  2. Clerk creates user → fires user.created webhook          │
-│  3. Backend webhook handler:                                 │
-│     ├── Creates Tenant (organization)                        │
-│     ├── Creates User with trial subscription                 │
-│     ├── Creates GCS bucket for tenant                        │
-│     └── Optionally creates Stripe customer                   │
-│  4. User redirected to complete onboarding                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -128,44 +115,30 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/auth/login` | POST | Validates Clerk JWT, returns user + subscription + permissions |
-| `/api/v1/auth/logout` | POST | Logs event (Clerk handles session invalidation) |
-| `/api/v1/auth/me` | GET | Returns current user data (for refresh) |
-| `/api/v1/auth/complete-onboarding` | POST | Marks onboarding as completed |
-| `/api/v1/webhooks/clerk` | POST | Handles Clerk webhooks (user.created, etc.) |
+| `/api/v1/auth/login` | POST | Initiates OIDC/SAML flow |
+| `/api/v1/auth/callback` | POST | Handles IdP callback, creates session |
+| `/api/v1/auth/logout` | POST | Logs event, clears session |
+| `/api/v1/auth/me` | GET | Returns current user data |
 
-**Login Response Structure:**
-```typescript
-interface LoginResponse {
-  user: BackendUser;
-  subscription: {
-    plan: string;                  // trial, basic, pro, enterprise
-    status: string;                // active, trialing, past_due, canceled
-    can_use_agents: boolean;
-    can_use_advanced_features: boolean;
-    limits: Record<string, number>; // { documents: 500, storage_mb: 10240 }
-    needs_upgrade: boolean;        // True if trial expired
-    trial_days_remaining: number | null;
-    current_period_end: string | null;
-  };
-  permissions: {
-    is_admin: boolean;
-    is_team_member: boolean;
-    can_upload_documents: boolean;
-    can_use_agents: boolean;
-    can_invite_members: boolean;
-    can_access_api: boolean;
-    can_export: boolean;
-  };
-  tenant_id: string;
-}
+**Configuration:**
+```bash
+# OIDC Configuration (.env)
+AUTH_PROVIDER=oidc
+OIDC_ISSUER_URL=https://keycloak.company.com/realms/nexusdocs
+OIDC_CLIENT_ID=nexusdocs-client
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_SCOPES=openid,profile,email,groups
+
+# Group to Role Mapping
+OIDC_ADMIN_GROUP=NexusDocs-Admins
+OIDC_USER_GROUP=NexusDocs-Users
 ```
 
 **Important:**
-- **NO JIT Provisioning**: Login does NOT create users. Unregistered users get 401.
-- **Registration via Clerk Webhook**: Users are created when Clerk fires `user.created` event.
-- **Trial expired = Login success + flag**: `needs_upgrade: true` in response.
-- **Stripe integration**: Subscription status is cached and synced via webhooks.
+- **JIT Provisioning**: Users created automatically on first login from IdP groups.
+- **Group Mapping**: IdP groups map to application roles (Admin, User, Viewer).
+- **No External Dependencies**: Authentication handled by your organization's IdP.
+- **SSO Ready**: Integrates with existing enterprise identity infrastructure.
 
 #### Microservices Design
 - **Main API** (port 8000): Core business logic, authentication, document management
@@ -180,7 +153,7 @@ interface LoginResponse {
 
 #### Modular Architecture (SaaS vs On-Premise)
 
-> **📖 Full Documentation**: [`backend/architecture/MODULAR_ARCHITECTURE.md`](backend/architecture/MODULAR_ARCHITECTURE.md)
+> **📖 Full Documentation**: [`docs/architecture/MODULAR_ARCHITECTURE.md`](docs/architecture/MODULAR_ARCHITECTURE.md)
 
 The codebase supports different deployment modes through a modular architecture:
 
@@ -222,11 +195,11 @@ DEPLOYMENT_MODE=on_premise  # or: saas, custom
 - **Audit trails**: Comprehensive tracking for compliance (document views, role assignments)
 - **RBAC system**: Role-based access control with fine-grained permissions
 - **Agent system**: AI agents with conversation history and execution tracking
-- **Digital signatures**: Complete workflow with provider integrations
+- **ACL JSONB**: Fine-grained access control stored in IndexedDocument
 
 #### Structural Intelligence Layer (SIL) - Pre-LLM Reasoning
 
-> **📖 Full Documentation**: [`backend/architecture/SIL-structural-intelligence-layer.md`](backend/architecture/SIL-structural-intelligence-layer.md)
+> **📖 Full Documentation**: [`docs/architecture/SIL.md`](docs/architecture/SIL.md)
 
 The SIL represents a paradigm shift in RAG architecture - **learning document STRUCTURE instead of CONTENT**:
 
@@ -309,8 +282,7 @@ LLM interprets structural context → "ACME tiene 5 contratos..."
 - **FastAPI**: High-performance async web framework
 - **SQLAlchemy 2.0**: Modern ORM with async support
 - **Alembic**: Database migration management
-- **Clerk**: Authentication and user management
-- **Stripe**: Payment processing integration
+- **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
 - **Weaviate**: Vector database for semantic search
 - **Apache AGE**: PostgreSQL graph extension for Structural Intelligence Layer (SIL)
 - **Microsoft Agent Framework**: Multi-agent orchestration with ChatAgent, @ai_function decorators
@@ -322,7 +294,7 @@ LLM interprets structural context → "ACME tiene 5 contratos..."
 
 #### Frontend Technologies
 - **Next.js 15**: React framework with App Router
-- **Clerk**: Authentication provider
+- **OIDC/SAML Integration**: Supports KeyCloak, Azure AD, Okta
 - **shadcn/ui**: UI component library based on Radix UI
 - **Tailwind CSS**: Utility-first styling
 - **Zod**: Schema validation

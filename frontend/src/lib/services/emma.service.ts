@@ -270,8 +270,8 @@ export interface EmmaAgent {
 
 const normalizedBaseUrl = (API_CONFIG.BASE_URL || '').replace(/\/$/, '')
 const BASE_API_URL = `${normalizedBaseUrl}${API_CONFIG.API_V1}`
-const EMMA_QUERY_PATH = '/weaviate/emma/query'
-const EMMA_QUERY_STREAM_PATH = '/weaviate/emma/query/stream'
+const EMMA_QUERY_PATH = '/weaviate/emma/v2/query'
+const EMMA_QUERY_STREAM_PATH = '/weaviate/emma/v2/query/stream'
 const EMMA_TOOLS_PATH = '/weaviate/emma/tools'
 const EMMA_ANALYZE_WITH_ANNOTATIONS_PATH = '/weaviate/emma/analyze-with-annotations'
 const EMMA_GET_ANALYSIS_PATH = '/weaviate/emma/analysis'  // GET /analysis/{job_id}

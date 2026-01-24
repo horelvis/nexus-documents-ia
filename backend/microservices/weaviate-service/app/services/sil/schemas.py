@@ -449,7 +449,15 @@ class StructuralContext(BaseModel):
     query_type: str = ""  # count, list, location, exists
     query_result: Dict[str, Any] = Field(default_factory=dict)
 
-    # Document information (without content)
+    # Entity type: what is this context about?
+    # "document" = about documents/files
+    # "folder" = about folders/expedientes/cases
+    # "both" = about both (e.g., "documents in folder X")
+    entity_type: str = "document"
+
+    # Document/Item information (without content)
+    # Note: These fields are named document_* for backwards compatibility
+    # but when entity_type="folder", they contain folder information
     document_count: int = 0
     document_ids: List[str] = Field(default_factory=list)
     document_titles: List[str] = Field(default_factory=list)
@@ -469,9 +477,62 @@ class StructuralContext(BaseModel):
     # Additional metadata
     details: Dict[str, Any] = Field(default_factory=dict)
 
+    def _get_entity_terminology(self) -> Dict[str, str]:
+        """
+        Get terminology based on entity type for dynamic labeling.
+
+        Uses tenant-specific terminology if available in details,
+        otherwise falls back to generic terms.
+
+        This is domain-agnostic:
+        - Law firm: expedientes, casos
+        - Consulting: proyectos
+        - Commercial: clientes
+        - Construction: obras
+        - Healthcare: pacientes
+        """
+        # Check details for more specific entity type (set by _build_folder_context)
+        entity = self.details.get("entity_type", self.entity_type)
+
+        # Check for tenant-specific terminology in details
+        # This allows the tenant to define their own terms
+        custom_singular = self.details.get("container_term_singular")
+        custom_plural = self.details.get("container_term_plural")
+
+        if entity == "folder":
+            # Use custom terms if provided, otherwise generic "carpeta"
+            singular = custom_singular or "carpeta"
+            plural = custom_plural or "carpetas"
+            return {
+                "singular": singular,
+                "plural": plural,
+                "found": f"{plural.capitalize()} encontrados",
+                "related": f"{plural.capitalize()} relacionados",
+                "type_label": "tipo",
+            }
+        elif entity == "both":
+            return {
+                "singular": "elemento",
+                "plural": "elementos",
+                "found": "Elementos encontrados",
+                "related": "Elementos relacionados",
+                "type_label": "tipo",
+            }
+        else:  # document (default)
+            return {
+                "singular": "documento",
+                "plural": "documentos",
+                "found": "Documentos encontrados",
+                "related": "Documentos relacionados",
+                "type_label": "tipo",
+            }
+
     def to_context_string(self) -> str:
         """Format as string for LLM context."""
         parts = ["## Contexto Estructural\n"]
+
+        # Get dynamic terminology based on entity type
+        terms = self._get_entity_terminology()
 
         if self.query_result:
             parts.append(f"**Resultado de consulta ({self.query_type}):**")
@@ -479,7 +540,7 @@ class StructuralContext(BaseModel):
                 parts.append(f"  - {key}: {value}")
 
         if self.document_count > 0:
-            parts.append(f"\n**Documentos encontrados:** {self.document_count}")
+            parts.append(f"\n**{terms['found']}:** {self.document_count}")
             if self.document_titles:
                 for i, title in enumerate(self.document_titles[:10], 1):
                     doc_type = self.document_types[i - 1] if i - 1 < len(self.document_types) else ""
@@ -494,7 +555,7 @@ class StructuralContext(BaseModel):
             parts.append(f"**Dominio:** {self.semantic_domain}")
 
         if self.related_documents:
-            parts.append(f"\n**Documentos relacionados:** {len(self.related_documents)}")
+            parts.append(f"\n**{terms['related']}:** {len(self.related_documents)}")
 
         return "\n".join(parts)
 
