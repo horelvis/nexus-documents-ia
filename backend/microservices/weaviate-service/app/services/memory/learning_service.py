@@ -3,6 +3,8 @@ Preference Learning Service for Emma AI.
 
 Learns user preferences from interactions to personalize responses.
 Integrates with the existing preference system and persists to PostgreSQL.
+
+Version 1.1 - January 2026 (Refactored with centralized config)
 """
 
 import logging
@@ -12,6 +14,22 @@ from datetime import datetime, timedelta
 from collections import Counter
 from dataclasses import dataclass, field
 import json
+
+from app.core.learning_config import learning_settings
+from app.core.learning_constants import (
+    MAX_FREQUENT_QUERIES,
+    MAX_FREQUENT_DOCUMENTS,
+    MAX_INTERACTIONS_PER_USER,
+    INTERACTION_BUFFER_THRESHOLD,
+    PROFILE_CACHE_TTL_HOURS,
+    REDIS_INTERACTION_TTL_SECONDS,
+    REDIS_PROFILE_TTL_SECONDS,
+    DEFAULT_RANKING_WEIGHT_RECENCY,
+    DEFAULT_RANKING_WEIGHT_FREQUENCY,
+    DEFAULT_RANKING_WEIGHT_RELEVANCE,
+    MAX_RANKING_WEIGHT,
+    FEEDBACK_WEIGHT_ADJUSTMENT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,20 +115,20 @@ class PreferenceLearningService:
         self._redis_client = None
         self._initialized = False
 
-        # Cache for active profiles (TTL 1 hour)
+        # Cache for active profiles (TTL from constants)
         self._profile_cache: Dict[str, UserLearningProfile] = {}
-        self._cache_ttl = timedelta(hours=1)
+        self._cache_ttl = timedelta(hours=PROFILE_CACHE_TTL_HOURS)
         self._cache_timestamps: Dict[str, datetime] = {}
 
         # Interaction buffer for batch updates
         self._interaction_buffer: Dict[str, List[UserInteraction]] = {}
-        self._buffer_threshold = 5  # Update profile after N interactions
+        self._buffer_threshold = INTERACTION_BUFFER_THRESHOLD
 
-        # Default weights for ranking
+        # Default weights for ranking (from constants)
         self._default_weights = {
-            "recency": 0.3,
-            "frequency": 0.3,
-            "relevance": 0.4
+            "recency": DEFAULT_RANKING_WEIGHT_RECENCY,
+            "frequency": DEFAULT_RANKING_WEIGHT_FREQUENCY,
+            "relevance": DEFAULT_RANKING_WEIGHT_RELEVANCE,
         }
 
     async def initialize(self) -> None:
@@ -200,10 +218,10 @@ class PreferenceLearningService:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-            # Add to list (keep last 1000 interactions)
+            # Add to list (keep last N interactions)
             await self._redis_client.lpush(key, json.dumps(interaction_data))
-            await self._redis_client.ltrim(key, 0, 999)
-            await self._redis_client.expire(key, 60 * 60 * 24 * 30)  # 30 days TTL
+            await self._redis_client.ltrim(key, 0, MAX_INTERACTIONS_PER_USER - 1)
+            await self._redis_client.expire(key, REDIS_INTERACTION_TTL_SECONDS)
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to store interaction in Redis: {e}")
@@ -253,13 +271,13 @@ class PreferenceLearningService:
                 query = interaction.query_text.strip()
                 if query and query not in profile.frequent_queries:
                     profile.frequent_queries.insert(0, query)
-                    profile.frequent_queries = profile.frequent_queries[:50]
+                    profile.frequent_queries = profile.frequent_queries[:MAX_FREQUENT_QUERIES]
 
             # Record selected documents
             for doc_id in interaction.selected_document_ids:
                 if doc_id not in profile.frequent_document_ids:
                     profile.frequent_document_ids.insert(0, doc_id)
-                    profile.frequent_document_ids = profile.frequent_document_ids[:20]
+                    profile.frequent_document_ids = profile.frequent_document_ids[:MAX_FREQUENT_DOCUMENTS]
 
             # Update search patterns
             if interaction.intent_detected:
@@ -275,7 +293,7 @@ class PreferenceLearningService:
             if interaction.document_id:
                 if interaction.document_id not in profile.frequent_document_ids:
                     profile.frequent_document_ids.insert(0, interaction.document_id)
-                    profile.frequent_document_ids = profile.frequent_document_ids[:20]
+                    profile.frequent_document_ids = profile.frequent_document_ids[:MAX_FREQUENT_DOCUMENTS]
 
         elif interaction.interaction_type == "feedback":
             # Adjust weights based on feedback
@@ -299,11 +317,14 @@ class PreferenceLearningService:
         """
         if rating >= 4:
             # User liked the results - increase relevance
-            profile.ranking_weights["relevance"] = min(0.6, profile.ranking_weights.get("relevance", 0.4) + 0.02)
+            current_relevance = profile.ranking_weights.get("relevance", DEFAULT_RANKING_WEIGHT_RELEVANCE)
+            profile.ranking_weights["relevance"] = min(MAX_RANKING_WEIGHT, current_relevance + FEEDBACK_WEIGHT_ADJUSTMENT)
         elif rating <= 2:
             # User didn't like results - try different approach
-            profile.ranking_weights["recency"] = min(0.4, profile.ranking_weights.get("recency", 0.3) + 0.02)
-            profile.ranking_weights["frequency"] = min(0.4, profile.ranking_weights.get("frequency", 0.3) + 0.02)
+            current_recency = profile.ranking_weights.get("recency", DEFAULT_RANKING_WEIGHT_RECENCY)
+            current_frequency = profile.ranking_weights.get("frequency", DEFAULT_RANKING_WEIGHT_FREQUENCY)
+            profile.ranking_weights["recency"] = min(MAX_RANKING_WEIGHT, current_recency + FEEDBACK_WEIGHT_ADJUSTMENT)
+            profile.ranking_weights["frequency"] = min(MAX_RANKING_WEIGHT, current_frequency + FEEDBACK_WEIGHT_ADJUSTMENT)
 
         # Normalize weights to sum to 1.0
         total = sum(profile.ranking_weights.values())
@@ -412,7 +433,7 @@ class PreferenceLearningService:
             await self._redis_client.set(
                 key,
                 json.dumps(profile_dict),
-                ex=60 * 60 * 24 * 30  # 30 days TTL
+                ex=REDIS_PROFILE_TTL_SECONDS
             )
 
             # Update cache
