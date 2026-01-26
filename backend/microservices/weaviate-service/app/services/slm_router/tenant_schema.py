@@ -223,31 +223,31 @@ class SchemaExtractor:
             doc_types_query = """
                 MATCH (d:structural_document)
                 WHERE d.tenant_id = $tenant_id
-                RETURN DISTINCT d.semantic_type as type, count(*) as cnt
-                ORDER BY cnt DESC LIMIT 20
+                RETURN DISTINCT d.semantic_type as doc_type, count(*) as num
+                ORDER BY num DESC LIMIT 20
             """
             result = await self._graph_provider.execute_cypher(
                 doc_types_query,
                 {"tenant_id": tenant_id}
             )
             if result:
-                schema.document_types = [r['type'] for r in result if r.get('type')]
-                schema.total_documents = sum(r.get('cnt', 0) for r in result)
+                schema.document_types = [r['doc_type'] for r in result if r.get('doc_type')]
+                schema.total_documents = sum(r.get('num', 0) for r in result)
 
             # Get folder types
             folder_types_query = """
                 MATCH (f:structural_folder)
                 WHERE f.tenant_id = $tenant_id
-                RETURN DISTINCT f.folder_type as type, count(*) as cnt
-                ORDER BY cnt DESC LIMIT 10
+                RETURN DISTINCT f.folder_type as folder_type, count(*) as num
+                ORDER BY num DESC LIMIT 10
             """
             result = await self._graph_provider.execute_cypher(
                 folder_types_query,
                 {"tenant_id": tenant_id}
             )
             if result:
-                schema.folder_types = [r['type'] for r in result if r.get('type')]
-                schema.total_folders = sum(r.get('cnt', 0) for r in result)
+                schema.folder_types = [r['folder_type'] for r in result if r.get('folder_type')]
+                schema.total_folders = sum(r.get('num', 0) for r in result)
 
             # Get known entities (clients)
             entities_query = """
@@ -267,15 +267,15 @@ class SchemaExtractor:
             domains_query = """
                 MATCH (d:structural_document)
                 WHERE d.tenant_id = $tenant_id
-                RETURN DISTINCT d.domain as domain, count(*) as cnt
-                ORDER BY cnt DESC LIMIT 10
+                RETURN DISTINCT d.domain as doc_domain, count(*) as num
+                ORDER BY num DESC LIMIT 10
             """
             result = await self._graph_provider.execute_cypher(
                 domains_query,
                 {"tenant_id": tenant_id}
             )
             if result:
-                schema.domains = [r['domain'] for r in result if r.get('domain')]
+                schema.domains = [r['doc_domain'] for r in result if r.get('doc_domain')]
 
         except Exception as e:
             logger.error(f"Error extracting schema from graph: {e}")

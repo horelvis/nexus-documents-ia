@@ -526,17 +526,8 @@ class TOONParser:
         # Clean the output
         cleaned = TOONParser._clean_output(raw_output)
 
-        # Check if output is just the route name (common with small models)
-        route_direct = TOONParser._try_parse_direct_route(cleaned)
-        if route_direct:
-            logger.debug(f"Parsed TOON as direct route: {route_direct.value}")
-            return TOONPlan(
-                route=route_direct,
-                confidence=0.8,  # High confidence for direct match
-                reasoning=f"Direct route detection: {cleaned}"
-            )
-
-        # Try to parse as structured data
+        # Try to parse as structured data FIRST (YAML/JSON)
+        # This takes priority over direct route detection
         plan_dict = None
 
         # Try YAML first (most common for structured output)
@@ -565,9 +556,22 @@ class TOONParser:
 
                 plan = TOONPlan(**plan_dict)
                 plan = plan.apply_guardrails()
+                logger.info(f"Parsed TOON plan: route={plan.route.value}, entities={len(plan.entities)}")
                 return plan
             except Exception as e:
                 logger.warning(f"Failed to validate TOON plan: {e}")
+
+        # Only try direct route detection for SHORT outputs (likely just route name)
+        # This prevents false positives on full YAML that happens to contain route names
+        if len(cleaned) < 100:
+            route_direct = TOONParser._try_parse_direct_route(cleaned)
+            if route_direct:
+                logger.debug(f"Parsed TOON as direct route: {route_direct.value}")
+                return TOONPlan(
+                    route=route_direct,
+                    confidence=0.8,
+                    reasoning=f"Direct route detection: {cleaned[:50]}"
+                )
 
         # Fallback: try to extract intent from raw text
         logger.warning(f"Using fallback parsing for TOON output")
@@ -576,15 +580,19 @@ class TOONParser:
     @staticmethod
     def _clean_output(raw: str) -> str:
         """Clean SLM output for parsing."""
-        # Remove markdown code blocks
-        raw = re.sub(r'```(?:yaml|json)?\s*', '', raw)
-        raw = re.sub(r'```\s*', '', raw)
+        # Extract content from code blocks first (handles ```yaml ... ``` format)
+        code_block_match = re.search(r'```(?:yaml|json)?\s*([\s\S]*?)```', raw)
+        if code_block_match:
+            raw = code_block_match.group(1).strip()
+        else:
+            # Remove any stray code block markers
+            raw = re.sub(r'```(?:yaml|json)?\s*', '', raw)
+            raw = re.sub(r'```\s*', '', raw)
 
         # Remove leading/trailing whitespace
         raw = raw.strip()
 
         # Find the start of YAML/JSON content
-        # Look for 'toon:' or '{' or 'version:'
         yaml_match = re.search(r'(toon:|version:|route:)', raw, re.IGNORECASE)
         json_match = re.search(r'\{', raw)
 
@@ -593,7 +601,17 @@ class TOONParser:
         elif json_match:
             raw = raw[json_match.start():]
 
-        return raw
+        # Truncate at common end-of-YAML indicators (extra text from model)
+        # Look for lines that don't look like YAML/JSON
+        lines = raw.split('\n')
+        clean_lines = []
+        for line in lines:
+            # Stop if we hit explanatory text (common model artifact)
+            if re.match(r'^(Output|Note|Explanation|The|This|I|Please|Here)', line.strip()):
+                break
+            clean_lines.append(line)
+
+        return '\n'.join(clean_lines).strip()
 
     @staticmethod
     def _try_parse_direct_route(cleaned: str) -> Optional[TOONRoute]:
@@ -831,39 +849,113 @@ class TOONExecutionResult(BaseModel):
     )
 
     def format_context(self) -> str:
-        """Format execution results as context for the LLM."""
+        """
+        Format execution results as context for the LLM.
+
+        Optimized for GRPO-trained models (horelvis/qwen-dw-grpo-rag) that
+        understand graph structures and entity relationships better.
+
+        Key improvements for GRPO:
+        1. Entity section with types and graph labels (GRPO understands typed entities)
+        2. Relationship context from graph queries (GRPO excels at multi-hop reasoning)
+        3. Structured format that maps to knowledge graph patterns
+        """
         parts = []
 
         if self.plan.route == TOONRoute.ASK_CLARIFY:
             return ""  # No context for clarification
 
+        # === SECTION 1: Extracted Entities (GRPO-optimized) ===
+        # GRPO models understand entity types and their graph labels
+        if self.plan.entities:
+            parts.append("## Entities Identified\n")
+            entity_lines = []
+            for entity in self.plan.entities:
+                label_info = f" [{entity.graph_label}]" if entity.graph_label else ""
+                confidence_info = f" ({entity.confidence:.0%})" if entity.confidence < 1.0 else ""
+                entity_lines.append(f"- **{entity.name}** (type: {entity.type}){label_info}{confidence_info}")
+            parts.append("\n".join(entity_lines))
+            parts.append("")
+
+        # === SECTION 2: Graph Structure Results (GRPO-optimized) ===
+        # GRPO models excel at understanding hierarchical and relational data
         if self.graph_result:
-            parts.append("## Structural Information\n")
+            parts.append("## Knowledge Graph Results\n")
+
+            # Add traversal depth info for multi-hop reasoning context
+            if self.plan.graph.hops > 1:
+                parts.append(f"*Traversal depth: {self.plan.graph.hops} hops*\n")
+
             if self.plan.graph.operation == GraphOperation.COUNT:
                 count = self.graph_result.get('count', self.graph_row_count)
-                parts.append(f"**Count:** {count}")
+                # Include entity context for GRPO to understand what was counted
+                if self.plan.entities:
+                    primary_entity = self.plan.entities[0]
+                    parts.append(f"**Count of {primary_entity.type}:** {count}")
+                else:
+                    parts.append(f"**Count:** {count}")
+
             elif self.plan.graph.operation == GraphOperation.EXISTS:
                 exists = self.graph_result.get('exists', self.graph_row_count > 0)
                 parts.append(f"**Exists:** {'Yes' if exists else 'No'}")
+
             elif self.plan.graph.operation == GraphOperation.LIST:
-                parts.append(f"**Found:** {self.graph_row_count} items")
+                parts.append(f"**Found:** {self.graph_row_count} items\n")
                 if 'items' in self.graph_result:
+                    # Format with relationship context for GRPO
                     for i, item in enumerate(self.graph_result['items'][:10], 1):
-                        parts.append(f"  {i}. {item.get('title', item.get('name', str(item)))}")
-            else:
-                # Generic formatting
+                        title = item.get('title', item.get('name', str(item)))
+                        # Include relationship info if available (GRPO-optimized)
+                        if 'relationship' in item:
+                            parts.append(f"  {i}. {title} —[{item['relationship']}]→")
+                        elif 'connected_to' in item:
+                            parts.append(f"  {i}. {title} → {item['connected_to']}")
+                        else:
+                            parts.append(f"  {i}. {title}")
+                        # Add properties if present (metadata helps GRPO reasoning)
+                        if 'properties' in item and item['properties']:
+                            props = ", ".join(f"{k}: {v}" for k, v in list(item['properties'].items())[:3])
+                            parts.append(f"      Properties: {props}")
+
+            elif self.plan.graph.operation == GraphOperation.AGGREGATE:
+                parts.append("**Aggregation Results:**")
                 parts.append(f"```json\n{json.dumps(self.graph_result, indent=2, default=str)}\n```")
 
+            elif self.plan.graph.operation == GraphOperation.PATH:
+                # Path queries are where GRPO really shines (multi-hop reasoning)
+                parts.append("**Relationship Path:**")
+                if 'path' in self.graph_result:
+                    path = self.graph_result['path']
+                    parts.append(f"  {' → '.join(str(node) for node in path)}")
+                else:
+                    parts.append(f"```json\n{json.dumps(self.graph_result, indent=2, default=str)}\n```")
+            else:
+                # Generic formatting with structure preserved
+                parts.append(f"```json\n{json.dumps(self.graph_result, indent=2, default=str)}\n```")
+
+        # === SECTION 3: Vector Search Results (Semantic content) ===
         if self.vector_results:
             parts.append("\n## Retrieved Documents\n")
             for i, doc in enumerate(self.vector_results[:5], 1):
                 title = doc.get('title', doc.get('filename', 'Untitled'))
                 score = doc.get('score', doc.get('distance', 'N/A'))
-                parts.append(f"**{i}. {title}** (relevance: {score})")
+                doc_type = doc.get('document_type', doc.get('type', ''))
+
+                # Include document type for GRPO entity understanding
+                type_info = f" [{doc_type}]" if doc_type else ""
+                parts.append(f"**{i}. {title}**{type_info} (relevance: {score})")
+
                 if 'content' in doc:
                     content = doc['content'][:500] + "..." if len(doc.get('content', '')) > 500 else doc.get('content', '')
                     parts.append(f"   {content}")
                 parts.append("")
+
+        # === SECTION 4: Query Context (helps GRPO understand intent) ===
+        if self.plan.route == TOONRoute.HYBRID and self.graph_result and self.vector_results:
+            parts.append("\n## Combined Context")
+            parts.append(f"Graph provided {self.graph_row_count} structural relationships.")
+            parts.append(f"Vector search found {self.vector_result_count} relevant documents.")
+            parts.append("Use both sources to form a complete answer.")
 
         self.context_for_llm = "\n".join(parts)
         return self.context_for_llm

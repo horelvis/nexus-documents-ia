@@ -74,57 +74,96 @@ class SLMConfig(BaseModel):
 # PROMPT TEMPLATES
 # =============================================================================
 
-SLM_SYSTEM_PROMPT = """You are a query planning assistant. Your ONLY job is to generate TOON plans.
+SLM_SYSTEM_PROMPT = """You are a query planning assistant. Generate TOON plans in YAML format.
 
-TOON (Task-Oriented Orchestration Notation) is a structured format for query routing.
-
-## Tenant Schema Context
+## Context
 {tenant_schema}
 
-## Conversation History
-{conversation_history}
+History: {conversation_history}
+Previous plan: {last_toon_plan}
 
-## Previous TOON Plan (if any)
-{last_toon_plan}
-
-## Available Routes
-- GRAPH_ONLY: Use when query asks about counts, lists, existence, relationships between documents/folders
-- VECTOR_ONLY: Use when query needs semantic search (content meaning, similarity, knowledge lookup)
-- HYBRID: Use when query needs both graph structure AND semantic content
-- ASK_CLARIFY: Use when query is too ambiguous to plan (even with history context)
+## Routes
+- GRAPH_ONLY: counts, lists, existence ("cuántos", "listar", "hay")
+- VECTOR_ONLY: semantic search, content lookup
+- HYBRID: structure + content
+- ASK_CLARIFY: ambiguous query
 
 ## Graph Operations
-- COUNT: "how many", "cuántos", "count"
-- LIST: "list", "show", "muéstrame", "listar"
-- EXISTS: "is there", "hay", "does exist"
-- TRAVERSE: "related to", "connected", "relationships"
-- AGGREGATE: "total", "sum", "average"
+- COUNT: "cuántos", "how many"
+- LIST: "listar", "mostrar", "show"
+- EXISTS: "hay", "existe"
 
-## Vector Operations
-- SEMANTIC_SEARCH: content-based search
-- SIMILARITY: find similar documents
-- RERANK: search + rerank for precision
+## Graph Labels
+- Entity: clients, persons, companies
+- structural_document: documents, contracts, invoices
+- structural_folder: folders, cases (expedientes)
 
-## Rules for History Resolution
-1. If user says "yes", "sí", "ok", "show me" → continue previous operation (use entities from history)
-2. If user references "them", "those", "the same" → use entities from history
-3. If user says "more", "más" → increase limit from previous plan
-4. If user contradicts previous context → start fresh, ignore history
+## Example 1 - Count query:
+Query: "¿Cuántos contratos tiene ACME?"
+```yaml
+route: GRAPH_ONLY
+confidence: 0.9
+entities:
+  - name: ACME
+    type: client
+    graph_label: Entity
+  - name: contrato
+    type: document_type
+    graph_label: structural_document
+graph:
+  enabled: true
+  operation: COUNT
+  cypher_template: |
+    MATCH (c:Entity {{name: $client_name}})<-[:BELONGS_TO]-(d:structural_document)
+    WHERE d.semantic_type = $doc_type
+    RETURN count(d) as total
+  params:
+    client_name: ACME
+    doc_type: contract
+  limit: 1
+  hops: 2
+```
 
-## Output Rules
-1. ALWAYS output valid YAML following TOON schema
-2. Extract entities from the query and map to graph labels
-3. Apply guardrails: limit <= 300, top_k <= 12, hops <= 4
-4. For Spanish queries, understand common terms:
-   - "expediente" = folder_type:case (folder/case)
-   - "contrato" = semantic_type:contract (document)
-   - "factura" = semantic_type:invoice (document)
-   - "cuántos" = COUNT operation
-   - "listar/mostrar" = LIST operation
-   - "hay" = EXISTS operation
-5. Use graph_label: "Entity" for clients/persons, "structural_document" for documents, "structural_folder" for folders
+## Example 2 - List query:
+Query: "Lista los expedientes de Legal"
+```yaml
+route: GRAPH_ONLY
+confidence: 0.85
+entities:
+  - name: Legal
+    type: department
+    graph_label: Entity
+  - name: expediente
+    type: folder_type
+    graph_label: structural_folder
+graph:
+  enabled: true
+  operation: LIST
+  cypher_template: |
+    MATCH (d:Entity {{name: $department}})<-[:BELONGS_TO]-(f:structural_folder)
+    RETURN f.name as name, f.id as id
+  params:
+    department: Legal
+  limit: 50
+  hops: 2
+```
 
-Output ONLY the TOON plan in YAML format, no explanations."""
+## Example 3 - Semantic search:
+Query: "Busca información sobre cláusulas de confidencialidad"
+```yaml
+route: VECTOR_ONLY
+confidence: 0.9
+entities:
+  - name: cláusulas de confidencialidad
+    type: concept
+vector:
+  enabled: true
+  operation: SEMANTIC_SEARCH
+  query: cláusulas de confidencialidad
+  top_k: 5
+```
+
+Output ONLY valid YAML, no explanations."""
 
 SLM_USER_TEMPLATE = """Query: {query}
 
@@ -664,7 +703,7 @@ class SLMClient:
                 )
 
                 # Debug: log raw output at debug level
-                logger.debug(f"SLM raw output: {repr(raw_output[:200]) if raw_output else 'empty'}")
+                logger.debug(f"SLM raw output: {repr(raw_output[:500]) if raw_output else 'empty'}")
 
                 # Parse the output
                 plan = TOONParser.parse(raw_output)

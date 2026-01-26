@@ -564,6 +564,70 @@ class AGEProvider(GraphProvider):
     # Query Operations
     # =========================================================================
 
+    async def execute_cypher(
+        self,
+        cypher: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a Cypher query with parameter substitution.
+
+        This is the public interface used by TOON Executor for executing
+        graph queries. It handles parameter interpolation since Apache AGE
+        doesn't support native parameterized Cypher.
+
+        Args:
+            cypher: Cypher query string with $param placeholders
+            params: Dictionary of parameter values
+
+        Returns:
+            List of result rows as dictionaries
+        """
+        if not self._pool:
+            return []
+
+        try:
+            # Apache AGE doesn't support parameterized Cypher
+            # Interpolate parameters into the query string (escaped)
+            if params:
+                for key, value in params.items():
+                    placeholder = f"${key}"
+                    if placeholder in cypher:
+                        if isinstance(value, str):
+                            cypher = cypher.replace(
+                                placeholder,
+                                f"'{self.escape_string(value)}'"
+                            )
+                        elif isinstance(value, (int, float)):
+                            cypher = cypher.replace(placeholder, str(value))
+                        elif value is None:
+                            cypher = cypher.replace(placeholder, "null")
+                        else:
+                            cypher = cypher.replace(
+                                placeholder,
+                                f"'{self.escape_string(str(value))}'"
+                            )
+
+            async with self._get_connection() as conn:
+                # Extract columns from RETURN clause
+                columns = self._extract_columns_from_query(cypher)
+
+                logger.debug(f"Executing Cypher: {cypher[:500]}")
+                logger.debug(f"Extracted columns: {columns}")
+
+                result = await self._execute_cypher(
+                    conn,
+                    cypher,
+                    [(col, "agtype") for col in columns],
+                )
+
+                return result
+
+        except Exception as e:
+            logger.error(f"Cypher execution error: {e}")
+            logger.error(f"Failed query: {cypher[:500]}")
+            raise
+
     async def execute_query(
         self,
         query: str,
@@ -866,8 +930,10 @@ class AGEProvider(GraphProvider):
         Returns:
             List of result rows as dictionaries
         """
-        # Build column casting
-        column_specs = ", ".join(f"{name} {typ}" for name, typ in columns)
+        # Build column casting (quote reserved keywords like 'count', 'sum', etc.)
+        column_specs = ", ".join(
+            f"{self._quote_identifier(name)} {typ}" for name, typ in columns
+        )
 
         # Wrap in ag_catalog.cypher call
         sql = f"""
@@ -884,6 +950,7 @@ class AGEProvider(GraphProvider):
             for row in rows:
                 result_row = {}
                 for name, _ in columns:
+                    # asyncpg returns lowercase column names without quotes
                     value = row.get(name)
                     result_row[name] = self._clean_agtype_value(value)
                 results.append(result_row)
@@ -950,6 +1017,26 @@ class AGEProvider(GraphProvider):
 
         return {"raw": str(agtype_value)}
 
+    # PostgreSQL reserved keywords that need quoting when used as identifiers
+    _PG_RESERVED_KEYWORDS = {
+        'count', 'sum', 'avg', 'min', 'max', 'select', 'from', 'where',
+        'order', 'limit', 'group', 'by', 'having', 'as', 'and', 'or',
+        'not', 'null', 'true', 'false', 'in', 'is', 'like', 'between',
+        'exists', 'all', 'any', 'some', 'case', 'when', 'then', 'else',
+        'end', 'join', 'left', 'right', 'inner', 'outer', 'cross', 'on',
+        'using', 'union', 'except', 'intersect', 'distinct', 'into',
+        'values', 'insert', 'update', 'delete', 'create', 'drop', 'alter',
+        'table', 'index', 'view', 'trigger', 'function', 'procedure',
+        'type', 'cast', 'exists', 'default', 'primary', 'key', 'foreign',
+        'references', 'unique', 'check', 'constraint', 'total', 'result'
+    }
+
+    def _quote_identifier(self, identifier: str) -> str:
+        """Quote identifier if it's a PostgreSQL reserved keyword."""
+        if identifier.lower() in self._PG_RESERVED_KEYWORDS:
+            return f'"{identifier}"'
+        return identifier
+
     def _extract_columns_from_query(self, query: str) -> List[str]:
         """Extract column names from RETURN clause."""
         import re
@@ -957,7 +1044,7 @@ class AGEProvider(GraphProvider):
         # Find RETURN clause
         match = re.search(r'RETURN\s+(.+?)(?:ORDER|LIMIT|$)', query, re.IGNORECASE | re.DOTALL)
         if not match:
-            return ["result"]
+            return ["result_col"]
 
         return_clause = match.group(1).strip()
 
@@ -974,4 +1061,4 @@ class AGEProvider(GraphProvider):
                 col = re.sub(r'[^a-zA-Z0-9_]', '_', part)
                 columns.append(col)
 
-        return columns if columns else ["result"]
+        return columns if columns else ["result_col"]
