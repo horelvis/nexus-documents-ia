@@ -197,29 +197,30 @@ DEPLOYMENT_MODE=on_premise  # or: saas, custom
 - **Agent system**: AI agents with conversation history and execution tracking
 - **ACL JSONB**: Fine-grained access control stored in IndexedDocument
 
-#### Structural Intelligence Layer (SIL) - Pre-LLM Reasoning
+#### SLM Router - Small Language Model Query Planning
 
-> **📖 Full Documentation**: [`docs/architecture/SIL.md`](docs/architecture/SIL.md)
+> **📖 Full Documentation**: [`docs/architecture/SLM_ROUTER.md`](docs/architecture/SLM_ROUTER.md)
 
-The SIL represents a paradigm shift in RAG architecture - **learning document STRUCTURE instead of CONTENT**:
+The SLM Router is a unified query routing system that uses a Small Language Model to generate **TOON (Task-Oriented Orchestration Notation)** plans:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  TRADITIONAL RAG                    →    SIL APPROACH                        │
+│  TRADITIONAL RAG                    →    SLM ROUTER APPROACH                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  ❌ Embed full document content     →    ✅ Embed structural descriptions    │
-│  ❌ Always invoke LLM + RAG         →    ✅ Answer structurally when possible│
+│  ❌ Always invoke full RAG          →    ✅ Route to optimal data source     │
+│  ❌ Hardcoded routing rules         →    ✅ LLM-generated execution plans    │
 │  ❌ 10K+ tokens per query           →    ✅ 500-1000 tokens (70-90% savings) │
-│  ❌ No temporal awareness           →    ✅ Full history & evolution         │
+│  ❌ No learning capability          →    ✅ Continuous learning from usage   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**5-Layer Architecture:**
-1. **Structural Metadata Extraction** - Extract location, type, relationships (not content)
-2. **Structural Graph (Apache AGE)** - Cypher-queryable graph of document structure
-3. **Structural Embeddings** - Embeddings of structural descriptions only
-4. **Pre-LLM Reasoning Engine** - Answer structural queries without invoking RAG
-5. **LLM as Interpreter** - LLM receives structural context, not full documents
+**Route Types:**
+| Route | Description | Data Source |
+|-------|-------------|-------------|
+| `GRAPH_ONLY` | Structural/counting queries | Apache AGE |
+| `VECTOR_ONLY` | Semantic search queries | Weaviate |
+| `HYBRID` | Structure + content | Both |
+| `ASK_CLARIFY` | Ambiguous query | User input |
 
 **Query Flow:**
 ```
@@ -227,39 +228,44 @@ User: "¿Cuántos contratos tiene ACME?"
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ SIL Pre-LLM Reasoning                                                        │
-│ Intent: STRUCTURAL_COUNT → No RAG needed                                     │
-│ Cypher: MATCH (d:structural_document {client:'ACME', type:'contract'})       │
-│         RETURN count(d) → 5                                                  │
+│ SLM Router                                                                   │
+│ 1. SLM generates TOON plan: route=GRAPH_ONLY, operation=COUNT               │
+│ 2. Executor runs Cypher: MATCH (d:structural_document) WHERE...             │
+│ 3. Returns: count=5, context="ACME has 5 contracts"                         │
 └─────────────────────────────────────────────────────────────────────────────┘
          │
          ▼
-LLM interprets structural context → "ACME tiene 5 contratos..."
+Emma receives structured context → "ACME tiene 5 contratos..."
          │
          ▼
 🎯 NO DOCUMENT CONTENT READ - 70% token savings
 ```
 
 **Key Components:**
-- `weaviate-service/app/services/sil/` - SIL package (10+ modules)
-- `weaviate-service/app/api/sil.py` - REST endpoints (`/sil/*`)
-- `backend/alembic/versions/20260120_add_sil_graph_schema.py` - Apache AGE migration
+- `weaviate-service/app/services/slm_router/` - SLM Router package
+  - `router.py` - Main orchestrator
+  - `toon_schema.py` - TOON models and guardrails
+  - `slm_client.py` - SLM client (Qwen2-0.5B)
+  - `toon_executor.py` - Plan execution
+  - `tenant_schema.py` - Tenant context
+  - `history_manager.py` - Conversation history
+  - `continuous_learning.py` - Automated fine-tuning
+- `weaviate-service/app/api/slm_router.py` - REST endpoints (`/slm/*`)
 
 **API Endpoints:**
 | Endpoint | Description |
 |----------|-------------|
-| `POST /sil/query` | Structural query with Pre-LLM reasoning |
-| `POST /sil/index-structural` | Index structural metadata |
-| `GET /sil/structure/{doc_id}` | Get structural metadata |
-| `GET /sil/graph/stats` | Graph statistics |
-| `POST /sil/search-structural` | Search by structural similarity |
+| `POST /slm/route` | Plan and execute a query |
+| `POST /slm/plan` | Generate TOON plan only |
+| `GET /slm/health` | Health check |
+| `GET /slm/metrics` | Router metrics |
 
-**Reasoning Types:**
-- `STRUCTURAL` - Direct answer from graph (count, exists, location)
-- `TEMPORAL` - Time-based queries (what changed, when, evolution)
-- `MULTIHOP` - Traverse relationships (related documents, paths)
-- `FOCUSED_RAG` - RAG on specific documents only
-- `FULL_RAG` - Traditional full-corpus RAG (fallback)
+**Configuration:**
+```bash
+SLM_ROUTER_ENABLED=true
+SLM_MODEL=Qwen/Qwen2-0.5B-Instruct
+SLM_BASE_URL=http://vllm:8000/v1
+```
 
 ### File Structure Conventions
 
@@ -284,7 +290,7 @@ LLM interprets structural context → "ACME tiene 5 contratos..."
 - **Alembic**: Database migration management
 - **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
 - **Weaviate**: Vector database for semantic search
-- **Apache AGE**: PostgreSQL graph extension for Structural Intelligence Layer (SIL)
+- **Apache AGE**: PostgreSQL graph extension for SLM Router (structural queries via Cypher)
 - **Microsoft Agent Framework**: Multi-agent orchestration with ChatAgent, @ai_function decorators
 - **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing

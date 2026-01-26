@@ -434,12 +434,62 @@ docker logs docker-weaviate-service-1 --tail 100 -f
 
 ---
 
+## SLM Router Integration
+
+Emma integrates with the SLM Router for intelligent query pre-processing:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        EMMA + SLM ROUTER INTEGRATION                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   User Query                                                                 │
+│       │                                                                      │
+│       ▼                                                                      │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                      SLM Router                                      │   │
+│   │   • Generates TOON (Task-Oriented Orchestration Notation) plans     │   │
+│   │   • Routes to GRAPH_ONLY / VECTOR_ONLY / HYBRID / ASK_CLARIFY       │   │
+│   │   • Executes against Apache AGE (graph) and Weaviate (vector)       │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       │ Structured context (not raw documents)                              │
+│       ▼                                                                      │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                     Emma Coordinator                                 │   │
+│   │   • Receives pre-processed context from SLM Router                  │   │
+│   │   • Delegates to specialized agents as needed                       │   │
+│   │   • Generates natural language response                             │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│   Benefits:                                                                  │
+│   • 70-90% token reduction for structural queries                           │
+│   • Faster response times (<500ms for graph-only queries)                   │
+│   • More precise answers based on actual data                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### TOON Route Types
+
+| Route | Emma Behavior | Example |
+|-------|--------------|---------|
+| `GRAPH_ONLY` | Direct answer from graph context | "ACME has 5 contracts" |
+| `VECTOR_ONLY` | RAG with retrieved documents | "The contract mentions..." |
+| `HYBRID` | Graph context + RAG documents | "ACME has 5 contracts, with risks in..." |
+| `ASK_CLARIFY` | Ask user for more details | "Which client are you asking about?" |
+
+For full SLM Router documentation, see [SLM_ROUTER.md](./SLM_ROUTER.md).
+
+---
+
 ## Related Documentation
 
-- [SIL.md](./SIL.md) - Structural Intelligence Layer
+- [SLM_ROUTER.md](./SLM_ROUTER.md) - SLM Router (Query Planning)
+- [SIL.md](./SIL.md) - Structural Intelligence Layer (Legacy)
 - [RAG_PIPELINE.md](./RAG_PIPELINE.md) - RAG Implementation Blueprint
 - [MODULAR_ARCHITECTURE.md](./MODULAR_ARCHITECTURE.md) - On-Premise Architecture
 
 ---
 
-*Architecture: EmmaCoordinator + Microsoft Agent Framework + vLLM (Qwen3)*
+*Architecture: EmmaCoordinator + Microsoft Agent Framework + vLLM (Qwen3) + SLM Router*

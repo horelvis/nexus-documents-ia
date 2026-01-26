@@ -1,8 +1,15 @@
 # Structural Intelligence Layer (SIL)
 
-## Visión General
+> ⚠️ **DEPRECATED**: SIL has evolved into **SLM Router** (Small Language Model Router).
+> See [SLM_ROUTER.md](./SLM_ROUTER.md) for the current architecture.
+>
+> The SLM Router replaces SIL's rule-based intent detection with LLM-powered query planning using TOON (Task-Oriented Orchestration Notation). The core concepts remain the same, but the implementation is more flexible and includes continuous learning.
 
-El **Structural Intelligence Layer (SIL)** es un componente revolucionario que representa un cambio de paradigma en la arquitectura RAG de NouxCubeIA. En lugar de aprender el **contenido** de los documentos, el SIL aprende su **estructura** - dónde están, cómo se relacionan, qué tipo son.
+---
+
+## Visión General (Legacy)
+
+El **Structural Intelligence Layer (SIL)** fue un componente que representó un cambio de paradigma en la arquitectura RAG de NouxCubeIA. En lugar de aprender el **contenido** de los documentos, el SIL aprende su **estructura** - dónde están, cómo se relacionan, qué tipo son.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
