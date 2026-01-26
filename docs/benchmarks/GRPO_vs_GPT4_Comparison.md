@@ -4,6 +4,8 @@
 **Autor:** NouxCube AI Team
 **Versión:** 1.0
 
+> 📚 **Fundamento Académico:** El modelo GRPO utilizado en este benchmark está basado en la técnica **DW-GRPO** (Deep Web Group Relative Policy Optimization) del paper *"Deep GraphRAG"* por Li et al. (2026). Ver [Referencias](#referencias) para citación completa.
+
 ## Resumen Ejecutivo
 
 Este documento presenta los resultados de la comparación entre el modelo **GRPO (horelvis/qwen-dw-grpo-rag)** ejecutado localmente en GPU RTX 4090 y **GPT-4.1** de OpenAI Cloud, evaluando su rendimiento en tareas de RAG (Retrieval-Augmented Generation) con contexto de Knowledge Graph.
@@ -171,11 +173,11 @@ GPT-4.1: 1788ms ± 500ms (variable por red/carga)
 
 ### 4. Optimizado para Knowledge Graph
 
-GRPO está fine-tuneado con técnicas de **Group Relative Policy Optimization** específicamente para:
-- Entender estructuras de grafos
-- Extraer relaciones entre entidades
-- Responder basándose estrictamente en el contexto dado
-- Minimizar hallucinations en RAG
+GRPO está fine-tuneado con técnicas de **DW-GRPO (Deep Web Group Relative Policy Optimization)**, introducidas en el paper *"Deep GraphRAG: A Balanced Approach to Hierarchical Retrieval and Adaptive Integration"* [[1]](#referencias), específicamente para:
+- Entender estructuras de grafos mediante recuperación jerárquica de tres etapas
+- Extraer relaciones entre entidades con filtrado inter-comunidad
+- Responder basándose estrictamente en el contexto dado usando el Knowledge Integration Module
+- Minimizar hallucinations en RAG mediante aprendizaje por refuerzo
 
 ---
 
@@ -306,6 +308,30 @@ curl -s https://api.openai.com/v1/chat/completions \
     "max_tokens": 200,
     "temperature": 0.3
   }'
+```
+
+---
+
+## Referencias
+
+<a name="referencias"></a>
+
+**[1]** Li, Y., Yang, K., Wang, T., Chen, B., Li, B., & Mao, C. (2026). *Deep GraphRAG: A Balanced Approach to Hierarchical Retrieval and Adaptive Integration*. arXiv:2601.11144. https://doi.org/10.48550/arXiv.2601.11144
+
+> **Abstract:** Este paper aborda los desafíos en Graph-based Retrieval-Augmented Generation proponiendo un framework que balancea la "exhaustividad de búsqueda global" con la eficiencia de búsqueda. Introduce un proceso de recuperación jerárquica de tres etapas combinando filtrado inter-comunidad, refinamiento a nivel de comunidad, y búsqueda a nivel de entidad. El enfoque incluye un Knowledge Integration Module que utiliza aprendizaje por refuerzo (DW-GRPO) para entrenar modelos de lenguaje compactos, con evaluaciones que muestran mejoras de rendimiento en los datasets Natural Questions y HotpotQA.
+
+### Citación BibTeX
+
+```bibtex
+@misc{li2026deepgraphrag,
+      title={Deep GraphRAG: A Balanced Approach to Hierarchical Retrieval and Adaptive Integration},
+      author={Yuejie Li and Ke Yang and Tao Wang and Bolin Chen and Bowen Li and Chengjun Mao},
+      year={2026},
+      eprint={2601.11144},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2601.11144}
+}
 ```
 
 ---
