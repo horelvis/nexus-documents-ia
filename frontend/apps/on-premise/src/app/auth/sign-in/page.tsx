@@ -9,7 +9,17 @@
 
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
-import { IconLoader2, IconShield, IconLock, IconCpu, IconBrain, IconShieldCheck, IconNetwork } from '@tabler/icons-react'
+import {
+  IconLoader2,
+  IconShield,
+  IconLock,
+  IconCpu,
+  IconBrain,
+  IconScale,
+  IconRoute,
+  IconPlugConnected,
+  IconSearch
+} from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 
@@ -48,10 +58,12 @@ export default function SignInPage() {
   }
 
   const features = [
-    { icon: IconCpu, label: 'GPU Local', desc: 'Inferencia privada sin APIs externas' },
-    { icon: IconNetwork, label: 'SLM Router', desc: '70-90% ahorro en tokens' },
-    { icon: IconShieldCheck, label: 'Generación Verificada', desc: '70% menos alucinaciones' },
-    { icon: IconBrain, label: 'Multi-Agente Emma', desc: 'Agentes especializados por dominio' },
+    { icon: IconCpu, label: 'vLLM + Qwen3', desc: 'GPU local, sin APIs externas' },
+    { icon: IconBrain, label: 'Emma AI', desc: '12 agentes especializados' },
+    { icon: IconRoute, label: 'SLM Router', desc: 'Query planning con TOON' },
+    { icon: IconSearch, label: 'RAG 7 Capas', desc: 'Búsqueda híbrida + reranking' },
+    { icon: IconScale, label: 'BOE Legal', desc: '47+ leyes españolas indexadas' },
+    { icon: IconPlugConnected, label: 'Conectores', desc: 'Alfresco, SharePoint, DB' },
   ]
 
   return (
@@ -79,16 +91,16 @@ export default function SignInPage() {
 
           <div className="space-y-4 text-center lg:text-left">
             <p className="max-w-md text-lg text-slate-300">
-              Todo el conocimiento de tu empresa en un solo lugar. 100% en tu infraestructura.
+              Gestión documental inteligente con IA 100% local. Privacidad total, sin dependencias externas.
             </p>
             <div className="inline-flex items-center gap-2 rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300 ring-1 ring-cyan-500/20">
               <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
-              On-Premise · Data Sovereignty · Air-Gap Ready
+              On-Premise · GDPR Ready · Air-Gap Compatible
             </div>
           </div>
 
           {/* Features */}
-          <div className="grid w-full max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid w-full max-w-lg grid-cols-2 gap-3 sm:grid-cols-3">
             {features.map(({ icon: Icon, label, desc }) => (
               <div
                 key={label}
