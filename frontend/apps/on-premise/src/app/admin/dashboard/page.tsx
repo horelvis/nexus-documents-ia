@@ -135,28 +135,30 @@ interface TopFolder {
   count: number
 }
 
-interface SILGraphStats {
-  tenant_id: string
-  total_documents: number
-  total_folders: number
-  total_relationships: number
-  types_breakdown: Record<string, number>
-  domains_breakdown: Record<string, number>
-  relationships_breakdown: Record<string, number>
-  top_folders: TopFolder[]
-  recent_documents: RecentDocument[]
-  graph_name: string
-  sil_enabled: boolean
+interface SLMRouterStats {
+  status: string
+  initialized: boolean
+  enabled: boolean
+  slm: {
+    model?: string
+    endpoint?: string
+    status?: string
+  }
+  executor: {
+    graph_backend?: string
+    vector_backend?: string
+    status?: string
+  }
+  metrics: {
+    total_requests?: number
+    graph_requests?: number
+    vector_requests?: number
+    hybrid_requests?: number
+    avg_latency_ms?: number
+    cache_hits?: number
+    cache_misses?: number
+  }
   error?: string
-}
-
-interface SILReindexResult {
-  success: boolean
-  total_documents: number
-  documents_processed: number
-  documents_skipped: number
-  errors: number
-  message: string
 }
 
 interface BOEPreset {
@@ -201,7 +203,7 @@ export default function AdminDashboardPage() {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null)
   const [weaviateHealth, setWeaviateHealth] = useState<WeaviateHealth | null>(null)
   const [knowledgeStats, setKnowledgeStats] = useState<KnowledgeStats | null>(null)
-  const [silStats, setSilStats] = useState<SILGraphStats | null>(null)
+  const [slmStats, setSlmStats] = useState<SLMRouterStats | null>(null)
   const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
   const [publicKnowledgeStats, setPublicKnowledgeStats] = useState<PublicKnowledgeStats | null>(null)
 
@@ -209,8 +211,6 @@ export default function AdminDashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRunningMaintenance, setIsRunningMaintenance] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isReindexingSil, setIsReindexingSil] = useState(false)
-  const [isClearingSil, setIsClearingSil] = useState(false)
   const [isDownloadingBoe, setIsDownloadingBoe] = useState(false)
   const [isSyncingBoe, setIsSyncingBoe] = useState(false)
   const [isExtractingKnowledge, setIsExtractingKnowledge] = useState(false)
@@ -227,14 +227,9 @@ export default function AdminDashboardPage() {
   // Dialogs
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false)
-  const [showSilReindexDialog, setShowSilReindexDialog] = useState(false)
-  const [showSilClearDialog, setShowSilClearDialog] = useState(false)
   const [showBoeDownloadDialog, setShowBoeDownloadDialog] = useState(false)
   const [showBoeSyncDialog, setShowBoeSyncDialog] = useState(false)
   const [showKnowledgeExtractDialog, setShowKnowledgeExtractDialog] = useState(false)
-
-  // SIL options
-  const [silFullReindex, setSilFullReindex] = useState(false)
 
   // BOE options
   const [selectedBoePreset, setSelectedBoePreset] = useState<string>("")
@@ -246,7 +241,6 @@ export default function AdminDashboardPage() {
 
   // Results
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResult | null>(null)
-  const [silReindexResult, setSilReindexResult] = useState<SILReindexResult | null>(null)
 
   // ============================================================================
   // Effects
@@ -286,7 +280,7 @@ export default function AdminDashboardPage() {
         loadSystemStats(),
         loadWeaviateHealth(),
         loadKnowledgeStats(),
-        loadSilStats(),
+        loadSlmStats(),
         loadBoePresets(),
         loadPublicKnowledgeStats(),
       ])
@@ -336,15 +330,15 @@ export default function AdminDashboardPage() {
     }
   }
 
-  const loadSilStats = async () => {
+  const loadSlmStats = async () => {
     try {
-      // Call /weaviate/sil/graph/stats endpoint
-      const response = await apiClient.get<SILGraphStats>('/weaviate/sil/graph/stats')
+      // Call /weaviate/slm/health endpoint
+      const response = await apiClient.get<SLMRouterStats>('/weaviate/slm/health')
       if (!response.error && response.data) {
-        setSilStats(response.data)
+        setSlmStats(response.data)
       }
     } catch (error) {
-      console.error('Failed to load SIL stats:', error)
+      console.error('Failed to load SLM Router stats:', error)
     }
   }
 
@@ -433,68 +427,6 @@ export default function AdminDashboardPage() {
       setError(errorMessage)
     } finally {
       setIsDeleting(false)
-    }
-  }
-
-  // ============================================================================
-  // SIL Actions
-  // ============================================================================
-
-  const handleSilReindex = async () => {
-    setShowSilReindexDialog(false)
-    setIsReindexingSil(true)
-    setSilReindexResult(null)
-    setError(null)
-
-    try {
-      // Call /weaviate/sil/reindex endpoint
-      const response = await apiClient.post<SILReindexResult>('/weaviate/sil/reindex', {
-        full_reindex: silFullReindex,
-      })
-
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
-      setSilReindexResult(response.data || null)
-      setSuccessMessage(
-        `SIL reindex completado: ${response.data?.documents_processed || 0} documentos procesados`
-      )
-
-      // Reload SIL stats
-      await loadSilStats()
-
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Error al reindexar SIL'
-      setError(errorMessage)
-    } finally {
-      setIsReindexingSil(false)
-    }
-  }
-
-  const handleSilClear = async () => {
-    setShowSilClearDialog(false)
-    setIsClearingSil(true)
-    setError(null)
-
-    try {
-      // Call /weaviate/sil/graph/clear endpoint
-      const response = await apiClient.delete('/weaviate/sil/graph/clear')
-
-      if (response.error) {
-        throw new Error(response.error)
-      }
-
-      setSuccessMessage('Grafo SIL limpiado correctamente')
-
-      // Reload SIL stats
-      await loadSilStats()
-
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Error al limpiar grafo SIL'
-      setError(errorMessage)
-    } finally {
-      setIsClearingSil(false)
     }
   }
 
@@ -820,9 +752,9 @@ export default function AdminDashboardPage() {
                   <IconBinaryTree className="h-4 w-4 mr-2" />
                   Knowledge
                 </TabsTrigger>
-                <TabsTrigger value="sil">
-                  <IconSchool className="h-4 w-4 mr-2" />
-                  SIL
+                <TabsTrigger value="slm">
+                  <IconBrain className="h-4 w-4 mr-2" />
+                  SLM Router
                 </TabsTrigger>
                 <TabsTrigger value="boe">
                   <IconDatabase className="h-4 w-4 mr-2" />
@@ -1049,59 +981,20 @@ export default function AdminDashboardPage() {
                 )}
               </TabsContent>
 
-              {/* SIL (Structural Intelligence Layer) Tab */}
-              <TabsContent value="sil" className="space-y-4">
-                {/* SIL Info Banner */}
+              {/* SLM Router Tab */}
+              <TabsContent value="slm" className="space-y-4">
+                {/* SLM Info Banner */}
                 <Alert>
-                  <IconSchool className="h-4 w-4" />
+                  <IconBrain className="h-4 w-4" />
                   <AlertDescription>
-                    <strong>Structural Intelligence Layer (SIL)</strong> — Aprende la ESTRUCTURA de documentos, no su contenido.
-                    Permite respuestas rápidas (70% menos tokens) para consultas estructurales como conteos, ubicaciones y relaciones.
+                    <strong>SLM Router (Small Language Model)</strong> — Sistema de planificación de queries que
+                    genera planes TOON (Task-Oriented Orchestration Notation) para enrutar consultas al origen
+                    de datos óptimo. Ahorra hasta 70-90% de tokens comparado con RAG tradicional.
                   </AlertDescription>
                 </Alert>
 
-                {silReindexResult && (
-                  <Alert>
-                    <IconCircleCheck className="h-4 w-4" />
-                    <AlertDescription>
-                      SIL Reindex: {silReindexResult.message} — Procesados: {silReindexResult.documents_processed},
-                      Omitidos: {silReindexResult.documents_skipped}, Errores: {silReindexResult.errors}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
                 {/* Overview Stats Cards */}
                 <div className="grid gap-4 md:grid-cols-4">
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Documentos</CardTitle>
-                      <IconFile className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{formatNumber(silStats?.total_documents)}</div>
-                      <p className="text-xs text-muted-foreground">En el grafo estructural</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Carpetas</CardTitle>
-                      <IconFolder className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{formatNumber(silStats?.total_folders)}</div>
-                      <p className="text-xs text-muted-foreground">Jerarquía rastreada</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Relaciones</CardTitle>
-                      <IconBinaryTree className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{formatNumber(silStats?.total_relationships)}</div>
-                      <p className="text-xs text-muted-foreground">Conexiones en el grafo</p>
-                    </CardContent>
-                  </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                       <CardTitle className="text-sm font-medium">Estado</CardTitle>
@@ -1109,292 +1002,209 @@ export default function AdminDashboardPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="flex items-center gap-2">
-                        {getStatusBadge(silStats?.sil_enabled)}
+                        {getStatusBadge(slmStats?.status === 'healthy')}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">{silStats?.graph_name || 'knowledge_graph'}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {slmStats?.initialized ? 'Inicializado' : 'No inicializado'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
+                      <IconChartBar className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{formatNumber(slmStats?.metrics?.total_requests)}</div>
+                      <p className="text-xs text-muted-foreground">Consultas procesadas</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Latencia Promedio</CardTitle>
+                      <IconActivity className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">
+                        {slmStats?.metrics?.avg_latency_ms ? `${Math.round(slmStats.metrics.avg_latency_ms)}ms` : '-'}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Tiempo de respuesta</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Cache Hit Rate</CardTitle>
+                      <IconServer className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">
+                        {slmStats?.metrics?.cache_hits !== undefined && slmStats?.metrics?.cache_misses !== undefined
+                          ? `${Math.round((slmStats.metrics.cache_hits / (slmStats.metrics.cache_hits + slmStats.metrics.cache_misses || 1)) * 100)}%`
+                          : '-'}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {formatNumber(slmStats?.metrics?.cache_hits)} hits / {formatNumber(slmStats?.metrics?.cache_misses)} misses
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  {/* Types Breakdown */}
+                  {/* Route Distribution */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
                         <IconChartPie className="h-5 w-5" />
-                        Por Tipo Semántico
+                        Distribución de Rutas
                       </CardTitle>
-                      <CardDescription>Clasificación automática de documentos</CardDescription>
+                      <CardDescription>Tipos de enrutamiento utilizados</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {isLoading ? (
-                        <div className="space-y-2">
-                          {[1, 2, 3].map(i => (
-                            <div key={i} className="h-8 bg-muted animate-pulse rounded" />
-                          ))}
-                        </div>
-                      ) : silStats?.types_breakdown && Object.keys(silStats.types_breakdown).length > 0 ? (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {Object.entries(silStats.types_breakdown)
-                            .sort(([, a], [, b]) => b - a)
-                            .map(([type, count]) => (
-                            <div key={type} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                              <span className="text-sm capitalize">{type.replace(/_/g, ' ')}</span>
-                              <Badge variant="outline">{formatNumber(count)}</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          No hay documentos indexados. Ejecuta un reindex para poblar el SIL.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Domains Breakdown */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconBuilding className="h-5 w-5" />
-                        Por Dominio
-                      </CardTitle>
-                      <CardDescription>Área de negocio de los documentos</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {isLoading ? (
-                        <div className="space-y-2">
-                          {[1, 2, 3].map(i => (
-                            <div key={i} className="h-8 bg-muted animate-pulse rounded" />
-                          ))}
-                        </div>
-                      ) : silStats?.domains_breakdown && Object.keys(silStats.domains_breakdown).length > 0 ? (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {Object.entries(silStats.domains_breakdown)
-                            .sort(([, a], [, b]) => b - a)
-                            .map(([domain, count]) => (
-                            <div key={domain} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                              <span className="text-sm capitalize">{domain.replace(/_/g, ' ')}</span>
-                              <Badge variant="outline">{formatNumber(count)}</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          No hay dominios detectados aún.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  {/* Top Folders */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconFolder className="h-5 w-5" />
-                        Top Carpetas
-                      </CardTitle>
-                      <CardDescription>Carpetas con más documentos</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {isLoading ? (
-                        <div className="space-y-2">
-                          {[1, 2, 3].map(i => (
-                            <div key={i} className="h-8 bg-muted animate-pulse rounded" />
-                          ))}
-                        </div>
-                      ) : silStats?.top_folders && silStats.top_folders.length > 0 ? (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {silStats.top_folders.map((folder, index) => (
-                            <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                              <span className="text-sm truncate max-w-[200px]" title={folder.path}>
-                                {folder.path.split('/').pop() || folder.path}
-                              </span>
-                              <Badge variant="outline">{formatNumber(folder.count)}</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          No hay carpetas indexadas aún.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Recent Documents */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconActivity className="h-5 w-5" />
-                        Documentos Recientes
-                      </CardTitle>
-                      <CardDescription>Últimos documentos indexados</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {isLoading ? (
-                        <div className="space-y-2">
-                          {[1, 2, 3].map(i => (
-                            <div key={i} className="h-10 bg-muted animate-pulse rounded" />
-                          ))}
-                        </div>
-                      ) : silStats?.recent_documents && silStats.recent_documents.length > 0 ? (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {silStats.recent_documents.map((doc) => (
-                            <div key={doc.id} className="p-2 bg-muted/50 rounded">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium truncate max-w-[180px]" title={doc.title}>
-                                  {doc.title}
-                                </span>
-                                <Badge variant="secondary" className="text-xs capitalize">
-                                  {doc.type.replace(/_/g, ' ')}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {doc.created_at ? new Date(doc.created_at).toLocaleDateString('es-ES') : 'Fecha desconocida'}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          No hay documentos recientes.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Relationships Breakdown - Full Width */}
-                {silStats?.relationships_breakdown && Object.keys(silStats.relationships_breakdown).length > 0 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconBinaryTree className="h-5 w-5" />
-                        Relaciones en el Grafo
-                      </CardTitle>
-                      <CardDescription>Tipos de conexiones entre nodos</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-2 md:grid-cols-4">
-                        {Object.entries(silStats.relationships_breakdown).map(([relType, count]) => (
-                          <div key={relType} className="flex items-center justify-between p-3 bg-muted/50 rounded">
-                            <span className="text-sm font-medium capitalize">{relType.replace(/_/g, ' ')}</span>
-                            <Badge variant="outline">{formatNumber(count)}</Badge>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <div className="flex items-center gap-2">
+                            <IconBinaryTree className="h-4 w-4 text-blue-500" />
+                            <span className="text-sm">GRAPH_ONLY</span>
                           </div>
-                        ))}
+                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.graph_requests)}</Badge>
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <div className="flex items-center gap-2">
+                            <IconDatabase className="h-4 w-4 text-green-500" />
+                            <span className="text-sm">VECTOR_ONLY</span>
+                          </div>
+                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.vector_requests)}</Badge>
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <div className="flex items-center gap-2">
+                            <IconBrain className="h-4 w-4 text-purple-500" />
+                            <span className="text-sm">HYBRID</span>
+                          </div>
+                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.hybrid_requests)}</Badge>
+                        </div>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-4">
+                        GRAPH_ONLY: Consultas estructurales. VECTOR_ONLY: Búsqueda semántica. HYBRID: Combinación.
+                      </p>
                     </CardContent>
                   </Card>
-                )}
 
-                {/* SIL Actions */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  {/* Reindex SIL */}
+                  {/* Backend Status */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <IconReload className="h-5 w-5" />
-                        Reindexar SIL
+                        <IconServer className="h-5 w-5" />
+                        Estado de Backends
                       </CardTitle>
-                      <CardDescription>
-                        Extrae metadatos estructurales de documentos e indexa al grafo
-                      </CardDescription>
+                      <CardDescription>Servicios de datos conectados</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="sil-full-reindex">Reindex completo</Label>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="p-3 bg-muted/50 rounded">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">SLM Client</span>
+                            {getStatusBadge(slmStats?.slm?.status === 'ok')}
+                          </div>
                           <p className="text-xs text-muted-foreground">
-                            Si está desactivado, solo procesa documentos nuevos
+                            Modelo: {slmStats?.slm?.model || 'No configurado'}
                           </p>
                         </div>
-                        <Switch
-                          id="sil-full-reindex"
-                          checked={silFullReindex}
-                          onCheckedChange={setSilFullReindex}
-                        />
+                        <div className="p-3 bg-muted/50 rounded">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">Graph Backend (AGE)</span>
+                            {getStatusBadge(slmStats?.executor?.status === 'ok')}
+                          </div>
+                        </div>
+                        <div className="p-3 bg-muted/50 rounded">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">Vector Backend (Weaviate)</span>
+                            {getStatusBadge(slmStats?.executor?.status === 'ok')}
+                          </div>
+                        </div>
                       </div>
-                      <div className="rounded-lg bg-muted p-4 text-sm">
-                        <p className="text-muted-foreground">
-                          El reindex extrae: tipo semántico, dominio, ruta de carpeta,
-                          propiedades clave y descripción estructural de cada documento.
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* TOON Routes Explanation */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <IconBrain className="h-5 w-5" />
+                      TOON - Task-Oriented Orchestration Notation
+                    </CardTitle>
+                    <CardDescription>
+                      El SLM Router genera planes estructurados para cada consulta
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <IconBinaryTree className="h-4 w-4 text-blue-500" />
+                          GRAPH_ONLY
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Para consultas estructurales: conteos, existencia, relaciones.
+                          Ejecuta Cypher queries en Apache AGE. Latencia &lt;500ms.
+                        </p>
+                        <p className="text-xs mt-2 italic">
+                          Ejemplo: &quot;¿Cuántos contratos tiene ACME?&quot;
                         </p>
                       </div>
-                    </CardContent>
-                    <CardFooter>
-                      <Button
-                        onClick={() => setShowSilReindexDialog(true)}
-                        disabled={isReindexingSil}
-                        className="w-full"
-                      >
-                        {isReindexingSil ? (
-                          <>
-                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Reindexando...
-                          </>
-                        ) : (
-                          <>
-                            <IconReload className="mr-2 h-4 w-4" />
-                            Reindexar SIL
-                          </>
-                        )}
-                      </Button>
-                    </CardFooter>
-                  </Card>
-
-                  {/* Clear SIL Graph */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-destructive">
-                        <IconTrash className="h-5 w-5" />
-                        Limpiar Grafo SIL
-                      </CardTitle>
-                      <CardDescription>
-                        Elimina todos los nodos y relaciones del grafo estructural
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <Alert variant="destructive">
-                        <IconAlertCircle className="h-4 w-4" />
-                        <AlertDescription>
-                          Esta acción eliminará permanentemente todos los metadatos estructurales.
-                          Los documentos originales NO se verán afectados.
-                        </AlertDescription>
-                      </Alert>
-                      <div className="rounded-lg bg-muted p-4">
-                        <h4 className="font-medium mb-2">Se eliminarán:</h4>
-                        <ul className="text-sm text-muted-foreground space-y-1">
-                          <li>• {formatNumber(silStats?.total_documents)} nodos de documentos</li>
-                          <li>• {formatNumber(silStats?.total_folders)} nodos de carpetas</li>
-                          <li>• Todas las relaciones estructurales</li>
-                          <li>• Embeddings estructurales en Weaviate</li>
-                        </ul>
+                      <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <IconDatabase className="h-4 w-4 text-green-500" />
+                          VECTOR_ONLY
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Para búsqueda semántica de contenido. Usa embeddings BGE-M3
+                          y busca en Weaviate.
+                        </p>
+                        <p className="text-xs mt-2 italic">
+                          Ejemplo: &quot;Encuentra cláusulas sobre confidencialidad&quot;
+                        </p>
                       </div>
-                    </CardContent>
-                    <CardFooter>
-                      <Button
-                        variant="destructive"
-                        onClick={() => setShowSilClearDialog(true)}
-                        disabled={isClearingSil}
-                        className="w-full"
-                      >
-                        {isClearingSil ? (
-                          <>
-                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Limpiando...
-                          </>
-                        ) : (
-                          <>
-                            <IconTrash className="mr-2 h-4 w-4" />
-                            Limpiar Grafo SIL
-                          </>
-                        )}
-                      </Button>
-                    </CardFooter>
-                  </Card>
+                      <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <IconBrain className="h-4 w-4 text-purple-500" />
+                          HYBRID
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Combina graph y vector search cuando la consulta requiere
+                          contexto estructural y semántico.
+                        </p>
+                        <p className="text-xs mt-2 italic">
+                          Ejemplo: &quot;Analiza el contrato de ACME sobre privacidad&quot;
+                        </p>
+                      </div>
+                      <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <IconAlertCircle className="h-4 w-4 text-yellow-500" />
+                          ASK_CLARIFY
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Cuando la consulta es ambigua, el sistema solicita
+                          clarificación antes de ejecutar.
+                        </p>
+                        <p className="text-xs mt-2 italic">
+                          Ejemplo: &quot;Busca el documento&quot; → &quot;¿Qué documento?&quot;
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Refresh Button */}
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={loadSlmStats}
+                    disabled={isLoading}
+                  >
+                    <IconRefresh className="mr-2 h-4 w-4" />
+                    Actualizar Estadísticas
+                  </Button>
                 </div>
               </TabsContent>
 
@@ -1901,74 +1711,6 @@ export default function AdminDashboardPage() {
             >
               <IconTrash className="mr-2 h-4 w-4" />
               Eliminar Todo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* SIL Reindex Confirmation Dialog */}
-      <AlertDialog open={showSilReindexDialog} onOpenChange={setShowSilReindexDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Reindexar SIL?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {silFullReindex ? (
-                <>
-                  Se ejecutará un <strong>reindex completo</strong>:
-                  <ul className="mt-2 list-disc list-inside">
-                    <li>Limpiará el grafo existente</li>
-                    <li>Procesará TODOS los documentos</li>
-                    <li>Puede tardar varios minutos</li>
-                  </ul>
-                </>
-              ) : (
-                <>
-                  Se ejecutará un <strong>reindex incremental</strong>:
-                  <ul className="mt-2 list-disc list-inside">
-                    <li>Solo procesará documentos nuevos</li>
-                    <li>Más rápido que el reindex completo</li>
-                    <li>No eliminará datos existentes</li>
-                  </ul>
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSilReindex}>
-              <IconReload className="mr-2 h-4 w-4" />
-              Reindexar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* SIL Clear Graph Confirmation Dialog */}
-      <AlertDialog open={showSilClearDialog} onOpenChange={setShowSilClearDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-destructive">¿Limpiar grafo SIL?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción eliminará permanentemente:
-              <ul className="mt-2 list-disc list-inside">
-                <li>{formatNumber(silStats?.total_documents)} nodos de documentos</li>
-                <li>{formatNumber(silStats?.total_folders)} nodos de carpetas</li>
-                <li>Todas las relaciones estructurales</li>
-              </ul>
-              <p className="mt-2 text-sm">
-                Los documentos originales NO se eliminarán. Deberás ejecutar un reindex
-                completo para volver a poblar el grafo.
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleSilClear}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              <IconTrash className="mr-2 h-4 w-4" />
-              Limpiar Grafo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

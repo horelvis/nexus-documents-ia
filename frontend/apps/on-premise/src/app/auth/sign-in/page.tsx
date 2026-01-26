@@ -49,7 +49,7 @@ export default function SignInPage() {
 
   const features = [
     { icon: IconCpu, label: 'GPU Local', desc: 'Inferencia privada sin APIs externas' },
-    { icon: IconNetwork, label: 'SIL Pre-LLM', desc: '70-90% ahorro en tokens' },
+    { icon: IconNetwork, label: 'SLM Router', desc: '70-90% ahorro en tokens' },
     { icon: IconShieldCheck, label: 'Generación Verificada', desc: '70% menos alucinaciones' },
     { icon: IconBrain, label: 'Multi-Agente Emma', desc: 'Agentes especializados por dominio' },
   ]
