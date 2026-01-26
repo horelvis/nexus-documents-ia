@@ -14,7 +14,7 @@ Eres un experto en comunicación corporativa y presentaciones de producto tecnol
 ### Stack Tecnológico (simplificar para audiencia no técnica)
 - Modelo LLM: Qwen3 (open source, ejecutado localmente)
 - Base de datos vectorial: Weaviate
-- Framework de agentes: Microsoft Agent Framework
+- Framework de agentes: Anthropic Skill Custom
 - Infraestructura: Docker, GPU local (RTX 4090)
 
 ### Problema que Resuelve

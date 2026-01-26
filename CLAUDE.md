@@ -80,7 +80,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 **Frontend**: Next.js 15 with App Router, TypeScript, and OIDC/SAML authentication
 **Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
 **Storage**: Google Cloud Storage for files
-**AI/ML**: vLLM (GPU inference) + Microsoft Agent Framework for multi-agent orchestration (Emma AI)
+**AI/ML**: vLLM (GPU inference) + Anthropic Skill Custom for multi-agent orchestration (Emma AI)
 
 ### Key Architectural Patterns
 
@@ -291,7 +291,7 @@ SLM_BASE_URL=http://vllm:8000/v1
 - **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
 - **Weaviate**: Vector database for semantic search
 - **Apache AGE**: PostgreSQL graph extension for SLM Router (structural queries via Cypher)
-- **Microsoft Agent Framework**: Multi-agent orchestration with ChatAgent, @ai_function decorators
+- **Anthropic Skill Custom**: Multi-agent orchestration with ChatAgent, @ai_function decorators
 - **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing
 - **Redis**: Caching and session storage
@@ -409,8 +409,8 @@ If you encounter module resolution errors like "Export default doesn't exist":
 4. Add necessary environment variables
 5. Update docker-compose configuration
 
-### Working with Microsoft Agent Framework
-The Weaviate Service includes a complete Microsoft Agent Framework + vLLM integration for high-throughput GPU inference:
+### Working with Anthropic Skill Custom
+The Weaviate Service includes a complete Anthropic Skill Custom + vLLM integration for high-throughput GPU inference:
 
 **Architecture:**
 ```

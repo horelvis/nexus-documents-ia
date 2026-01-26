@@ -405,7 +405,7 @@ Usuario ──▶ API ──▶ weaviate-service
 
 ## Emma AI: Multi-Agent System
 
-Emma is the intelligent assistant built on **Qwen-Agent** framework with multi-pattern orchestration. The system automatically selects the best execution pattern based on query analysis.
+Emma is the intelligent assistant built on **Anthropic Skill Custom** framework with multi-pattern orchestration. The system automatically selects the best execution pattern based on query analysis.
 
 ### Orchestration Patterns
 

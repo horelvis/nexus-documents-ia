@@ -97,7 +97,7 @@ RLM es un **paradigma de inferencia** (no un modelo nuevo) que permite procesar 
 | Componente | Compatibilidad | Notas |
 |------------|---------------|-------|
 | vLLM + Qwen3 | ✅ Excelente | RLM usa OpenAI-compatible API |
-| Microsoft Agent Framework | ✅ Compatible | RLM se integra como patrón de orquestación |
+| Anthropic Skill Custom | ✅ Compatible | RLM se integra como patrón de orquestación |
 | Redis | ✅ Aprovechable | Para almacenar contexto externo |
 | Docker | ✅ Nativo | RLM incluye executor Docker |
 | Pipeline RAG 7 capas | ✅ Extensible | RLM como capa 4.5 adicional |
@@ -299,7 +299,7 @@ Justificación:
 1. **Paper**: Zhang, A. L., Kraska, T., & Khattab, O. (2025). Recursive Language Models. arXiv:2512.24601v1
 2. **Repositorio**: https://github.com/alexzhang13/rlm
 3. **DSPy Framework**: https://github.com/stanfordnlp/dspy (referencia de Omar Khattab)
-4. **Microsoft Agent Framework**: Documentación interna NouxCubeIA
+4. **Anthropic Skill Custom**: Documentación interna NouxCubeIA
 
 ---
 

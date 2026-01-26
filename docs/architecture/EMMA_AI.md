@@ -1,6 +1,6 @@
 # Emma AI - Technical Architecture
 
-Emma is the intelligent AI assistant for NouxCubeIA, built on **Microsoft Agent Framework** with **vLLM** (Qwen3) as the primary inference engine.
+Emma is the intelligent AI assistant for NouxCubeIA, built on **Anthropic Skill Custom** framework with **vLLM** (Qwen3) as the primary inference engine.
 
 > **Current Status**: EmmaCoordinator is the active execution path. Voice-first capabilities are planned for Phase 2.
 
@@ -492,4 +492,4 @@ For full SLM Router documentation, see [SLM_ROUTER.md](./SLM_ROUTER.md).
 
 ---
 
-*Architecture: EmmaCoordinator + Microsoft Agent Framework + vLLM (Qwen3) + SLM Router*
+*Architecture: EmmaCoordinator + Anthropic Skill Custom + vLLM (Qwen3) + SLM Router*

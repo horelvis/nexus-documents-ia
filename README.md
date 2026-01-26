@@ -27,7 +27,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Emma AI Assistant** | Intelligent assistant with multi-agent orchestration (Microsoft Agent Framework) |
+| **Emma AI Assistant** | Intelligent assistant with multi-agent orchestration (Anthropic Skill Custom) |
 | **SLM Router** | Small Language Model query planning with TOON notation |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, reranking, and validated generation |
 | **Cross-Modal Search** | Text queries find images, diagrams, and tables in documents |
@@ -98,7 +98,7 @@ curl http://localhost:8000/health
 
 ### Emma AI: Multi-Agent Orchestration
 
-Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** orchestration:
+Emma AI is built on **Anthropic Skill Custom** with **PlanningFlow** orchestration:
 
 | Agent | Domain | Capabilities |
 |-------|--------|--------------|
@@ -132,7 +132,7 @@ Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** orchestr
 - **Database**: PostgreSQL 15 + Apache AGE (Graph)
 - **Vector DB**: Weaviate
 - **Cache**: Redis
-- **AI Framework**: Microsoft Agent Framework
+- **AI Framework**: Anthropic Skill Custom
 
 ### Frontend
 - **Framework**: Next.js 15 (App Router)
@@ -189,5 +189,5 @@ This project is licensed under the [MIT License](LICENSE).
 
 <div align="center">
   <h3>NouxCubeIA - Enterprise Document Intelligence with Local AI</h3>
-  <p>Powered by vLLM + Microsoft Agent Framework</p>
+  <p>Powered by vLLM + Anthropic Skill Custom</p>
 </div>
