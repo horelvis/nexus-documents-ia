@@ -112,3 +112,11 @@ backups/
 celerybeat-schedule
 celerybeat-schedule.*
 celerybeat.pid
+
+# wget logs
+wget-log*
+
+# Presentation service test files
+backend/microservices/presentation-service/*.pptx
+!backend/microservices/presentation-service/templates/*.pptx
+!backend/microservices/presentation-service/templates/*.potx
