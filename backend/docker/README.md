@@ -381,7 +381,7 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 |---------|------|-------------|
 | Main API | 8000 | FastAPI main application |
 | Storage Service | 8003 | Google Cloud Storage operations |
-| Weaviate Service | 8007 | Emma AI + SIL + Verified Generation (Agent Framework + vLLM + RAG) |
+| Weaviate Service | 8007 | Emma AI + SLM Router + Verified Generation (Agent Framework + vLLM + RAG) |
 | Elasticsearch Service | 8008 | Full-text search & document indexing |
 | LangExtract Service | 8009 | Document language extraction |
 | TTS Service | 8010 | Text-to-Speech (Google TTS / VibeVoice) |
@@ -401,69 +401,57 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 
 ---
 
-## 🧠 Structural Intelligence Layer (SIL)
+## 🧠 SLM Router (Small Language Model Query Planning)
 
 ### Descripción
-El SIL es un sistema de **razonamiento pre-LLM** que aprende la **estructura** de los documentos en lugar de su contenido. Esto permite responder consultas estructurales sin invocar el RAG completo, ahorrando hasta un **70-90% de tokens**.
+El SLM Router es un sistema de **planificación de queries** que utiliza un Small Language Model (SLM) para generar planes de ejecución estructurados llamados **TOON (Task-Oriented Orchestration Notation)**. Permite enrutar consultas al origen de datos óptimo, ahorrando hasta un **70-90% de tokens**.
+
+> **📖 Documentación completa**: [`docs/architecture/SLM_ROUTER.md`](../../docs/architecture/SLM_ROUTER.md)
 
 ### Arquitectura
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  RAG TRADICIONAL                    →    ENFOQUE SIL                         │
+│  RAG TRADICIONAL                    →    SLM ROUTER                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  ❌ Embeber contenido completo      →    ✅ Embeber descripciones estructurales│
-│  ❌ Siempre invocar LLM + RAG       →    ✅ Responder estructuralmente si es posible│
+│  ❌ Siempre invocar RAG completo    →    ✅ Enrutar al origen de datos óptimo│
+│  ❌ Reglas hardcodeadas             →    ✅ Planes generados por LLM         │
 │  ❌ 10K+ tokens por consulta        →    ✅ 500-1000 tokens (70-90% ahorro)  │
-│  ❌ Sin consciencia temporal        →    ✅ Historial completo y evolución   │
+│  ❌ Sin capacidad de aprendizaje    →    ✅ Aprendizaje continuo automático  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Capas del SIL
+### Tipos de Ruta (TOON Routes)
 
-| Capa | Descripción |
-|------|-------------|
-| **1. Extracción Estructural** | Extrae ubicación, tipo, relaciones (no contenido) |
-| **2. Grafo Estructural (Apache AGE)** | Grafo consultable con Cypher |
-| **3. Embeddings Estructurales** | Embeddings de descripciones estructurales |
-| **4. Motor Pre-LLM** | Responde consultas estructurales sin RAG |
-| **5. LLM como Intérprete** | LLM recibe contexto estructural, no documentos completos |
-
-### Tipos de Razonamiento
-
-| Tipo | Descripción | Ejemplo |
+| Ruta | Descripción | Ejemplo |
 |------|-------------|---------|
-| `STRUCTURAL` | Respuesta directa del grafo | "¿Cuántos contratos tiene ACME?" |
-| `TEMPORAL` | Consultas basadas en tiempo | "¿Qué cambió en el último mes?" |
-| `MULTIHOP` | Traversar relaciones | "Documentos relacionados con X" |
-| `FOCUSED_RAG` | RAG solo en documentos específicos | "Resumen del contrato #123" |
-| `FULL_RAG` | RAG tradicional (fallback) | Consultas de contenido general |
+| `GRAPH_ONLY` | Respuesta directa del grafo Apache AGE | "¿Cuántos contratos tiene ACME?" |
+| `VECTOR_ONLY` | Búsqueda semántica en Weaviate | "Busca información sobre X" |
+| `HYBRID` | Grafo + búsqueda semántica | "Lista contratos ACME y resume riesgos" |
+| `ASK_CLARIFY` | Query ambigua, pedir clarificación | "documentos" (muy vago) |
 
-### Endpoints SIL
+### Endpoints SLM Router
 
 ```bash
-# Consulta estructural con razonamiento Pre-LLM
-POST /sil/query
+# Planificar y ejecutar query
+POST /slm/route
 {
   "query": "¿Cuántos contratos tiene ACME?",
   "tenant_id": "tenant-uuid",
-  "reasoning_mode": "auto"
+  "session_id": "session-uuid"
 }
 
-# Indexar metadatos estructurales
-POST /sil/index-structural
+# Solo generar plan TOON (sin ejecutar)
+POST /slm/plan
 {
-  "document_id": "doc-uuid",
+  "query": "Lista todos los contratos de ACME",
   "tenant_id": "tenant-uuid"
 }
 
-# Obtener estructura de un documento
-GET /sil/structure/{document_id}
+# Health check
+GET /slm/health
 
-# Estadísticas del grafo
-GET /sil/graph/stats
-
-# Búsqueda por similitud estructural
-POST /sil/search-structural
+# Métricas del router
+GET /slm/metrics
 ```
 
 ### Flujo de Consulta
@@ -472,14 +460,14 @@ Usuario: "¿Cuántos contratos tiene ACME?"
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ SIL Pre-LLM Reasoning                                                        │
-│ Intent: STRUCTURAL_COUNT → No RAG necesario                                  │
-│ Cypher: MATCH (d:structural_document {client:'ACME', type:'contract'})       │
-│         RETURN count(d) → 5                                                  │
+│ SLM Router                                                                   │
+│ 1. SLM genera plan TOON: route=GRAPH_ONLY, operation=COUNT                  │
+│ 2. Executor ejecuta Cypher contra Apache AGE                                 │
+│ 3. Resultado: count=5                                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
          │
          ▼
-LLM interpreta contexto estructural → "ACME tiene 5 contratos..."
+Emma recibe contexto estructurado → "ACME tiene 5 contratos..."
          │
          ▼
 🎯 SIN LECTURA DE CONTENIDO - 70% ahorro de tokens
@@ -885,12 +873,12 @@ curl http://localhost:3001/health
 | Feature | Tiempo Típico | Tokens |
 |---------|---------------|--------|
 | RAG Tradicional | 3-8s | 10K+ |
-| SIL (Estructural) | 0.5-2s | 500-1K |
+| SLM Router (Estructural) | 0.5-2s | 500-1K |
 | Verified Generation (por claim) | 30-50s | 2-3K |
 | Embedding (BGE-M3) | 50-100ms | - |
 
 ### Notas de Desarrollo
 - **Development mode**: Overhead leve por volume mounting
 - **Production mode**: Imágenes optimizadas, menor tamaño
-- **SIL**: Ahorra 70-90% de tokens en consultas estructurales
+- **SLM Router**: Ahorra 70-90% de tokens en consultas estructurales
 - **Verified Generation**: Reduce alucinaciones ~70%, pero más lento (stop-and-go)

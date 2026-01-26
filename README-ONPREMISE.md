@@ -52,7 +52,7 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │     • Contexto máximo 8K tokens                                             │
 │     • Embeddings en CPU (muy lento, 2-5 segundos por chunk)                 │
 │     • Sin TTS local                                                         │
-│     • SIL disponible pero lento                                             │
+│     • SLM Router disponible pero lento                                      │
 │     • Agent Self-Verifies: ~2-3 minutos por claim                           │
 │     • 1-2 usuarios concurrentes máximo                                      │
 │     • NO RECOMENDADO para producción                                        │
@@ -83,7 +83,7 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │     • Qwen3-4B con contexto 16K tokens                                      │
 │     • BGE-M3 embeddings en GPU (~50-100ms por chunk)                        │
 │     • TTS local (VibeVoice)                                                 │
-│     • SIL completo con respuestas en <2 segundos                            │
+│     • SLM Router completo con respuestas en <2 segundos                     │
 │     • Agent Self-Verifies: 30-50 segundos por claim                         │
 │     • RAG completo en <3 segundos                                           │
 │     • 3-5 usuarios concurrentes                                             │
@@ -307,7 +307,7 @@ For documents without visual elements, maximize context window.
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                 NouxCubeIA On-Premise Architecture v2.0                    │
-│                      (con SIL + Agent Self-Verifies)                         │
+│                    (con SLM Router + Agent Self-Verifies)                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
@@ -317,7 +317,7 @@ For documents without visual elements, maximize context window.
 │  │  │   api    │  │    weaviate-service     │  │ background-worker│   │    │
 │  │  │ FastAPI  │  │  ┌───────────────────┐  │  │     Celery       │   │    │
 │  │  │  :8000   │  │  │ Emma AI (RAG)     │  │  │     :8100        │   │    │
-│  │  │          │  │  │ SIL (Pre-LLM)     │  │  │  ┌────────────┐  │   │    │
+│  │  │          │  │  │ SLM Router        │  │  │  ┌────────────┐  │   │    │
 │  │  │          │  │  │ Verified Gen      │  │  │  │verification│  │   │    │
 │  │  │          │  │  └───────────────────┘  │  │  │   queue    │  │   │    │
 │  │  │          │  │         :8007           │  │  └────────────┘  │   │    │
@@ -369,9 +369,9 @@ Usuario ──▶ API ──▶ weaviate-service
          │               │               │
          ▼               ▼               ▼
     ┌─────────┐    ┌──────────┐    ┌───────────┐
-    │   SIL   │    │   RAG    │    │ Verified  │
-    │ (Pre-   │    │ Pipeline │    │    Gen    │
-    │  LLM)   │    │ (Emma)   │    │  (Stop&Go)│
+    │   SLM   │    │   RAG    │    │ Verified  │
+    │ Router  │    │ Pipeline │    │    Gen    │
+    │ (TOON)  │    │ (Emma)   │    │  (Stop&Go)│
     └────┬────┘    └────┬─────┘    └─────┬─────┘
          │              │                │
          │         ┌────┴────┐      ┌────┴────┐
@@ -828,133 +828,129 @@ docker compose exec db psql -U nexusdocs -d nexusdocs -c "
 
 ---
 
-## 🧠 SIL - Structural Intelligence Layer (NUEVO)
+## 🧠 SLM Router - Small Language Model Query Planning
 
-El **SIL (Structural Intelligence Layer)** es un sistema de **razonamiento pre-LLM** que aprende la **ESTRUCTURA** de los documentos, no su contenido. Permite responder consultas estructurales **sin invocar RAG**, ahorrando hasta un **70-90% de tokens**.
+El **SLM Router** es un sistema de **planificación de queries** que utiliza un Small Language Model (SLM) para generar planes de ejecución estructurados llamados **TOON (Task-Oriented Orchestration Notation)**. Permite enrutar consultas al origen de datos óptimo, ahorrando hasta un **70-90% de tokens**.
+
+> **📖 Documentación completa**: [`docs/architecture/SLM_ROUTER.md`](docs/architecture/SLM_ROUTER.md)
 
 ### Problema que Resuelve
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  RAG TRADICIONAL                    →    SIL (NUEVO)                         │
+│  RAG TRADICIONAL                    →    SLM ROUTER                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  ❌ Embebe contenido completo       →    ✅ Embebe descripciones estructurales│
-│  ❌ Siempre invoca LLM + RAG        →    ✅ Responde estructuralmente si puede│
+│  ❌ Siempre invoca RAG completo     →    ✅ Enruta al origen de datos óptimo │
+│  ❌ Reglas de routing hardcodeadas  →    ✅ Planes generados por LLM         │
 │  ❌ 10K+ tokens por consulta        →    ✅ 500-1000 tokens (70-90% ahorro)  │
-│  ❌ Sin consciencia temporal        →    ✅ Historial completo y evolución   │
-│  ❌ Lento para consultas simples    →    ✅ <500ms para consultas estructurales│
+│  ❌ Sin capacidad de aprendizaje    →    ✅ Aprendizaje continuo automático  │
+│  ❌ Lento para consultas simples    →    ✅ <500ms para consultas de grafo   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Arquitectura de 5 Capas
+### Arquitectura
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    SIL - 5 LAYER ARCHITECTURE                                │
+│                         SLM ROUTER ARCHITECTURE                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  CAPA 1: Extracción Estructural                                              │
-│  ─────────────────────────────────                                           │
-│  Extrae: ubicación, tipo, relaciones, metadata (NO contenido)               │
-│  Input:  "Contrato de servicios con ACME Corp"                              │
-│  Output: {type: "contract", client: "ACME", date: "2024-01", pages: 15}     │
-│                               │                                              │
-│                               ▼                                              │
-│  CAPA 2: Grafo Estructural (Apache AGE)                                      │
-│  ─────────────────────────────────────                                       │
-│  Almacena relaciones en grafo consultable con Cypher                        │
-│  (ACME)-[:HAS_CONTRACT]->(Contract123)-[:SIGNED_BY]->(John)                 │
-│                               │                                              │
-│                               ▼                                              │
-│  CAPA 3: Embeddings Estructurales                                            │
-│  ────────────────────────────────                                            │
-│  Vectoriza DESCRIPCIONES estructurales, no contenido                        │
-│  "Contract for consulting services with ACME Corp, 15 pages, Jan 2024"      │
-│                               │                                              │
-│                               ▼                                              │
-│  CAPA 4: Motor Pre-LLM (Razonador)                                           │
-│  ────────────────────────────────                                            │
-│  Responde consultas estructurales SIN invocar RAG                           │
-│  "¿Cuántos contratos tiene ACME?" → Cypher → 5 (sin leer documentos)        │
-│                               │                                              │
-│                               ▼                                              │
-│  CAPA 5: LLM como Intérprete                                                 │
-│  ──────────────────────────                                                  │
-│  LLM recibe contexto estructural para formular respuesta natural            │
-│  Input: {count: 5, type: "contract", client: "ACME"}                        │
-│  Output: "ACME tiene 5 contratos activos en el sistema"                     │
+│   User Query: "¿Cuántos contratos tiene ACME?"                              │
+│       │                                                                      │
+│       ▼                                                                      │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │  SLM Client (Qwen2-0.5B)                                             │   │
+│   │  Genera plan TOON:                                                   │   │
+│   │  {route: GRAPH_ONLY, operation: COUNT, entities: [{ACME, client}]}  │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       ▼                                                                      │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │  TOON Executor                                                       │   │
+│   │  Ejecuta Cypher contra Apache AGE:                                   │   │
+│   │  MATCH (d:structural_document {client:'ACME'}) RETURN count(d) → 5  │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       ▼                                                                      │
+│   Emma recibe contexto estructurado → "ACME tiene 5 contratos..."           │
+│                                                                              │
+│   🎯 NO SE LEYÓ CONTENIDO - 70% ahorro de tokens                            │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Tipos de Razonamiento SIL
+### Tipos de Ruta (TOON Routes)
 
-| Tipo | Usa RAG | Tiempo | Ejemplo |
+| Ruta | Usa RAG | Tiempo | Ejemplo |
 |------|---------|--------|---------|
-| `STRUCTURAL` | ❌ No | <500ms | "¿Cuántos documentos hay?" |
-| `TEMPORAL` | ❌ No | <500ms | "¿Qué se añadió este mes?" |
-| `MULTIHOP` | ❌ No | <1s | "Documentos relacionados con ACME" |
-| `FOCUSED_RAG` | ⚠️ Parcial | 1-3s | "Resumen del contrato #123" |
-| `FULL_RAG` | ✅ Sí | 3-8s | "Explica las cláusulas de..." |
+| `GRAPH_ONLY` | ❌ No | <500ms | "¿Cuántos documentos hay?" |
+| `VECTOR_ONLY` | ✅ Sí | 1-3s | "Busca información sobre..." |
+| `HYBRID` | ✅ Parcial | 2-4s | "Lista contratos ACME y resume riesgos" |
+| `ASK_CLARIFY` | ❌ No | <100ms | "documentos" (muy ambiguo) |
 
-### Endpoints SIL
+### Endpoints SLM Router
 
 ```bash
-# Consulta estructural (auto-detecta tipo de razonamiento)
-POST http://localhost:8007/sil/query
+# Planificar y ejecutar query
+POST http://localhost:8007/slm/route
 {
   "query": "¿Cuántos contratos tiene ACME?",
   "tenant_id": "tenant-uuid",
-  "reasoning_mode": "auto"
+  "session_id": "session-uuid"
 }
 
 # Respuesta (SIN leer contenido de documentos)
 {
-  "answer": "ACME tiene 5 contratos activos",
-  "reasoning_type": "STRUCTURAL",
-  "tokens_used": 850,
-  "tokens_saved_vs_rag": 9150,
-  "execution_time_ms": 420,
-  "cypher_query": "MATCH (d:Document {client:'ACME', type:'contract'}) RETURN count(d)"
+  "success": true,
+  "plan": {
+    "route": "GRAPH_ONLY",
+    "confidence": 0.92,
+    "entities": [{"name": "ACME", "type": "client"}]
+  },
+  "graph_result": {"count": 5},
+  "context_for_llm": "## Structural Information\n**Count:** 5",
+  "execution_time_ms": 45
 }
 
-# Indexar metadatos estructurales de un documento
-POST http://localhost:8007/sil/index-structural
+# Solo generar plan (sin ejecutar)
+POST http://localhost:8007/slm/plan
 {
-  "document_id": "doc-uuid",
+  "query": "Lista todos los contratos de ACME",
   "tenant_id": "tenant-uuid"
 }
 
-# Obtener estructura de un documento
-GET http://localhost:8007/sil/structure/{document_id}
+# Health check
+GET http://localhost:8007/slm/health
 
-# Estadísticas del grafo
-GET http://localhost:8007/sil/graph/stats
-
-# Búsqueda por similitud estructural
-POST http://localhost:8007/sil/search-structural
-{
-  "query": "contratos de servicios",
-  "tenant_id": "tenant-uuid",
-  "limit": 10
-}
+# Métricas del router
+GET http://localhost:8007/slm/metrics
 ```
 
-### Configuración SIL
+### Configuración SLM Router
 
 ```bash
 # backend/docker/.env
 
 # =============================================================================
-# SIL - Structural Intelligence Layer
+# SLM Router - Small Language Model Query Planning
 # =============================================================================
-SIL_ENABLED=true
-SIL_AUTO_INDEX=true                    # Indexar estructura al subir documentos
-SIL_REASONING_MODE=auto                # auto | structural | temporal | full_rag
-SIL_STRUCTURAL_SIMILARITY_THRESHOLD=0.7
-SIL_GRAPH_TRAVERSAL_DEPTH=3
-SIL_CACHE_TTL_SECONDS=3600
+SLM_ROUTER_ENABLED=true
+SLM_MODEL=Qwen/Qwen2-0.5B-Instruct    # Modelo pequeño y rápido (~1GB VRAM)
+SLM_BASE_URL=http://vllm:8000/v1
+SLM_TEMPERATURE=0.0                    # Determinístico para planes consistentes
+SLM_MAX_TOKENS=512                     # Planes TOON son concisos
+SLM_TIMEOUT_MS=3000
 ```
+
+### Componentes del SLM Router
+
+| Componente | Descripción |
+|------------|-------------|
+| `SLMClient` | Cliente del Small Language Model (Qwen2-0.5B) |
+| `TOONExecutor` | Ejecuta planes contra Apache AGE y Weaviate |
+| `TenantSchemaProvider` | Proporciona contexto del tenant |
+| `HistoryManager` | Maneja historial de conversación |
+| `ContinuousLearningService` | Fine-tuning automático basado en uso |
 
 ---
 

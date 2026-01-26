@@ -28,7 +28,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Emma AI Assistant** | Intelligent assistant with multi-agent orchestration (Microsoft Agent Framework) |
-| **Structural Intelligence Layer (SIL)** | Pre-LLM reasoning with Apache AGE knowledge graphs |
+| **SLM Router** | Small Language Model query planning with TOON notation |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, reranking, and validated generation |
 | **Cross-Modal Search** | Text queries find images, diagrams, and tables in documents |
 | **Legal Knowledge Base** | Spanish BOE legislation indexed for automatic legal context |
@@ -144,7 +144,7 @@ Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** orchestr
 - **Inference**: vLLM (GPU)
 - **Model**: Qwen3-4B-Thinking (default)
 - **Embeddings**: BGE-M3 (multilingual)
-- **RAG**: 7-layer pipeline with SIL
+- **RAG**: 7-layer pipeline with SLM Router
 
 ---
 
@@ -163,7 +163,7 @@ Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** orchestr
 | Document | Description |
 |----------|-------------|
 | [MODULAR_ARCHITECTURE.md](docs/architecture/MODULAR_ARCHITECTURE.md) | SaaS vs On-Premise modular design |
-| [SIL.md](docs/architecture/SIL.md) | Structural Intelligence Layer |
+| [SLM_ROUTER.md](docs/architecture/SLM_ROUTER.md) | SLM Router (Query Planning) |
 | [EMMA_AI.md](docs/architecture/EMMA_AI.md) | Emma AI agent system |
 | [ACL_SYSTEM.md](docs/architecture/ACL_SYSTEM.md) | Access Control architecture |
 | [RAG_PIPELINE.md](docs/architecture/RAG_PIPELINE.md) | RAG implementation blueprint |
