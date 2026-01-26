@@ -348,15 +348,17 @@ class SLMRouter:
 
         # Store in history (async, don't wait)
         if session_id:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._store_in_history(session_id, tenant_id, query, plan, result)
             )
+            task.add_done_callback(self._handle_background_task_error)
 
         # Collect training data if enabled
         if self.config.collect_training_data:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._collect_training_example(query, plan, result)
             )
+            task.add_done_callback(self._handle_background_task_error)
 
         return result
 
@@ -514,7 +516,7 @@ class SLMRouter:
                 "tenant_id": plan.tenant_id,
                 "timestamp": time.time(),
                 "execution_success": result.success,
-                "execution_time_ms": result.execution_time_ms
+                "execution_time_ms": result.total_execution_time_ms
             }
 
             # Store in Redis list for batch export
@@ -532,6 +534,21 @@ class SLMRouter:
                 logger.debug(f"Collected training example: {query[:50]}... → {plan.route.value}")
         except Exception as e:
             logger.warning(f"Failed to collect training example: {e}")
+
+    def _handle_background_task_error(self, task: asyncio.Task):
+        """
+        Handle errors from background tasks (history storage, training collection).
+
+        This callback prevents silent failures in fire-and-forget tasks by logging
+        any exceptions that occur during execution.
+        """
+        try:
+            if task.exception():
+                logger.error(f"Background task failed: {task.exception()}")
+        except asyncio.CancelledError:
+            pass  # Task was cancelled, not an error
+        except asyncio.InvalidStateError:
+            pass  # Task not done yet (shouldn't happen in callback)
 
     def _update_plan_metrics(self, start_time: float):
         """Update planning metrics."""

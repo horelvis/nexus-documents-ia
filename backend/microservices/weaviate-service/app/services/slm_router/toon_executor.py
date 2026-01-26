@@ -17,6 +17,7 @@ Version 1.0 - January 2026
 
 import asyncio
 import logging
+import re
 import time
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
@@ -31,6 +32,110 @@ from .toon_schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CYPHER VALIDATION (Security)
+# =============================================================================
+
+class CypherValidator:
+    """
+    Validates Cypher queries for safety before execution.
+
+    Prevents SQL/Cypher injection attacks by:
+    1. Blocking dangerous operations (DELETE, DROP, CREATE, etc.)
+    2. Detecting injection patterns in parameters
+    3. Enforcing query structure requirements
+    """
+
+    # Dangerous Cypher keywords that should NEVER appear in read queries
+    DANGEROUS_KEYWORDS = [
+        'DELETE', 'DETACH', 'DROP', 'CREATE', 'SET', 'MERGE',
+        'REMOVE', 'CALL', 'LOAD', 'FOREACH'
+    ]
+
+    # Injection patterns to detect in parameters
+    INJECTION_PATTERNS = [
+        r';\s*(?:DELETE|DROP|CREATE)',  # Command chaining
+        r'--',  # SQL comment
+        r'/\*.*\*/',  # Block comment
+        r'\}\s*(?:DELETE|DROP)',  # Closing brace followed by dangerous op
+        r"'\s*OR\s*'",  # Classic SQL injection
+        r'\$\{',  # Template injection
+    ]
+
+    @classmethod
+    def validate_query(cls, cypher: str) -> Tuple[bool, Optional[str]]:
+        """
+        Validate a Cypher query for safety.
+
+        Args:
+            cypher: The Cypher query to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not cypher or not cypher.strip():
+            return False, "Empty query"
+
+        upper_cypher = cypher.upper()
+
+        # Check for dangerous keywords
+        for keyword in cls.DANGEROUS_KEYWORDS:
+            # Look for the keyword as a standalone word
+            pattern = r'\b' + keyword + r'\b'
+            if re.search(pattern, upper_cypher):
+                return False, f"Dangerous operation '{keyword}' not allowed in read queries"
+
+        # Check for injection patterns in the query itself
+        for pattern in cls.INJECTION_PATTERNS:
+            if re.search(pattern, cypher, re.IGNORECASE):
+                return False, f"Potential injection pattern detected"
+
+        return True, None
+
+    @classmethod
+    def validate_params(cls, params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validate query parameters for safety.
+
+        Args:
+            params: Dictionary of parameters to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        for key, value in params.items():
+            if isinstance(value, str):
+                # Check for injection patterns in string values
+                for pattern in cls.INJECTION_PATTERNS:
+                    if re.search(pattern, value, re.IGNORECASE):
+                        return False, f"Potential injection in parameter '{key}'"
+
+                # Check for embedded dangerous keywords
+                upper_value = value.upper()
+                for keyword in cls.DANGEROUS_KEYWORDS:
+                    if keyword in upper_value and len(value) > len(keyword) + 10:
+                        # Only flag if it looks like an injection attempt
+                        if re.search(r'[\s;{}()\[\]]' + keyword, upper_value):
+                            return False, f"Suspicious content in parameter '{key}'"
+
+        return True, None
+
+    @classmethod
+    def sanitize_identifier(cls, identifier: str) -> str:
+        """
+        Sanitize an identifier (label, property name) for safe use.
+
+        Args:
+            identifier: The identifier to sanitize
+
+        Returns:
+            Sanitized identifier safe for use in Cypher
+        """
+        # Remove or escape dangerous characters
+        sanitized = re.sub(r'[^\w_]', '', identifier)
+        return sanitized[:64]  # Limit length
 
 
 # =============================================================================
@@ -113,6 +218,17 @@ class GraphExecutor:
         try:
             cypher = plan.graph.cypher_template
             params = plan.graph.params.copy()
+
+            # SECURITY: Validate query and parameters before execution
+            query_valid, query_error = CypherValidator.validate_query(cypher)
+            if not query_valid:
+                logger.warning(f"Cypher validation failed: {query_error}")
+                return {"error": f"Query validation failed: {query_error}"}, 0, 0.0
+
+            params_valid, params_error = CypherValidator.validate_params(params)
+            if not params_valid:
+                logger.warning(f"Parameter validation failed: {params_error}")
+                return {"error": f"Parameter validation failed: {params_error}"}, 0, 0.0
 
             # Ensure limit is applied
             if '$limit' not in cypher.lower() and plan.graph.limit:
