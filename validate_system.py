@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validación Simple del Sistema NexusDocs360
+Validación Simple del Sistema NouxCubeIA
 ==========================================
 
 Script que valida los servicios disponibles sin depender de Docker.
@@ -32,7 +32,7 @@ def check_http_service(url, service_name, timeout=5):
         return False
 
 def main():
-    print("🚀 NexusDocs360 - Validación de Servicios")
+    print("🚀 NouxCubeIA - Validación de Servicios")
     print("=" * 60)
     print(f"⏰ Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()

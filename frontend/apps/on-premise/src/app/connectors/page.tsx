@@ -20,6 +20,8 @@ import {
   IconTrash,
   IconPlus,
   IconTestPipe,
+  IconCloudDownload,
+  IconEdit,
 } from '@tabler/icons-react'
 import {
   SidebarProvider,
@@ -59,7 +61,7 @@ import {
   Connector,
   ConnectorType,
 } from '@/lib/services/connector.service'
-import { ConnectorIcon, HealthCheckDialog } from '@/components/connectors'
+import { ConnectorIcon, HealthCheckDialog, SyncDialog, EditConnectorDialog } from '@/components/connectors'
 
 function getHealthBadge(status: string) {
   const config: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -92,6 +94,14 @@ export default function ConnectorsPage() {
   // Health check dialog state
   const [healthCheckDialogOpen, setHealthCheckDialogOpen] = useState(false)
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null)
+
+  // Sync dialog state
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [syncConnector, setSyncConnector] = useState<Connector | null>(null)
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editConnector, setEditConnector] = useState<Connector | null>(null)
 
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -133,6 +143,24 @@ export default function ConnectorsPage() {
   }
 
   const handleHealthCheckComplete = () => {
+    loadData()
+  }
+
+  const handleSyncConnector = (connector: Connector) => {
+    setSyncConnector(connector)
+    setSyncDialogOpen(true)
+  }
+
+  const handleSyncComplete = () => {
+    loadData()
+  }
+
+  const handleEditConnector = (connector: Connector) => {
+    setEditConnector(connector)
+    setEditDialogOpen(true)
+  }
+
+  const handleEditSave = () => {
     loadData()
   }
 
@@ -284,10 +312,53 @@ export default function ConnectorsPage() {
                                     Sync: {connector.sync_enabled ? `cada ${connector.sync_interval_hours}h` : 'Deshabilitado'}
                                   </span>
                                 </div>
+                                {/* Document stats */}
+                                {connector.documents_total > 0 && (
+                                  <div className="flex items-center gap-3 mt-2 text-xs">
+                                    <span className="text-muted-foreground">
+                                      {connector.documents_total} docs
+                                    </span>
+                                    <span className="text-green-600">
+                                      {connector.documents_indexed} indexados
+                                    </span>
+                                    {connector.documents_pending > 0 && (
+                                      <span className="text-yellow-600">
+                                        {connector.documents_pending} pendientes
+                                      </span>
+                                    )}
+                                    {connector.documents_failed > 0 && (
+                                      <span className="text-red-600">
+                                        {connector.documents_failed} fallidos
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <TooltipProvider>
                               <div className="flex gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleSyncConnector(connector)}
+                                    >
+                                      <IconCloudDownload className="h-4 w-4" />
+                                      {connector.documents_pending > 0 && (
+                                        <span className="ml-1 text-xs text-yellow-600">
+                                          {connector.documents_pending}
+                                        </span>
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>
+                                      Sincronización
+                                      {connector.documents_pending > 0 && ` (${connector.documents_pending} pendientes)`}
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Button
@@ -300,6 +371,20 @@ export default function ConnectorsPage() {
                                   </TooltipTrigger>
                                   <TooltipContent>
                                     <p>Probar conexión</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleEditConnector(connector)}
+                                    >
+                                      <IconEdit className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Editar conector</p>
                                   </TooltipContent>
                                 </Tooltip>
                                 <Tooltip>
@@ -397,6 +482,22 @@ export default function ConnectorsPage() {
         onOpenChange={setHealthCheckDialogOpen}
         connector={selectedConnector}
         onHealthCheckComplete={handleHealthCheckComplete}
+      />
+
+      {/* Sync Dialog */}
+      <SyncDialog
+        open={syncDialogOpen}
+        onOpenChange={setSyncDialogOpen}
+        connector={syncConnector}
+        onSyncComplete={handleSyncComplete}
+      />
+
+      {/* Edit Dialog */}
+      <EditConnectorDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        connector={editConnector}
+        onSave={handleEditSave}
       />
 
       {/* Delete Confirmation Dialog */}

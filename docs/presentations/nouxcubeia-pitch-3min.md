@@ -1,4 +1,4 @@
-# NexusDocs360 - La IA que protege tus documentos
+# NouxCubeIA - La IA que protege tus documentos
 
 **Duración**: 3 minutos | **Audiencia**: Ejecutivos y decisores de negocio
 
@@ -68,7 +68,7 @@ Los grandes están centrados en el consumidor: imágenes, vídeos, asistentes pe
 
 ---
 
-## Slide 5: NexusDocs360 - IA Documental de Nueva Generación
+## Slide 5: NouxCubeIA - IA Documental de Nueva Generación
 
 > **"No añadimos IA a un gestor documental. Construimos un gestor documental DESDE la IA"**
 
@@ -80,7 +80,7 @@ Los grandes están centrados en el consumidor: imágenes, vídeos, asistentes pe
 🏗️ *Visual: Edificio con IA como cimientos, no como antena en el tejado*
 
 **Notas del presentador:**
-En Venzia creamos NexusDocs360 desde cero con un principio claro: la IA no es un complemento que se añade después. Es el pilar sobre el que se construye todo. Esto significa que cada función, cada flujo, está diseñado para aprovechar la inteligencia artificial de forma nativa.
+En Venzia creamos NouxCubeIA desde cero con un principio claro: la IA no es un complemento que se añade después. Es el pilar sobre el que se construye todo. Esto significa que cada función, cada flujo, está diseñado para aprovechar la inteligencia artificial de forma nativa.
 
 ---
 
@@ -104,7 +104,7 @@ Emma es vuestra asistente experta en documentación. Podéis preguntarle en leng
 
 > **"Resolvemos los problemas que otros ni mencionan"**
 
-| Problema Oculto | Otros | NexusDocs360 |
+| Problema Oculto | Otros | NouxCubeIA |
 |-----------------|-------|--------------|
 | Documentos largos | Truncan información | Procesamos completo |
 | Información dispersa | Fragmentan contexto | Visión holística |
@@ -146,10 +146,10 @@ Y esto es solo el principio. En el primer trimestre de 2026, Emma podrá procesa
 - ✅ Especialización real - Diseñado para documentos
 - ✅ Evolución continua - Mejora constante
 
-📩 *Visual: Logo NexusDocs360 + datos de contacto*
+📩 *Visual: Logo NouxCubeIA + datos de contacto*
 
 **Notas del presentador:**
-NexusDocs360 es la respuesta a cómo las empresas pueden beneficiarse de la inteligencia artificial sin sacrificar privacidad, sin costes impredecibles, y con una herramienta diseñada específicamente para gestión documental. Tus documentos, tu IA, tu control.
+NouxCubeIA es la respuesta a cómo las empresas pueden beneficiarse de la inteligencia artificial sin sacrificar privacidad, sin costes impredecibles, y con una herramienta diseñada específicamente para gestión documental. Tus documentos, tu IA, tu control.
 
 ---
 

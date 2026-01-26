@@ -1,10 +1,10 @@
 'use client'
 
 /**
- * NotebookPanel - NexusLM Panel Component
+ * NotebookPanel - Presentation Generator Panel
  *
- * Inline panel for notebook management, similar to NotebookLM.
- * Shows sources, allows adding documents, and generates podcasts.
+ * Inline panel for notebook management and presentation generation.
+ * Shows sources, allows adding documents, and generates presentations.
  * Can be collapsed/expanded with a toggle button.
  */
 
@@ -12,10 +12,9 @@ import { useState, useEffect } from 'react'
 import {
   IconChevronDown,
   IconChevronRight,
-  IconChevronLeft,
   IconPlus,
   IconFileText,
-  IconHeadphones,
+  IconPresentation,
   IconTrash,
   IconLoader2,
   IconLayoutSidebarRightCollapse,
@@ -34,9 +33,17 @@ import {
   SelectValue,
 } from '@nexus/shared/ui'
 import { cn } from '@/lib/utils'
-import { notebookService, Notebook, NotebookSource, NotebookAudio, AudioConfig } from '@/lib/services/notebook.service'
+import {
+  notebookService,
+  Notebook,
+  NotebookSource,
+  NotebookPresentation,
+  PresentationConfig,
+  PresentationTemplate,
+} from '@/lib/services/notebook.service'
 import { SourceSelector } from './source-selector'
-import { AudioPlayer } from './audio-player'
+import { PresentationViewer } from './presentation-viewer'
+import { TemplateSelector } from './template-selector'
 
 interface NotebookPanelProps {
   className?: string
@@ -49,21 +56,22 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
   const [activeNotebook, setActiveNotebook] = useState<Notebook | null>(null)
   const [sources, setSources] = useState<NotebookSource[]>([])
-  const [audios, setAudios] = useState<NotebookAudio[]>([])
+  const [presentations, setPresentations] = useState<NotebookPresentation[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // UI State
   const [sourcesExpanded, setSourcesExpanded] = useState(true)
-  const [audioExpanded, setAudioExpanded] = useState(true)
+  const [generationExpanded, setGenerationExpanded] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [showSourceSelector, setShowSourceSelector] = useState(false)
 
-  // Audio config
-  const [audioConfig, setAudioConfig] = useState<AudioConfig>({
-    tone: 'conversational',
-    length: 'standard',
+  // Presentation config
+  const [presentationConfig, setPresentationConfig] = useState<Partial<PresentationConfig>>({
+    template: 'corporate',
     language: 'es-ES',
+    max_slides: 10,
+    include_speaker_notes: true,
   })
 
   // Load notebooks on mount
@@ -102,16 +110,19 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
 
   const loadNotebookDetails = async (notebookId: string) => {
     try {
-      const [sourcesRes, audiosRes] = await Promise.all([
+      const [sourcesRes, presentationsRes] = await Promise.all([
         notebookService.listSources(notebookId),
-        notebookService.listAudios(notebookId),
+        notebookService.listPresentations(notebookId),
       ])
+
+      console.log('[NotebookPanel] Sources response:', sourcesRes)
+      console.log('[NotebookPanel] Presentations response:', presentationsRes)
 
       if (!sourcesRes.error && sourcesRes.data) {
         setSources(sourcesRes.data)
       }
-      if (!audiosRes.error && audiosRes.data) {
-        setAudios(audiosRes.data)
+      if (!presentationsRes.error && presentationsRes.data) {
+        setPresentations(presentationsRes.data)
       }
     } catch (err) {
       console.error('Error loading notebook details:', err)
@@ -162,21 +173,21 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
     }
   }
 
-  const handleGenerateAudio = async () => {
+  const handleGeneratePresentation = async () => {
     if (!activeNotebook || sources.length === 0) return
 
     setIsGenerating(true)
     setError(null)
 
     try {
-      const response = await notebookService.generateAudio(activeNotebook.id, audioConfig)
+      const response = await notebookService.generatePresentation(activeNotebook.id, presentationConfig)
       if (response.error) {
         setError(response.error)
       } else if (response.data) {
-        setAudios(prev => [response.data!, ...prev])
+        setPresentations(prev => [response.data!, ...prev])
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error generating audio')
+      setError(err instanceof Error ? err.message : 'Error generating presentation')
     } finally {
       setIsGenerating(false)
     }
@@ -186,7 +197,7 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
   if (!isOpen) {
     return (
       <div className={cn(
-        "flex flex-col items-center py-4 px-2 border-l bg-[var(--sidebar-background)]",
+        "flex flex-col items-center py-4 px-2 border-l bg-[var(--sidebar-background)] shrink-0",
         className
       )}>
         <Button
@@ -204,13 +215,13 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
   // Full panel content
   return (
     <div className={cn(
-      "flex flex-col h-full border-l bg-[var(--sidebar-background)] w-80",
+      "flex flex-col h-full border-l bg-[var(--sidebar-background)] w-80 shrink-0",
       className
     )}>
       {/* Header with collapse button */}
       <div className="p-3 border-b flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">NexusLM</h2>
+          <h2 className="text-sm font-semibold">NouxCube Studio</h2>
           <Button
             variant="ghost"
             size="icon"
@@ -342,15 +353,15 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
                 </CollapsibleContent>
               </Collapsible>
 
-              {/* Audio Generation Section */}
-              <Collapsible open={audioExpanded} onOpenChange={setAudioExpanded}>
+              {/* Presentation Generation Section */}
+              <Collapsible open={generationExpanded} onOpenChange={setGenerationExpanded}>
                 <CollapsibleTrigger asChild>
                   <Button variant="ghost" className="w-full justify-between p-2 h-auto">
                     <span className="flex items-center gap-2">
-                      <IconHeadphones className="h-4 w-4" />
-                      <span className="font-medium text-sm">Podcast</span>
+                      <IconPresentation className="h-4 w-4" />
+                      <span className="font-medium text-sm">Presentación</span>
                     </span>
-                    {audioExpanded ? (
+                    {generationExpanded ? (
                       <IconChevronDown className="h-4 w-4" />
                     ) : (
                       <IconChevronRight className="h-4 w-4" />
@@ -358,40 +369,32 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-2 mt-2">
-                  {/* Audio config */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select
-                      value={audioConfig.tone}
-                      onValueChange={(v) => setAudioConfig(prev => ({ ...prev, tone: v as AudioConfig['tone'] }))}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="conversational">Conversacional</SelectItem>
-                        <SelectItem value="formal">Formal</SelectItem>
-                        <SelectItem value="educational">Educativo</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {/* Template selector with preview */}
+                  <TemplateSelector
+                    selectedTemplate={presentationConfig.template || 'corporate'}
+                    onSelect={(template) => setPresentationConfig(prev => ({ ...prev, template: template as PresentationTemplate }))}
+                    compact
+                  />
 
-                    <Select
-                      value={audioConfig.length}
-                      onValueChange={(v) => setAudioConfig(prev => ({ ...prev, length: v as AudioConfig['length'] }))}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="short">3-5 min</SelectItem>
-                        <SelectItem value="standard">5-10 min</SelectItem>
-                        <SelectItem value="long">10-15 min</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* Slides count selector */}
+                  <Select
+                    value={String(presentationConfig.max_slides || 10)}
+                    onValueChange={(v) => setPresentationConfig(prev => ({ ...prev, max_slides: parseInt(v) }))}
+                  >
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue placeholder="Número de slides" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5">5 slides</SelectItem>
+                      <SelectItem value="10">10 slides</SelectItem>
+                      <SelectItem value="15">15 slides</SelectItem>
+                      <SelectItem value="20">20 slides</SelectItem>
+                    </SelectContent>
+                  </Select>
 
                   <Button
                     className="w-full h-8 text-xs"
-                    onClick={handleGenerateAudio}
+                    onClick={handleGeneratePresentation}
                     disabled={isGenerating || sources.length === 0}
                   >
                     {isGenerating ? (
@@ -401,27 +404,30 @@ export function NotebookPanel({ className, isOpen, onOpenChange }: NotebookPanel
                       </>
                     ) : (
                       <>
-                        <IconHeadphones className="h-3.5 w-3.5 mr-1.5" />
-                        Generar Podcast
+                        <IconPresentation className="h-3.5 w-3.5 mr-1.5" />
+                        Generar Presentación
                       </>
                     )}
                   </Button>
 
                   {sources.length === 0 && (
                     <p className="text-[10px] text-muted-foreground text-center">
-                      Añade fuentes para generar un podcast
+                      Añade fuentes para generar contenido
                     </p>
                   )}
 
-                  {/* Recent audios */}
-                  {audios.length > 0 && (
+                  {/* Recent presentations */}
+                  {presentations.length > 0 && (
                     <div className="space-y-2 pt-2 border-t">
-                      <p className="text-xs text-muted-foreground">Podcasts generados</p>
-                      {audios.slice(0, 3).map((audio) => (
-                        <AudioPlayer
-                          key={audio.id}
-                          audio={audio}
+                      <p className="text-xs text-muted-foreground">Presentaciones generadas</p>
+                      {presentations.slice(0, 3).map((presentation) => (
+                        <PresentationViewer
+                          key={presentation.id}
+                          presentation={presentation}
                           notebookId={activeNotebook.id}
+                          onDeleted={() => {
+                            setPresentations(prev => prev.filter(p => p.id !== presentation.id))
+                          }}
                         />
                       ))}
                     </div>

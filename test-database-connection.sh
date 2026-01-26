@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test PostgreSQL database connection for NexusDocs360 PRE environment
+# Test PostgreSQL database connection for NouxCubeIA PRE environment
 # Supports both Cloud SQL Proxy and direct connection methods
 
 set -e

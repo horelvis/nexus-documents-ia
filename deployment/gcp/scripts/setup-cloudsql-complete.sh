@@ -1,10 +1,10 @@
 #!/bin/bash
-# Complete Cloud SQL configuration for NexusDocs360 Backend
+# Complete Cloud SQL configuration for NouxCubeIA Backend
 # This script configures all necessary database variables for Cloud Run
 
 set -e
 
-echo "🔧 Complete Cloud SQL Configuration for NexusDocs360"
+echo "🔧 Complete Cloud SQL Configuration for NouxCubeIA"
 echo "=================================================="
 echo ""
 

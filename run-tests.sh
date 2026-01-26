@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 🚀 Script de Ejecución Rápida de Pruebas - NexusDocs360
+# 🚀 Script de Ejecución Rápida de Pruebas - NouxCubeIA
 # =======================================================
 
 set -e
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Función para imprimir con colores
 print_header() {
-    echo -e "${BLUE}🚀 NexusDocs360 - Suite de Pruebas de Integración${NC}"
+    echo -e "${BLUE}🚀 NouxCubeIA - Suite de Pruebas de Integración${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo ""
 }
@@ -45,7 +45,7 @@ print_step() {
 show_help() {
     echo "Uso: $0 [OPCIONES]"
     echo ""
-    echo "🚀 Suite de Pruebas de Integración - NexusDocs360"
+    echo "🚀 Suite de Pruebas de Integración - NouxCubeIA"
     echo "⚠️  TODOS los tests se ejecutan dentro de contenedores Docker"
     echo ""
     echo "Opciones disponibles:"

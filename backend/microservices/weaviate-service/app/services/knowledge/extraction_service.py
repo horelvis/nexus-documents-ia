@@ -219,6 +219,7 @@ class KnowledgeExtractionService:
             result.relationships = relationships
             result.entities_count = len(normalized_entities)
             result.relationships_count = len(relationships)
+            result.domain = domain  # Set document domain
             result.processing_time_ms = int((time.time() - start_time) * 1000)
             result.success = True
 

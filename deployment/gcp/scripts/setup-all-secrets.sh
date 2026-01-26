@@ -76,7 +76,7 @@ echo "6️⃣ Setting up email secrets (optional)..."
 create_secret "mail-username-pre" "" "Email username"
 create_secret "mail-password-pre" "" "Email password"
 create_secret "mail-from-pre" "noreply@nexusdocs360.app" "From email"
-create_secret "mail-from-name-pre" "NexusDocs360" "From name"
+create_secret "mail-from-name-pre" "NouxCubeIA" "From name"
 create_secret "mail-server-pre" "smtp.gmail.com" "Mail server"
 create_secret "mail-port-pre" "587" "Mail port"
 

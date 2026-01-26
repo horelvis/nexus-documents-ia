@@ -29,6 +29,7 @@ export interface Notebook {
   total_words: number
   chat_count: number
   audio_count: number
+  presentation_count: number
   is_archived: boolean
   last_activity_at: string
   created_at: string
@@ -111,6 +112,60 @@ export interface TranscriptSegment {
   end_ms: number
 }
 
+// =====================================
+// Presentation Types
+// =====================================
+
+export interface NotebookPresentation {
+  id: string
+  notebook_id: string
+  config: PresentationConfig
+  status: PresentationStatus
+  status_message?: string
+  progress_percent: number
+  outline?: SlideOutline[]
+  pptx_url?: string
+  thumbnail_url?: string
+  slide_count?: number
+  file_size_bytes?: number
+  error_message?: string
+  generation_started_at?: string
+  generation_completed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PresentationConfig {
+  template: PresentationTemplate
+  language: string
+  max_slides: number
+  focus_topics?: string[]
+  include_speaker_notes: boolean
+}
+
+export type PresentationTemplate =
+  | 'corporate'
+  | 'educational'
+  | 'minimal'
+  | 'creative'
+  | 'nouxcube'
+
+export type PresentationStatus =
+  | 'pending'
+  | 'analyzing'
+  | 'generating_outline'
+  | 'generating_slides'
+  | 'uploading'
+  | 'completed'
+  | 'failed'
+
+export interface SlideOutline {
+  slide_number: number
+  title: string
+  bullet_points: string[]
+  speaker_notes?: string
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -143,6 +198,7 @@ export interface NotebookStats {
   total_sources: number
   total_words: number
   total_audios: number
+  total_presentations: number
   total_chats: number
   recent_activity: Notebook[]
 }
@@ -185,6 +241,7 @@ export const notebookService = {
   async get(notebookId: string): Promise<ApiResponse<Notebook & {
     sources: NotebookSource[]
     recent_audios: NotebookAudio[]
+    recent_presentations: NotebookPresentation[]
     recent_chats: NotebookChat[]
   }>> {
     return apiClient.get(`/notebooks/${notebookId}`)
@@ -320,6 +377,111 @@ export const notebookService = {
     audioId: string
   ): Promise<ApiResponse<{ message: string }>> {
     return apiClient.delete(`/notebooks/${notebookId}/audio/${audioId}`)
+  },
+
+  // =====================================
+  // Presentation Generation
+  // =====================================
+
+  /**
+   * Generate a PowerPoint presentation for a notebook
+   */
+  async generatePresentation(
+    notebookId: string,
+    config?: Partial<PresentationConfig>
+  ): Promise<ApiResponse<NotebookPresentation>> {
+    return apiClient.post<NotebookPresentation>(`/notebooks/${notebookId}/presentations`, {
+      config: {
+        template: 'corporate',
+        language: 'es-ES',
+        max_slides: 10,
+        include_speaker_notes: true,
+        ...config,
+      },
+    })
+  },
+
+  /**
+   * List all presentations for a notebook
+   */
+  async listPresentations(notebookId: string): Promise<ApiResponse<NotebookPresentation[]>> {
+    return apiClient.get<NotebookPresentation[]>(`/notebooks/${notebookId}/presentations`)
+  },
+
+  /**
+   * Get a specific presentation
+   */
+  async getPresentation(
+    notebookId: string,
+    presentationId: string
+  ): Promise<ApiResponse<NotebookPresentation>> {
+    return apiClient.get<NotebookPresentation>(
+      `/notebooks/${notebookId}/presentations/${presentationId}`
+    )
+  },
+
+  /**
+   * Get presentation generation status
+   */
+  async getPresentationStatus(
+    notebookId: string,
+    presentationId: string
+  ): Promise<ApiResponse<{
+    id: string
+    status: PresentationStatus
+    status_message?: string
+    progress_percent: number
+    error_message?: string
+  }>> {
+    return apiClient.get(
+      `/notebooks/${notebookId}/presentations/${presentationId}/status`
+    )
+  },
+
+  /**
+   * Delete a presentation
+   */
+  async deletePresentation(
+    notebookId: string,
+    presentationId: string
+  ): Promise<ApiResponse<{ message: string }>> {
+    return apiClient.delete(`/notebooks/${notebookId}/presentations/${presentationId}`)
+  },
+
+  /**
+   * Download a presentation file
+   */
+  async downloadPresentation(
+    notebookId: string,
+    presentationId: string,
+    filename?: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    try {
+      const result = await apiClient.downloadBlob(
+        `/notebooks/${notebookId}/presentations/${presentationId}/download`
+      )
+
+      if (result.error || !result.blob) {
+        return { success: false, error: result.error || 'Download failed' }
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename || `presentation_${presentationId}.pptx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+
+      return { success: true, error: null }
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Download failed'
+      }
+    }
   },
 
   // =====================================

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy infrastructure for NexusDocs360 PRE environment on GCP
+# Deploy infrastructure for NouxCubeIA PRE environment on GCP
 # This script creates PRE-specific resources with reduced capacity and test configurations
 
 set -e
@@ -25,7 +25,7 @@ echo "⚡ Environment: PRE (Pre-Production)"
 # Check if project exists, create if not
 if ! gcloud projects describe $PROJECT_ID &>/dev/null; then
     echo "📝 Creating project $PROJECT_ID..."
-    gcloud projects create $PROJECT_ID --name="NexusDocs360 PRE"
+    gcloud projects create $PROJECT_ID --name="NouxCubeIA PRE"
     echo "✅ Project created"
 fi
 
@@ -239,7 +239,7 @@ echo "📦 Creating Artifact Registry for PRE..."
 gcloud artifacts repositories create nexusdocs360-pre \
     --repository-format=docker \
     --location=$REGION \
-    --description="NexusDocs360 PRE container images" \
+    --description="NouxCubeIA PRE container images" \
     --project=$PROJECT_ID || echo "Artifact Registry already exists"
 
 # Configure docker authentication

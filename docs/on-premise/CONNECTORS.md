@@ -1,6 +1,6 @@
 # Enterprise Connectors Guide
 
-This guide covers configuring enterprise content connectors for NexusDocs360 on-premise deployments.
+This guide covers configuring enterprise content connectors for NouxCubeIA on-premise deployments.
 
 ## Supported Connectors
 
@@ -22,7 +22,7 @@ This guide covers configuring enterprise content connectors for NexusDocs360 on-
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐    │
-│  │    External      │     │    Connector     │     │   NexusDocs360   │    │
+│  │    External      │     │    Connector     │     │   NouxCubeIA   │    │
 │  │    Sources       │◀───▶│    Service       │────▶│    Backend       │    │
 │  │                  │     │                  │     │                  │    │
 │  │  ┌────────────┐  │     │  ┌────────────┐  │     │  ┌────────────┐  │    │
@@ -45,7 +45,7 @@ This guide covers configuring enterprise content connectors for NexusDocs360 on-
 
 ### Overview
 
-The Alfresco connector provides bi-directional sync between Alfresco Content Services and NexusDocs360, enabling:
+The Alfresco connector provides bi-directional sync between Alfresco Content Services and NouxCubeIA, enabling:
 - Real-time document synchronization
 - Metadata mapping
 - Permission inheritance
@@ -55,7 +55,7 @@ The Alfresco connector provides bi-directional sync between Alfresco Content Ser
 
 - Alfresco Content Services 7.0+
 - Alfresco Search Services (Solr)
-- Network access from NexusDocs360 to Alfresco API
+- Network access from NouxCubeIA to Alfresco API
 
 ### Configuration
 

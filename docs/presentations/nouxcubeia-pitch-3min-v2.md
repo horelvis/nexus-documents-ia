@@ -1,4 +1,4 @@
-# NexusDocs360 - Gestión Documental Inteligente
+# NouxCubeIA - Gestión Documental Inteligente
 
 **Duración**: 3-4 minutos | **Audiencia**: Ejecutivos y decisores de negocio
 **Versión**: 2.0 - Completa
@@ -37,7 +37,7 @@ Los grandes están centrados en el consumidor: imágenes, vídeos, asistentes pe
 
 ---
 
-## Slide 3: NexusDocs360 - Visión 360° de tus Documentos
+## Slide 3: NouxCubeIA - Visión 360° de tus Documentos
 
 > **"No añadimos IA a un gestor documental. Construimos un gestor documental DESDE la IA"**
 
@@ -49,7 +49,7 @@ Los grandes están centrados en el consumidor: imágenes, vídeos, asistentes pe
 🏗️ *Visual: Edificio con IA como cimientos, no como antena en el tejado*
 
 **Notas (25s):**
-En Venzia creamos NexusDocs360 desde cero con un principio claro: la IA no es un complemento. Es el pilar sobre el que se construye todo. Un pipeline de 7 capas procesa cada documento: extracción, clasificación, indexación semántica, y análisis inteligente.
+En Venzia creamos NouxCubeIA desde cero con un principio claro: la IA no es un complemento. Es el pilar sobre el que se construye todo. Un pipeline de 7 capas procesa cada documento: extracción, clasificación, indexación semántica, y análisis inteligente.
 
 ---
 
@@ -68,7 +68,7 @@ En Venzia creamos NexusDocs360 desde cero con un principio claro: la IA no es un
 📂 *Visual: Interfaz de carpetas con iconos de funcionalidades*
 
 **Notas (25s):**
-NexusDocs360 cubre todo el ciclo de vida documental. Almacenamiento seguro en la nube, organización inteligente con carpetas y etiquetas, búsqueda que entiende lo que buscas aunque no uses las palabras exactas, permisos granulares documento por documento, y auditoría completa de quién hizo qué y cuándo.
+NouxCubeIA cubre todo el ciclo de vida documental. Almacenamiento seguro en la nube, organización inteligente con carpetas y etiquetas, búsqueda que entiende lo que buscas aunque no uses las palabras exactas, permisos granulares documento por documento, y auditoría completa de quién hizo qué y cuándo.
 
 ---
 
@@ -85,7 +85,7 @@ NexusDocs360 cubre todo el ciclo de vida documental. Almacenamiento seguro en la
 🔗 *Visual: Portal de invitados con logo personalizado y lista de accesos*
 
 **Notas (25s):**
-Compartir documentos con externos siempre ha sido un riesgo. Con NexusDocs360 creáis un portal con vuestra marca donde los invitados acceden con verificación por código. Cada acceso queda registrado, y podéis revocar el acceso instantáneamente. Control total sin fricciones.
+Compartir documentos con externos siempre ha sido un riesgo. Con NouxCubeIA creáis un portal con vuestra marca donde los invitados acceden con verificación por código. Cada acceso queda registrado, y podéis revocar el acceso instantáneamente. Control total sin fricciones.
 
 ---
 
@@ -162,7 +162,7 @@ Lo que diferencia a Emma de ChatGPT es que no inventa. Cada hallazgo incluye la 
 
 ## Slide 9: Integraciones y Flujos de Trabajo
 
-> **"NexusDocs360 se integra con tu ecosistema"**
+> **"NouxCubeIA se integra con tu ecosistema"**
 
 - 📁 **Google Drive**: Sincronización bidireccional
 - ✉️ **Gmail**: Importación automática de adjuntos
@@ -170,10 +170,10 @@ Lo que diferencia a Emma de ChatGPT es que no inventa. Cada hallazgo incluye la 
 - 🔄 **Workflows BPMN**: Aprobaciones y flujos con Camunda
 - 🔌 **API REST**: Integración con cualquier sistema
 
-⚙️ *Visual: NexusDocs en el centro conectado a iconos de integraciones*
+⚙️ *Visual: NouxCubeIA en el centro conectado a iconos de integraciones*
 
 **Notas (20s):**
-NexusDocs360 no vive aislado. Se sincroniza con Google Drive, importa documentos desde Gmail, integra proveedores de firma digital, y tiene un motor de workflows para automatizar aprobaciones. Y una API completa para conectar con cualquier sistema que ya tengáis.
+NouxCubeIA no vive aislado. Se sincroniza con Google Drive, importa documentos desde Gmail, integra proveedores de firma digital, y tiene un motor de workflows para automatizar aprobaciones. Y una API completa para conectar con cualquier sistema que ya tengáis.
 
 ---
 
@@ -181,7 +181,7 @@ NexusDocs360 no vive aislado. Se sincroniza con Google Drive, importa documentos
 
 > **"Resolvemos los problemas que otros ni mencionan"**
 
-| Problema Oculto | Otros | NexusDocs360 |
+| Problema Oculto | Otros | NouxCubeIA |
 |-----------------|-------|--------------|
 | Documentos largos | Cortan y pierden info | Procesamos completo |
 | Contexto previo | Olvidan cada pregunta | Memoria de 1 hora |
@@ -250,10 +250,10 @@ En resumen: gestión documental completa, búsqueda que entiende significado, se
 **¿Siguiente paso?**
 Solicita una demo personalizada con tus propios documentos
 
-📩 *Visual: Logo NexusDocs360 + CTA*
+📩 *Visual: Logo NouxCubeIA + CTA*
 
 **Notas (20s):**
-NexusDocs360 es la respuesta a cómo las empresas pueden usar inteligencia artificial sin sacrificar privacidad, con costes predecibles, y con una herramienta diseñada específicamente para documentos empresariales y legislación española. Tus documentos, tu IA, tu control.
+NouxCubeIA es la respuesta a cómo las empresas pueden usar inteligencia artificial sin sacrificar privacidad, con costes predecibles, y con una herramienta diseñada específicamente para documentos empresariales y legislación española. Tus documentos, tu IA, tu control.
 
 ---
 

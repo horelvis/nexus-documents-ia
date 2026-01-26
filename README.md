@@ -1,4 +1,4 @@
-# NexusDocs360 - Intelligent Document Management Platform
+# NouxCubeIA - Intelligent Document Management Platform
 
 <div align="center">
   <h3>Enterprise Document Intelligence with Local AI</h3>
@@ -14,9 +14,14 @@
 
 ## Overview
 
-**NexusDocs360** is an enterprise-grade document management platform where Artificial Intelligence transforms how organizations interact with their information. Running **100% locally** with GPU inference, it ensures complete data sovereignty while automating document workflows with advanced AI capabilities.
+**NouxCubeIA** is an enterprise-grade document management platform where Artificial Intelligence transforms how organizations interact with their information. Running **100% locally** with GPU inference, it ensures complete data sovereignty while automating document workflows with advanced AI capabilities.
 
-**Full Installation Guide: [README-ONPREMISE.md](README-ONPREMISE.md)** (1700+ lines of comprehensive documentation)
+### Deployment Options
+
+| Option | Best For | Guide |
+|--------|----------|-------|
+| **SaaS** | Fast start, no infrastructure | [README-SAAS.md](README-SAAS.md) |
+| **On-Premise** | Data sovereignty, air-gapped | [README-ONPREMISE.md](README-ONPREMISE.md) |
 
 ### Key Features
 
@@ -68,7 +73,7 @@ curl http://localhost:8000/health
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        NexusDocs360 Architecture                             │
+│                        NouxCubeIA Architecture                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────┐    │
@@ -147,6 +152,7 @@ Emma AI is built on **Microsoft Agent Framework** with **PlanningFlow** orchestr
 
 | Document | Description |
 |----------|-------------|
+| [README-SAAS.md](README-SAAS.md) | **Cloud-hosted SaaS deployment guide** |
 | [README-ONPREMISE.md](README-ONPREMISE.md) | **Complete on-premise deployment guide** |
 | [CLAUDE.md](CLAUDE.md) | Development guidelines for Claude Code |
 | [docs/architecture/](docs/architecture/) | System architecture documentation |
@@ -182,6 +188,6 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <div align="center">
-  <h3>NexusDocs360 - Enterprise Document Intelligence with Local AI</h3>
+  <h3>NouxCubeIA - Enterprise Document Intelligence with Local AI</h3>
   <p>Powered by vLLM + Microsoft Agent Framework</p>
 </div>

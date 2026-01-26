@@ -1,15 +1,15 @@
-# NexusDocs360 On-Premise - Self-Hosted Deployment
+# NouxCubeIA On-Premise - Self-Hosted Deployment
 
 <div align="center">
   <h3>Full Control, Local GPU Inference, Data Sovereignty</h3>
-  <p><strong>Run NexusDocs360 on your own infrastructure</strong></p>
+  <p><strong>Run NouxCubeIA on your own infrastructure</strong></p>
 </div>
 
 ---
 
 ## Overview
 
-NexusDocs360 On-Premise is designed for organizations that require complete control over their data and infrastructure. With local GPU inference via vLLM and Qwen3 models, you get enterprise-grade AI capabilities without sending data to external providers.
+NouxCubeIA On-Premise is designed for organizations that require complete control over their data and infrastructure. With local GPU inference via vLLM and Qwen3 models, you get enterprise-grade AI capabilities without sending data to external providers.
 
 ### Key Benefits
 
@@ -306,7 +306,7 @@ For documents without visual elements, maximize context window.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                 NexusDocs360 On-Premise Architecture v2.0                    │
+│                 NouxCubeIA On-Premise Architecture v2.0                    │
 │                      (con SIL + Agent Self-Verifies)                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
@@ -492,7 +492,7 @@ RLM_MAX_DEPTH=3
 
 ## External Connectors
 
-NexusDocs360 can sync documents from external systems via the **Connector Adapter** system. This enables unified search across your organization's document repositories.
+NouxCubeIA can sync documents from external systems via the **Connector Adapter** system. This enables unified search across your organization's document repositories.
 
 ### Supported Connectors
 
@@ -600,7 +600,7 @@ CONNECTOR_HEALTH_CHECK_INTERVAL=300
 
 ## Knowledge Graph: Entity & Document Relationships
 
-NexusDocs360 includes a **Knowledge Graph** powered by **Apache AGE** (A Graph Extension for PostgreSQL). This enables entity-based document discovery, relationship traversal, and intelligent query expansion.
+NouxCubeIA includes a **Knowledge Graph** powered by **Apache AGE** (A Graph Extension for PostgreSQL). This enables entity-based document discovery, relationship traversal, and intelligent query expansion.
 
 ### Architecture
 
@@ -1714,7 +1714,7 @@ certbot --nginx -d your-domain.com
 
 ## Updates
 
-### Updating NexusDocs360
+### Updating NouxCubeIA
 
 ```bash
 # 1. Pull latest code

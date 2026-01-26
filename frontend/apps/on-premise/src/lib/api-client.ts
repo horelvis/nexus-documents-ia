@@ -184,6 +184,27 @@ class ApiClient {
   }
 
   /**
+   * Download a file as a blob with authentication
+   */
+  async downloadBlob(url: string): Promise<{ blob: Blob | null; error: string | null }> {
+    try {
+      const response = await this.client.get(url, {
+        responseType: 'blob',
+      })
+      return { blob: response.data, error: null }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError
+        return {
+          blob: null,
+          error: axiosError.message || 'Download failed',
+        }
+      }
+      return { blob: null, error: 'Unknown error' }
+    }
+  }
+
+  /**
    * Set tenant ID for multi-tenant requests
    */
   setTenantId(tenantId: string): void {

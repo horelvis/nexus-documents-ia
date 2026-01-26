@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nginx VM startup script for NexusDocs360 PRE environment
+# Nginx VM startup script for NouxCubeIA PRE environment
 # Complete setup: nginx installation, HTTP config, SSL certificates, HTTPS config
 
 set -e

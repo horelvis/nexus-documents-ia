@@ -95,6 +95,8 @@ class TTSProviderFactory:
             provider = await factory._create_vibevoice_provider()
         elif provider_name == "google":
             provider = await factory._create_google_provider()
+        elif provider_name == "edge":
+            provider = await factory._create_edge_provider()
         else:
             raise ValueError(f"Unknown TTS provider: {provider_name}")
 
@@ -149,6 +151,22 @@ class TTSProviderFactory:
 
         except Exception as e:
             logger.error(f"Failed to create Google TTS provider: {e}")
+            return None
+
+    @classmethod
+    async def _create_edge_provider(cls) -> Optional[TTSProvider]:
+        """Create and initialize Edge TTS provider."""
+        try:
+            from app.services.edge_tts_service import get_edge_tts_service
+
+            service = get_edge_tts_service()
+            if await service.initialize():
+                logger.info("Edge TTS provider initialized successfully")
+                return service
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to create Edge TTS provider: {e}")
             return None
 
     @classmethod

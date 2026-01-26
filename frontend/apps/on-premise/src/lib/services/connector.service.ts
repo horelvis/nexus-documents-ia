@@ -181,6 +181,11 @@ export interface Connector {
   updated_at: string | null
   users_connected: number
   users_syncing: number
+  // Document processing stats
+  documents_total: number
+  documents_pending: number
+  documents_indexed: number
+  documents_failed: number
 }
 
 export interface ConnectorListResponse {
@@ -529,6 +534,49 @@ class ConnectorService {
     }
     return { data: response.data, error: null }
   }
+
+  /**
+   * Force sync connector (admin)
+   * Triggers immediate synchronization of documents from the external source
+   */
+  async syncConnector(connectorId: string, fullSync = false): Promise<{ data: SyncTriggerResponse | null; error: string | null }> {
+    const response = await apiClient.post<SyncTriggerResponse>(
+      `/connectors/${connectorId}/sync?full_sync=${fullSync}`
+    )
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Index pending documents (admin)
+   * Processes documents that have been synced but not yet indexed
+   */
+  async indexPending(connectorId: string, batchSize = 10, maxDocuments?: number): Promise<{ data: IndexPendingResponse | null; error: string | null }> {
+    let url = `/connectors/${connectorId}/index-pending?batch_size=${batchSize}`
+    if (maxDocuments) {
+      url += `&max_documents=${maxDocuments}`
+    }
+    const response = await apiClient.post<IndexPendingResponse>(url)
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Get pending documents list (admin)
+   */
+  async getPendingDocuments(connectorId: string, page = 1, pageSize = 20): Promise<{ data: PendingDocumentsResponse | null; error: string | null }> {
+    const response = await apiClient.get<PendingDocumentsResponse>(
+      `/connectors/${connectorId}/pending-documents?page=${page}&page_size=${pageSize}`
+    )
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
 }
 
 // Health check response type
@@ -538,6 +586,45 @@ export interface HealthCheckResponse {
   message: string
   checked_at: string
   details: Record<string, any> | null
+}
+
+// Sync trigger response type
+export interface SyncTriggerResponse {
+  status: string
+  task_id: string
+  connector_id: string
+  message: string
+}
+
+// Index pending response type
+export interface IndexPendingResponse {
+  status: string
+  task_id: string
+  connector_id: string
+  pending_count: number
+  message: string
+}
+
+// Pending document type
+export interface PendingDocument {
+  id: string
+  connector_id: string
+  external_id: string
+  external_path: string | null
+  title: string
+  mime_type: string | null
+  indexing_status: string
+  indexing_error: string | null
+  created_at: string
+}
+
+// Pending documents list response
+export interface PendingDocumentsResponse {
+  items: PendingDocument[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
 }
 
 export const connectorService = new ConnectorService()

@@ -249,6 +249,11 @@ class AlfrescoConfig(BaseModel):
 
         Returns:
             Complete AFTS query string for document sync
+
+        Note on Alfresco Site structure:
+            Sites contain multiple containers: documentLibrary, wiki, links, etc.
+            Documents are stored in: /st:sites/cm:{shortname}/cm:documentLibrary/
+            When using SITE filter, we also filter by documentLibrary PATH.
         """
         parts = []
 
@@ -259,11 +264,16 @@ class AlfrescoConfig(BaseModel):
         else:
             parts.append('TYPE:"cm:content"')
 
-        # Site filter
-        if self.default_site_id:
+        # Folder filter using ANCESTOR (most specific, uses node UUID)
+        # This is the preferred way to search within a specific folder like documentLibrary
+        if self.default_folder_id:
+            parts.append(f'ANCESTOR:"workspace://SpacesStore/{self.default_folder_id}"')
+        elif self.default_site_id:
+            # Site filter - the adapter should resolve this to documentLibrary nodeId
+            # and use ANCESTOR instead. This is a fallback if that fails.
             parts.append(f'SITE:"{self.default_site_id}"')
 
-        # Path filter
+        # Path filter (additional custom path restriction)
         if self.afts_path_filter:
             parts.append(f'PATH:"{self.afts_path_filter}"')
 

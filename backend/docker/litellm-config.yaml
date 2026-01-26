@@ -1,0 +1,80 @@
+# LiteLLM Proxy Configuration
+# Gateway for routing between SLM (TGI) and Main LLM (vLLM)
+#
+# Models:
+#   - slm/qwen2-0.5b: TGI server (CPU) - Fast routing (~50-100ms)
+#   - main/qwen3-4b: vLLM server (GPU) - Response generation (~1-5s)
+#
+# Usage:
+#   curl http://localhost:4000/v1/chat/completions \
+#     -d '{"model": "slm/qwen2-0.5b", "messages": [...]}'
+
+model_list:
+  # =============================================================================
+  # SLM - Small Language Model for Query Planning (TGI on CPU)
+  # =============================================================================
+  - model_name: slm/qwen2-0.5b
+    litellm_params:
+      model: huggingface/Qwen/Qwen2-0.5B-Instruct
+      api_base: http://tgi-slm:80
+      api_key: ""  # TGI doesn't require key
+      # Fast inference settings
+      max_tokens: 512
+      temperature: 0.0
+      timeout: 10  # 10 seconds max
+    model_info:
+      description: "Fast SLM for TOON query planning"
+      mode: chat
+
+  # =============================================================================
+  # Main LLM - Primary model for response generation (vLLM on GPU)
+  # =============================================================================
+  - model_name: main/qwen3-4b
+    litellm_params:
+      model: openai/Qwen/Qwen3-4B
+      api_base: http://vllm:8000/v1
+      api_key: "not-needed"  # vLLM local doesn't require key
+      max_tokens: 4096
+      temperature: 0.7
+      timeout: 60
+    model_info:
+      description: "Main LLM for response generation"
+      mode: chat
+
+  # =============================================================================
+  # Aliases for backward compatibility
+  # =============================================================================
+  - model_name: qwen3-4b
+    litellm_params:
+      model: openai/Qwen/Qwen3-4B
+      api_base: http://vllm:8000/v1
+      api_key: "not-needed"
+      max_tokens: 4096
+      temperature: 0.7
+      timeout: 60
+
+# General settings
+general_settings:
+  master_key: "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
+  # Disable telemetry
+  disable_spend_logs: true
+
+# Router settings
+router_settings:
+  # Simple routing (no load balancing needed for single backend per model)
+  routing_strategy: simple-shuffle
+  # Retry settings
+  num_retries: 2
+  retry_after: 0.5
+  # Timeout settings
+  request_timeout: 120
+
+# Logging
+litellm_settings:
+  drop_params: true  # Drop unsupported params silently
+  set_verbose: false
+
+# Disable database requirement
+environment_variables:
+  DATABASE_URL: ""
+  STORE_MODEL_IN_DB: "false"

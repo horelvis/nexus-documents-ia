@@ -17,11 +17,19 @@ class Settings(BaseSettings):
     service_port: int = int(os.getenv("PORT", "8000"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
 
-    # GCS Configuration
+    # Storage Provider: "gcs" or "local"
+    storage_provider: str = os.getenv("STORAGE_PROVIDER", "gcs")
+
+    # GCS Configuration (when storage_provider=gcs)
     gcs_project_id: str = os.getenv("GCS_PROJECT_ID", "")
     gcs_credentials: str = os.getenv("GCS_CREDENTIALS", "")
     gcs_default_bucket: str = os.getenv("GCS_DEFAULT_BUCKET", "nexus-documents")
     gcs_location: str = os.getenv("GCS_LOCATION", "europe-west1")
+
+    # Local Storage Configuration (when storage_provider=local)
+    local_storage_path: str = os.getenv("LOCAL_STORAGE_PATH", "/app/storage")
+    local_storage_base_url: str = os.getenv("LOCAL_STORAGE_BASE_URL", "http://localhost:8000")
+    signed_url_secret: str = os.getenv("SIGNED_URL_SECRET", "local-storage-secret-change-me")
 
     # Signed URL settings
     signed_url_expiration: int = int(os.getenv("SIGNED_URL_EXPIRATION", "3600"))  # 1 hour

@@ -413,3 +413,219 @@ async def get_data_statistics():
             status_code=500,
             detail=f"Error getting statistics: {str(e)}"
         )
+
+
+# =============================================================================
+# Knowledge Source Router Endpoints
+# =============================================================================
+
+class KnowledgeTestRequest(BaseModel):
+    """Request to test knowledge source classification."""
+    query: str = Field(..., description="Query text to classify")
+
+
+class KnowledgeTestResponse(BaseModel):
+    """Response from knowledge source classification test."""
+    query: str
+    source: str
+    confidence: float
+    stage_used: int
+    semantic_confidence: float
+    ml_used: bool
+    total_latency_ms: float
+    needs_tenant_search: bool
+    needs_public_search: bool
+
+
+class KnowledgeTrainRequest(BaseModel):
+    """Request to trigger knowledge source model training."""
+    include_seeds: bool = Field(True, description="Include seed utterances")
+    include_collected: bool = Field(True, description="Include collected examples")
+    include_corrections: bool = Field(True, description="Include user corrections")
+
+
+class KnowledgeCorrectionRequest(BaseModel):
+    """Request to submit a classification correction."""
+    query: str = Field(..., description="The query that was misclassified")
+    predicted_source: str = Field(..., description="What the router predicted")
+    actual_source: str = Field(..., description="The correct source")
+    tenant_id: Optional[str] = Field(None, description="Tenant ID")
+
+
+@router.get("/knowledge/status")
+async def get_knowledge_router_status():
+    """
+    Get knowledge source router status.
+
+    Returns status of semantic router, ML classifier, and collection statistics.
+    """
+    try:
+        from app.agents.orchestration import (
+            get_hybrid_knowledge_router,
+            _SEMANTIC_ROUTER_AVAILABLE,
+        )
+        from app.services.nexus_router import get_knowledge_trainer
+
+        result = {
+            "semantic_router_available": _SEMANTIC_ROUTER_AVAILABLE,
+        }
+
+        if _SEMANTIC_ROUTER_AVAILABLE:
+            router = get_hybrid_knowledge_router()
+            await router.initialize()
+            result["hybrid_router"] = router.get_status()
+
+        trainer = get_knowledge_trainer()
+        result["learning_system"] = await trainer.get_status()
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting knowledge router status: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting status: {str(e)}"
+        )
+
+
+@router.post("/knowledge/test", response_model=KnowledgeTestResponse)
+async def test_knowledge_classification(request: KnowledgeTestRequest):
+    """
+    Test knowledge source classification on a query.
+
+    Uses the 2-stage hybrid router (semantic + ML fallback).
+    """
+    try:
+        from app.agents.orchestration import (
+            classify_knowledge_source_hybrid,
+            _SEMANTIC_ROUTER_AVAILABLE,
+        )
+
+        if not _SEMANTIC_ROUTER_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Semantic router not available (semantic-router package not installed)"
+            )
+
+        result = await classify_knowledge_source_hybrid(request.query)
+
+        return KnowledgeTestResponse(
+            query=request.query,
+            source=result.source.value,
+            confidence=result.confidence,
+            stage_used=result.stage_used,
+            semantic_confidence=result.semantic_confidence,
+            ml_used=result.ml_used,
+            total_latency_ms=result.total_latency_ms,
+            needs_tenant_search=result.needs_tenant_search,
+            needs_public_search=result.needs_public_search,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error testing knowledge classification: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error classifying: {str(e)}"
+        )
+
+
+@router.post("/knowledge/train")
+async def train_knowledge_model(request: KnowledgeTrainRequest):
+    """
+    Train the knowledge source SetFit classifier.
+
+    Combines seed data, collected examples, and corrections.
+    """
+    try:
+        from app.services.nexus_router import get_knowledge_trainer
+
+        trainer = get_knowledge_trainer()
+        result = await trainer.train(
+            include_seeds=request.include_seeds,
+            include_collected=request.include_collected,
+            include_corrections=request.include_corrections,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error training knowledge model: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error training: {str(e)}"
+        )
+
+
+@router.post("/knowledge/correct")
+async def submit_knowledge_correction(request: KnowledgeCorrectionRequest):
+    """
+    Submit a classification correction.
+
+    Corrections are weighted higher during training.
+    """
+    try:
+        from app.services.nexus_router import (
+            get_knowledge_collector,
+            KnowledgeSource,
+        )
+
+        # Validate sources
+        try:
+            predicted = KnowledgeSource(request.predicted_source)
+            actual = KnowledgeSource(request.actual_source)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid source value: {e}. Valid: tenant_documents, public_knowledge, hybrid"
+            )
+
+        collector = get_knowledge_collector()
+        example = await collector.collect_correction(
+            query=request.query,
+            predicted_source=predicted,
+            actual_source=actual,
+            tenant_id=request.tenant_id or "unknown",
+        )
+
+        return {
+            "status": "success",
+            "message": "Correction recorded",
+            "example": example.to_dict(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting correction: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error submitting correction: {str(e)}"
+        )
+
+
+@router.get("/knowledge/examples")
+async def get_knowledge_examples():
+    """
+    Get statistics about collected knowledge examples.
+
+    Shows counts by source, accuracy, etc.
+    """
+    try:
+        from app.services.nexus_router import get_knowledge_collector
+
+        collector = get_knowledge_collector()
+        stats = await collector.get_statistics()
+
+        return {
+            "status": "success",
+            "statistics": stats,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting knowledge examples: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting examples: {str(e)}"
+        )

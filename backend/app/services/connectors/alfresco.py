@@ -88,6 +88,54 @@ class AlfrescoAdapter(ConnectorAdapter):
         # Cache for folder metadata (avoid repeated API calls)
         self._folder_metadata_cache: Dict[str, Dict[str, Any]] = {}
 
+        # Cache for site documentLibrary node IDs
+        self._site_doc_library_cache: Dict[str, str] = {}
+
+    async def get_site_document_library_id(self, site_id: str) -> Optional[str]:
+        """
+        Get the documentLibrary container node ID for a site.
+
+        Uses Alfresco Sites API: GET /sites/{siteId}/containers/documentLibrary
+
+        Args:
+            site_id: Alfresco site ID (shortName or UUID)
+
+        Returns:
+            Node ID (UUID) of the documentLibrary container, or None if not found
+        """
+        # Check cache first
+        if site_id in self._site_doc_library_cache:
+            return self._site_doc_library_cache[site_id]
+
+        try:
+            async with httpx.AsyncClient(
+                headers=self._get_auth_headers(),
+                timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+            ) as client:
+                response = await client.get(
+                    f"{self.base_url}{self.api_path}/sites/{site_id}/containers/documentLibrary"
+                )
+                response.raise_for_status()
+                entry = response.json().get("entry", {})
+                node_id = entry.get("id")
+
+                if node_id:
+                    self._site_doc_library_cache[site_id] = node_id
+                    logger.info(f"[{self.connector_id}] Site {site_id} documentLibrary nodeId: {node_id}")
+                    return node_id
+
+                return None
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"[{self.connector_id}] Site {site_id} not found or no documentLibrary")
+            else:
+                logger.error(f"[{self.connector_id}] Error getting documentLibrary for site {site_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[{self.connector_id}] Error getting documentLibrary for site {site_id}: {e}")
+            return None
+
     async def get_folder_metadata(self, folder_id: str) -> Optional[Dict[str, Any]]:
         """
         Get folder metadata with all properties (cached).
@@ -181,17 +229,36 @@ class AlfrescoAdapter(ConnectorAdapter):
             "Content-Type": "application/json",
         }
 
-    def _build_afts_query(self, modified_after: Optional[datetime] = None) -> str:
+    async def _build_afts_query(
+        self,
+        modified_after: Optional[datetime] = None,
+        document_library_node_id: Optional[str] = None,
+    ) -> str:
         """
         Build AFTS query from configuration.
 
         Args:
             modified_after: Add date filter for incremental sync
+            document_library_node_id: If provided, uses ANCESTOR instead of SITE filter
 
         Returns:
             Complete AFTS query string
         """
+        # Build base query from config
         afts_query = self.alfresco_config.build_sync_afts_query()
+
+        # If we have the documentLibrary nodeId, replace SITE filter with ANCESTOR
+        # ANCESTOR is more precise and only searches within that specific folder tree
+        if document_library_node_id:
+            # Remove SITE filter if present (we'll use ANCESTOR instead)
+            import re
+            afts_query = re.sub(r'\s*AND\s*SITE:"[^"]*"', '', afts_query)
+            afts_query = re.sub(r'SITE:"[^"]*"\s*AND\s*', '', afts_query)
+            afts_query = re.sub(r'\s*AND\s*PATH:"//cm:documentLibrary//\*"', '', afts_query)
+
+            # Add ANCESTOR filter for the documentLibrary folder
+            ancestor_filter = f'ANCESTOR:"workspace://SpacesStore/{document_library_node_id}"'
+            afts_query = f"({afts_query}) AND {ancestor_filter}"
 
         # Add date filter for incremental sync
         if modified_after:
@@ -209,6 +276,10 @@ class AlfrescoAdapter(ConnectorAdapter):
         """
         Search for documents using AFTS query.
 
+        Uses Alfresco Sites API to get the documentLibrary node ID when a site
+        is configured, then uses ANCESTOR filter for precise searching within
+        that container only.
+
         Args:
             modified_after: Only return documents modified after this date
             skip: Number of results to skip
@@ -217,7 +288,19 @@ class AlfrescoAdapter(ConnectorAdapter):
         Returns:
             Tuple of (documents, has_more)
         """
-        afts_query = self._build_afts_query(modified_after)
+        # If a site is configured, get the documentLibrary node ID for precise filtering
+        document_library_node_id = None
+        if self.alfresco_config.default_site_id and not self.alfresco_config.default_folder_id:
+            document_library_node_id = await self.get_site_document_library_id(
+                self.alfresco_config.default_site_id
+            )
+            if not document_library_node_id:
+                logger.warning(
+                    f"[{self.connector_id}] Could not get documentLibrary for site "
+                    f"{self.alfresco_config.default_site_id}, falling back to SITE filter"
+                )
+
+        afts_query = await self._build_afts_query(modified_after, document_library_node_id)
         logger.info(f"[{self.connector_id}] Executing AFTS query: {afts_query}")
 
         search_body = {

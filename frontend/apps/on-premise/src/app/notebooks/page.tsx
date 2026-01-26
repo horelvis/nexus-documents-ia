@@ -201,7 +201,7 @@ export default function NotebooksPage() {
           <div className="h-4 w-px bg-border" />
           <div className="flex items-center gap-2">
             <IconNotebook className="h-5 w-5 text-primary" />
-            <span className="font-semibold">NexusLM</span>
+            <span className="font-semibold">NouxCube Podcast</span>
           </div>
         </header>
 

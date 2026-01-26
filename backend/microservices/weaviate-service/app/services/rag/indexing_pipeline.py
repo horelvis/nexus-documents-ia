@@ -72,6 +72,7 @@ from .hierarchical_indexer import (
     hierarchical_indexer,
 )
 from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
+from .langextract_client import LangExtractClient, LangExtractResult, langextract_client
 from .ocr_client import OCRClient, OCRResult, ocr_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
@@ -669,6 +670,38 @@ class IndexingPipeline:
                 warnings.append(f"Contextual retrieval failed: {e}")
                 contextual_time = (time.time() - contextual_start) * 1000
 
+        # === Stage 4.5: Entity Extraction (LangExtract) ===
+        # Extract entities (DNI, NIE, CIF, PERSON, ORGANIZATION, etc.) before knowledge extraction
+        extracted_entities = []
+        entity_extraction_time = 0.0
+
+        if self._knowledge_extraction_enabled and indexing_strategy.get("extract_entities", True):
+            logger.info(f"[{document_id}] Extracting named entities...")
+            entity_start = time.time()
+
+            try:
+                # Call LangExtract client for entity extraction
+                langextract_result = await langextract_client.extract_entities(
+                    text=text_for_chunking,
+                    document_type=metadata.get("document_type", "general"),
+                    filename=metadata.get("filename"),
+                    use_llm=True,  # Use LLM for rich entity extraction
+                )
+
+                if langextract_result.success and langextract_result.entities:
+                    extracted_entities = langextract_result.entities
+                    logger.info(
+                        f"[{document_id}] Extracted {len(extracted_entities)} entities: "
+                        f"{', '.join(set(e.get('type', 'UNKNOWN') for e in extracted_entities[:10]))}"
+                    )
+
+                entity_extraction_time = (time.time() - entity_start) * 1000
+
+            except Exception as e:
+                logger.warning(f"[{document_id}] Entity extraction failed (non-blocking): {e}")
+                warnings.append(f"Entity extraction failed: {e}")
+                entity_extraction_time = (time.time() - entity_start) * 1000
+
         # === Stage 5: Knowledge Extraction ===
         knowledge_result = None
         knowledge_time = 0.0
@@ -686,7 +719,7 @@ class IndexingPipeline:
                 knowledge_result = await self.knowledge_extractor.extract_from_document(
                     document_id=document_id,
                     tenant_id=tenant_id,
-                    extracted_entities=metadata.get("extracted_entities", []),
+                    extracted_entities=extracted_entities,  # Use entities from LangExtract
                     content=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
                     acl_user_ids=acl_user_ids,

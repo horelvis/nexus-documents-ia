@@ -1,7 +1,7 @@
-# Cloud Monitoring Dashboard Configuration for NexusDocs360 PRE
+# Cloud Monitoring Dashboard Configuration for NouxCubeIA PRE
 # This dashboard provides comprehensive monitoring for the PRE environment
 
-displayName: "NexusDocs360 PRE - Overview Dashboard"
+displayName: "NouxCubeIA PRE - Overview Dashboard"
 mosaicLayout:
   columns: 12
   tiles:
@@ -9,7 +9,7 @@ mosaicLayout:
     - width: 12
       height: 2
       widget:
-        title: "🚀 NexusDocs360 PRE Environment - Real-time Monitoring"
+        title: "🚀 NouxCubeIA PRE Environment - Real-time Monitoring"
         text:
           content: |
             **Environment**: PRE (Pre-Production)

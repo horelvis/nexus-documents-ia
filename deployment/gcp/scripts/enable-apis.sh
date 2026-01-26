@@ -1,5 +1,5 @@
 #!/bin/bash
-# Enable all required Google Cloud APIs for NexusDocs360
+# Enable all required Google Cloud APIs for NouxCubeIA
 # Works for both PRE and PROD environments
 
 set -e
@@ -15,7 +15,7 @@ echo "Project: $PROJECT_ID"
 if ! gcloud projects describe $PROJECT_ID &>/dev/null; then
     echo -e "\n❌ ERROR: Project '$PROJECT_ID' does not exist or you don't have access."
     echo -e "\n📝 To create the project, run:"
-    echo -e "   gcloud projects create $PROJECT_ID --name=\"NexusDocs360\""
+    echo -e "   gcloud projects create $PROJECT_ID --name=\"NouxCubeIA\""
     echo -e "\n🔧 Then configure it:"
     echo -e "   gcloud config set project $PROJECT_ID"
     echo -e "\n💳 And link billing:"

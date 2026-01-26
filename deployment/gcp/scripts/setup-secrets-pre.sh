@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup secrets for NexusDocs360 PRE environment
+# Setup secrets for NouxCubeIA PRE environment
 
 set -e
 
@@ -130,7 +130,7 @@ SERVICE_ACCOUNT="nexus-cloud-run-pre@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Create service account if it doesn't exist
 gcloud iam service-accounts create nexus-cloud-run-pre \
-    --display-name="NexusDocs360 PRE Cloud Run Service Account" \
+    --display-name="NouxCubeIA PRE Cloud Run Service Account" \
     --project=$PROJECT_ID || true
 
 # Grant secret accessor role

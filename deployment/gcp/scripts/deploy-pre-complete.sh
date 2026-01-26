@@ -9,7 +9,7 @@ PROJECT_ID="nexusdocs360-pre"
 REGION="europe-west1"
 ZONE="europe-west1-b"
 
-echo "🚀 NexusDocs360 PRE Environment Deployment"
+echo "🚀 NouxCubeIA PRE Environment Deployment"
 echo "=========================================="
 echo ""
 

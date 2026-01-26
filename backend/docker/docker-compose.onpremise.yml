@@ -104,7 +104,7 @@ services:
       - "--max-model-len"
       - "${VLLM_MAX_MODEL_LEN:-32768}"
       - "--gpu-memory-utilization"
-      - "0.70"
+      - "0.60"
       - "--trust-remote-code"
       # Enable tool calling for Emma v2 (native async client)
       - "--enable-auto-tool-choice"
@@ -124,6 +124,68 @@ services:
       retries: 5
       start_period: 180s
     restart: unless-stopped
+
+  # =============================================================================
+  # TGI - Text Generation Inference for SLM (GPU)
+  # =============================================================================
+  # Small Language Model for fast query planning (~10-50ms on GPU)
+  # Model: Qwen2-0.5B-Instruct (~1GB VRAM)
+  # Shares GPU with vLLM (vLLM uses 60%, TGI uses remaining ~10GB)
+  tgi-slm:
+    image: ghcr.io/huggingface/text-generation-inference:2.4.1
+    environment:
+      - MODEL_ID=Qwen/Qwen2-0.5B-Instruct
+      - MAX_INPUT_LENGTH=2048
+      - MAX_TOTAL_TOKENS=2560
+      - MAX_BATCH_PREFILL_TOKENS=4096
+      - MAX_CONCURRENT_REQUESTS=32
+      - HF_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - tgi_cache:/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # =============================================================================
+  # LiteLLM - LLM Gateway/Proxy (DISABLED - direct TGI connection is simpler)
+  # =============================================================================
+  # Note: LiteLLM requires PostgreSQL which adds complexity.
+  # We use direct TGI connection instead for SLM.
+  # Uncomment if you need unified gateway with database features.
+  # litellm:
+  #   image: ghcr.io/berriai/litellm:main-latest
+  #   ports:
+  #     - "4000:4000"
+  #   depends_on:
+  #     vllm:
+  #       condition: service_healthy
+  #     tgi-slm:
+  #       condition: service_started
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - backend-network
+  #   environment:
+  #     - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
+  #     - DATABASE_URL=postgresql://user:pass@db:5432/litellm
+  #   volumes:
+  #     - ./litellm-config.yaml:/app/config.yaml:ro
+  #   command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+  #   restart: unless-stopped
 
   # =============================================================================
   # Apache Tika - Document Text Extraction
@@ -174,6 +236,8 @@ services:
         condition: service_healthy
       vllm:
         condition: service_healthy
+      tgi-slm:
+        condition: service_healthy
       db:
         condition: service_healthy
       textextract-service:
@@ -204,6 +268,22 @@ services:
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
       - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
+      # SLM Router Configuration (direct TGI connection)
+      - SLM_ROUTER_ENABLED=${SLM_ROUTER_ENABLED:-true}
+      - SLM_PROVIDER=${SLM_PROVIDER:-tgi}
+      - SLM_BASE_URL=${SLM_BASE_URL:-http://tgi-slm:80}
+      - SLM_MODEL=${SLM_MODEL:-Qwen/Qwen2-0.5B-Instruct}
+      - SLM_TIMEOUT_MS=${SLM_TIMEOUT_MS:-5000}
+      - SLM_TEMPERATURE=${SLM_TEMPERATURE:-0.0}
+      - SLM_MAX_TOKENS=${SLM_MAX_TOKENS:-512}
+      # Continuous Learning Configuration (automated fine-tuning)
+      # System automatically improves SLM routing accuracy based on usage
+      - CONTINUOUS_LEARNING_ENABLED=${CONTINUOUS_LEARNING_ENABLED:-true}
+      - LEARNING_MIN_EXAMPLES=${LEARNING_MIN_EXAMPLES:-500}
+      - LEARNING_MAINTENANCE_HOUR=${LEARNING_MAINTENANCE_HOUR:-3}
+      - LEARNING_CHECK_INTERVAL=${LEARNING_CHECK_INTERVAL:-3600}
+      - LEARNING_MODELS_DIR=/data/models
+      - LEARNING_ADAPTERS_DIR=/data/adapters
       # Langfuse Observability Configuration (Emma v2 agent tracing)
       # Dashboard: http://localhost:3002
       - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-true}
@@ -217,7 +297,9 @@ services:
     volumes:
       - ../microservices/weaviate-service/app:/app/app:ro
       - ../microservices/weaviate-service/config:/app/config:ro
+      - ../microservices/weaviate-service/scripts:/app/scripts:ro
       - huggingface_cache:/root/.cache/huggingface
+      - slm_models_data:/data  # SLM fine-tuned models (continuous learning)
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     deploy:
       resources:
@@ -253,6 +335,12 @@ services:
         condition: service_healthy
       weaviate-service:
         condition: service_healthy
+      mcp-storage:
+        condition: service_healthy
+      podcast-service:
+        condition: service_started
+      presentation-service:
+        condition: service_started
       keycloak:
         condition: service_started
     networks:
@@ -265,6 +353,10 @@ services:
       - ALLOW_ALL_CORS=true
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
+      - PODCAST_SERVICE_URL=${PODCAST_SERVICE_URL:-http://podcast-service:8000}
+      - PRESENTATION_SERVICE_URL=${PRESENTATION_SERVICE_URL:-http://presentation-service:8000}
+      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - MCP_ENABLED=${MCP_ENABLED:-true}
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
       - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}
@@ -283,6 +375,7 @@ services:
       - ../core:/app/core:ro
       - ../modules:/app/modules:ro
       - ../../credentials:/app/credentials:ro
+      - local_storage_data:/app/storage
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -477,6 +570,181 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # =============================================================================
+  # MCP Storage Server - Local File Storage (On-Premise)
+  # =============================================================================
+  mcp-storage:
+    build:
+      context: ../microservices/mcp-storage-server
+      dockerfile: Dockerfile
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      # Use local filesystem storage instead of GCS
+      - STORAGE_PROVIDER=local
+      - LOCAL_STORAGE_PATH=/app/storage
+      - LOCAL_STORAGE_BASE_URL=${LOCAL_STORAGE_BASE_URL:-http://mcp-storage:8000}
+      - SIGNED_URL_SECRET=${SIGNED_URL_SECRET:-change-this-secret-in-production}
+      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
+    volumes:
+      - ../microservices/mcp-storage-server/app:/app/app:ro
+      # Persistent local storage volume
+      - local_storage_data:/app/storage
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # TTS Service - Text-to-Speech using Microsoft VibeVoice
+  # =============================================================================
+  tts-service:
+    build:
+      context: ../microservices/tts-service
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - TTS_PROVIDER=${TTS_PROVIDER:-vibevoice}
+      - VIBEVOICE_MODEL_PATH=${VIBEVOICE_MODEL_PATH:-microsoft/VibeVoice-Realtime-0.5B}
+      - VIBEVOICE_DEVICE=${VIBEVOICE_DEVICE:-cuda}
+      - VIBEVOICE_DEFAULT_VOICE=${VIBEVOICE_DEFAULT_VOICE:-Carter}
+      - GOOGLE_TTS_ENABLED=${GOOGLE_TTS_ENABLED:-false}
+      - HF_TOKEN=${HF_TOKEN}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_ENABLED=${TTS_CACHE_ENABLED:-true}
+    volumes:
+      - ../microservices/tts-service/app:/app/app:ro
+      - ../microservices/tts-service/voice_prompts:/app/voice_prompts:ro
+      - tts_model_cache:/app/.cache/huggingface
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # =============================================================================
+  # NouxCube Podcast Service - AI Podcast Generation
+  # =============================================================================
+  podcast-service:
+    build:
+      context: ../microservices/podcast-service
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      tts-service:
+        condition: service_healthy
+      mcp-storage:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - PODCAST_API_KEY=${MICROSERVICES_API_KEY}
+      - PODCAST_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - PODCAST_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - PODCAST_TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
+      - PODCAST_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - PODCAST_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
+      - MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_OUTPUT_FORMAT=${PODCAST_AUDIO_FORMAT:-mp3}
+      - AUDIO_BITRATE=${PODCAST_AUDIO_BITRATE:-192k}
+      - AUDIO_SAMPLE_RATE=${PODCAST_AUDIO_SAMPLE_RATE:-24000}
+      - DEFAULT_LANGUAGE=${PODCAST_DEFAULT_LANGUAGE:-es-ES}
+      - DEFAULT_TONE=${PODCAST_DEFAULT_TONE:-conversational}
+      - DEFAULT_LENGTH=${PODCAST_DEFAULT_LENGTH:-standard}
+    volumes:
+      - ../microservices/podcast-service/app:/app/app:ro
+      - ../microservices/podcast-service/config:/app/config:ro
+      - podcast_temp:/app/temp
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # =============================================================================
+  # NouxCube Presentation Service - PowerPoint Generation
+  # =============================================================================
+  presentation-service:
+    build:
+      context: ../microservices/presentation-service
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      mcp-storage:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
+      - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
+      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-http://nouxcube.local:8000}
+      - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
+      - DEFAULT_LANGUAGE=${PRESENTATION_DEFAULT_LANGUAGE:-es-ES}
+      - DEFAULT_TEMPLATE=${PRESENTATION_DEFAULT_TEMPLATE:-corporate}
+      - DEFAULT_MAX_SLIDES=${PRESENTATION_DEFAULT_MAX_SLIDES:-10}
+    volumes:
+      - ../microservices/presentation-service/app:/app/app:ro
+      - ../microservices/presentation-service/templates:/app/templates:ro
+      - local_storage_data:/app/storage
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/ping').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
 networks:
   backend-network:
     driver: bridge
@@ -486,8 +754,13 @@ volumes:
   redis_data:
   weaviate_data:
   vllm_cache:
+  tgi_cache:
   huggingface_cache:
   keycloak_data:
   langfuse_postgres_data:
   langfuse_clickhouse_data:
   langfuse_minio_data:
+  tts_model_cache:
+  podcast_temp:
+  local_storage_data:
+  slm_models_data:  # SLM fine-tuned models storage (continuous learning)

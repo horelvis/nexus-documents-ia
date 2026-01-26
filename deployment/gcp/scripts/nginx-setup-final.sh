@@ -3,7 +3,7 @@
 
 set -e
 
-echo "🚀 Configuración Completa de Nginx para NexusDocs360"
+echo "🚀 Configuración Completa de Nginx para NouxCubeIA"
 echo "=================================================="
 echo ""
 

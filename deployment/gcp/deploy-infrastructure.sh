@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy infrastructure for NexusDocs360 on GCP
+# Deploy infrastructure for NouxCubeIA on GCP
 # This script determines the environment and calls the appropriate deployment script
 
 set -e

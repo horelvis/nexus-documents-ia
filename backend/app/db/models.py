@@ -2342,6 +2342,7 @@ class Notebook(Base):
     total_words = Column(Integer, default=0, nullable=False)
     chat_count = Column(Integer, default=0, nullable=False)
     audio_count = Column(Integer, default=0, nullable=False)
+    presentation_count = Column(Integer, default=0, nullable=False)
 
     # Status
     is_archived = Column(Boolean, default=False, nullable=False)
@@ -2357,6 +2358,7 @@ class Notebook(Base):
     sources = relationship("NotebookSource", back_populates="notebook", cascade="all, delete-orphan")
     audios = relationship("NotebookAudio", back_populates="notebook", cascade="all, delete-orphan")
     chats = relationship("NotebookChat", back_populates="notebook", cascade="all, delete-orphan")
+    presentations = relationship("NotebookPresentation", back_populates="notebook", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_notebooks_tenant_user', 'tenant_id', 'user_id'),
@@ -2515,6 +2517,64 @@ class NotebookChat(Base):
         Index('idx_notebook_chats_notebook', 'notebook_id'),
         Index('idx_notebook_chats_user', 'user_id'),
         Index('idx_notebook_chats_last_message', 'last_message_at'),
+    )
+
+
+class NotebookPresentation(Base):
+    """
+    Generated PowerPoint presentation for a notebook.
+    Stores the PPTX file, outline, and generation configuration.
+    """
+    __tablename__ = "notebook_presentations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notebook_id = Column(UUID(as_uuid=True), ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Generation configuration
+    config = Column(JSONB, nullable=False, default={})
+    # {
+    #   template: "corporate" | "educational" | "minimal" | "creative" | "nouxcube",
+    #   language: "es-ES" | "en-US",
+    #   max_slides: 10,
+    #   focus_topics: ["topic1", "topic2"],
+    #   include_speaker_notes: true
+    # }
+
+    # Status
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # pending, analyzing, generating_outline, generating_slides, uploading, completed, failed
+    status_message = Column(Text, nullable=True)
+    progress_percent = Column(Integer, default=0, nullable=False)
+
+    # Generated content
+    outline = Column(JSONB, nullable=True)
+    # [{slide_number: 1, title: "...", bullet_points: ["...", "..."], speaker_notes: "..."}, ...]
+
+    # PPTX file
+    pptx_url = Column(String(1000), nullable=True)  # Storage URL
+    thumbnail_url = Column(String(1000), nullable=True)  # First slide thumbnail
+    slide_count = Column(Integer, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+
+    # Error tracking
+    error_message = Column(Text, nullable=True)
+    error_details = Column(JSONB, nullable=True)
+
+    # Processing metadata
+    generation_started_at = Column(DateTime(timezone=True), nullable=True)
+    generation_completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    notebook = relationship("Notebook", back_populates="presentations")
+
+    __table_args__ = (
+        Index('idx_notebook_presentations_notebook', 'notebook_id'),
+        Index('idx_notebook_presentations_status', 'status'),
+        Index('idx_notebook_presentations_created', 'created_at'),
     )
 
 

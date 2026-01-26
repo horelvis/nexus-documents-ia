@@ -40,6 +40,26 @@ class AudioStatus(str, Enum):
     FAILED = "failed"
 
 
+class PresentationStatus(str, Enum):
+    """Status of presentation generation process"""
+    PENDING = "pending"
+    ANALYZING = "analyzing"
+    GENERATING_OUTLINE = "generating_outline"
+    GENERATING_SLIDES = "generating_slides"
+    UPLOADING = "uploading"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class PresentationTemplate(str, Enum):
+    """Available presentation templates"""
+    CORPORATE = "corporate"      # Professional, neutral colors
+    EDUCATIONAL = "educational"  # Academic, clarity focused
+    MINIMAL = "minimal"          # Clean, whitespace
+    CREATIVE = "creative"        # Colorful, dynamic
+    NOUXCUBE = "nouxcube"        # NouxCube branding
+
+
 # =====================================
 # NOTEBOOK SCHEMAS
 # =====================================
@@ -82,6 +102,7 @@ class NotebookResponse(NotebookBase):
     total_words: int = 0
     chat_count: int = 0
     audio_count: int = 0
+    presentation_count: int = 0
     is_archived: bool = False
     last_activity_at: datetime
     created_at: datetime
@@ -214,8 +235,8 @@ class NotebookAudioResponse(BaseModel):
     error_message: Optional[str] = None
     generation_started_at: Optional[datetime] = None
     generation_completed_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     @computed_field
     @property
@@ -236,6 +257,64 @@ class AudioStatusResponse(BaseModel):
     """Response schema for audio generation status"""
     id: UUID
     status: AudioStatus
+    status_message: Optional[str] = None
+    progress_percent: int = 0
+    error_message: Optional[str] = None
+
+
+# =====================================
+# NOTEBOOK PRESENTATION SCHEMAS
+# =====================================
+
+class SlideOutline(BaseModel):
+    """A single slide in the presentation outline"""
+    slide_number: int
+    title: str
+    bullet_points: List[str] = Field(default_factory=list)
+    speaker_notes: Optional[str] = None
+
+
+class PresentationConfig(BaseModel):
+    """Configuration for presentation generation"""
+    template: PresentationTemplate = Field(default=PresentationTemplate.CORPORATE, description="Presentation template style")
+    language: str = Field(default="es-ES", description="Language for the presentation")
+    max_slides: int = Field(default=10, ge=3, le=30, description="Maximum number of slides")
+    focus_topics: Optional[List[str]] = Field(default=None, description="Topics to focus on")
+    include_speaker_notes: bool = Field(default=True, description="Include speaker notes in slides")
+
+
+class PresentationGenerateRequest(BaseModel):
+    """Request schema for generating a presentation"""
+    config: PresentationConfig = Field(default_factory=PresentationConfig)
+
+
+class NotebookPresentationResponse(BaseModel):
+    """Response schema for notebook presentation"""
+    id: UUID
+    notebook_id: UUID
+    config: Dict[str, Any] = Field(default_factory=dict)
+    status: PresentationStatus
+    status_message: Optional[str] = None
+    progress_percent: int = 0
+    outline: Optional[List[SlideOutline]] = None
+    pptx_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    slide_count: Optional[int] = None
+    file_size_bytes: Optional[int] = None
+    error_message: Optional[str] = None
+    generation_started_at: Optional[datetime] = None
+    generation_completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PresentationStatusResponse(BaseModel):
+    """Response schema for presentation generation status"""
+    id: UUID
+    status: PresentationStatus
     status_message: Optional[str] = None
     progress_percent: int = 0
     error_message: Optional[str] = None
@@ -302,6 +381,7 @@ class NotebookDetailResponse(NotebookResponse):
     """Detailed notebook response with sources and recent activity"""
     sources: List[NotebookSourceResponse] = Field(default_factory=list)
     recent_audios: List[NotebookAudioResponse] = Field(default_factory=list)
+    recent_presentations: List[NotebookPresentationResponse] = Field(default_factory=list)
     recent_chats: List[NotebookChatResponse] = Field(default_factory=list)
 
 
@@ -311,5 +391,6 @@ class NotebookStatsResponse(BaseModel):
     total_sources: int = 0
     total_words: int = 0
     total_audios: int = 0
+    total_presentations: int = 0
     total_chats: int = 0
     recent_activity: List[NotebookResponse] = Field(default_factory=list)

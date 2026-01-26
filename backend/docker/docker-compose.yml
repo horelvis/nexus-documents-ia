@@ -598,7 +598,7 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # NexusLM Podcast Service - AI Podcast Generation
+  # NouxCube Podcast Service - AI Podcast Generation
   # =============================================================================
   # Generates AI podcasts from document notebooks (NotebookLM alternative)
   # Pipeline: Analyze sources → Generate script → Synthesize audio → Stitch

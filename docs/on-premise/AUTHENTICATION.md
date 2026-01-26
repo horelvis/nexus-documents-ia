@@ -1,6 +1,6 @@
 # On-Premise Authentication Guide
 
-This guide covers setting up enterprise authentication for NexusDocs360 on-premise deployments using OIDC/SAML providers.
+This guide covers setting up enterprise authentication for NouxCubeIA on-premise deployments using OIDC/SAML providers.
 
 ## Supported Identity Providers
 
@@ -74,11 +74,11 @@ services:
    - **Valid Redirect URIs**: `https://your-app.com/api/v1/auth/callback`
 
 3. Create groups for role mapping:
-   - `NexusDocs-Admins` → Admin role
-   - `NexusDocs-Users` → User role
-   - `NexusDocs-Viewers` → Viewer role
+   - `NouxCubeIA-Admins` → Admin role
+   - `NouxCubeIA-Users` → User role
+   - `NouxCubeIA-Viewers` → Viewer role
 
-### 3. Configure NexusDocs360
+### 3. Configure NouxCubeIA
 
 ```bash
 # backend/docker/.env
@@ -93,9 +93,9 @@ OIDC_CLIENT_SECRET=your-client-secret-from-keycloak
 OIDC_SCOPES=openid,profile,email,groups
 
 # Group to Role Mapping
-OIDC_ADMIN_GROUP=NexusDocs-Admins
-OIDC_USER_GROUP=NexusDocs-Users
-OIDC_VIEWER_GROUP=NexusDocs-Viewers
+OIDC_ADMIN_GROUP=NouxCubeIA-Admins
+OIDC_USER_GROUP=NouxCubeIA-Users
+OIDC_VIEWER_GROUP=NouxCubeIA-Viewers
 
 # JIT Provisioning
 OIDC_JIT_PROVISIONING=true
@@ -114,7 +114,7 @@ SESSION_EXPIRE_HOURS=24
 
 1. Go to **Azure Portal** → **Microsoft Entra ID** → **App registrations**
 2. Click **New registration**:
-   - **Name**: `NexusDocs360`
+   - **Name**: `NouxCubeIA`
    - **Supported account types**: `Accounts in this organizational directory only`
    - **Redirect URI**: `https://your-app.com/api/v1/auth/callback`
 
@@ -139,11 +139,11 @@ Add these permissions:
 ### 3. Create Security Groups
 
 Create groups in Azure AD:
-- `SG-NexusDocs-Admins`
-- `SG-NexusDocs-Users`
-- `SG-NexusDocs-Viewers`
+- `SG-NouxCubeIA-Admins`
+- `SG-NouxCubeIA-Users`
+- `SG-NouxCubeIA-Viewers`
 
-### 4. Configure NexusDocs360
+### 4. Configure NouxCubeIA
 
 ```bash
 # backend/docker/.env
@@ -175,11 +175,11 @@ OIDC_JIT_PROVISIONING=true
    - **Application type**: `Web Application`
 
 3. Configure:
-   - **App integration name**: `NexusDocs360`
+   - **App integration name**: `NouxCubeIA`
    - **Sign-in redirect URIs**: `https://your-app.com/api/v1/auth/callback`
    - **Sign-out redirect URIs**: `https://your-app.com/logout`
 
-### 2. Configure NexusDocs360
+### 2. Configure NouxCubeIA
 
 ```bash
 # backend/docker/.env
@@ -192,15 +192,15 @@ OIDC_CLIENT_ID=your-okta-client-id
 OIDC_CLIENT_SECRET=your-okta-client-secret
 OIDC_SCOPES=openid,profile,email,groups
 
-OIDC_ADMIN_GROUP=NexusDocs-Admins
-OIDC_USER_GROUP=NexusDocs-Users
+OIDC_ADMIN_GROUP=NouxCubeIA-Admins
+OIDC_USER_GROUP=NouxCubeIA-Users
 ```
 
 ---
 
 ## Group to Role Mapping
 
-NexusDocs360 maps IdP groups to application roles:
+NouxCubeIA maps IdP groups to application roles:
 
 | IdP Group | Application Role | Permissions |
 |-----------|------------------|-------------|
@@ -215,9 +215,9 @@ NexusDocs360 maps IdP groups to application roles:
 
 GROUP_ROLE_MAPPING = {
     # KeyCloak groups
-    "NexusDocs-Admins": "admin",
-    "NexusDocs-Users": "user",
-    "NexusDocs-Viewers": "viewer",
+    "NouxCubeIA-Admins": "admin",
+    "NouxCubeIA-Users": "user",
+    "NouxCubeIA-Viewers": "viewer",
 
     # Azure AD groups (by Object ID)
     "12345678-1234-...": "admin",

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup GCP Secrets for NexusDocs360
+# Setup GCP Secrets for NouxCubeIA
 
 set -e
 

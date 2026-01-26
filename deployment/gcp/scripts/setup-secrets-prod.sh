@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup secrets for NexusDocs360 PRODUCTION environment
+# Setup secrets for NouxCubeIA PRODUCTION environment
 # This script creates all necessary secrets with production-grade security
 
 set -e
@@ -129,7 +129,7 @@ SERVICE_ACCOUNT="nexus-cloud-run-prod@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Create service account if it doesn't exist
 gcloud iam service-accounts create nexus-cloud-run-prod \
-    --display-name="NexusDocs360 PROD Cloud Run Service Account" \
+    --display-name="NouxCubeIA PROD Cloud Run Service Account" \
     --project=$PROJECT_ID || true
 
 # Grant secret accessor role

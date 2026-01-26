@@ -3,7 +3,7 @@
 **Fecha**: Enero 2026
 **Prioridad**: Q2 2026 - Investigación y PoC
 **Estado**: Propuesta para evaluación
-**Autores**: Equipo de Arquitectura NexusDocs360
+**Autores**: Equipo de Arquitectura NouxCubeIA
 
 ---
 
@@ -107,7 +107,7 @@ Emma AI utiliza el modelo base **Qwen3-4B** vía vLLM sin ninguna adaptación es
 
 ---
 
-## 3. Compatibilidad con NexusDocs360
+## 3. Compatibilidad con NouxCubeIA
 
 ### 3.1 vLLM Soporte Nativo para LoRA
 

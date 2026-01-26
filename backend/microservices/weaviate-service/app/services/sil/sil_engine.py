@@ -1,8 +1,27 @@
 """
 Structural Intelligence Layer Engine
 
-The main entry point for the SIL.
-Orchestrates all components to process queries with structural intelligence.
+.. deprecated:: 2.0.0
+    SIL is deprecated in favor of SLM Router. Use SLM Router for all new
+    implementations. SIL remains as a fallback when SLM Router is unavailable.
+
+    Migration:
+        # OLD (SIL)
+        from app.services.sil import sil_engine
+        result = await sil_engine.process_query(query, tenant_id)
+
+        # NEW (SLM Router)
+        from app.services.slm_router import get_slm_router
+        router = get_slm_router()
+        result = await router.route(query, tenant_id, session_id)
+
+    SLM Router provides:
+    - TOON (Task-Oriented Orchestration Notation) structured plans
+    - Conversation history support for contextual queries
+    - Tenant-aware schema context
+    - Unified routing (Graph, Vector, Hybrid, Ask-Clarify)
+
+The SIL is maintained only as a fallback and will be removed in v3.0.0.
 
 Usage:
     from app.services.sil import sil_engine
@@ -80,6 +99,16 @@ class SILEngine:
         if self._initialized:
             return
 
+        # Deprecation warning
+        import warnings
+        warnings.warn(
+            "SIL is deprecated and will be removed in v3.0.0. "
+            "Use SLM Router instead: from app.services.slm_router import get_slm_router",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        logger.warning("⚠️ SIL is DEPRECATED - Use SLM Router for new implementations")
+
         await self._detector.initialize()
         await self._reasoning_engine.initialize()
         await self._temporal_engine.initialize()
@@ -87,7 +116,7 @@ class SILEngine:
         await self._executor.initialize()
 
         self._initialized = True
-        logger.info("✅ SILEngine initialized")
+        logger.info("✅ SILEngine initialized (DEPRECATED - fallback only)")
 
     async def process_query(
         self,

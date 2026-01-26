@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick database connection test for NexusDocs360
+Quick database connection test for NouxCubeIA
 Tests connection to Cloud SQL PostgreSQL instance
 """
 
@@ -127,7 +127,7 @@ def test_connection():
         return False
 
 if __name__ == "__main__":
-    print("🔍 NexusDocs360 Database Connection Test")
+    print("🔍 NouxCubeIA Database Connection Test")
     print("=" * 40)
     
     success = test_connection()

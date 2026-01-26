@@ -66,10 +66,9 @@ class PodcastGenerator:
             })
 
         # Update in main API
-        url = f"{settings.main_api_url}/api/v1/internal/podcast/status"
+        url = f"{settings.main_api_url}/api/v1/notebooks/internal/audio/{audio_id}/status"
 
         payload = {
-            "audio_id": str(audio_id),
             "status": status.value,
             "status_message": status_message,
             "progress_percent": progress_percent,
@@ -92,7 +91,7 @@ class PodcastGenerator:
 
         try:
             headers = {"X-API-Key": settings.api_key}
-            response = await self.client.patch(url, json=payload, headers=headers)
+            response = await self.client.put(url, json=payload, headers=headers)
             response.raise_for_status()
         except Exception as e:
             logger.error(f"Failed to update audio status: {e}")
@@ -303,7 +302,7 @@ class PodcastGenerator:
 
         # Not tracking locally, query main API
         try:
-            url = f"{settings.main_api_url}/api/v1/internal/podcast/status/{audio_id}"
+            url = f"{settings.main_api_url}/api/v1/notebooks/internal/audio/{audio_id}/status"
             headers = {"X-API-Key": settings.api_key}
             response = await self.client.get(url, headers=headers)
 

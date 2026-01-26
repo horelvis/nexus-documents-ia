@@ -130,8 +130,8 @@ OIDC_CLIENT_SECRET=your-client-secret
 OIDC_SCOPES=openid,profile,email,groups
 
 # Group to Role Mapping
-OIDC_ADMIN_GROUP=NexusDocs-Admins
-OIDC_USER_GROUP=NexusDocs-Users
+OIDC_ADMIN_GROUP=NouxCubeIA-Admins
+OIDC_USER_GROUP=NouxCubeIA-Users
 ```
 
 **Important:**

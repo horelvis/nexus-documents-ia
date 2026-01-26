@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup monitoring for NexusDocs360 PRE environment
+# Setup monitoring for NouxCubeIA PRE environment
 
 set -e
 
@@ -201,7 +201,7 @@ EOF
 echo "🤖 Creating AI metrics dashboard..."
 
 cat > /tmp/ai-dashboard-pre.yaml <<EOF
-displayName: "NexusDocs360 PRE - AI Services Dashboard"
+displayName: "NouxCubeIA PRE - AI Services Dashboard"
 mosaicLayout:
   columns: 12
   tiles:
@@ -297,7 +297,7 @@ echo "🏢 Setting up monitoring workspace..."
 
 # Link project to workspace
 gcloud alpha monitoring workspaces create \
-    --display-name="NexusDocs360 PRE Monitoring" \
+    --display-name="NouxCubeIA PRE Monitoring" \
     --project=$PROJECT_ID || true
 
 # Summary

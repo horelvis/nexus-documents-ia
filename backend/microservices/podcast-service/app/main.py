@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="NexusLM Podcast Service",
-    description="Podcast generation service for NexusLM notebooks. "
+    title="NouxCube Podcast Service",
+    description="Podcast generation service for NouxCube notebooks. "
                 "Generates two-host podcasts from document sources using "
                 "Qwen3-4B-Thinking for script generation and VibeVoice for TTS.",
     version=settings.service_version,

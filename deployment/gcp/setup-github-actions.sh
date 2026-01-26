@@ -205,7 +205,7 @@ show_summary() {
 
 # Main
 main() {
-    print_message "=== Setup GitHub Actions para NexusDocs360 ==="
+    print_message "=== Setup GitHub Actions para NouxCubeIA ==="
     echo
     
     # Verificar prerrequisitos

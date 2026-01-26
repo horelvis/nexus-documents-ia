@@ -1,8 +1,8 @@
-# 📊 Monitoring Configuration - NexusDocs360
+# 📊 Monitoring Configuration - NouxCubeIA
 
 ## Overview
 
-This directory contains monitoring configurations for NexusDocs360 environments. Each environment (PRE, PROD) has its own set of dashboards, alerts, and monitoring scripts.
+This directory contains monitoring configurations for NouxCubeIA environments. Each environment (PRE, PROD) has its own set of dashboards, alerts, and monitoring scripts.
 
 ## Structure
 

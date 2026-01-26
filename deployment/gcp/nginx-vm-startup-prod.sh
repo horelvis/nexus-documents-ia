@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nginx VM startup script for NexusDocs360 PRODUCTION environment
+# Nginx VM startup script for NouxCubeIA PRODUCTION environment
 # Configures Nginx as reverse proxy with Let's Encrypt SSL for production domains
 # Includes enhanced security, performance optimization, and high availability features
 

@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     microservices_api_key: str = Field(default="", alias="MICROSERVICES_API_KEY")
 
     # TTS Provider Configuration
-    tts_provider: Literal["vibevoice", "google"] = Field(
-        default="vibevoice",
+    tts_provider: Literal["vibevoice", "google", "edge"] = Field(
+        default="edge",
         alias="TTS_PROVIDER",
-        description="TTS provider to use"
+        description="TTS provider to use (edge recommended for on-premise)"
     )
 
     # VibeVoice Configuration

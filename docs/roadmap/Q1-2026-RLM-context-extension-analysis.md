@@ -3,7 +3,7 @@
 **Fecha**: Enero 2026
 **Prioridad**: Q1 2026 - Evaluación y PoC
 **Estado**: Propuesta para evaluación
-**Autores**: Equipo de Arquitectura NexusDocs360
+**Autores**: Equipo de Arquitectura NouxCubeIA
 
 ---
 
@@ -90,7 +90,7 @@ RLM es un **paradigma de inferencia** (no un modelo nuevo) que permite procesar 
 
 ---
 
-## 3. Compatibilidad con NexusDocs360
+## 3. Compatibilidad con NouxCubeIA
 
 ### 3.1 Stack Actual
 
@@ -299,7 +299,7 @@ Justificación:
 1. **Paper**: Zhang, A. L., Kraska, T., & Khattab, O. (2025). Recursive Language Models. arXiv:2512.24601v1
 2. **Repositorio**: https://github.com/alexzhang13/rlm
 3. **DSPy Framework**: https://github.com/stanfordnlp/dspy (referencia de Omar Khattab)
-4. **Microsoft Agent Framework**: Documentación interna NexusDocs360
+4. **Microsoft Agent Framework**: Documentación interna NouxCubeIA
 
 ---
 

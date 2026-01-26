@@ -1,6 +1,6 @@
 # GCP Deployment Scripts
 
-This directory contains the main deployment scripts for NexusDocs360 on Google Cloud Platform.
+This directory contains the main deployment scripts for NouxCubeIA on Google Cloud Platform.
 
 ## Main Deployment Scripts
 

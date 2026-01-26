@@ -52,6 +52,7 @@ from app.api.router_admin import router as router_admin_router  # NexusRouter ad
 from app.api.emma_v2 import router as emma_v2_router  # Emma v2 API
 from app.api.boe_legislation import router as boe_router  # BOE legislation download API
 from app.api.legal_graph import router as legal_graph_router  # Legal Knowledge Graph API
+from app.api.slm_router import router as slm_router  # SLM Router API
 from app.cag.api.cag import router as cag_router
 from app.cag.api.vector import router as cag_vector_router
 
@@ -113,6 +114,66 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Failed to initialize integrated CAG engine: {cag_error}")
             raise cag_error
 
+        # Initialize SLM Router (TOON-based query planning)
+        if settings.slm_router_enabled:
+            try:
+                from app.services.slm_router import initialize_slm_router, SLMRouterConfig, SLMConfig
+                slm_config = SLMConfig(
+                    provider=settings.slm_provider,
+                    # TGI settings (recommended: direct connection to TGI)
+                    tgi_base_url=settings.slm_base_url,
+                    tgi_model=settings.slm_model,
+                    # vLLM settings (fallback)
+                    vllm_base_url=settings.slm_base_url,
+                    vllm_model=settings.slm_model,
+                    # Inference settings
+                    max_tokens=settings.slm_max_tokens,
+                    temperature=settings.slm_temperature,
+                    timeout_ms=settings.slm_timeout_ms
+                )
+                router_config = SLMRouterConfig(
+                    enabled=True,
+                    slm_config=slm_config,
+                    fallback_to_vector=settings.slm_fallback_to_vector,
+                    min_confidence_threshold=settings.slm_min_confidence,
+                    collect_training_data=settings.slm_collect_training_data
+                )
+                await initialize_slm_router(router_config)
+                logger.info("✅ SLM Router initialized (TOON-based query planning)")
+
+                # Initialize Continuous Learning (zero-intervention fine-tuning)
+                if settings.continuous_learning_enabled:
+                    try:
+                        from app.services.slm_router.continuous_learning import (
+                            LearningConfig,
+                            initialize_continuous_learning
+                        )
+                        learning_config = LearningConfig(
+                            enabled=True,
+                            min_examples=settings.learning_min_examples,
+                            maintenance_hour=settings.learning_maintenance_hour,
+                            check_interval_seconds=settings.learning_check_interval,
+                            min_success_rate=settings.learning_min_success_rate,
+                            models_dir=settings.learning_models_dir,
+                            adapter_dir=settings.learning_adapters_dir,
+                            model_name=settings.slm_model
+                        )
+                        learning_service = await initialize_continuous_learning(
+                            redis_url=settings.redis_url,
+                            config=learning_config
+                        )
+                        if learning_service:
+                            # Store reference for shutdown
+                            app.state.continuous_learning_service = learning_service
+                            logger.info("✅ Continuous Learning started (automated fine-tuning)")
+                            logger.info(f"   └─ Maintenance window: {settings.learning_maintenance_hour}:00")
+                            logger.info(f"   └─ Min examples: {settings.learning_min_examples}")
+                    except Exception as learning_error:
+                        logger.warning(f"⚠️ Continuous Learning skipped: {learning_error}")
+
+            except Exception as slm_error:
+                logger.warning(f"⚠️ SLM Router initialization skipped: {slm_error}")
+
     except Exception as e:
         logger.error(f"❌ Service initialization failed: {e}")
         # Continue startup but log error
@@ -121,6 +182,15 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     logger.info("🛑 Shutting down Weaviate Service...")
+
+    # Stop Continuous Learning monitor
+    try:
+        if hasattr(app.state, 'continuous_learning_service'):
+            await app.state.continuous_learning_service.stop()
+            logger.info("✅ Continuous Learning stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Error stopping Continuous Learning: {e}")
+
     try:
         from app.services.weaviate_service import weaviate_service
         await weaviate_service.cleanup()
@@ -180,6 +250,7 @@ app.include_router(sil_router, tags=["structural-intelligence"])  # SIL API
 app.include_router(verified_router, tags=["verified-generation"])  # Verified Generation API
 app.include_router(router_admin_router, tags=["nexus-router"])  # NexusRouter admin API
 app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])  # Legal Knowledge Graph API
+app.include_router(slm_router, tags=["slm-router"])  # SLM Router API (TOON-based query planning)
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
 

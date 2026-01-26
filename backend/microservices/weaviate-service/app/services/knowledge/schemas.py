@@ -109,6 +109,9 @@ class KnowledgeExtractionResult(BaseModel):
     entities_count: int = 0
     relationships_count: int = 0
 
+    # Domain classification (most common from entities, or GENERAL)
+    domain: DomainType = DomainType.GENERAL
+
     # Processing info
     processing_time_ms: int = 0
     extraction_method: str = "langextract"  # langextract, llm, hybrid

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy infrastructure for NexusDocs360 PRODUCTION environment on GCP
+# Deploy infrastructure for NouxCubeIA PRODUCTION environment on GCP
 # This script creates PROD-specific resources with full capacity and high availability
 
 set -e
@@ -32,7 +32,7 @@ fi
 # Check if project exists, create if not
 if ! gcloud projects describe $PROJECT_ID &>/dev/null; then
     echo "📝 Creating project $PROJECT_ID..."
-    gcloud projects create $PROJECT_ID --name="NexusDocs360 PROD"
+    gcloud projects create $PROJECT_ID --name="NouxCubeIA PROD"
     echo "✅ Project created"
 fi
 
@@ -315,7 +315,7 @@ echo "📦 Creating Artifact Registry for PRODUCTION..."
 gcloud artifacts repositories create nexusdocs360-prod \
     --repository-format=docker \
     --location=$REGION \
-    --description="NexusDocs360 PRODUCTION container images" \
+    --description="NouxCubeIA PRODUCTION container images" \
     --project=$PROJECT_ID || echo "Artifact Registry already exists"
 
 # Configure docker authentication

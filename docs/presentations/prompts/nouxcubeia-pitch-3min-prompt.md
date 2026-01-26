@@ -1,14 +1,14 @@
-# Prompt: Presentación NexusDocs360 (3 minutos)
+# Prompt: Presentación NouxCubeIA (3 minutos)
 
 ## Contexto para el LLM
 
-Eres un experto en comunicación corporativa y presentaciones de producto tecnológico. Tu tarea es crear una presentación de 3 minutos sobre NexusDocs360, un sistema de gestión documental con IA.
+Eres un experto en comunicación corporativa y presentaciones de producto tecnológico. Tu tarea es crear una presentación de 3 minutos sobre NouxCubeIA, un sistema de gestión documental con IA.
 
 ## Información del Proyecto
 
 ### Empresa
 - **Nombre**: Venzia IT
-- **Producto**: NexusDocs360
+- **Producto**: NouxCubeIA
 - **Asistente IA**: Emma
 
 ### Stack Tecnológico (simplificar para audiencia no técnica)
@@ -29,7 +29,7 @@ Eres un experto en comunicación corporativa y presentaciones de producto tecnol
    - "Olvido" de información relevante
    - Alucinaciones
 
-### Solución NexusDocs360
+### Solución NouxCubeIA
 - IA como pilar arquitectónico (no como añadido)
 - Modelo open source ejecutado on-premise
 - Pipeline RAG de 7 capas optimizado
@@ -60,7 +60,7 @@ Eres un experto en comunicación corporativa y presentaciones de producto tecnol
 2. **El coste oculto**: Privacidad y dependencia de proveedores
 3. **La oportunidad**: Modelos open source
 4. **El gap del mercado**: Falta de soluciones documentales
-5. **Nuestra solución**: NexusDocs360
+5. **Nuestra solución**: NouxCubeIA
 6. **Emma**: La IA que entiende tus documentos
 7. **Diferenciadores**: Por qué somos diferentes
 8. **Visión de futuro**: Roadmap 2026
@@ -92,7 +92,7 @@ Genera un documento Markdown con:
 ## Ejemplo de Formato de Salida
 
 ```markdown
-# NexusDocs360 - Presentación 3 min
+# NouxCubeIA - Presentación 3 min
 
 ---
 

@@ -180,7 +180,7 @@ class PublicDocumentResponse(BaseModel):
 class PublicSearchRequest(BaseModel):
     """Schema for searching public knowledge base"""
     query: str = Field(..., description="Search query")
-    limit: int = Field(default=10, ge=1, le=100, description="Max results")
+    limit: int = Field(default=10, ge=1, le=1000, description="Max results")
 
     # Filters
     categories: Optional[List[PublicDocumentCategory]] = Field(None, description="Filter by categories")

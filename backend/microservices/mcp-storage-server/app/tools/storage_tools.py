@@ -9,7 +9,7 @@ import base64
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.services.gcs_service import get_gcs_service
+from app.services import get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def upload_file(
         # Decode base64 content
         content = base64.b64decode(content_base64)
 
-        service = get_gcs_service()
+        service = get_storage_service()
         result = await service.upload_file(
             content=content,
             object_name=filename,
@@ -97,7 +97,7 @@ async def download_file(
         - encoding: "base64" or "text"
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         content = service.download_file(
             object_name=filename,
             tenant_id=tenant_id,
@@ -169,7 +169,7 @@ async def list_files(
         - prefix: The prefix used for filtering
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         files = service.list_files(
             tenant_id=tenant_id,
             prefix=prefix,
@@ -217,7 +217,7 @@ async def delete_file(
         - filename: The deleted filename
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         deleted = service.delete_file(
             object_name=filename,
             tenant_id=tenant_id,
@@ -274,7 +274,7 @@ async def get_file_info(
         - metadata: Custom metadata dict
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         info = service.get_file_info(
             object_name=filename,
             tenant_id=tenant_id,
@@ -332,7 +332,7 @@ async def generate_signed_url(
         - method: The HTTP method allowed
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         url, expires_at = service.generate_signed_url(
             object_name=filename,
             tenant_id=tenant_id,
@@ -384,7 +384,7 @@ async def move_file(
         - moved_at: Timestamp of the move operation
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         result = service.move_file(
             source_name=source,
             destination_name=destination,
@@ -436,7 +436,7 @@ async def file_exists(
         - filename: The checked filename
     """
     try:
-        service = get_gcs_service()
+        service = get_storage_service()
         exists = service.file_exists(
             object_name=filename,
             tenant_id=tenant_id,

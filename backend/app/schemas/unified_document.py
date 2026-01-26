@@ -41,6 +41,7 @@ class ConnectorType(str, Enum):
     NETWORK_SHARE = "network_share"
     DROPBOX = "dropbox"
     BOX = "box"
+    DATABASE = "database"  # Generic database BLOB storage
     DIRECT_UPLOAD = "direct_upload"  # Manual uploads (existing flow)
 
 

@@ -3,7 +3,7 @@
 **Fecha**: Enero 2026
 **Prioridad**: Q3 2026 - Desarrollo en paralelo con LoRA
 **Estado**: Propuesta para evaluación
-**Autores**: Equipo de Arquitectura NexusDocs360
+**Autores**: Equipo de Arquitectura NouxCubeIA
 
 ---
 
@@ -180,12 +180,12 @@ Basado en la [discusión #139 de nanochat](https://github.com/karpathy/nanochat/
 # Basado en nanochat dev/gen_synthetic_data.py
 
 EMMA_IDENTITY_PROMPT = """
-Eres Emma, asistente de gestión documental de NexusDocs360.
+Eres Emma, asistente de gestión documental de NouxCubeIA.
 
 IDENTIDAD:
 - Nombre: Emma
 - Rol: Asistente especializada en gestión documental y derecho español
-- Creador: NexusDocs360
+- Creador: NouxCubeIA
 - Tono: Profesional, preciso, servicial
 
 COMPORTAMIENTO:

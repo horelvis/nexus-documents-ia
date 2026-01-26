@@ -20,6 +20,8 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, Header
+from fastapi.responses import FileResponse
+from pathlib import Path
 from pydantic import BaseModel
 from sqlalchemy import func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,13 +31,14 @@ from app.api.async_dependencies import get_current_user_async, get_current_tenan
 from app.db.async_database import get_async_db
 from app.db.models import (
     User, Document, IndexedDocument,
-    Notebook, NotebookSource, NotebookAudio, NotebookChat
+    Notebook, NotebookSource, NotebookAudio, NotebookChat, NotebookPresentation
 )
 from app.schemas.notebook import (
     NotebookCreate, NotebookUpdate, NotebookResponse, NotebookListResponse,
     NotebookDetailResponse, NotebookStatsResponse,
     NotebookSourceAdd, NotebookSourceResponse,
     AudioGenerateRequest, NotebookAudioResponse, AudioStatusResponse, AudioStatus,
+    PresentationGenerateRequest, NotebookPresentationResponse, PresentationStatusResponse, PresentationStatus,
     NotebookChatCreate, NotebookChatResponse, NotebookChatMessage, ChatCompletionResponse,
     ChatMessage, Citation
 )
@@ -45,8 +48,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 PODCAST_SERVICE_URL = os.getenv("PODCAST_SERVICE_URL", "http://podcast-service:8000")
+PRESENTATION_SERVICE_URL = os.getenv("PRESENTATION_SERVICE_URL", "http://presentation-service:8000")
 WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
 MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY", "")
+LOCAL_STORAGE_PATH = os.getenv("LOCAL_STORAGE_PATH", "/app/storage")
 
 router = APIRouter()
 
@@ -68,9 +73,51 @@ class AudioStatusUpdate(BaseModel):
     transcript: Optional[List[dict]] = None
 
 
+class PresentationStatusUpdate(BaseModel):
+    """Schema for internal presentation status updates from presentation service."""
+    status: str
+    status_message: Optional[str] = None
+    progress_percent: int = 0
+    error_message: Optional[str] = None
+    outline: Optional[List[dict]] = None
+    pptx_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    slide_count: Optional[int] = None
+    file_size_bytes: Optional[int] = None
+
+
 # =====================================
 # HELPER FUNCTIONS
 # =====================================
+
+def _presentation_to_response(presentation: NotebookPresentation) -> NotebookPresentationResponse:
+    """Convert NotebookPresentation model to response schema.
+
+    This helper avoids lazy-loading issues with async SQLAlchemy sessions
+    by accessing attributes through __dict__ to prevent triggering lazy loads.
+    """
+    # Access through __dict__ to avoid lazy loading
+    d = presentation.__dict__
+
+    return NotebookPresentationResponse(
+        id=d.get("id"),
+        notebook_id=d.get("notebook_id"),
+        config=d.get("config") or {},
+        status=d.get("status"),
+        status_message=d.get("status_message"),
+        progress_percent=d.get("progress_percent") or 0,
+        outline=d.get("outline"),
+        pptx_url=d.get("pptx_url"),
+        thumbnail_url=d.get("thumbnail_url"),
+        slide_count=d.get("slide_count"),
+        file_size_bytes=d.get("file_size_bytes"),
+        error_message=d.get("error_message"),
+        generation_started_at=d.get("generation_started_at"),
+        generation_completed_at=d.get("generation_completed_at"),
+        created_at=d.get("created_at"),
+        updated_at=d.get("updated_at"),
+    )
+
 
 async def verify_microservice_api_key(
     x_api_key: str = Header(..., alias="X-API-Key")
@@ -160,6 +207,38 @@ async def trigger_podcast_generation(
         return False
 
 
+async def trigger_presentation_generation(
+    presentation_id: UUID,
+    notebook_id: UUID,
+    tenant_id: UUID,
+    sources: List[dict],
+    config: dict,
+):
+    """Trigger presentation generation in the presentation service."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{PRESENTATION_SERVICE_URL}/api/v1/presentation/generate",
+                json={
+                    "presentation_id": str(presentation_id),
+                    "notebook_id": str(notebook_id),
+                    "tenant_id": str(tenant_id),
+                    "sources": sources,
+                    "config": config,
+                },
+                headers={"X-API-Key": MICROSERVICES_API_KEY},
+            )
+            response.raise_for_status()
+            logger.info(f"Presentation generation triggered for presentation {presentation_id}")
+            return True
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Presentation service returned error: {e.response.status_code} - {e.response.text}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to trigger presentation generation: {e}")
+        return False
+
+
 # =====================================
 # INTERNAL ENDPOINTS (Microservices)
 # =====================================
@@ -221,6 +300,67 @@ async def update_audio_status_internal(
     await db.commit()
 
     logger.info(f"Audio {audio_id} status updated to {update.status}")
+
+    return SuccessResponse(message="Status updated successfully")
+
+
+@router.put("/internal/presentation/{presentation_id}/status", response_model=SuccessResponse, include_in_schema=False)
+async def update_presentation_status_internal(
+    presentation_id: UUID,
+    update: PresentationStatusUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    _: bool = Depends(verify_microservice_api_key),
+):
+    """
+    Internal endpoint for presentation service to update presentation generation status.
+
+    This endpoint is authenticated with MICROSERVICES_API_KEY and should only
+    be called by the presentation-service microservice.
+    """
+    # Get presentation record
+    presentation_query = select(NotebookPresentation).where(NotebookPresentation.id == presentation_id)
+    presentation_result = await db.execute(presentation_query)
+    presentation = presentation_result.scalar_one_or_none()
+
+    if not presentation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    # Update fields
+    presentation.status = update.status
+    presentation.status_message = update.status_message
+    presentation.progress_percent = update.progress_percent
+
+    if update.error_message:
+        presentation.error_message = update.error_message
+
+    if update.outline:
+        presentation.outline = update.outline
+
+    if update.pptx_url:
+        presentation.pptx_url = update.pptx_url
+
+    if update.thumbnail_url:
+        presentation.thumbnail_url = update.thumbnail_url
+
+    if update.slide_count:
+        presentation.slide_count = update.slide_count
+
+    if update.file_size_bytes:
+        presentation.file_size_bytes = update.file_size_bytes
+
+    # Update timestamps based on status
+    if update.status == "analyzing" and not presentation.generation_started_at:
+        presentation.generation_started_at = datetime.now(timezone.utc)
+
+    if update.status == "completed":
+        presentation.generation_completed_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    logger.info(f"Presentation {presentation_id} status updated to {update.status}")
 
     return SuccessResponse(message="Status updated successfully")
 
@@ -339,6 +479,7 @@ async def get_notebook_stats(
         func.sum(Notebook.source_count).label("total_sources"),
         func.sum(Notebook.total_words).label("total_words"),
         func.sum(Notebook.audio_count).label("total_audios"),
+        func.sum(Notebook.presentation_count).label("total_presentations"),
         func.sum(Notebook.chat_count).label("total_chats"),
     ).where(
         and_(
@@ -364,6 +505,7 @@ async def get_notebook_stats(
         total_sources=stats.total_sources or 0,
         total_words=stats.total_words or 0,
         total_audios=stats.total_audios or 0,
+        total_presentations=stats.total_presentations or 0,
         total_chats=stats.total_chats or 0,
         recent_activity=[NotebookResponse.model_validate(n) for n in recent_notebooks],
     )
@@ -384,6 +526,7 @@ async def get_notebook(
     query = select(Notebook).options(
         selectinload(Notebook.sources),
         selectinload(Notebook.audios),
+        selectinload(Notebook.presentations),
         selectinload(Notebook.chats),
     ).where(
         and_(
@@ -409,6 +552,10 @@ async def get_notebook(
     response_data["recent_audios"] = [
         NotebookAudioResponse.model_validate(a)
         for a in sorted(notebook.audios, key=lambda x: x.created_at, reverse=True)[:5]
+    ]
+    response_data["recent_presentations"] = [
+        _presentation_to_response(p)
+        for p in sorted(notebook.presentations, key=lambda x: x.created_at, reverse=True)[:5]
     ]
     response_data["recent_chats"] = [
         NotebookChatResponse.model_validate(c)
@@ -832,7 +979,9 @@ async def generate_audio(
         audio.status = "failed"
         audio.error_message = "Failed to connect to podcast generation service"
         await db.commit()
-        await db.refresh(audio)
+
+    # Refresh to get the latest state before returning
+    await db.refresh(audio)
 
     return NotebookAudioResponse.model_validate(audio)
 
@@ -1007,6 +1156,376 @@ async def delete_audio(
     logger.info(f"Audio deleted from notebook {notebook_id}: {audio_id}")
 
     return SuccessResponse(message="Audio deleted successfully")
+
+
+# =====================================
+# PRESENTATION GENERATION ENDPOINTS
+# =====================================
+
+@router.post("/{notebook_id}/presentations", response_model=NotebookPresentationResponse, status_code=status.HTTP_202_ACCEPTED)
+async def generate_presentation(
+    notebook_id: UUID,
+    request: PresentationGenerateRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Start PowerPoint presentation generation for the notebook.
+
+    Generates a PPTX presentation summarizing the notebook's sources.
+    The generation happens asynchronously - poll the status endpoint for progress.
+    """
+    # Verify notebook ownership and get sources
+    notebook_query = select(Notebook).options(
+        selectinload(Notebook.sources)
+    ).where(
+        and_(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    notebook_result = await db.execute(notebook_query)
+    notebook = notebook_result.scalar_one_or_none()
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found"
+        )
+
+    if not notebook.sources:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Notebook has no sources. Add at least one document before generating a presentation."
+        )
+
+    # Create presentation record
+    presentation = NotebookPresentation(
+        notebook_id=notebook_id,
+        config=request.config.model_dump(),
+        status="pending",
+        status_message="Fetching source content from Weaviate...",
+        progress_percent=0,
+    )
+
+    db.add(presentation)
+
+    # Update notebook stats
+    notebook.presentation_count += 1
+    notebook.last_activity_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(presentation)
+
+    logger.info(f"Presentation generation queued for notebook {notebook_id}: {presentation.id}")
+
+    # Fetch content from Weaviate for each source
+    sources_data = []
+    tenant_id = str(current_user.tenant_id)
+
+    for source in notebook.sources:
+        # Determine which document ID to use
+        doc_id = str(source.indexed_document_id) if source.indexed_document_id else (
+            str(source.document_id) if source.document_id else None
+        )
+
+        if not doc_id:
+            logger.warning(f"Source {source.id} has no document ID, skipping")
+            continue
+
+        # Fetch full content from Weaviate
+        weaviate_content = await get_source_content_from_weaviate(tenant_id, doc_id)
+
+        if weaviate_content:
+            sources_data.append({
+                "id": str(source.id),
+                "title": weaviate_content.get("title") or source.title,
+                "document_id": str(source.document_id) if source.document_id else None,
+                "indexed_document_id": str(source.indexed_document_id) if source.indexed_document_id else None,
+                "content": weaviate_content.get("content", ""),
+                "word_count": weaviate_content.get("word_count", 0),
+                "source_type": weaviate_content.get("source_type", source.source_type),
+            })
+            logger.info(f"Fetched content for source {source.id}: {weaviate_content.get('word_count', 0)} words")
+        else:
+            logger.warning(f"Could not fetch content for source {source.id} (doc_id: {doc_id})")
+
+    if not sources_data:
+        # Update status to failed if no content could be fetched
+        presentation.status = "failed"
+        presentation.error_message = "Could not fetch content from any source. Ensure documents are indexed in Weaviate."
+        await db.commit()
+        await db.refresh(presentation)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not fetch content from any source. Ensure documents are indexed in Weaviate."
+        )
+
+    # Update presentation status
+    presentation.status_message = f"Retrieved content from {len(sources_data)} source(s). Starting generation..."
+    presentation.progress_percent = 10
+    await db.commit()
+
+    # Trigger presentation generation in the presentation service
+    success = await trigger_presentation_generation(
+        presentation_id=presentation.id,
+        notebook_id=notebook_id,
+        tenant_id=current_user.tenant_id,
+        sources=sources_data,
+        config=request.config.model_dump(),
+    )
+
+    if not success:
+        # Update status to failed if we couldn't reach the presentation service
+        presentation.status = "failed"
+        presentation.error_message = "Failed to connect to presentation generation service"
+        await db.commit()
+        await db.refresh(presentation)
+
+    # Use helper to avoid lazy-loading issues with async session
+    return _presentation_to_response(presentation)
+
+
+@router.get("/{notebook_id}/presentations", response_model=List[NotebookPresentationResponse])
+async def list_presentations(
+    notebook_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    List all generated presentations for a notebook.
+    """
+    # Verify notebook ownership
+    notebook_query = select(Notebook).where(
+        and_(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    notebook_result = await db.execute(notebook_query)
+    if not notebook_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found"
+        )
+
+    # Get presentations
+    presentations_query = select(NotebookPresentation).where(
+        NotebookPresentation.notebook_id == notebook_id
+    ).order_by(NotebookPresentation.created_at.desc())
+
+    presentations_result = await db.execute(presentations_query)
+    presentations = presentations_result.scalars().all()
+
+    # Use helper to avoid lazy-loading issues with async session
+    return [_presentation_to_response(p) for p in presentations]
+
+
+@router.get("/{notebook_id}/presentations/{presentation_id}", response_model=NotebookPresentationResponse)
+async def get_presentation(
+    notebook_id: UUID,
+    presentation_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Get details of a specific presentation generation.
+    """
+    # Verify notebook ownership
+    notebook_query = select(Notebook).where(
+        and_(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    notebook_result = await db.execute(notebook_query)
+    if not notebook_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found"
+        )
+
+    # Get presentation
+    presentation_query = select(NotebookPresentation).where(
+        and_(
+            NotebookPresentation.id == presentation_id,
+            NotebookPresentation.notebook_id == notebook_id,
+        )
+    )
+    presentation_result = await db.execute(presentation_query)
+    presentation = presentation_result.scalar_one_or_none()
+
+    if not presentation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    # Use helper to avoid lazy-loading issues with async session
+    return _presentation_to_response(presentation)
+
+
+@router.get("/{notebook_id}/presentations/{presentation_id}/status", response_model=PresentationStatusResponse)
+async def get_presentation_status(
+    notebook_id: UUID,
+    presentation_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Get the status of a presentation generation.
+
+    Use this for polling during generation.
+    """
+    # Simplified query - just get status fields
+    presentation_query = select(
+        NotebookPresentation.id,
+        NotebookPresentation.status,
+        NotebookPresentation.status_message,
+        NotebookPresentation.progress_percent,
+        NotebookPresentation.error_message,
+    ).where(
+        NotebookPresentation.id == presentation_id
+    )
+    presentation_result = await db.execute(presentation_query)
+    presentation = presentation_result.one_or_none()
+
+    if not presentation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    return PresentationStatusResponse(
+        id=presentation.id,
+        status=PresentationStatus(presentation.status),
+        status_message=presentation.status_message,
+        progress_percent=presentation.progress_percent,
+        error_message=presentation.error_message,
+    )
+
+
+@router.delete("/{notebook_id}/presentations/{presentation_id}", response_model=SuccessResponse)
+async def delete_presentation(
+    notebook_id: UUID,
+    presentation_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Delete a generated presentation.
+    """
+    # Verify notebook ownership
+    notebook_query = select(Notebook).where(
+        and_(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    notebook_result = await db.execute(notebook_query)
+    notebook = notebook_result.scalar_one_or_none()
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found"
+        )
+
+    # Get and delete presentation
+    presentation_query = select(NotebookPresentation).where(
+        and_(
+            NotebookPresentation.id == presentation_id,
+            NotebookPresentation.notebook_id == notebook_id,
+        )
+    )
+    presentation_result = await db.execute(presentation_query)
+    presentation = presentation_result.scalar_one_or_none()
+
+    if not presentation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    # TODO: Delete PPTX file from storage if exists
+
+    # Update notebook stats
+    notebook.presentation_count = max(0, notebook.presentation_count - 1)
+
+    await db.delete(presentation)
+    await db.commit()
+
+    logger.info(f"Presentation deleted from notebook {notebook_id}: {presentation_id}")
+
+    return SuccessResponse(message="Presentation deleted successfully")
+
+
+@router.get("/{notebook_id}/presentations/{presentation_id}/download")
+async def download_presentation(
+    notebook_id: UUID,
+    presentation_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    current_tenant_id: UUID = Depends(get_current_tenant_id_async),
+):
+    """
+    Download a generated PPTX presentation file.
+    """
+    # Verify notebook ownership
+    notebook_query = select(Notebook).where(
+        and_(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    notebook_result = await db.execute(notebook_query)
+    notebook = notebook_result.scalar_one_or_none()
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found"
+        )
+
+    # Get presentation
+    presentation_query = select(NotebookPresentation).where(
+        and_(
+            NotebookPresentation.id == presentation_id,
+            NotebookPresentation.notebook_id == notebook_id,
+        )
+    )
+    presentation_result = await db.execute(presentation_query)
+    presentation = presentation_result.scalar_one_or_none()
+
+    if not presentation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    if presentation.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Presentation is not ready for download"
+        )
+
+    # Build file path
+    filename = f"presentation_{presentation_id}.pptx"
+    file_path = Path(LOCAL_STORAGE_PATH) / f"tenant-{current_tenant_id}" / "presentations" / str(presentation_id) / filename
+
+    if not file_path.exists():
+        logger.error(f"Presentation file not found: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation file not found"
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
 
 
 # =====================================

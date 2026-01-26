@@ -140,14 +140,14 @@ cat > /var/www/html/index.html << HTML
 <!DOCTYPE html>
 <html>
 <head>
-    <title>NexusDocs360 PRE Environment</title>
+    <title>NouxCubeIA PRE Environment</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
         .status { color: green; }
     </style>
 </head>
 <body>
-    <h1>NexusDocs360 PRE Environment</h1>
+    <h1>NouxCubeIA PRE Environment</h1>
     <p class="status">✅ Nginx proxy is running</p>
     <p>Backend API: <a href="https://pre-api.${DOMAIN}">https://pre-api.${DOMAIN}</a></p>
 </body>

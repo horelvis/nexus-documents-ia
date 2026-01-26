@@ -72,14 +72,14 @@ REGLAS IMPORTANTES:
 6. Duración aproximada: {duration}
 
 Responde SOLO en formato JSON válido con esta estructura:
-{
+{{
     "title": "Título del episodio",
     "segments": [
-        {"speaker": "A", "text": "Texto de Emma...", "segment_id": 1},
-        {"speaker": "B", "text": "Texto de Alex...", "segment_id": 2},
+        {{"speaker": "A", "text": "Texto de Emma...", "segment_id": 1}},
+        {{"speaker": "B", "text": "Texto de Alex...", "segment_id": 2}},
         ...
     ]
-}"""
+}}"""
 
 REFINE_SCRIPT_SYSTEM = """Eres un editor de scripts de podcast que hace el diálogo más natural.
 Tu tarea es añadir elementos de habla natural al script:
@@ -136,16 +136,48 @@ class ScriptGenerator:
 
             content = result["choices"][0]["message"]["content"]
 
+            # Remove Qwen3 thinking blocks first (handle various formats)
+            content = re.sub(r'<think>[\s\S]*?</think>', '', content)
+            content = re.sub(r'<thinking>[\s\S]*?</thinking>', '', content)
+            content = content.strip()
+
+            # Log first 200 chars for debugging
+            logger.debug(f"LLM response (first 200 chars): {content[:200]}...")
+
             # Extract JSON from response (handle markdown code blocks)
             json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
             if json_match:
-                return json_match.group(1).strip()
+                extracted = json_match.group(1).strip()
+                # Validate it's valid JSON
+                try:
+                    json.loads(extracted)
+                    return extracted
+                except json.JSONDecodeError:
+                    logger.warning("Markdown block content is not valid JSON, continuing...")
 
-            # Try to find JSON object directly
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                return json_match.group(0)
+            # Find the first complete JSON object by counting braces
+            start_idx = content.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                end_idx = start_idx
+                for i, char in enumerate(content[start_idx:], start_idx):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
 
+                if brace_count == 0 and end_idx > start_idx:
+                    extracted = content[start_idx:end_idx]
+                    try:
+                        json.loads(extracted)
+                        return extracted
+                    except json.JSONDecodeError:
+                        logger.warning(f"Extracted content is not valid JSON: {extracted[:100]}...")
+
+            logger.warning(f"Could not extract valid JSON from response")
             return content
 
         except httpx.HTTPError as e:

@@ -73,6 +73,29 @@ from .intent_classifier import IntentClassifier, intent_classifier
 from .entity_extractor import EntityExtractor, entity_extractor
 from .action_router import ActionRouter, action_router, nexus_router
 
+# Knowledge Source Classifier (Stage 2 of 2-stage routing)
+from .knowledge_classifier import (
+    KnowledgeSource,
+    KnowledgeClassification,
+    KnowledgeTrainingExample,
+    KnowledgeClassifierConfig,
+    SetFitKnowledgeClassifier,
+    get_knowledge_classifier,
+    initialize_knowledge_classifier,
+    KNOWLEDGE_SOURCE_SEEDS,
+)
+
+# Knowledge Learning System (collection + training)
+from .knowledge_learning import (
+    KnowledgeLearningConfig,
+    KnowledgeLearningCollector,
+    KnowledgeModelTrainer,
+    get_knowledge_collector,
+    get_knowledge_trainer,
+    knowledge_collector,
+    knowledge_trainer,
+)
+
 __all__ = [
     # Main entry point
     "nexus_router",
@@ -101,4 +124,21 @@ __all__ = [
     # Statistics
     "RouterMetrics",
     "ClassificationStats",
+    # Knowledge Source Classifier (Stage 2)
+    "KnowledgeSource",
+    "KnowledgeClassification",
+    "KnowledgeTrainingExample",
+    "KnowledgeClassifierConfig",
+    "SetFitKnowledgeClassifier",
+    "get_knowledge_classifier",
+    "initialize_knowledge_classifier",
+    "KNOWLEDGE_SOURCE_SEEDS",
+    # Knowledge Learning System
+    "KnowledgeLearningConfig",
+    "KnowledgeLearningCollector",
+    "KnowledgeModelTrainer",
+    "get_knowledge_collector",
+    "get_knowledge_trainer",
+    "knowledge_collector",
+    "knowledge_trainer",
 ]

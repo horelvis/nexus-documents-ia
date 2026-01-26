@@ -3,7 +3,7 @@ Emma v2 - Redesigned AI Assistant
 
 A simplified, efficient implementation of Emma that:
 1. Uses native async LLM client (no Qwen-Agent thread overhead)
-2. Leverages SIL for structural queries (70-90% token savings)
+2. SLM Router for TOON-based query planning (70-90% token savings)
 3. Loads domain-specific prompts dynamically (~700 vs ~4250 tokens)
 4. Has 6 consolidated tools (vs 15+ in v1)
 
@@ -12,8 +12,16 @@ Architecture:
     │                         Emma v2 Agent                                │
     │                                                                      │
     │   ┌───────────────────────────────────────────────────────────────┐ │
-    │   │                    SIL Fast Path                              │ │
-    │   │  Structural queries → Cypher → Direct answer (no LLM)         │ │
+    │   │              SLM Router (TOON Planning)                       │ │
+    │   │  Query → TGI (Qwen2-0.5B) → TOON Plan → Execute               │ │
+    │   │  Routes: GRAPH_ONLY | VECTOR_ONLY | HYBRID | ASK_CLARIFY      │ │
+    │   └───────────────────────────────────────────────────────────────┘ │
+    │                              │                                       │
+    │                              │ If SLM unavailable                    │
+    │                              ▼                                       │
+    │   ┌───────────────────────────────────────────────────────────────┐ │
+    │   │              SIL Fallback (DEPRECATED)                        │ │
+    │   │  Structural queries → Cypher → Direct answer                  │ │
     │   └───────────────────────────────────────────────────────────────┘ │
     │                              │                                       │
     │                              │ If content needed                     │
@@ -21,12 +29,6 @@ Architecture:
     │   ┌───────────────────────────────────────────────────────────────┐ │
     │   │                   Domain Router                               │ │
     │   │  Query → Keywords/Doc Type → Domain (labor|fiscal|...)        │ │
-    │   └───────────────────────────────────────────────────────────────┘ │
-    │                              │                                       │
-    │                              ▼                                       │
-    │   ┌───────────────────────────────────────────────────────────────┐ │
-    │   │               Dynamic Prompt Loader                           │ │
-    │   │  Domain → Base (~200 tok) + Domain prompt (~500 tok)          │ │
     │   └───────────────────────────────────────────────────────────────┘ │
     │                              │                                       │
     │                              ▼                                       │
@@ -44,9 +46,9 @@ Architecture:
     └─────────────────────────────────────────────────────────────────────┘
 
 References:
+- SLM Router: services/slm_router/README.md (TOON-based query planning)
 - Contextual Retrieval: https://www.anthropic.com/news/contextual-retrieval
 - Agent Skills: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
-- SIL Architecture: backend/architecture/SIL-structural-intelligence-layer.md
 """
 
 import asyncio
@@ -81,6 +83,20 @@ from .dynamic_prompt_loader import (
     get_system_prompt_for_domain,
 )
 from .skill_loader import SkillLoader, skill_loader, get_skill_instructions
+
+# Knowledge Source Router (2-stage: semantic + ML fallback)
+try:
+    from .orchestration import (
+        KnowledgeSource,
+        HybridClassificationResult,
+        get_hybrid_knowledge_router,
+        _SEMANTIC_ROUTER_AVAILABLE as KNOWLEDGE_ROUTER_AVAILABLE,
+    )
+except ImportError:
+    KNOWLEDGE_ROUTER_AVAILABLE = False
+    KnowledgeSource = None
+    HybridClassificationResult = None
+    get_hybrid_knowledge_router = None
 from .emma_v2_tools import (
     EMMA_V2_TOOLS,
     ToolContext,
@@ -92,6 +108,22 @@ from app.services.tenant_knowledge_service import (
     TenantKnowledgeService,
     tenant_knowledge_service,
 )
+
+# SLM Router (TOON-based query planning)
+try:
+    from app.services.slm_router import (
+        get_slm_router,
+        TOONRoute,
+        TOONExecutionResult,
+        SLMRouter,
+    )
+    SLM_ROUTER_AVAILABLE = True
+except ImportError:
+    SLM_ROUTER_AVAILABLE = False
+    get_slm_router = None
+    TOONRoute = None
+    TOONExecutionResult = None
+    SLMRouter = None
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +138,9 @@ class EmmaV2Config:
     """Configuration for Emma v2."""
     max_iterations: int = MAX_AGENTIC_ITERATIONS
     enable_sil_fast_path: bool = True
+    enable_slm_router: bool = True  # Use SLM Router for TOON-based query planning (alternative to SIL)
     enable_domain_routing: bool = True
+    enable_knowledge_source_routing: bool = True  # Route by knowledge source (tenant/public/hybrid)
     enable_skills: bool = True  # Load procedural knowledge from skills
     enable_streaming: bool = True
     thread_ttl_seconds: int = THREAD_TTL_SECONDS
@@ -119,6 +153,7 @@ class EmmaV2Result:
     success: bool
     answer: str
     domain: DomainType = DomainType.GENERAL
+    knowledge_source: Optional[str] = None  # tenant_documents, public_knowledge, hybrid
     tools_called: List[str] = field(default_factory=list)
     skills_used: List[str] = field(default_factory=list)  # Skills loaded for this query
     iterations: int = 0
@@ -134,6 +169,7 @@ class EmmaV2Result:
             "success": self.success,
             "answer": self.answer,
             "domain": self.domain.value,
+            "knowledge_source": self.knowledge_source,
             "tools_called": self.tools_called,
             "skills_used": self.skills_used,
             "iterations": self.iterations,
@@ -191,7 +227,9 @@ class EmmaV2:
         self._prompt_loader = dynamic_prompt_loader
         self._skill_loader = skill_loader
         self._knowledge_service = knowledge_service or tenant_knowledge_service
+        self._knowledge_router = None  # HybridKnowledgeRouter
         self._sil = None
+        self._slm_router = None  # SLM Router for TOON-based query planning
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -208,7 +246,24 @@ class EmmaV2:
         if not is_connected:
             logger.warning(f"LLM connection issue: {msg}")
 
-        # Initialize SIL
+        # Initialize Knowledge Source Router
+        if self.config.enable_knowledge_source_routing and KNOWLEDGE_ROUTER_AVAILABLE:
+            self._knowledge_router = get_hybrid_knowledge_router()
+            await self._knowledge_router.initialize()
+            logger.info("✅ Knowledge Source Router enabled (2-stage: semantic + ML)")
+
+        # Initialize SLM Router (TOON-based query planning) - takes priority over SIL
+        if self.config.enable_slm_router and SLM_ROUTER_AVAILABLE:
+            try:
+                self._slm_router = get_slm_router()
+                if not self._slm_router._initialized:
+                    await self._slm_router.initialize()
+                logger.info("✅ SLM Router enabled (TOON-based query planning)")
+            except Exception as slm_err:
+                logger.warning(f"⚠️ SLM Router initialization failed: {slm_err}")
+                self._slm_router = None
+
+        # Initialize SIL (fallback if SLM Router is disabled or unavailable)
         if self.config.enable_sil_fast_path:
             from app.services.sil import pre_llm_engine
             self._sil = pre_llm_engine
@@ -281,17 +336,160 @@ class EmmaV2:
             ask_user_callback=ask_user_callback,
         )
 
-        # Step 1: Try SIL fast path
-        if self.config.enable_sil_fast_path and self._sil:
-            logger.info(f"🧠 Emma v2: Trying SIL fast path for query: '{query[:60]}...'")
-            sil_result = await self._try_sil_fast_path(query, context.tenant_id)
-            if sil_result:
-                logger.info(f"✅ Emma v2: SIL fast path answered (tokens_saved={sil_result.tokens_saved})")
-                sil_result.latency_ms = (time.time() - start_time) * 1000
-                sil_result.thread_id = context.thread_id or ""
-                return sil_result
-            else:
-                logger.info(f"➡️ Emma v2: SIL declined → agentic loop with Weaviate search tools")
+        # Step 0: Classify Knowledge Source (NEW)
+        knowledge_classification = None
+        is_follow_up = self._is_follow_up_query(query)
+        inherited_knowledge_source = None
+
+        if self._knowledge_router:
+            knowledge_classification = await self._knowledge_router.classify(query)
+
+            # For follow-up queries with low confidence, inherit from previous turn
+            if knowledge_classification and is_follow_up and knowledge_classification.confidence < 0.85:
+                # Get last knowledge_source from Redis to maintain context
+                inherited_knowledge_source = await self._get_last_knowledge_source(context.thread_id)
+                logger.info(
+                    f"🔄 Follow-up query detected (conf={knowledge_classification.confidence:.2f}), "
+                    f"inheriting knowledge_source={inherited_knowledge_source}"
+                )
+
+                # Inherit routing from previous turn to maintain conversation context
+                if inherited_knowledge_source == "public_knowledge":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.PUBLIC_KNOWLEDGE,
+                        confidence=0.95,  # High confidence for inherited context
+                        stage_used=0,  # Inherited from history
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"📚 Inheriting PUBLIC_KNOWLEDGE routing for follow-up")
+                elif inherited_knowledge_source == "hybrid":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.HYBRID,
+                        confidence=0.95,
+                        stage_used=0,
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"🔀 Inheriting HYBRID routing for follow-up")
+                elif inherited_knowledge_source == "tenant_documents":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.TENANT_DOCUMENTS,
+                        confidence=0.95,
+                        stage_used=0,
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"📁 Inheriting TENANT_DOCUMENTS routing for follow-up")
+                else:
+                    # No previous context, let agentic loop handle it
+                    knowledge_classification = None
+                    logger.info(f"❓ No previous knowledge_source, using default routing")
+            elif knowledge_classification:
+                logger.info(
+                    f"🎯 Knowledge Source: {knowledge_classification.source.value} "
+                    f"(conf={knowledge_classification.confidence:.2f}, "
+                    f"stage={knowledge_classification.stage_used}, "
+                    f"ml_used={knowledge_classification.ml_used})"
+                )
+
+            # PUBLIC_KNOWLEDGE: Skip SIL, go directly to agentic loop with legal_search hint
+            if knowledge_classification and knowledge_classification.source == KnowledgeSource.PUBLIC_KNOWLEDGE:
+                logger.info("📚 Routing to PUBLIC_KNOWLEDGE path (skip SIL)")
+                result = await self._handle_public_knowledge_query(
+                    query, context, tool_ctx, knowledge_classification
+                )
+                result.latency_ms = (time.time() - start_time) * 1000
+                result.thread_id = context.thread_id or ""
+
+                # IMPORTANT: Save to conversation history for context continuity
+                if context.thread_id:
+                    await self._save_to_history(
+                        context.thread_id, query, result.answer,
+                        knowledge_source=knowledge_classification.source.value
+                    )
+
+                # Auto-collect example for learning
+                await self._collect_knowledge_example(
+                    query, knowledge_classification, result.tools_called, 0, context.tenant_id
+                )
+                return result
+
+            # HYBRID: Skip SIL, use both tenant search and legal_search
+            if knowledge_classification and knowledge_classification.source == KnowledgeSource.HYBRID:
+                logger.info("🔀 Routing to HYBRID path (both sources)")
+                result = await self._handle_hybrid_query(
+                    query, context, tool_ctx, knowledge_classification
+                )
+                result.latency_ms = (time.time() - start_time) * 1000
+                result.thread_id = context.thread_id or ""
+
+                if context.thread_id:
+                    await self._save_to_history(
+                        context.thread_id, query, result.answer,
+                        knowledge_source=knowledge_classification.source.value
+                    )
+
+                await self._collect_knowledge_example(
+                    query, knowledge_classification, result.tools_called, 0, context.tenant_id
+                )
+                return result
+
+        # Step 1: Try fast path routing (SLM Router or SIL)
+        # Skip for conversational responses that need conversation context
+        sil_doc_count = 0
+        is_conversational = self._is_conversational_response(query)
+
+        if is_conversational:
+            logger.info(f"💬 Conversational response detected, skipping fast path → agentic loop with history")
+        else:
+            # Step 1a: Try SLM Router first (TOON-based planning)
+            if self.config.enable_slm_router and self._slm_router and SLM_ROUTER_AVAILABLE:
+                logger.info(f"🎯 Emma v2: Trying SLM Router for query: '{query[:60]}...'")
+                session_id = context.thread_id or context.conversation_id or ""
+                slm_result = await self._try_slm_router(query, context.tenant_id, session_id)
+                if slm_result:
+                    logger.info(f"✅ Emma v2: SLM Router answered (route={slm_result.metadata.get('toon_route')})")
+                    slm_result.latency_ms = (time.time() - start_time) * 1000
+                    slm_result.thread_id = context.thread_id or ""
+                    slm_result.knowledge_source = knowledge_classification.source.value if knowledge_classification else "tenant_documents"
+
+                    # Auto-collect example for learning
+                    if knowledge_classification:
+                        await self._collect_knowledge_example(
+                            query, knowledge_classification, [], 0, context.tenant_id
+                        )
+                    return slm_result
+                else:
+                    logger.info(f"➡️ Emma v2: SLM Router declined → trying SIL fallback")
+
+            # Step 1b: Try SIL fast path as fallback
+            if self.config.enable_sil_fast_path and self._sil:
+                logger.info(f"🧠 Emma v2: Trying SIL fast path for query: '{query[:60]}...'")
+                sil_result, sil_doc_count = await self._try_sil_fast_path_with_count(query, context.tenant_id)
+                if sil_result:
+                    logger.info(f"✅ Emma v2: SIL fast path answered (tokens_saved={sil_result.tokens_saved})")
+                    sil_result.latency_ms = (time.time() - start_time) * 1000
+                    sil_result.thread_id = context.thread_id or ""
+                    sil_result.knowledge_source = knowledge_classification.source.value if knowledge_classification else "tenant_documents"
+
+                    # Auto-collect example for learning
+                    if knowledge_classification:
+                        await self._collect_knowledge_example(
+                            query, knowledge_classification, [], sil_doc_count, context.tenant_id
+                        )
+                    return sil_result
+                else:
+                    logger.info(f"➡️ Emma v2: SIL declined (doc_count={sil_doc_count}) → agentic loop")
 
         # Step 2: Detect domain for dynamic prompt
         domain = DomainType.GENERAL
@@ -307,13 +505,29 @@ class EmmaV2:
         # Step 4: Run agentic loop
         result = await self._agentic_loop(messages, tool_ctx, domain)
         result.skills_used = skills_used
+        result.knowledge_source = knowledge_classification.source.value if knowledge_classification else "tenant_documents"
 
         result.latency_ms = (time.time() - start_time) * 1000
         result.thread_id = context.thread_id or ""
 
+        # Auto-collect example for learning (after agentic loop)
+        if knowledge_classification:
+            await self._collect_knowledge_example(
+                query, knowledge_classification, result.tools_called, sil_doc_count, context.tenant_id
+            )
+
         # Step 5: Save to conversation history
         if context.thread_id:
-            await self._save_to_history(context.thread_id, query, result.answer)
+            # Determine knowledge_source: from classification, inheritance, or default
+            final_knowledge_source = (
+                knowledge_classification.source.value if knowledge_classification
+                else inherited_knowledge_source
+                or "tenant_documents"
+            )
+            await self._save_to_history(
+                context.thread_id, query, result.answer,
+                knowledge_source=final_knowledge_source
+            )
 
         # Step 6: Score the result for Langfuse analytics
         score_emma_result(
@@ -389,8 +603,94 @@ class EmmaV2:
             ask_user_callback=ask_user_callback,
         )
 
+        # Classify Knowledge Source (NEW)
+        knowledge_classification = None
+        is_follow_up = self._is_follow_up_query(query)
+        inherited_knowledge_source = None
+
+        if self._knowledge_router:
+            knowledge_classification = await self._knowledge_router.classify(query)
+
+            # For follow-up queries with low confidence, inherit from previous turn
+            if knowledge_classification and is_follow_up and knowledge_classification.confidence < 0.85:
+                # Get last knowledge_source from Redis to maintain context
+                inherited_knowledge_source = await self._get_last_knowledge_source(context.thread_id)
+                logger.info(
+                    f"🔄 Stream: Follow-up query detected (conf={knowledge_classification.confidence:.2f}), "
+                    f"inheriting knowledge_source={inherited_knowledge_source}"
+                )
+
+                # Inherit routing from previous turn to maintain conversation context
+                if inherited_knowledge_source == "public_knowledge":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.PUBLIC_KNOWLEDGE,
+                        confidence=0.95,
+                        stage_used=0,
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"📚 Stream: Inheriting PUBLIC_KNOWLEDGE routing for follow-up")
+                elif inherited_knowledge_source == "hybrid":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.HYBRID,
+                        confidence=0.95,
+                        stage_used=0,
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"🔀 Stream: Inheriting HYBRID routing for follow-up")
+                elif inherited_knowledge_source == "tenant_documents":
+                    knowledge_classification = HybridClassificationResult(
+                        source=KnowledgeSource.TENANT_DOCUMENTS,
+                        confidence=0.95,
+                        stage_used=0,
+                        semantic_confidence=0.0,
+                        ml_used=False,
+                        total_latency_ms=0.0,
+                        semantic_latency_ms=0.0,
+                        ml_latency_ms=0.0,
+                    )
+                    logger.info(f"📁 Stream: Inheriting TENANT_DOCUMENTS routing for follow-up")
+                else:
+                    knowledge_classification = None
+                    logger.info(f"❓ Stream: No previous knowledge_source, using default routing")
+            elif knowledge_classification:
+                logger.info(
+                    f"🎯 Stream: Knowledge Source: {knowledge_classification.source.value} "
+                    f"(conf={knowledge_classification.confidence:.2f})"
+                )
+
+            # PUBLIC_KNOWLEDGE: Skip SIL, stream with legal_search hint
+            if knowledge_classification and knowledge_classification.source == KnowledgeSource.PUBLIC_KNOWLEDGE:
+                logger.info("📚 Stream: Routing to PUBLIC_KNOWLEDGE path")
+                async for event in self._stream_public_knowledge_query(
+                    query, context, tool_ctx, knowledge_classification
+                ):
+                    yield event
+                return
+
+            # HYBRID: Skip SIL, stream with both sources hint
+            if knowledge_classification and knowledge_classification.source == KnowledgeSource.HYBRID:
+                logger.info("🔀 Stream: Routing to HYBRID path")
+                async for event in self._stream_hybrid_query(
+                    query, context, tool_ctx, knowledge_classification
+                ):
+                    yield event
+                return
+
         # Try SIL fast path first with real LLM streaming
-        if self.config.enable_sil_fast_path and self._sil:
+        # Skip SIL for conversational responses that need conversation context
+        is_conversational = self._is_conversational_response(query)
+
+        if is_conversational:
+            logger.info(f"💬 Stream: Conversational response detected, skipping SIL → agentic loop with history")
+        elif self.config.enable_sil_fast_path and self._sil:
             sil_stream_result = await self._try_sil_fast_path_stream(query, context.tenant_id)
             if sil_stream_result is not None:
                 # Stream the SIL response using LLM
@@ -488,6 +788,18 @@ class EmmaV2:
                     "execution_time_ms": latency_ms,
                 }
                 yield {"type": "done", "result": result_dict}
+
+                # IMPORTANT: Save to conversation history for context continuity
+                if context.thread_id:
+                    final_knowledge_source = (
+                        knowledge_classification.source.value if knowledge_classification
+                        else inherited_knowledge_source
+                        or "tenant_documents"
+                    )
+                    await self._save_to_history(
+                        context.thread_id, query, accumulated_content,
+                        knowledge_source=final_knowledge_source
+                    )
                 return
 
             # Execute tool calls
@@ -560,6 +872,13 @@ class EmmaV2:
             is_structural = type_value in {"structural", "temporal"}
 
             if not is_structural or result.requires_rag:
+                return None
+
+            # Check document count - if 0, let agentic loop handle it
+            # This allows legal_search tool to check PublicKnowledge
+            doc_count = result.structural_context.document_count if result.structural_context else 0
+            if doc_count == 0:
+                logger.info(f"🔍 SIL stream: 0 tenant documents → falling back to agentic loop")
                 return None
 
             # Return streaming generator
@@ -692,6 +1011,137 @@ Responde de forma completa y útil usando la terminología del contexto ({terms[
                 }
             }
 
+    @observe(name="emma.slm_router")
+    async def _try_slm_router(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str = "",
+    ) -> Optional[EmmaV2Result]:
+        """
+        Try to route query using SLM Router (TOON-based planning).
+
+        Returns result if SLM Router can handle the query (GRAPH_ONLY or VECTOR_ONLY).
+        Returns None for ASK_CLARIFY or if routing fails.
+
+        The SLM Router:
+        1. Generates a TOON plan using a Small Language Model
+        2. Executes the plan against appropriate data sources
+        3. Returns formatted context for LLM response generation
+        """
+        if not self._slm_router:
+            return None
+
+        try:
+            langfuse_context.update_current_observation(
+                input={"query": query, "tenant_id": tenant_id, "session_id": session_id}
+            )
+
+            # Route the query through SLM Router
+            result: TOONExecutionResult = await self._slm_router.route(
+                query=query,
+                tenant_id=tenant_id,
+                session_id=session_id
+            )
+
+            if not result.success:
+                logger.warning(f"SLM Router execution failed: {result.error}")
+                return None
+
+            # Handle ASK_CLARIFY - return None to let agentic loop handle
+            if result.plan.route == TOONRoute.ASK_CLARIFY:
+                logger.info(f"🤔 SLM Router: Query too ambiguous, asking for clarification")
+                # Could return clarification question to user here
+                # For now, let agentic loop handle it
+                return None
+
+            # Check for empty results
+            if result.plan.route == TOONRoute.GRAPH_ONLY and result.graph_row_count == 0:
+                logger.info(f"🔍 SLM Router: 0 graph results → falling back to agentic loop")
+                return None
+
+            if result.plan.route == TOONRoute.VECTOR_ONLY and result.vector_result_count == 0:
+                logger.info(f"🔍 SLM Router: 0 vector results → falling back to agentic loop")
+                return None
+
+            # Format the answer using LLM
+            answer = await self._format_slm_router_answer_with_llm(query, result)
+
+            return EmmaV2Result(
+                success=True,
+                answer=answer,
+                domain=DomainType.GENERAL,
+                sil_answered=True,  # Reuse field for "fast path answered"
+                tokens_saved=result.plan.confidence * 500,  # Estimate based on confidence
+                metadata={
+                    "slm_router_used": True,
+                    "toon_route": result.plan.route.value,
+                    "toon_confidence": result.plan.confidence,
+                    "graph_rows": result.graph_row_count,
+                    "vector_results": result.vector_result_count,
+                    "execution_time_ms": result.total_execution_time_ms,
+                },
+            )
+
+        except Exception as e:
+            logger.warning(f"SLM Router error: {e}")
+            return None
+
+    async def _format_slm_router_answer_with_llm(
+        self,
+        query: str,
+        result: TOONExecutionResult,
+    ) -> str:
+        """
+        Use LLM to format SLM Router results into natural response.
+
+        The context_for_llm from the TOON execution result contains
+        the formatted structural/vector results ready for interpretation.
+        """
+        if not result.context_for_llm:
+            # Format the context if not already done
+            result.format_context()
+
+        if not result.context_for_llm:
+            return "Lo siento, no encontré información relevante para tu consulta."
+
+        # Build prompt for LLM
+        system_prompt = """Eres un asistente de documentos. Tu tarea es interpretar los resultados de búsqueda y responder de forma clara y concisa.
+
+Reglas:
+1. Responde DIRECTAMENTE a la pregunta del usuario
+2. Usa la información proporcionada en el contexto
+3. Si hay conteos, menciona los números exactos
+4. Si hay listas, presenta los items de forma organizada
+5. Mantén un tono profesional y amigable
+6. NO inventes información que no esté en el contexto"""
+
+        user_prompt = f"""Pregunta del usuario: {query}
+
+Contexto de la búsqueda:
+{result.context_for_llm}
+
+Responde a la pregunta del usuario basándote en el contexto proporcionado:"""
+
+        try:
+            response = await self._llm_client.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+
+            if response and response.content:
+                return response.content.strip()
+
+        except Exception as e:
+            logger.warning(f"SLM Router LLM formatting failed: {e}")
+
+        # Fallback: return raw context
+        return f"Resultados encontrados:\n{result.context_for_llm}"
+
     @observe(name="emma.sil_fast_path")
     async def _try_sil_fast_path(
         self,
@@ -725,6 +1175,13 @@ Responde de forma completa y útil usando la terminología del contexto ({terms[
             # Only use SIL fast path for purely structural queries
             if is_structural:
                 if not result.requires_rag:
+                    # Check document count - if 0, let agentic loop handle it
+                    # This allows legal_search tool to check PublicKnowledge
+                    doc_count = result.structural_context.document_count if result.structural_context else 0
+                    if doc_count == 0:
+                        logger.info(f"🔍 SIL found 0 tenant documents → falling back to agentic loop (may search PublicKnowledge)")
+                        return None
+
                     # Format structural answer using LLM for natural response
                     answer = await self._format_sil_answer_with_llm(query, result)
 
@@ -733,7 +1190,7 @@ Responde de forma completa y útil usando la terminología del contexto ({terms[
                         answer=answer,
                         domain=DomainType.GENERAL,
                         sil_answered=True,
-                        tokens_saved=result.structural_context.document_count * 500 if result.structural_context else 0,
+                        tokens_saved=doc_count * 500,
                         metadata={
                             "reasoning_type": result.type.value if hasattr(result.type, 'value') else str(result.type),
                             "cypher_query": result.cypher_result.query if result.cypher_result else None,
@@ -933,6 +1390,577 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
 
         return result.reasoning_explanation or f"Encontré **{ctx.document_count} {plural if ctx.document_count != 1 else singular}** en tu repositorio. ¿En qué puedo ayudarte?"
 
+    # =========================================================================
+    # KNOWLEDGE SOURCE ROUTING METHODS
+    # =========================================================================
+
+    def _is_conversational_response(self, query: str) -> bool:
+        """
+        Detect if query is a short conversational response that should skip SIL.
+
+        Examples: "Si", "No", "Ok", "Dale", "Claro", "Yes", "Sure"
+
+        These require conversation history to understand context, so SIL
+        (which is stateless) would not be able to process them correctly.
+        """
+        query_clean = query.strip().lower()
+        query_words = len(query_clean.split())
+
+        # Very short queries (1-2 words) that are conversational
+        if query_words <= 2:
+            conversational_responses = {
+                # Spanish affirmative
+                "si", "sí", "ok", "vale", "dale", "claro", "perfecto",
+                "bueno", "bien", "de acuerdo", "correcto", "exacto",
+                "eso", "asi", "así", "ajá", "aja",
+                # Spanish negative
+                "no", "nop", "nope", "tampoco", "ninguno",
+                # English
+                "yes", "yeah", "yep", "sure", "ok", "okay", "right",
+                "correct", "exactly", "no", "nope", "not",
+                # Requests
+                "muéstrame", "muestrame", "dime", "listar", "mostrar",
+                "show", "list", "tell me",
+            }
+            if query_clean in conversational_responses:
+                return True
+
+            # Also catch patterns like "si, por favor" or "ok gracias"
+            for response in conversational_responses:
+                if query_clean.startswith(response + ",") or query_clean.startswith(response + " "):
+                    return True
+
+        return False
+
+    def _is_follow_up_query(self, query: str) -> bool:
+        """
+        Detect if a query is likely a follow-up to previous conversation.
+
+        Follow-up queries are short and contextual, like:
+        - "y si es por cambio de trabajo?"
+        - "qué más?"
+        - "puedes explicar más?"
+        - "and if it's voluntary?"
+
+        These should use conversation history for context rather than
+        being classified as new standalone queries.
+        """
+        query_lower = query.strip().lower()
+        query_words = len(query_lower.split())
+
+        # Very short queries (< 8 words) are likely follow-ups
+        if query_words < 8:
+            # Check for follow-up indicators
+            follow_up_patterns = [
+                # Spanish
+                "y si", "y en caso de", "y qué pasa", "y cuando",
+                "qué más", "algo más", "puedes explicar", "más detalles",
+                "cómo así", "por qué", "en ese caso", "entonces",
+                "pero si", "pero qué", "pero cómo", "y cómo",
+                "cuál es", "cuáles son", "dime más", "explica",
+                # English
+                "and if", "what if", "and what", "what about",
+                "can you explain", "more details", "tell me more",
+                "how so", "why is", "in that case", "then",
+                "but if", "but what", "but how", "and how",
+                "which is", "which are",
+                # Questions referencing previous
+                "eso", "esto", "ese", "esta", "lo anterior",
+                "that", "this", "the previous",
+            ]
+
+            for pattern in follow_up_patterns:
+                if query_lower.startswith(pattern) or pattern in query_lower:
+                    return True
+
+            # Very short questions without clear topic are likely follow-ups
+            if query_words <= 5 and "?" in query:
+                return True
+
+        return False
+
+    async def _try_sil_fast_path_with_count(
+        self,
+        query: str,
+        tenant_id: str,
+    ) -> tuple[Optional[EmmaV2Result], int]:
+        """
+        Try SIL fast path and return both result and document count.
+
+        Returns:
+            Tuple of (EmmaV2Result or None, document_count)
+        """
+        try:
+            from app.services.sil.schemas import ReasoningType
+
+            result = await self._sil.process_query(query, tenant_id)
+
+            # Get document count
+            doc_count = result.structural_context.document_count if result.structural_context else 0
+
+            # Check if structural
+            type_value = result.type.value if hasattr(result.type, 'value') else str(result.type)
+            is_structural = type_value in {"structural", "temporal"}
+
+            if is_structural and not result.requires_rag:
+                # If 0 docs, let agentic loop handle (may search PublicKnowledge)
+                if doc_count == 0:
+                    logger.info(f"🔍 SIL found 0 tenant documents → agentic loop")
+                    return None, doc_count
+
+                # Format structural answer
+                answer = await self._format_sil_answer_with_llm(query, result)
+
+                return EmmaV2Result(
+                    success=True,
+                    answer=answer,
+                    domain=DomainType.GENERAL,
+                    sil_answered=True,
+                    tokens_saved=doc_count * 500,
+                    metadata={
+                        "reasoning_type": type_value,
+                        "cypher_query": result.cypher_result.query if result.cypher_result else None,
+                    },
+                ), doc_count
+
+            return None, doc_count
+
+        except Exception as e:
+            logger.warning(f"SIL fast path error: {e}")
+            return None, 0
+
+    async def _handle_public_knowledge_query(
+        self,
+        query: str,
+        context: ExecutionContext,
+        tool_ctx: ToolContext,
+        knowledge_classification: "HybridClassificationResult",
+    ) -> EmmaV2Result:
+        """
+        Handle queries classified as PUBLIC_KNOWLEDGE.
+
+        Skips SIL and directs the LLM to use legal_search tool directly.
+        This is more efficient for legislation/BOE queries.
+        """
+        # Detect domain for appropriate prompt
+        domain = DomainType.GENERAL
+        if self.config.enable_domain_routing:
+            detection = self._domain_router.detect_domain(query)
+            domain = detection.domain
+
+        # Build messages with a hint to use legal_search
+        skills_used = []
+        messages = await self._build_messages(query, context, domain, skills_used)
+
+        # Add system hint to use legal_search for public knowledge
+        legal_hint = (
+            "\n\n[INSTRUCCIÓN ESPECIAL]: Esta consulta requiere información de legislación pública "
+            "(BOE, estatutos, normativa). Usa la herramienta `legal_search` para buscar en la base "
+            "de conocimiento público. NO uses las herramientas de búsqueda de documentos del usuario."
+        )
+        messages[0]["content"] += legal_hint
+
+        # Run agentic loop
+        result = await self._agentic_loop(messages, tool_ctx, domain)
+        result.skills_used = skills_used
+        result.knowledge_source = knowledge_classification.source.value
+        result.metadata["knowledge_routing"] = {
+            "source": knowledge_classification.source.value,
+            "confidence": knowledge_classification.confidence,
+            "stage_used": knowledge_classification.stage_used,
+        }
+
+        return result
+
+    async def _handle_hybrid_query(
+        self,
+        query: str,
+        context: ExecutionContext,
+        tool_ctx: ToolContext,
+        knowledge_classification: "HybridClassificationResult",
+    ) -> EmmaV2Result:
+        """
+        Handle queries classified as HYBRID (need both tenant docs AND public knowledge).
+
+        Examples:
+        - "¿Mi contrato cumple con el estatuto de los trabajadores?"
+        - "Compara mi nómina con lo que dice la ley"
+
+        Skips SIL and directs the LLM to use BOTH search tools.
+        """
+        # Detect domain for appropriate prompt
+        domain = DomainType.GENERAL
+        if self.config.enable_domain_routing:
+            detection = self._domain_router.detect_domain(query)
+            domain = detection.domain
+
+        # Build messages with a hint to use both sources
+        skills_used = []
+        messages = await self._build_messages(query, context, domain, skills_used)
+
+        # Add system hint to use both search tools
+        hybrid_hint = (
+            "\n\n[INSTRUCCIÓN ESPECIAL]: Esta consulta requiere información de AMBAS fuentes:\n"
+            "1. Documentos del usuario (usa `search` para buscar en sus documentos)\n"
+            "2. Legislación pública (usa `legal_search` para buscar en BOE/normativa)\n\n"
+            "IMPORTANTE: Debes consultar AMBAS fuentes para dar una respuesta completa. "
+            "Por ejemplo, si el usuario pregunta si su contrato cumple con la ley, "
+            "primero busca el contrato del usuario, luego busca la normativa aplicable, "
+            "y finalmente compara ambos."
+        )
+        messages[0]["content"] += hybrid_hint
+
+        # Run agentic loop
+        result = await self._agentic_loop(messages, tool_ctx, domain)
+        result.skills_used = skills_used
+        result.knowledge_source = knowledge_classification.source.value
+        result.metadata["knowledge_routing"] = {
+            "source": knowledge_classification.source.value,
+            "confidence": knowledge_classification.confidence,
+            "stage_used": knowledge_classification.stage_used,
+        }
+
+        return result
+
+    async def _collect_knowledge_example(
+        self,
+        query: str,
+        classification: "HybridClassificationResult",
+        tools_used: List[str],
+        sil_doc_count: int,
+        tenant_id: str,
+    ) -> None:
+        """
+        Collect training example for knowledge source learning.
+
+        Infers actual source from tool usage:
+        - legal_search used + SIL=0 → PUBLIC_KNOWLEDGE
+        - search/sil_query used + SIL>0 → TENANT_DOCUMENTS
+        - Both sources used → HYBRID
+        """
+        if not KNOWLEDGE_ROUTER_AVAILABLE:
+            return
+
+        try:
+            from app.services.nexus_router import get_knowledge_collector
+
+            collector = get_knowledge_collector()
+            await collector.collect_from_tool_usage(
+                query=query,
+                predicted_source=classification.source,
+                tools_used=tools_used,
+                sil_doc_count=sil_doc_count,
+                tenant_id=tenant_id,
+                metadata={
+                    "confidence": classification.confidence,
+                    "stage_used": classification.stage_used,
+                    "ml_used": classification.ml_used,
+                },
+            )
+        except Exception as e:
+            logger.debug(f"Failed to collect knowledge example: {e}")
+
+    async def _stream_public_knowledge_query(
+        self,
+        query: str,
+        context: ExecutionContext,
+        tool_ctx: ToolContext,
+        knowledge_classification: "HybridClassificationResult",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream response for PUBLIC_KNOWLEDGE queries.
+
+        Skips SIL and directs the LLM to use legal_search tool directly.
+        """
+        start_time = time.time()
+
+        # Detect domain
+        domain = DomainType.GENERAL
+        if self.config.enable_domain_routing:
+            detection = self._domain_router.detect_domain(query)
+            domain = detection.domain
+
+        # Build messages with legal_search hint
+        skills_used = []
+        messages = await self._build_messages(query, context, domain, skills_used)
+
+        legal_hint = (
+            "\n\n[INSTRUCCIÓN ESPECIAL]: Esta consulta requiere información de legislación pública "
+            "(BOE, estatutos, normativa). Usa la herramienta `legal_search` para buscar en la base "
+            "de conocimiento público. NO uses las herramientas de búsqueda de documentos del usuario."
+        )
+        messages[0]["content"] += legal_hint
+
+        # Stream agentic loop
+        tools_called = []
+        iterations = 0
+
+        for iteration in range(self.config.max_iterations):
+            iterations = iteration + 1
+            accumulated_content = ""
+            tool_calls = []
+
+            async for event in self._llm_client.chat_stream(messages, EMMA_V2_TOOLS):
+                if event.event_type == "content":
+                    accumulated_content += event.content
+                    yield {"type": "content", "content": event.content}
+                elif event.event_type == "thinking":
+                    yield {"type": "thinking", "content": event.thinking}
+                elif event.event_type == "tool_call":
+                    tool_calls.append(event.tool_call)
+                    tools_called.append(event.tool_call.name)
+                    yield {
+                        "type": "tool_call",
+                        "name": event.tool_call.name,
+                        "arguments": event.tool_call.arguments,
+                        "process_info": {
+                            "reasoning_type": "PUBLIC_KNOWLEDGE",
+                            "knowledge_source": knowledge_classification.source.value,
+                            "active_tools": [{
+                                "name": event.tool_call.name,
+                                "status": "running",
+                            }],
+                        },
+                    }
+                elif event.event_type == "error":
+                    yield {"type": "error", "error": event.error}
+                    return
+
+            # If no tool calls, we're done
+            if not tool_calls:
+                latency_ms = (time.time() - start_time) * 1000
+                result = EmmaV2Result(
+                    success=True,
+                    answer=accumulated_content,
+                    domain=domain,
+                    knowledge_source=knowledge_classification.source.value,
+                    tools_called=tools_called,
+                    skills_used=skills_used,
+                    iterations=iterations,
+                    latency_ms=latency_ms,
+                    thread_id=context.thread_id or "",
+                )
+                result_dict = result.to_dict()
+                result_dict["process_info"] = {
+                    "reasoning_type": "PUBLIC_KNOWLEDGE",
+                    "reasoning_message": "Consulta de legislación pública",
+                    "knowledge_source": knowledge_classification.source.value,
+                    "tokens_saved": 0,
+                    "sil_used": False,
+                    "active_tools": [{"name": t, "status": "completed"} for t in tools_called],
+                }
+                yield {"type": "done", "result": result_dict}
+
+                # IMPORTANT: Save to conversation history for context continuity
+                if context.thread_id:
+                    await self._save_to_history(
+                        context.thread_id, query, accumulated_content,
+                        knowledge_source=knowledge_classification.source.value
+                    )
+
+                # Collect example for learning
+                await self._collect_knowledge_example(
+                    query, knowledge_classification, tools_called, 0, context.tenant_id
+                )
+                return
+
+            # Execute tool calls
+            messages.append({
+                "role": "assistant",
+                "content": accumulated_content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        }
+                    }
+                    for tc in tool_calls
+                ]
+            })
+
+            for tc in tool_calls:
+                tool_start = time.time()
+                result = await execute_tool(tc.name, tc.arguments, tool_ctx)
+                tool_elapsed = (time.time() - tool_start) * 1000
+
+                yield {
+                    "type": "tool_result",
+                    "name": tc.name,
+                    "result": result.data if result.success else {"error": result.error},
+                    "process_info": {
+                        "active_tools": [{
+                            "name": tc.name,
+                            "status": "completed" if result.success else "error",
+                            "elapsed_ms": tool_elapsed,
+                        }],
+                    },
+                }
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": result.to_json(),
+                })
+
+        # Max iterations
+        yield {"type": "error", "error": "Maximum iterations reached"}
+
+    async def _stream_hybrid_query(
+        self,
+        query: str,
+        context: ExecutionContext,
+        tool_ctx: ToolContext,
+        knowledge_classification: "HybridClassificationResult",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream response for HYBRID queries (need both tenant docs AND public knowledge).
+
+        Examples:
+        - "¿Mi contrato cumple con el estatuto de los trabajadores?"
+        - "Compara mi nómina con lo que dice la ley"
+        """
+        start_time = time.time()
+
+        # Detect domain
+        domain = DomainType.GENERAL
+        if self.config.enable_domain_routing:
+            detection = self._domain_router.detect_domain(query)
+            domain = detection.domain
+
+        # Build messages with hybrid hint
+        skills_used = []
+        messages = await self._build_messages(query, context, domain, skills_used)
+
+        hybrid_hint = (
+            "\n\n[INSTRUCCIÓN ESPECIAL]: Esta consulta requiere información de AMBAS fuentes:\n"
+            "1. Documentos del usuario (usa `search` para buscar en sus documentos)\n"
+            "2. Legislación pública (usa `legal_search` para buscar en BOE/normativa)\n\n"
+            "IMPORTANTE: Debes consultar AMBAS fuentes para dar una respuesta completa."
+        )
+        messages[0]["content"] += hybrid_hint
+
+        # Stream agentic loop
+        tools_called = []
+        iterations = 0
+
+        for iteration in range(self.config.max_iterations):
+            iterations = iteration + 1
+            accumulated_content = ""
+            tool_calls = []
+
+            async for event in self._llm_client.chat_stream(messages, EMMA_V2_TOOLS):
+                if event.event_type == "content":
+                    accumulated_content += event.content
+                    yield {"type": "content", "content": event.content}
+                elif event.event_type == "thinking":
+                    yield {"type": "thinking", "content": event.thinking}
+                elif event.event_type == "tool_call":
+                    tool_calls.append(event.tool_call)
+                    tools_called.append(event.tool_call.name)
+                    yield {
+                        "type": "tool_call",
+                        "name": event.tool_call.name,
+                        "arguments": event.tool_call.arguments,
+                        "process_info": {
+                            "reasoning_type": "HYBRID",
+                            "knowledge_source": knowledge_classification.source.value,
+                            "active_tools": [{
+                                "name": event.tool_call.name,
+                                "status": "running",
+                            }],
+                        },
+                    }
+                elif event.event_type == "error":
+                    yield {"type": "error", "error": event.error}
+                    return
+
+            # If no tool calls, we're done
+            if not tool_calls:
+                latency_ms = (time.time() - start_time) * 1000
+                result = EmmaV2Result(
+                    success=True,
+                    answer=accumulated_content,
+                    domain=domain,
+                    knowledge_source=knowledge_classification.source.value,
+                    tools_called=tools_called,
+                    skills_used=skills_used,
+                    iterations=iterations,
+                    latency_ms=latency_ms,
+                    thread_id=context.thread_id or "",
+                )
+                result_dict = result.to_dict()
+                result_dict["process_info"] = {
+                    "reasoning_type": "HYBRID",
+                    "reasoning_message": "Consulta híbrida (documentos + legislación)",
+                    "knowledge_source": knowledge_classification.source.value,
+                    "tokens_saved": 0,
+                    "sil_used": False,
+                    "active_tools": [{"name": t, "status": "completed"} for t in tools_called],
+                }
+                yield {"type": "done", "result": result_dict}
+
+                # Save to conversation history
+                if context.thread_id:
+                    await self._save_to_history(
+                        context.thread_id, query, accumulated_content,
+                        knowledge_source=knowledge_classification.source.value
+                    )
+
+                # Collect example for learning
+                await self._collect_knowledge_example(
+                    query, knowledge_classification, tools_called, 0, context.tenant_id
+                )
+                return
+
+            # Execute tool calls
+            messages.append({
+                "role": "assistant",
+                "content": accumulated_content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        }
+                    }
+                    for tc in tool_calls
+                ]
+            })
+
+            for tc in tool_calls:
+                tool_start = time.time()
+                result = await execute_tool(tc.name, tc.arguments, tool_ctx)
+                tool_elapsed = (time.time() - tool_start) * 1000
+
+                yield {
+                    "type": "tool_result",
+                    "name": tc.name,
+                    "result": result.data if result.success else {"error": result.error},
+                    "process_info": {
+                        "active_tools": [{
+                            "name": tc.name,
+                            "status": "completed" if result.success else "error",
+                            "elapsed_ms": tool_elapsed,
+                        }],
+                    },
+                }
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": result.to_json(),
+                })
+
+        # Max iterations
+        yield {"type": "error", "error": "Maximum iterations reached"}
+
     async def _build_messages(
         self,
         query: str,
@@ -1122,6 +2150,7 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
         thread_id: str,
         query: str,
         answer: str,
+        knowledge_source: Optional[str] = None,
     ) -> None:
         """Save conversation turn to Redis."""
         if not self._redis:
@@ -1148,8 +2177,29 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
                 json.dumps(history),
             )
 
+            # Also save knowledge_source for follow-up context
+            if knowledge_source:
+                await self._redis.setex(
+                    f"{key}:knowledge_source",
+                    self.config.thread_ttl_seconds,
+                    knowledge_source,
+                )
+                logger.debug(f"Saved knowledge_source={knowledge_source} for thread {thread_id}")
+
         except Exception as e:
             logger.warning(f"Failed to save history: {e}")
+
+    async def _get_last_knowledge_source(self, thread_id: str) -> Optional[str]:
+        """Get the last knowledge_source from the conversation history."""
+        if not self._redis or not thread_id:
+            return None
+
+        try:
+            key = f"{THREAD_KEY_PREFIX}{thread_id}:knowledge_source"
+            return await self._redis.get(key)
+        except Exception as e:
+            logger.debug(f"Failed to get last knowledge_source: {e}")
+            return None
 
 
 # =============================================================================

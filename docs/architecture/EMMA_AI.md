@@ -1,6 +1,6 @@
 # Emma AI - Technical Architecture
 
-Emma is the intelligent AI assistant for NexusDocs360, built on **Microsoft Agent Framework** with **vLLM** (Qwen3) as the primary inference engine.
+Emma is the intelligent AI assistant for NouxCubeIA, built on **Microsoft Agent Framework** with **vLLM** (Qwen3) as the primary inference engine.
 
 > **Current Status**: EmmaCoordinator is the active execution path. Voice-first capabilities are planned for Phase 2.
 
