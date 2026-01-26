@@ -165,6 +165,7 @@ Emma AI is built on **Anthropic Skill Custom** with **PlanningFlow** orchestrati
 | [MODULAR_ARCHITECTURE.md](docs/architecture/MODULAR_ARCHITECTURE.md) | SaaS vs On-Premise modular design |
 | [SLM_ROUTER.md](docs/architecture/SLM_ROUTER.md) | SLM Router (Query Planning) |
 | [EMMA_AI.md](docs/architecture/EMMA_AI.md) | Emma AI agent system |
+| [BOE_LEGAL_KNOWLEDGE.md](docs/architecture/BOE_LEGAL_KNOWLEDGE.md) | Spanish Legal Knowledge Base (BOE) |
 | [ACL_SYSTEM.md](docs/architecture/ACL_SYSTEM.md) | Access Control architecture |
 | [RAG_PIPELINE.md](docs/architecture/RAG_PIPELINE.md) | RAG implementation blueprint |
 

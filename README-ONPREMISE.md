@@ -828,6 +828,52 @@ docker compose exec db psql -U nexusdocs -d nexusdocs -c "
 
 ---
 
+## ⚖️ BOE Legal Knowledge Base
+
+NouxCubeIA includes a comprehensive **Spanish Legal Knowledge Base** sourced from the Boletín Oficial del Estado (BOE). This enables Emma AI to provide legally-grounded responses when analyzing contracts, compliance documents, and legal questions.
+
+> **📖 Full Documentation**: [`docs/architecture/BOE_LEGAL_KNOWLEDGE.md`](docs/architecture/BOE_LEGAL_KNOWLEDGE.md)
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **13 Legal Domains** | Labor, Tax, Civil, Commercial, GDPR, Compliance, etc. |
+| **47+ Laws Indexed** | ET, LOPDGDD, LGT, Código Civil, LSC, and more |
+| **Change Detection** | Automatic sync with BOE for legislative updates |
+| **Article-Level Diff** | Detailed change tracking with severity classification |
+| **Graph Integration** | Laws linked in Apache AGE for relationship queries |
+
+### Initialization
+
+```bash
+# Download all core Spanish legislation (first-time setup)
+cd backend
+python scripts/boe_legislation_downloader.py --preset all
+
+# Or download specific domains
+python scripts/boe_legislation_downloader.py --preset laboral
+python scripts/boe_legislation_downloader.py --preset fiscal
+python scripts/boe_legislation_downloader.py --preset proteccion_datos
+
+# Sync to Legal Knowledge Graph
+python scripts/sync_public_knowledge_to_legal_graph.py
+```
+
+### Legal Domains Available
+
+| Preset | Laws | Description |
+|--------|------|-------------|
+| `laboral` | ET, LPRL, LISOS, LETA | Employment & Labor Law |
+| `fiscal` | LGT, LIRPF, LIVA | Tax Law |
+| `civil` | CC, LEC | Civil Code & Procedure |
+| `mercantil` | LSC, CCom | Commercial Law |
+| `proteccion_datos` | LOPDGDD | Data Protection (GDPR Spanish) |
+| `compliance` | LPBC, CP | AML, Criminal Liability |
+| `administrativo` | LPACAP, LRJSP | Administrative Procedure |
+
+---
+
 ## 🧠 SLM Router - Small Language Model Query Planning
 
 El **SLM Router** es un sistema de **planificación de queries** que utiliza un Small Language Model (SLM) para generar planes de ejecución estructurados llamados **TOON (Task-Oriented Orchestration Notation)**. Permite enrutar consultas al origen de datos óptimo, ahorrando hasta un **70-90% de tokens**.
