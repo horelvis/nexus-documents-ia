@@ -2269,6 +2269,7 @@ class IndexedDocument(Base):
     # Processing status
     indexing_status = Column(String(20), default="pending")  # pending, processing, indexed, failed
     indexing_error = Column(Text, nullable=True)
+    indexing_duration_seconds = Column(Float, nullable=True)  # Actual processing time (not queue wait time)
 
     # Data Learning - Learned context (cached for efficient RAG)
     learned_context = Column(JSONB, nullable=True)
@@ -2956,4 +2957,85 @@ class DataLearningJob(Base):
         Index('idx_dlj_status', 'status'),
         Index('idx_dlj_job_type', 'job_type'),
         Index('idx_dlj_created', 'created_at'),
+    )
+
+
+# =====================================
+# EMMA AI SESSION PERSISTENCE
+# =====================================
+
+class EmmaSession(Base):
+    """
+    Persistent storage for Emma AI chat sessions.
+
+    Architecture:
+    - Redis: Hot cache for active sessions (sub-ms reads, 1-hour TTL)
+    - PostgreSQL: Permanent storage for history and search
+
+    Similar to NotebookChat but for general Emma conversations.
+    Messages are stored as JSONB for efficient read/write of entire conversations.
+    """
+    __tablename__ = "emma_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Multi-tenant ownership
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Session identifier (links to Redis thread_id)
+    session_id = Column(String(255), nullable=False, unique=True, index=True)
+
+    # Auto-generated title from first user message
+    title = Column(String(255), nullable=True)
+
+    # Messages stored as JSONB array
+    messages = Column(JSONB, nullable=False, default=[])
+    # Structure:
+    # [
+    #   {
+    #     "role": "user",
+    #     "content": "...",
+    #     "timestamp": "2024-01-27T10:30:00Z"
+    #   },
+    #   {
+    #     "role": "assistant",
+    #     "content": "...",
+    #     "timestamp": "2024-01-27T10:30:05Z",
+    #     "sources": [{"document_id": "...", "title": "...", "page": 1, "excerpt": "..."}],
+    #     "tools_used": ["search", "analyze"],
+    #     "knowledge_source": "documents"
+    #   }
+    # ]
+
+    # Statistics
+    message_count = Column(Integer, default=0, nullable=False)
+    total_tokens = Column(Integer, default=0, nullable=True)
+
+    # Session state
+    is_archived = Column(Boolean, default=False, nullable=False)
+    is_pinned = Column(Boolean, default=False, nullable=False)
+
+    # Metadata for analytics and debugging (named session_metadata to avoid SQLAlchemy reserved name)
+    session_metadata = Column(JSONB, default={})
+    # {
+    #   "last_knowledge_source": "documents" | "graph" | "general",
+    #   "domains_used": ["labor", "fiscal"],
+    #   "total_execution_time_ms": 12345,
+    #   "sil_queries_count": 3
+    # }
+
+    # Timestamps
+    last_message_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", backref="emma_sessions")
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        Index('idx_emma_sessions_user_tenant', 'user_id', 'tenant_id'),
+        Index('idx_emma_sessions_user_last_message', 'user_id', 'last_message_at'),
+        Index('idx_emma_sessions_tenant_created', 'tenant_id', 'created_at'),
     )
