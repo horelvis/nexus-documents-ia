@@ -1694,13 +1694,15 @@ export default function AdminDashboardPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive">¿Eliminar TODOS los documentos?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. Se eliminarán permanentemente:
-              <ul className="mt-2 list-disc list-inside">
-                <li>{formatNumber(systemStats?.documents.total)} documentos</li>
-                <li>{formatBytes(systemStats?.storage.total_bytes)} de archivos</li>
-                <li>Todos los datos vectoriales</li>
-              </ul>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>Esta acción no se puede deshacer. Se eliminarán permanentemente:</p>
+                <ul className="mt-2 list-disc list-inside text-sm text-muted-foreground">
+                  <li>{formatNumber(systemStats?.documents.total)} documentos</li>
+                  <li>{formatBytes(systemStats?.storage.total_bytes)} de archivos</li>
+                  <li>Todos los datos vectoriales</li>
+                </ul>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

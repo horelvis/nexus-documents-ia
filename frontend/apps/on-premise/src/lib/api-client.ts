@@ -7,7 +7,9 @@
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+// Always use relative path to go through Next.js proxy (avoids CORS)
+// The proxy forwards requests to the backend configured in next.config.ts
+const API_BASE_URL = '/api/v1'
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
 interface SSOTokens {

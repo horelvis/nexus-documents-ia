@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from 'react'
 import { useApiClient } from '../api-client'
 import { API_CONFIG } from '../config'
 
@@ -96,7 +97,10 @@ export class DocumentService {
    * Get document stream URL for viewing/downloading
    */
   getDocumentStreamUrl(id: string): string {
-    const baseUrl = API_CONFIG.BASE_URL + API_CONFIG.API_V1
+    // Avoid duplicating /api/v1 if BASE_URL already contains it
+    const base = API_CONFIG.BASE_URL
+    const apiPrefix = base.includes('/api/v1') ? '' : API_CONFIG.API_V1
+    const baseUrl = base + apiPrefix
     return `${baseUrl}${API_CONFIG.ENDPOINTS.DOCUMENT_STREAM(id)}`
   }
 
@@ -113,12 +117,36 @@ export class DocumentService {
       total: number
     }>(`${API_CONFIG.ENDPOINTS.SEARCH}?${searchParams.toString()}`)
   }
+
+  /**
+   * Download document as blob with authentication.
+   * Uses the streaming proxy endpoint to avoid CORS issues.
+   * Returns blob and filename for display/download purposes.
+   */
+  async downloadDocument(id: string): Promise<{ blob: Blob; filename: string } | { error: string }> {
+    try {
+      const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_STREAM(id)
+      const { blob, error } = await this.apiClient.downloadBlob(endpoint)
+
+      if (error || !blob) {
+        return { error: error || 'Download failed' }
+      }
+
+      // Get document info for filename
+      const docResponse = await this.getDocument(id)
+      const filename = docResponse.data?.title || 'document'
+
+      return { blob, filename }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Download failed' }
+    }
+  }
 }
 
 /**
- * Hook to get document service instance
+ * Hook to get document service instance (memoized to prevent infinite loops)
  */
 export function useDocumentService() {
   const apiClient = useApiClient()
-  return new DocumentService(apiClient)
+  return useMemo(() => new DocumentService(apiClient), [apiClient])
 }
