@@ -7,20 +7,106 @@ that the SLM uses to understand the tenant's data structure:
 2. Folder types and hierarchy patterns
 3. Known entities (clients, employees, departments)
 4. Domain-specific terminology
+5. Semantic inventory (date ranges, counts per type, temporal distribution)
 
 The schema is cached per-tenant to minimize overhead.
 
-Version 1.0 - January 2026
+Version 1.1 - January 2026 (Added semantic inventory for context-aware queries)
 """
 
 import asyncio
 import logging
 import json
-from typing import Optional, Dict, Any, List, Set
+from typing import Optional, Dict, Any, List, Set, Tuple
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SEMANTIC INVENTORY MODELS
+# =============================================================================
+
+class DateRange(BaseModel):
+    """Date range of documents in the tenant's data."""
+    min_year: Optional[int] = None
+    max_year: Optional[int] = None
+    min_date: Optional[datetime] = None
+    max_date: Optional[datetime] = None
+
+    def to_string(self) -> str:
+        """Format as human-readable string."""
+        if self.min_year and self.max_year:
+            if self.min_year == self.max_year:
+                return f"año {self.min_year}"
+            return f"años {self.min_year}-{self.max_year}"
+        return "sin información de fechas"
+
+
+class DocumentTypeInventory(BaseModel):
+    """Inventory of a specific document type."""
+    type_name: str
+    count: int = 0
+    # Year distribution for this type (year -> count)
+    year_distribution: Dict[int, int] = Field(default_factory=dict)
+    # Sample document names (for context)
+    sample_names: List[str] = Field(default_factory=list, max_length=3)
+
+    def years_with_documents(self) -> List[int]:
+        """Get years that have documents of this type."""
+        return sorted(self.year_distribution.keys())
+
+
+class SemanticInventory(BaseModel):
+    """
+    Complete semantic inventory of a tenant's data.
+
+    This gives Emma full awareness of WHAT data exists, enabling
+    queries like "¿Cuántos seguros tengo en 2006?"
+    """
+    # Date range across all documents
+    date_range: DateRange = Field(default_factory=DateRange)
+
+    # Detailed inventory per document type
+    document_types: Dict[str, DocumentTypeInventory] = Field(default_factory=dict)
+
+    # Year distribution across all types (year -> total count)
+    total_by_year: Dict[int, int] = Field(default_factory=dict)
+
+    # Top categories with counts (for quick reference)
+    top_categories: List[Tuple[str, int]] = Field(default_factory=list)
+
+    def to_prompt_context(self) -> str:
+        """Format inventory as context for SLM prompt."""
+        parts = []
+
+        # Date range
+        parts.append(f"Rango temporal: {self.date_range.to_string()}")
+
+        # Top categories with counts
+        if self.top_categories:
+            categories_str = ", ".join(
+                f"{cat}: {count}" for cat, count in self.top_categories[:10]
+            )
+            parts.append(f"Inventario por tipo: {categories_str}")
+
+        # Years with data
+        if self.total_by_year:
+            years = sorted(self.total_by_year.keys())
+            if len(years) <= 5:
+                years_str = ", ".join(
+                    f"{y}({self.total_by_year[y]})" for y in years
+                )
+            else:
+                # Show first 2 and last 2 years
+                years_str = f"{years[0]}({self.total_by_year[years[0]]}), " \
+                           f"{years[1]}({self.total_by_year[years[1]]}), ..., " \
+                           f"{years[-2]}({self.total_by_year[years[-2]]}), " \
+                           f"{years[-1]}({self.total_by_year[years[-1]]})"
+            parts.append(f"Documentos por año: {years_str}")
+
+        return "\n".join(parts)
 
 
 # =============================================================================
@@ -70,6 +156,12 @@ class TenantSchema(BaseModel):
     total_documents: int = 0
     total_folders: int = 0
 
+    # Semantic inventory (date ranges, counts per type, temporal distribution)
+    semantic_inventory: SemanticInventory = Field(
+        default_factory=SemanticInventory,
+        description="Full semantic inventory for context-aware queries"
+    )
+
     # Custom terminology (tenant-specific terms)
     terminology: Dict[str, str] = Field(
         default_factory=dict,
@@ -87,29 +179,42 @@ class TenantSchema(BaseModel):
     expires_at: Optional[datetime] = None
 
     def to_prompt_context(self) -> str:
-        """Format as context string for SLM prompt."""
+        """
+        Format as context string for SLM prompt.
+
+        Includes semantic inventory for queries like:
+        - "¿Cuántos seguros tengo en 2006?"
+        - "¿Qué contratos hay del cliente ACME?"
+        - "¿Cuál es el rango de fechas de mis documentos?"
+        """
         parts = [f"Tenant: {self.tenant_name or self.tenant_id}"]
 
+        # Semantic inventory first (most important for context-aware queries)
+        if self.semantic_inventory:
+            inventory_context = self.semantic_inventory.to_prompt_context()
+            if inventory_context:
+                parts.append(inventory_context)
+
         if self.document_types:
-            parts.append(f"Document types: {', '.join(self.document_types[:15])}")
+            parts.append(f"Tipos de documento: {', '.join(self.document_types[:15])}")
 
         if self.folder_types:
-            parts.append(f"Folder types: {', '.join(self.folder_types[:10])}")
+            parts.append(f"Tipos de carpeta: {', '.join(self.folder_types[:10])}")
 
         if self.known_clients:
-            parts.append(f"Known clients: {', '.join(self.known_clients[:10])}")
+            parts.append(f"Clientes conocidos: {', '.join(self.known_clients[:10])}")
 
         if self.domains:
-            parts.append(f"Domains: {', '.join(self.domains)}")
+            parts.append(f"Dominios: {', '.join(self.domains)}")
 
         if self.graph_labels:
-            parts.append(f"Graph labels: {', '.join(self.graph_labels)}")
+            parts.append(f"Etiquetas de grafo: {', '.join(self.graph_labels)}")
 
         if self.terminology:
             terms = [f"{k}={v}" for k, v in list(self.terminology.items())[:5]]
-            parts.append(f"Terminology: {', '.join(terms)}")
+            parts.append(f"Terminología: {', '.join(terms)}")
 
-        parts.append(f"Stats: {self.total_documents} docs, {self.total_folders} folders")
+        parts.append(f"Totales: {self.total_documents} documentos, {self.total_folders} carpetas")
 
         return "\n".join(parts)
 
@@ -219,7 +324,7 @@ class SchemaExtractor:
             return
 
         try:
-            # Get document types
+            # Get document types with counts
             doc_types_query = """
                 MATCH (d:structural_document)
                 WHERE d.tenant_id = $tenant_id
@@ -233,6 +338,12 @@ class SchemaExtractor:
             if result:
                 schema.document_types = [r['doc_type'] for r in result if r.get('doc_type')]
                 schema.total_documents = sum(r.get('num', 0) for r in result)
+
+                # Build semantic inventory - top categories
+                schema.semantic_inventory.top_categories = [
+                    (r['doc_type'], r.get('num', 0))
+                    for r in result if r.get('doc_type')
+                ]
 
             # Get folder types
             folder_types_query = """
@@ -276,6 +387,113 @@ class SchemaExtractor:
             )
             if result:
                 schema.domains = [r['doc_domain'] for r in result if r.get('doc_domain')]
+
+            # =================================================================
+            # SEMANTIC INVENTORY EXTRACTION
+            # =================================================================
+
+            # Get date range (min/max year from document dates)
+            date_range_query = """
+                MATCH (d:structural_document)
+                WHERE d.tenant_id = $tenant_id AND d.document_date IS NOT NULL
+                RETURN
+                    min(d.document_date) as min_date,
+                    max(d.document_date) as max_date
+            """
+            result = await self._graph_provider.execute_cypher(
+                date_range_query,
+                {"tenant_id": tenant_id}
+            )
+            if result and result[0].get('min_date'):
+                min_date = result[0]['min_date']
+                max_date = result[0]['max_date']
+
+                # Parse dates and extract years
+                try:
+                    if isinstance(min_date, str):
+                        min_dt = datetime.fromisoformat(min_date.replace('Z', '+00:00'))
+                        max_dt = datetime.fromisoformat(max_date.replace('Z', '+00:00'))
+                    else:
+                        min_dt = min_date
+                        max_dt = max_date
+
+                    schema.semantic_inventory.date_range = DateRange(
+                        min_year=min_dt.year,
+                        max_year=max_dt.year,
+                        min_date=min_dt,
+                        max_date=max_dt
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not parse date range: {e}")
+
+            # Get document count by year
+            year_distribution_query = """
+                MATCH (d:structural_document)
+                WHERE d.tenant_id = $tenant_id AND d.document_date IS NOT NULL
+                WITH d, substring(toString(d.document_date), 0, 4) as year_str
+                WHERE year_str IS NOT NULL
+                RETURN year_str as year, count(*) as num
+                ORDER BY year
+            """
+            result = await self._graph_provider.execute_cypher(
+                year_distribution_query,
+                {"tenant_id": tenant_id}
+            )
+            if result:
+                for r in result:
+                    try:
+                        year = int(r['year'])
+                        count = r.get('num', 0)
+                        schema.semantic_inventory.total_by_year[year] = count
+                    except (ValueError, TypeError):
+                        continue
+
+            # Get detailed inventory per document type (type + year distribution)
+            type_year_query = """
+                MATCH (d:structural_document)
+                WHERE d.tenant_id = $tenant_id AND d.semantic_type IS NOT NULL
+                WITH d.semantic_type as doc_type,
+                     CASE WHEN d.document_date IS NOT NULL
+                          THEN substring(toString(d.document_date), 0, 4)
+                          ELSE null
+                     END as year_str,
+                     d.name as doc_name
+                RETURN doc_type, year_str as year, count(*) as num,
+                       collect(doc_name)[0..3] as samples
+                ORDER BY doc_type, year
+            """
+            result = await self._graph_provider.execute_cypher(
+                type_year_query,
+                {"tenant_id": tenant_id}
+            )
+            if result:
+                for r in result:
+                    doc_type = r.get('doc_type')
+                    if not doc_type:
+                        continue
+
+                    # Get or create inventory entry
+                    if doc_type not in schema.semantic_inventory.document_types:
+                        schema.semantic_inventory.document_types[doc_type] = DocumentTypeInventory(
+                            type_name=doc_type
+                        )
+
+                    inventory = schema.semantic_inventory.document_types[doc_type]
+                    inventory.count += r.get('num', 0)
+
+                    # Add year distribution
+                    year = r.get('year')
+                    if year:
+                        try:
+                            year_int = int(year)
+                            inventory.year_distribution[year_int] = r.get('num', 0)
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Add samples
+                    samples = r.get('samples', [])
+                    if samples and len(inventory.sample_names) < 3:
+                        inventory.sample_names.extend(samples[:3 - len(inventory.sample_names)])
 
         except Exception as e:
             logger.error(f"Error extracting schema from graph: {e}")

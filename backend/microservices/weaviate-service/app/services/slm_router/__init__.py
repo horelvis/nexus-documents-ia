@@ -56,7 +56,12 @@ from .toon_schema import (
     ExtractedEntity,
 
     # Guardrails
-    TOONGuardrails
+    TOONGuardrails,
+
+    # Chain-of-Thought (visible reasoning)
+    ThinkingStepType,
+    ThinkingStep,
+    ChainOfThought
 )
 
 # SLM Client
@@ -139,6 +144,11 @@ __all__ = [
     "DateRange",
     "ClarificationConfig",
     "ExtractedEntity",
+
+    # Chain-of-Thought (visible reasoning)
+    "ThinkingStepType",
+    "ThinkingStep",
+    "ChainOfThought",
 
     # SLM Client
     "SLMClient",

@@ -28,7 +28,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, AsyncGenerator, Union
 from datetime import datetime
 
 from .toon_schema import (
@@ -39,7 +39,9 @@ from .toon_schema import (
     GraphOperation,
     VectorOperation,
     ExtractedEntity,
-    EntitySource
+    EntitySource,
+    ThinkingStep,
+    ChainOfThought
 )
 from .slm_client import SLMClient, SLMConfig, get_slm_client, initialize_slm_client
 from .toon_executor import TOONExecutor, get_toon_executor, initialize_toon_executor
@@ -361,6 +363,188 @@ class SLMRouter:
             task.add_done_callback(self._handle_background_task_error)
 
         return result
+
+    async def plan_stream(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str = ""
+    ) -> AsyncGenerator[Union[ThinkingStep, TOONPlan], None]:
+        """
+        Generate a TOON plan with streaming chain-of-thought.
+
+        Yields ThinkingStep objects as the model reasons,
+        then yields the final TOONPlan.
+
+        This enables the UI to show visible reasoning progress.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        start_time = time.time()
+        self._metrics["total_requests"] += 1
+
+        try:
+            # Get tenant schema context
+            tenant_schema = await self._schema_provider.get_prompt_context(tenant_id)
+
+            # Get conversation history
+            conversation_history = ""
+            last_toon_plan = ""
+
+            if session_id:
+                conversation_history = await self._history_manager.format_for_prompt(
+                    session_id, tenant_id
+                )
+                last_toon_plan = await self._history_manager.get_last_toon_plan(
+                    session_id, tenant_id
+                )
+
+            # Stream plan generation with CoT
+            async for item in self._slm_client.generate_plan_stream(
+                query=query,
+                tenant_schema=tenant_schema,
+                conversation_history=conversation_history,
+                last_toon_plan=last_toon_plan or "",
+                tenant_id=tenant_id,
+                session_id=session_id
+            ):
+                if isinstance(item, ThinkingStep):
+                    # Yield thinking steps directly
+                    yield item
+                elif isinstance(item, TOONPlan):
+                    # Apply confidence threshold and guardrails
+                    plan = item
+                    if plan.confidence < self.config.min_confidence_threshold:
+                        if self.config.fallback_to_vector:
+                            plan.route = TOONRoute.VECTOR_ONLY
+                            plan.vector.enabled = True
+                            plan.reasoning = f"Low confidence ({plan.confidence:.2f}), fallback to vector search"
+                            self._metrics["fallbacks_used"] += 1
+
+                    self._update_plan_metrics(start_time)
+                    self._metrics["plans_generated"] += 1
+                    yield plan
+
+        except Exception as e:
+            logger.error(f"Plan stream error: {e}")
+            # Yield fallback plan
+            yield TOONPlanBuilder()\
+                .with_route(TOONRoute.VECTOR_ONLY, confidence=0.3)\
+                .with_vector_query(VectorOperation.SEMANTIC_SEARCH, top_k=5)\
+                .with_context(
+                    original_query=query,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    reasoning=f"Fallback due to error: {str(e)}"
+                )\
+                .build()
+
+    async def route_stream(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str = ""
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Plan and execute with streaming SSE events.
+
+        Yields events in the format:
+        - {"event": "thinking_start", "data": {"message": "..."}}
+        - {"event": "thinking_step", "data": {"step": 1, "type": "...", ...}}
+        - {"event": "plan_ready", "data": {"route": "...", "confidence": ...}}
+        - {"event": "execution_start", "data": {"message": "...", "route": "..."}}
+        - {"event": "execution_complete", "data": {"success": ..., "context_for_llm": ..., "time_ms": ...}}
+        """
+        # Yield thinking start event
+        yield {
+            "event": "thinking_start",
+            "data": {"message": "Analizando consulta..."}
+        }
+
+        plan: Optional[TOONPlan] = None
+        thinking_steps: List[ThinkingStep] = []
+
+        # Stream planning phase
+        async for item in self.plan_stream(query, tenant_id, session_id):
+            if isinstance(item, ThinkingStep):
+                thinking_steps.append(item)
+                yield {
+                    "event": "thinking_step",
+                    "data": {
+                        "step": item.step_number,
+                        "type": item.step_type.value,
+                        "content": item.content,
+                        "entities": item.entities_found,
+                        "confidence": item.confidence
+                    }
+                }
+            elif isinstance(item, TOONPlan):
+                plan = item
+                yield {
+                    "event": "plan_ready",
+                    "data": {
+                        "route": plan.route.value,
+                        "confidence": plan.confidence,
+                        "entities_count": len(plan.entities),
+                        "reasoning": plan.reasoning
+                    }
+                }
+
+        if not plan:
+            yield {
+                "event": "error",
+                "data": {"error": "Failed to generate plan"}
+            }
+            return
+
+        # Handle ASK_CLARIFY without execution
+        if plan.route == TOONRoute.ASK_CLARIFY:
+            yield {
+                "event": "execution_complete",
+                "data": {
+                    "success": True,
+                    "clarification_question": plan.clarify.question,
+                    "clarification_options": plan.clarify.options,
+                    "time_ms": 0
+                }
+            }
+            return
+
+        # Yield execution start event
+        yield {
+            "event": "execution_start",
+            "data": {
+                "message": f"Ejecutando en {plan.route.value.lower().replace('_', ' ')}...",
+                "route": plan.route.value
+            }
+        }
+
+        # Execute the plan
+        start_time = time.time()
+        result = await self.execute(plan)
+        execution_time_ms = (time.time() - start_time) * 1000
+
+        # Store in history (async, don't wait)
+        if session_id:
+            task = asyncio.create_task(
+                self._store_in_history(session_id, tenant_id, query, plan, result)
+            )
+            task.add_done_callback(self._handle_background_task_error)
+
+        # Yield execution complete event
+        yield {
+            "event": "execution_complete",
+            "data": {
+                "success": result.success,
+                "context_for_llm": result.context_for_llm,
+                "graph_result": result.graph_result,
+                "graph_row_count": result.graph_row_count,
+                "vector_result_count": result.vector_result_count,
+                "time_ms": execution_time_ms,
+                "error": result.error
+            }
+        }
 
     def _create_continuation_plan(
         self,

@@ -17,8 +17,10 @@ Version 1.0 - January 2026
 """
 
 import logging
+import json
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..core.config import settings
@@ -50,6 +52,13 @@ class RouteRequest(BaseModel):
 
 class PlanRequest(BaseModel):
     """Request for plan generation only."""
+    query: str = Field(..., min_length=1, max_length=2000, description="Natural language query")
+    tenant_id: str = Field(..., description="Tenant identifier")
+    session_id: str = Field(default="", description="Session ID for conversation history")
+
+
+class StreamRouteRequest(BaseModel):
+    """Request for streaming query routing with chain-of-thought."""
     query: str = Field(..., min_length=1, max_length=2000, description="Natural language query")
     tenant_id: str = Field(..., description="Tenant identifier")
     session_id: str = Field(default="", description="Session ID for conversation history")
@@ -156,6 +165,79 @@ async def route_query(
             status_code=500,
             detail=f"Routing failed: {str(e)}"
         )
+
+
+@router.post("/route/stream")
+async def route_query_stream(
+    request: StreamRouteRequest,
+    _: str = Depends(verify_api_key)
+) -> StreamingResponse:
+    """
+    Route a query with streaming chain-of-thought reasoning.
+
+    This endpoint uses Server-Sent Events (SSE) to stream:
+    1. Thinking steps as the SLM reasons about the query
+    2. The final TOON plan when reasoning is complete
+    3. Execution progress and results
+
+    Events:
+    - thinking_start: Reasoning has begun
+    - thinking_step: A reasoning step (entities, intent, route decision)
+    - plan_ready: TOON plan is ready with route and confidence
+    - execution_start: Execution has begun
+    - execution_complete: Final result with context for LLM
+
+    This enables the UI to show visible chain-of-thought reasoning,
+    similar to how coding agents show their thinking process.
+    """
+    if not settings.slm_router_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="SLM Router is disabled"
+        )
+
+    # Check if streaming is enabled (feature flag)
+    slm_streaming_enabled = getattr(settings, 'slm_streaming_enabled', True)
+    if not slm_streaming_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="SLM Router streaming is disabled"
+        )
+
+    async def generate_events():
+        """Generate SSE events from the router stream."""
+        try:
+            slm_router = get_slm_router()
+
+            if not slm_router._initialized:
+                await slm_router.initialize()
+
+            async for event in slm_router.route_stream(
+                query=request.query,
+                tenant_id=request.tenant_id,
+                session_id=request.session_id
+            ):
+                event_type = event.get("event", "message")
+                event_data = event.get("data", {})
+
+                # Format as SSE
+                yield f"event: {event_type}\n"
+                yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE stream error: {e}")
+            yield f"event: error\n"
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
 
 
 @router.post("/plan", response_model=PlanResponse)

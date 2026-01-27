@@ -24,6 +24,93 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# CHAIN-OF-THOUGHT MODELS - Visible Reasoning for UI
+# =============================================================================
+
+class ThinkingStepType(str, Enum):
+    """Types of thinking steps in chain-of-thought reasoning."""
+    ENTITY_DETECTION = "entity_detection"
+    INTENT_DETECTION = "intent_detection"
+    ROUTE_DECISION = "route_decision"
+
+
+class ThinkingStep(BaseModel):
+    """
+    A single step in the chain-of-thought reasoning process.
+
+    This is displayed to the user to show how the SLM Router
+    reasons about the query before generating the TOON plan.
+    """
+    step_number: int = Field(..., ge=1, le=3, description="Step number (1-3)")
+    step_type: ThinkingStepType = Field(..., description="Type of thinking step")
+    content: str = Field(..., description="Human-readable description of the step")
+    entities_found: List[str] = Field(
+        default_factory=list,
+        description="Entities detected in this step (for entity_detection)"
+    )
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in this step's conclusion"
+    )
+
+
+class ChainOfThought(BaseModel):
+    """
+    Complete chain-of-thought reasoning from the SLM.
+
+    Contains the structured thinking steps that explain how
+    the router arrived at its routing decision.
+    """
+    steps: List[ThinkingStep] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Ordered thinking steps (max 3 for efficiency)"
+    )
+    raw_thinking: str = Field(
+        default="",
+        description="Raw thinking text from the model (for debugging)"
+    )
+    total_time_ms: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Time taken for chain-of-thought generation"
+    )
+
+    def add_step(
+        self,
+        step_type: ThinkingStepType,
+        content: str,
+        entities_found: Optional[List[str]] = None,
+        confidence: float = 1.0
+    ) -> 'ChainOfThought':
+        """Add a thinking step to the chain."""
+        step = ThinkingStep(
+            step_number=len(self.steps) + 1,
+            step_type=step_type,
+            content=content,
+            entities_found=entities_found or [],
+            confidence=confidence
+        )
+        self.steps.append(step)
+        return self
+
+    def to_display_format(self) -> List[Dict[str, Any]]:
+        """Format steps for UI display."""
+        return [
+            {
+                "step": step.step_number,
+                "type": step.step_type.value,
+                "content": step.content,
+                "entities": step.entities_found,
+                "confidence": step.confidence
+            }
+            for step in self.steps
+        ]
+
+
+# =============================================================================
 # GUARDRAILS - Safety limits for query execution
 # =============================================================================
 

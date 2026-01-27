@@ -19,12 +19,16 @@ Version 1.0 - January 2026
 import asyncio
 import logging
 import time
-from typing import Optional, Dict, Any, List
+import re
+from typing import Optional, Dict, Any, List, AsyncGenerator, Union
 from abc import ABC, abstractmethod
 import httpx
 from pydantic import BaseModel
 
-from .toon_schema import TOONPlan, TOONParser, TOONRoute, TOONGuardrails
+from .toon_schema import (
+    TOONPlan, TOONParser, TOONRoute, TOONGuardrails,
+    ChainOfThought, ThinkingStep, ThinkingStepType
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +80,17 @@ class SLMConfig(BaseModel):
 
 SLM_SYSTEM_PROMPT = """You are a query planning assistant. Generate TOON plans in YAML format.
 
-## Context
+## Tenant Context (IMPORTANT - Use this to understand available data!)
 {tenant_schema}
 
 History: {conversation_history}
 Previous plan: {last_toon_plan}
 
 ## Routes
-- GRAPH_ONLY: counts, lists, existence ("cuántos", "listar", "hay")
+- GRAPH_ONLY: counts, lists, existence ("cuántos", "listar", "hay") - use when querying by type, year, client
 - VECTOR_ONLY: semantic search, content lookup
 - HYBRID: structure + content
-- ASK_CLARIFY: ambiguous query
+- ASK_CLARIFY: ambiguous query or requested type/year not in inventory
 
 ## Graph Operations
 - COUNT: "cuántos", "how many"
@@ -95,7 +99,7 @@ Previous plan: {last_toon_plan}
 
 ## Graph Labels
 - Entity: clients, persons, companies
-- structural_document: documents, contracts, invoices
+- structural_document: documents, contracts, invoices, seguros (insurance policies)
 - structural_folder: folders, cases (expedientes)
 
 ## Example 1 - Count query:
@@ -171,6 +175,125 @@ Generate TOON plan:"""
 
 
 # =============================================================================
+# CHAIN-OF-THOUGHT PROMPT (for streaming with visible reasoning)
+# =============================================================================
+
+SLM_SYSTEM_PROMPT_COT = """You are a query planner. FIRST think step by step, THEN output TOON plan.
+
+## Tenant Context (IMPORTANT - Use this to understand available data!)
+{tenant_schema}
+
+History: {conversation_history}
+Previous plan: {last_toon_plan}
+
+## IMPORTANT: Output Format
+You MUST output your reasoning in <thinking> tags FIRST, then the YAML plan.
+ALWAYS check the Tenant Context to know what document types and years are available.
+
+<thinking>
+1. [Entities]: What entities are mentioned? Check against Tenant Context inventory.
+2. [Intent]: What is the user's intent? (COUNT, LIST, EXISTS, or SEARCH?)
+3. [Route]: Which route based on available data?
+</thinking>
+
+```yaml
+route: GRAPH_ONLY
+confidence: 0.95
+...
+```
+
+## Routes
+- GRAPH_ONLY: counts, lists, existence ("cuántos", "listar", "hay") - use when querying by type, year, client
+- VECTOR_ONLY: semantic search, content lookup
+- HYBRID: structure + content
+- ASK_CLARIFY: ambiguous query or requested type/year not in inventory
+
+## Graph Operations
+- COUNT: "cuántos", "how many"
+- LIST: "listar", "mostrar", "show"
+- EXISTS: "hay", "existe"
+
+## Graph Labels
+- Entity: clients, persons, companies
+- structural_document: documents, contracts, invoices, seguros (insurance policies)
+- structural_folder: folders, cases (expedientes)
+
+## Example 1 - Count query with type:
+Query: "¿Cuántos contratos tiene ACME?"
+
+<thinking>
+1. [Entities]: ACME (client), contrato (document_type) - verified in inventory: 45 contratos
+2. [Intent]: COUNT - user wants to know the number
+3. [Route]: GRAPH_ONLY (95%) - counting is structural, data exists in inventory
+</thinking>
+
+```yaml
+route: GRAPH_ONLY
+confidence: 0.95
+entities:
+  - name: ACME
+    type: client
+    graph_label: Entity
+  - name: contrato
+    type: document_type
+    graph_label: structural_document
+graph:
+  enabled: true
+  operation: COUNT
+  cypher_template: |
+    MATCH (c:Entity {{name: $client_name}})<-[:BELONGS_TO]-(d:structural_document)
+    WHERE d.semantic_type = $doc_type
+    RETURN count(d) as total
+  params:
+    client_name: ACME
+    doc_type: contract
+  limit: 1
+  hops: 2
+```
+
+## Example 2 - Count query with year filter:
+Query: "¿Cuántos seguros tengo en 2006?"
+
+<thinking>
+1. [Entities]: seguro (document_type=insurance) - check inventory for year 2006
+2. [Intent]: COUNT - user wants count of insurance documents in specific year
+3. [Route]: GRAPH_ONLY (90%) - structural query with year filter, check inventory has 2006 data
+</thinking>
+
+```yaml
+route: GRAPH_ONLY
+confidence: 0.90
+entities:
+  - name: seguro
+    type: document_type
+    semantic_type: insurance
+    graph_label: structural_document
+graph:
+  enabled: true
+  operation: COUNT
+  cypher_template: |
+    MATCH (d:structural_document)
+    WHERE d.tenant_id = $tenant_id
+      AND d.semantic_type = $doc_type
+      AND substring(toString(d.document_date), 0, 4) = $year
+    RETURN count(d) as total
+  params:
+    doc_type: insurance
+    year: "2006"
+  limit: 1
+  hops: 1
+```
+
+Now respond to the user's query. Output <thinking> FIRST, then YAML."""
+
+SLM_USER_TEMPLATE_COT = """Query: {query}
+
+IMPORTANT: Start your response with <thinking> tags, then output YAML:
+<thinking>
+1. [Entities]:"""
+
+
+# =============================================================================
 # ABSTRACT BASE CLIENT
 # =============================================================================
 
@@ -188,6 +311,25 @@ class BaseSLMProvider(ABC):
     ) -> str:
         """Generate text from the SLM."""
         pass
+
+    async def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        timeout_ms: int
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate text from the SLM with streaming.
+
+        Default implementation falls back to non-streaming.
+        Override in subclasses for true streaming support.
+        """
+        result = await self.generate(
+            system_prompt, user_prompt, max_tokens, temperature, timeout_ms
+        )
+        yield result
 
     @abstractmethod
     async def health_check(self) -> bool:
@@ -250,6 +392,56 @@ class VLLMProvider(BaseSLMProvider):
             raise
         except Exception as e:
             logger.error(f"vLLM SLM error: {e}")
+            raise
+
+    async def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        timeout_ms: int
+    ) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support for real-time token output."""
+        client = await self._get_client()
+        timeout_seconds = timeout_ms / 1000.0
+
+        try:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "stream": True
+                },
+                timeout=timeout_seconds
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            import json
+                            data = json.loads(data_str)
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except Exception:
+                            continue
+        except httpx.TimeoutException:
+            logger.warning(f"vLLM SLM stream timeout after {timeout_ms}ms")
+            raise
+        except Exception as e:
+            logger.error(f"vLLM SLM stream error: {e}")
             raise
 
     async def health_check(self) -> bool:
@@ -318,6 +510,55 @@ class TGIProvider(BaseSLMProvider):
             raise
         except Exception as e:
             logger.error(f"TGI SLM error: {e}")
+            raise
+
+    async def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        timeout_ms: int
+    ) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support for TGI."""
+        client = await self._get_client()
+        timeout_seconds = timeout_ms / 1000.0
+
+        try:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/v1/chat/completions",
+                json={
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": max(temperature, 0.01),
+                    "stream": True
+                },
+                timeout=timeout_seconds
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            import json
+                            data = json.loads(data_str)
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except Exception:
+                            continue
+        except httpx.TimeoutException:
+            logger.warning(f"TGI SLM stream timeout after {timeout_ms}ms")
+            raise
+        except Exception as e:
+            logger.error(f"TGI SLM stream error: {e}")
             raise
 
     async def health_check(self) -> bool:
@@ -778,6 +1019,195 @@ class SLMClient:
                 "provider": self.config.provider,
                 "error": str(e)
             }
+
+    async def generate_plan_stream(
+        self,
+        query: str,
+        tenant_schema: str = "",
+        conversation_history: str = "",
+        last_toon_plan: str = "",
+        tenant_id: str = "",
+        session_id: str = ""
+    ) -> AsyncGenerator[Union[ThinkingStep, TOONPlan], None]:
+        """
+        Generate a TOON plan with streaming chain-of-thought.
+
+        Yields ThinkingStep objects as the model reasons,
+        then yields the final TOONPlan when complete.
+
+        This allows the UI to show real-time reasoning progress.
+        """
+        # Ensure initialized
+        if not self._initialized:
+            if not await self.initialize():
+                logger.warning("SLM not initialized, returning fallback plan")
+                yield self._create_fallback_plan(query, tenant_id, session_id)
+                return
+
+        # Use CoT prompt for streaming
+        system_prompt = SLM_SYSTEM_PROMPT_COT.format(
+            tenant_schema=tenant_schema or "No schema context available",
+            conversation_history=conversation_history or "No history",
+            last_toon_plan=last_toon_plan or "None"
+        )
+        user_prompt = SLM_USER_TEMPLATE_COT.format(query=query)
+
+        start_time = time.time()
+        # We prepend the thinking prefix since our prompt starts with it
+        # This allows the parser to find the complete <thinking> block
+        thinking_prefix = "<thinking>\n1. [Entities]: "
+        accumulated_text = thinking_prefix
+        thinking_yielded = set()  # Track which steps we've yielded
+
+        try:
+            async for chunk in self._provider.generate_stream(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                timeout_ms=self.config.timeout_ms
+            ):
+                accumulated_text += chunk
+
+                # Try to parse thinking steps incrementally
+                thinking_steps = self._parse_thinking_steps(accumulated_text)
+                for step in thinking_steps:
+                    step_key = (step.step_number, step.step_type)
+                    if step_key not in thinking_yielded:
+                        thinking_yielded.add(step_key)
+                        yield step
+
+            # Parse the complete output for the TOON plan
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            # Extract YAML after thinking block
+            plan = self._parse_cot_output(accumulated_text, query, tenant_id, session_id)
+
+            logger.info(
+                f"TOON plan generated with CoT in {elapsed_ms:.1f}ms: "
+                f"route={plan.route.value}, thinking_steps={len(thinking_yielded)}"
+            )
+
+            yield plan
+
+        except Exception as e:
+            logger.error(f"SLM streaming generation failed: {e}")
+            yield self._create_fallback_plan(query, tenant_id, session_id)
+
+    def _parse_thinking_steps(self, text: str) -> List[ThinkingStep]:
+        """
+        Parse thinking steps from accumulated text.
+
+        For incremental parsing, we only yield a step when we're confident it's complete:
+        - Step 1 is complete when we see "2. [Intent]"
+        - Step 2 is complete when we see "3. [Route]"
+        - Step 3 is complete when we see "</thinking>" or "```"
+        """
+        steps = []
+
+        # Find thinking block
+        thinking_match = re.search(r'<thinking>(.*?)(?:</thinking>|$)', text, re.DOTALL)
+        if not thinking_match:
+            return steps
+
+        thinking_content = thinking_match.group(1).strip()
+
+        # Check what steps are complete (have a clear ending marker)
+        has_step2 = bool(re.search(r'2\.\s*\[Intent\]', thinking_content, re.IGNORECASE))
+        has_step3 = bool(re.search(r'3\.\s*\[Route\]', thinking_content, re.IGNORECASE))
+        has_end = '</thinking>' in text or '```' in text
+
+        # Step 1: Entities - only parse if step 2 or end is visible
+        if has_step2 or has_end:
+            # Match content from 1. [Entities] until 2. [Intent]
+            match = re.search(
+                r'1\.\s*\[Entities?\]:?\s*(.*?)(?=2\.\s*\[Intent\]|$)',
+                thinking_content, re.DOTALL | re.IGNORECASE
+            )
+            if match:
+                content = match.group(1).strip()
+                if content:  # Only if there's actual content
+                    entities_found = re.findall(r'([A-Z][A-Za-z0-9_]+|\w+)\s*\([^)]+\)', content)
+                    if not entities_found:
+                        entities_found = re.findall(r'\b([A-Z][A-Za-z0-9_]{2,})\b', content)
+                    steps.append(ThinkingStep(
+                        step_number=1,
+                        step_type=ThinkingStepType.ENTITY_DETECTION,
+                        content=content,
+                        entities_found=entities_found,
+                        confidence=1.0
+                    ))
+
+        # Step 2: Intent - only parse if step 3 or end is visible
+        if has_step3 or has_end:
+            match = re.search(
+                r'2\.\s*\[Intent\]:?\s*(.*?)(?=3\.\s*\[Route\]|$)',
+                thinking_content, re.DOTALL | re.IGNORECASE
+            )
+            if match:
+                content = match.group(1).strip()
+                if content:
+                    steps.append(ThinkingStep(
+                        step_number=2,
+                        step_type=ThinkingStepType.INTENT_DETECTION,
+                        content=content,
+                        entities_found=[],
+                        confidence=1.0
+                    ))
+
+        # Step 3: Route - only parse if we see the end marker
+        if has_end:
+            match = re.search(
+                r'3\.\s*\[Route\]:?\s*(.*?)(?=</thinking>|```|$)',
+                thinking_content, re.DOTALL | re.IGNORECASE
+            )
+            if match:
+                content = match.group(1).strip()
+                if content:
+                    confidence = 1.0
+                    conf_match = re.search(r'\((\d+)%?\)', content)
+                    if conf_match:
+                        confidence = int(conf_match.group(1)) / 100.0
+                    steps.append(ThinkingStep(
+                        step_number=3,
+                        step_type=ThinkingStepType.ROUTE_DECISION,
+                        content=content,
+                        entities_found=[],
+                        confidence=confidence
+                    ))
+
+        return steps
+
+    def _parse_cot_output(
+        self,
+        raw_output: str,
+        query: str,
+        tenant_id: str,
+        session_id: str
+    ) -> TOONPlan:
+        """
+        Parse CoT output that contains <thinking> block followed by YAML.
+        """
+        # Remove thinking block to get just the YAML
+        # Find content after </thinking>
+        yaml_content = raw_output
+
+        thinking_end = raw_output.find('</thinking>')
+        if thinking_end != -1:
+            yaml_content = raw_output[thinking_end + 11:].strip()
+
+        # Also try to find content after closing ```yaml block
+        yaml_block_match = re.search(r'```ya?ml\s*([\s\S]*?)```', yaml_content)
+        if yaml_block_match:
+            yaml_content = yaml_block_match.group(1)
+
+        # Parse as regular TOON plan
+        plan = TOONParser.parse(yaml_content)
+        plan.original_query = query
+        plan.tenant_id = tenant_id
+        plan.session_id = session_id
+
+        return plan
 
     async def close(self):
         """Close the client and release resources."""
