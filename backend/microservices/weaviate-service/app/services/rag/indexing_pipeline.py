@@ -47,6 +47,7 @@ Usage:
 """
 
 import logging
+import os
 import time
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
@@ -287,6 +288,9 @@ class IndexingPipeline:
 
         Returns:
             IndexingResult with chunks ready for embedding
+
+        Note: MIME type is automatically detected from file content (magic bytes)
+        by the textextract-service, NOT from the filename extension.
         """
         start_time = time.time()
         errors = []
@@ -317,44 +321,70 @@ class IndexingPipeline:
                 errors=[f"Text extraction failed: {extract_result.error}"],
             )
 
+        # Note: We don't return early on empty text anymore - let OCR fallback handle it
         if not extract_result.text.strip():
-            logger.warning(f"[{document_id}] No text extracted from {filename}")
-            return IndexingResult(
-                document_id=document_id,
-                tenant_id=tenant_id,
-                extraction_time_ms=extraction_time,
-                total_time_ms=(time.time() - start_time) * 1000,
-                success=False,
-                errors=["No text content extracted from document"],
+            logger.warning(f"[{document_id}] No text from Tika for {filename}, will try OCR fallback")
+        else:
+            logger.info(
+                f"[{document_id}] Extracted {extract_result.characters} chars, "
+                f"language={extract_result.language}"
             )
 
-        logger.info(
-            f"[{document_id}] Extracted {extract_result.characters} chars, "
-            f"language={extract_result.language}"
-        )
-
         # === Stage 1.5: Enhanced OCR Fallback ===
-        # Check if we should trigger enhanced OCR for scanned/low-quality PDFs
+        # Check if we should trigger enhanced OCR for scanned/low-quality documents or images
         text_to_use = extract_result.text
         extraction_method = "tika"
         ocr_time = 0.0
 
-        if settings.enhanced_ocr_enabled and filename.lower().endswith('.pdf'):
+        # Define image extensions that should always use OCR
+        IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif'}
+        file_ext = os.path.splitext(filename.lower())[1]
+        is_image = file_ext in IMAGE_EXTENSIONS
+
+        # For images with no text extracted, always try OCR
+        # For PDFs with low quality extraction, check if OCR would help
+        should_try_ocr = (
+            settings.enhanced_ocr_enabled and
+            (is_image or filename.lower().endswith('.pdf'))
+        )
+
+        if should_try_ocr:
             # Quick quality check before full analysis
             preliminary_analysis = self.intelligence.analyze(
                 extract_result.text,
                 {"page_count": extract_result.metadata.get("page_count", 0)}
             )
 
-            if self.intelligence.should_trigger_enhanced_ocr(
-                preliminary_analysis,
-                metadata={**metadata, **extract_result.metadata},
-                min_confidence=settings.enhanced_ocr_quality_threshold,
-            ):
+            # Force OCR for:
+            # - Images with no/little text
+            # - PDFs with no text (scanned documents)
+            is_pdf = filename.lower().endswith('.pdf')
+            no_text_extracted = len(extract_result.text.strip()) < 50
+
+            force_ocr_for_image = is_image and no_text_extracted
+            force_ocr_for_scanned_pdf = is_pdf and no_text_extracted
+
+            # For documents with some text, use intelligence-based decision
+            trigger_ocr = (
+                force_ocr_for_image or
+                force_ocr_for_scanned_pdf or
+                self.intelligence.should_trigger_enhanced_ocr(
+                    preliminary_analysis,
+                    metadata={**metadata, **extract_result.metadata},
+                    min_confidence=settings.enhanced_ocr_quality_threshold,
+                )
+            )
+
+            if trigger_ocr:
+                if force_ocr_for_image:
+                    reason = "image with no text"
+                elif force_ocr_for_scanned_pdf:
+                    reason = "scanned PDF with no text"
+                else:
+                    reason = f"quality={preliminary_analysis.quality.value}"
                 logger.info(
                     f"[{document_id}] Triggering enhanced OCR "
-                    f"(quality={preliminary_analysis.quality.value}, "
-                    f"confidence={preliminary_analysis.confidence:.2f})"
+                    f"(reason={reason}, confidence={preliminary_analysis.confidence:.2f})"
                 )
 
                 ocr_start = time.time()
@@ -379,24 +409,50 @@ class IndexingPipeline:
 
                     ocr_time = (time.time() - ocr_start) * 1000
 
-                    # Use OCR result if it's better quality
-                    if ocr_result.success and ocr_result.confidence > preliminary_analysis.confidence:
+                    # Use OCR result if:
+                    # 1. Tika returned no text and OCR has text (forced OCR case)
+                    # 2. OCR quality is better than Tika quality
+                    use_ocr_result = (
+                        ocr_result.success and
+                        len(ocr_result.text.strip()) > 0 and
+                        (
+                            no_text_extracted or  # Tika had no text, use OCR
+                            ocr_result.confidence > preliminary_analysis.confidence  # OCR is better
+                        )
+                    )
+
+                    if use_ocr_result:
                         text_to_use = ocr_result.text
                         extraction_method = f"ocr_{ocr_result.engine}"
-                        logger.info(
-                            f"[{document_id}] Using OCR result: "
-                            f"{len(ocr_result.text)} chars, "
-                            f"confidence={ocr_result.confidence:.2f} (was {preliminary_analysis.confidence:.2f})"
-                        )
-                        warnings.append(
-                            f"Enhanced OCR applied: confidence improved from "
-                            f"{preliminary_analysis.confidence:.2f} to {ocr_result.confidence:.2f}"
-                        )
+                        if no_text_extracted:
+                            logger.info(
+                                f"[{document_id}] OCR recovered text from scanned document: "
+                                f"{len(ocr_result.text)} chars, confidence={ocr_result.confidence:.2f}"
+                            )
+                            warnings.append(
+                                f"OCR used for scanned document: {len(ocr_result.text)} chars extracted"
+                            )
+                        else:
+                            logger.info(
+                                f"[{document_id}] Using OCR result: "
+                                f"{len(ocr_result.text)} chars, "
+                                f"confidence={ocr_result.confidence:.2f} (was {preliminary_analysis.confidence:.2f})"
+                            )
+                            warnings.append(
+                                f"Enhanced OCR applied: confidence improved from "
+                                f"{preliminary_analysis.confidence:.2f} to {ocr_result.confidence:.2f}"
+                            )
                     else:
-                        logger.info(
-                            f"[{document_id}] Keeping Tika result "
-                            f"(OCR confidence={ocr_result.confidence:.2f} <= Tika {preliminary_analysis.confidence:.2f})"
-                        )
+                        if no_text_extracted:
+                            logger.warning(
+                                f"[{document_id}] OCR also failed to extract text "
+                                f"(success={ocr_result.success}, chars={len(ocr_result.text.strip())})"
+                            )
+                        else:
+                            logger.info(
+                                f"[{document_id}] Keeping Tika result "
+                                f"(OCR confidence={ocr_result.confidence:.2f} <= Tika {preliminary_analysis.confidence:.2f})"
+                            )
                         if ocr_result.warnings:
                             warnings.extend(ocr_result.warnings)
 
@@ -404,6 +460,19 @@ class IndexingPipeline:
                     logger.warning(f"[{document_id}] Enhanced OCR failed (non-blocking): {e}")
                     warnings.append(f"Enhanced OCR failed: {e}")
                     ocr_time = (time.time() - ocr_start) * 1000
+
+        # Final check: if still no text after Tika + OCR, fail
+        if not text_to_use.strip():
+            logger.error(f"[{document_id}] No text extracted from {filename} (Tika + OCR both failed)")
+            return IndexingResult(
+                document_id=document_id,
+                tenant_id=tenant_id,
+                extraction_time_ms=extraction_time + ocr_time,
+                total_time_ms=(time.time() - start_time) * 1000,
+                success=False,
+                errors=["No text content extracted (both Tika and OCR failed)"],
+                warnings=warnings,
+            )
 
         # Add extraction metadata
         enriched_metadata = {

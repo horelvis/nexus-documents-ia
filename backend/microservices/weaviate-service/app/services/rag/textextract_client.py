@@ -92,13 +92,16 @@ class TextExtractClient:
 
         Args:
             file_bytes: Raw file content
-            filename: Original filename (used for extension detection)
+            filename: Original filename (used for logging only)
             tenant_id: Tenant identifier for logging
             user_id: User identifier for logging
             strategy: Extraction strategy (auto, fast, hi_res)
 
         Returns:
             TextExtractResult with extracted text or error
+
+        Note: MIME type is automatically detected from file content (magic bytes)
+        by the textextract-service, NOT from the filename extension.
         """
         url = f"{self.base_url}/api/v1/text-extraction/extract"
 

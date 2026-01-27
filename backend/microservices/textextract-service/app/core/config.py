@@ -44,7 +44,15 @@ class Settings(BaseSettings):
         ".rtf",
         ".epub",
         ".xml",
-        ".json"
+        ".json",
+        # Images - Tika will attempt OCR if configured
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".tiff",
+        ".tif",
+        ".bmp",
+        ".gif",
     ]
 
     max_file_size_mb: int = 50

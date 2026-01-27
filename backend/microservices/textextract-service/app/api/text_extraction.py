@@ -47,6 +47,10 @@ async def extract_text(
     Extract plain text from an uploaded document using Apache Tika.
 
     The endpoint accepts multipart/form-data with the file payload.
+
+    Note: MIME type is automatically detected from file content (magic bytes),
+    NOT from the filename extension. This handles misleading filenames like
+    "GESTOR.docx.pdf" correctly.
     """
     contents = await file.read()
     if not contents:
