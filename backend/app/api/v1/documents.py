@@ -28,12 +28,14 @@ from app.api.async_dependencies import (
     get_document_service,
     get_async_db
 )
-from app.db.models import User, Document as DBDocument, Tag
+from app.db.models import User, Document as DBDocument, Tag, IndexedDocument, Connector
 from app.schemas.document import (
     Document, DocumentDetail,
     UploadRequest, DocumentUpdate
 )
 from app.schemas.document_acl import Permission
+from app.services.connectors import ConnectorAdapterFactory
+from app.schemas.unified_document import UnifiedDocument, ConnectorType
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,18 +55,93 @@ async def _check_document_permission(
     """
     Check if user has the required permission on a document.
 
+    Supports two document types:
+    - Document (uploads): Uses DocumentACLService with DocumentACL table
+    - IndexedDocument (connectors): Uses JSONB ACL fields (is_tenant_public, shared_with_users)
+
     Raises HTTPException 403 if permission is denied.
     """
+    # First, try Document table with DocumentACLService
     acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
     has_permission = await acl_service.check_permission(
         db, UUID(doc_id), permission, current_user
     )
-    if not has_permission:
-        permission_name = permission.value
-        raise HTTPException(
-            status_code=403,
-            detail=f"You don't have {permission_name} permission on this document"
+
+    if has_permission:
+        return  # Permission granted via Document ACL
+
+    # Check if document exists in IndexedDocument table (connectors)
+    indexed_doc_result = await db.execute(
+        select(IndexedDocument).filter(
+            IndexedDocument.id == UUID(doc_id),
+            IndexedDocument.tenant_id == tenant_id
         )
+    )
+    indexed_doc = indexed_doc_result.scalar_one_or_none()
+
+    if indexed_doc:
+        # Check IndexedDocument ACL
+        has_indexed_permission = await _check_indexed_document_permission(
+            indexed_doc, permission, current_user
+        )
+        if has_indexed_permission:
+            return  # Permission granted via IndexedDocument ACL
+
+    # No permission found
+    permission_name = permission.value
+    raise HTTPException(
+        status_code=403,
+        detail=f"You don't have {permission_name} permission on this document"
+    )
+
+
+async def _check_indexed_document_permission(
+    doc: IndexedDocument,
+    permission: Permission,
+    user: User,
+) -> bool:
+    """
+    Check if user has permission on an IndexedDocument.
+
+    IndexedDocument ACL hierarchy:
+    1. Owner → all permissions
+    2. Admin → all permissions
+    3. is_tenant_public=True → VIEW permission for all tenant users
+    4. User in shared_with_users → VIEW permission
+    5. User's groups in shared_with_groups → VIEW permission (from SSO)
+    """
+    user_id_str = str(user.id)
+
+    # Check 1: Is user the owner?
+    if doc.owner_id and str(doc.owner_id) == user_id_str:
+        return True  # Owner has all permissions
+
+    # Check 2: Is user an admin?
+    if user.is_admin:
+        return True  # Admin has all permissions
+
+    # For VIEW permission, check additional ACL fields
+    if permission == Permission.VIEW:
+        # Check 3: Is document public to tenant?
+        if doc.is_tenant_public:
+            return True
+
+        # Check 4: Is user in shared_with_users?
+        shared_users = doc.shared_with_users or []
+        if user_id_str in shared_users or str(user.id) in shared_users:
+            return True
+
+        # Check 5: Are any of user's groups in shared_with_groups?
+        shared_groups = doc.shared_with_groups or []
+        if shared_groups:
+            # Get user's groups from SSO provider (sso_groups field)
+            user_groups = user.sso_groups or []
+            if any(group in shared_groups for group in user_groups):
+                return True
+
+    # For EDIT/DELETE/SHARE, only owner and admin have permission
+    # (already checked above)
+    return False
 
 
 @router.get("", response_model=dict)
@@ -234,78 +311,164 @@ async def stream_document(
     """
     Sirve documentos a través del proxy con cache Redis.
 
+    Soporta dos tipos de documentos:
+    - Document (uploads directos): se obtienen del storage service
+    - IndexedDocument (conectores): se obtienen del sistema externo (Alfresco, etc.)
+
     Requires: VIEW permission on the document.
     """
+    import uuid as uuid_module
+
     # ACL Check: Verify user has view permission
     await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
 
-    # Obtener información del documento
-    document = await document_service.get_document(db=db, doc_id=doc_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Llamar al storage service proxy endpoint
-    storage_url = f"{settings.STORAGE_SERVICE_URL}/api/v1/storage/proxy/{document.file_path}"
-    
-    headers = {
-        "X-API-Key": settings.STORAGE_API_KEY,
-        "X-Tenant-ID": tenant_id,
-        "X-User-ID": str(current_user.id)
-    }
-    
-    client = httpx.AsyncClient(timeout=60.0)
+    # 1. Intentar obtener de tabla Document (uploads)
     try:
-        request = client.build_request("GET", storage_url, headers=headers)
-        response = await client.send(request, stream=True)
-        
-        if response.status_code == 404:
-            await response.aclose()
-            await client.aclose()
-            logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
-            raise HTTPException(status_code=404, detail="Document file not found in storage")
-        elif response.status_code != 200:
-            await response.aread()
-            logger.error(f"Storage error {response.status_code}: {response.text}")
-            await response.aclose()
-            await client.aclose()
-            raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
-        
-        # Preparar headers para el cliente
-        content_headers = {
-            "Content-Type": response.headers.get("content-type", "application/octet-stream"),
-            "Content-Disposition": f'inline; filename="{document.filename}"'
+        document = await document_service.get_document(db=db, doc_id=doc_id)
+
+        # Document encontrado - streameamos desde storage service
+        storage_url = f"{settings.STORAGE_SERVICE_URL}/api/v1/storage/proxy/{document.file_path}"
+
+        headers = {
+            "X-API-Key": settings.STORAGE_API_KEY,
+            "X-Tenant-ID": tenant_id,
+            "X-User-ID": str(current_user.id)
         }
-        
-        # Añadir headers de cache info si están disponibles
-        if "x-cache" in response.headers:
-            content_headers["X-Cache"] = response.headers["x-cache"]
-        
-        if "content-length" in response.headers:
-            content_headers["Content-Length"] = response.headers["content-length"]
-            
-        async def iterate_file():
-            try:
-                async for chunk in response.aiter_bytes(chunk_size=8192):
-                    yield chunk
-            except Exception as e:
-                logger.error(f"Error streaming document {doc_id} from storage: {e}")
-                # Stop yielding to close the stream gracefully from client perspective
-                # (although it will look truncated)
-        
-        return StreamingResponse(
-            iterate_file(),
-            headers=content_headers,
-            media_type=response.headers.get("content-type", "application/octet-stream"),
-            background=BackgroundTask(client.aclose)
+
+        client = httpx.AsyncClient(timeout=60.0)
+        try:
+            request = client.build_request("GET", storage_url, headers=headers)
+            response = await client.send(request, stream=True)
+
+            if response.status_code == 404:
+                await response.aclose()
+                await client.aclose()
+                logger.error(f"Storage 404: File not found in storage for path: {document.file_path}")
+                raise HTTPException(status_code=404, detail="Document file not found in storage")
+            elif response.status_code != 200:
+                await response.aread()
+                logger.error(f"Storage error {response.status_code}: {response.text}")
+                await response.aclose()
+                await client.aclose()
+                raise HTTPException(status_code=500, detail=f"Storage service error: {response.status_code}")
+
+            content_headers = {
+                "Content-Type": response.headers.get("content-type", "application/octet-stream"),
+                "Content-Disposition": f'inline; filename="{document.filename}"'
+            }
+
+            if "x-cache" in response.headers:
+                content_headers["X-Cache"] = response.headers["x-cache"]
+
+            if "content-length" in response.headers:
+                content_headers["Content-Length"] = response.headers["content-length"]
+
+            async def iterate_file():
+                try:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        yield chunk
+                except Exception as e:
+                    logger.error(f"Error streaming document {doc_id} from storage: {e}")
+
+            return StreamingResponse(
+                iterate_file(),
+                headers=content_headers,
+                media_type=response.headers.get("content-type", "application/octet-stream"),
+                background=BackgroundTask(client.aclose)
+            )
+
+        except httpx.TimeoutException:
+            await client.aclose()
+            raise HTTPException(status_code=408, detail="Request timeout")
+        except HTTPException:
+            raise
+        except Exception as e:
+            await client.aclose()
+            logger.error(f"Error streaming document {doc_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error streaming document")
+
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+        # Document no encontrado en tabla Document, intentar IndexedDocument
+        pass
+
+    # 2. Intentar obtener de tabla IndexedDocument (conectores)
+    try:
+        indexed_doc = await document_service.get_indexed_document(db=db, doc_id=doc_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Document not found in any table")
+
+    # Verificar si tiene conector asociado
+    if not indexed_doc.connector_id:
+        raise HTTPException(
+            status_code=400,
+            detail="IndexedDocument without connector - cannot stream content"
         )
-            
-    except httpx.TimeoutException:
-        await client.aclose()
-        raise HTTPException(status_code=408, detail="Request timeout")
+
+    # Obtener configuración del conector
+    connector_result = await db.execute(
+        select(Connector).where(Connector.id == indexed_doc.connector_id)
+    )
+    connector = connector_result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    # Crear adapter y descargar contenido
+    try:
+        adapter = ConnectorAdapterFactory.get_adapter(connector)
+
+        # Crear UnifiedDocument para el adapter
+        # Determinar el tipo de conector
+        connector_type_str = connector.connector_type or "alfresco"
+        try:
+            connector_type_enum = ConnectorType(connector_type_str)
+        except ValueError:
+            connector_type_enum = ConnectorType.ALFRESCO  # Fallback
+
+        unified_doc = UnifiedDocument(
+            document_id=indexed_doc.id,
+            connector_id=indexed_doc.connector_id,
+            connector_type=connector_type_enum,
+            external_id=indexed_doc.external_id,
+            external_url=indexed_doc.external_url,
+            external_path=indexed_doc.external_path,
+            filename=indexed_doc.title or "document",
+            mime_type=indexed_doc.mime_type,
+            size_bytes=indexed_doc.size_bytes or 0,
+            source_created_at=indexed_doc.source_created_at,
+            source_modified_at=indexed_doc.source_modified_at,
+            tenant_id=indexed_doc.tenant_id,
+            owner_id=indexed_doc.owner_id,
+        )
+
+        # Descargar contenido desde el sistema externo
+        content = await adapter.download_content(unified_doc)
+
+        # Preparar respuesta
+        content_type = indexed_doc.mime_type or "application/octet-stream"
+        filename = indexed_doc.title or "document"
+
+        content_headers = {
+            "Content-Type": content_type,
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(content)),
+            "X-Source": "connector"
+        }
+
+        return StreamingResponse(
+            io.BytesIO(content),
+            headers=content_headers,
+            media_type=content_type
+        )
+
+    except FileNotFoundError as e:
+        logger.error(f"Document not found in connector: {e}")
+        raise HTTPException(status_code=404, detail="Document not found in external system")
     except Exception as e:
-        await client.aclose()
-        logger.error(f"Error streaming document {doc_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error streaming document")
+        logger.error(f"Error downloading from connector {indexed_doc.connector_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error downloading from connector: {str(e)}")
 
 
 @router.get("/{doc_id}/pdf")

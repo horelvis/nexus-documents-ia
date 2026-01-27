@@ -430,6 +430,9 @@ class UnifiedIndexingService:
         indexed_doc.indexing_status = "processing"
         await db.commit()
 
+        # Track actual processing time (not queue wait time)
+        processing_start_time = time.time()
+
         try:
             # Step 1: Download content
             logger.debug(f"Downloading {indexed_doc.title} ({indexed_doc.size_bytes} bytes)")
@@ -523,6 +526,9 @@ class UnifiedIndexingService:
                 indexed_doc.indexed_at = datetime.now(timezone.utc)
                 indexed_doc.indexing_error = None
 
+                # Track actual processing duration (for accurate time estimates)
+                indexed_doc.indexing_duration_seconds = time.time() - processing_start_time
+
                 # Store learned context for future retrieval expansion
                 indexed_doc.learned_context = learned_context
 
@@ -540,6 +546,7 @@ class UnifiedIndexingService:
                 error_msg = weaviate_result.get("error", "Unknown error")
                 indexed_doc.indexing_status = "failed"
                 indexed_doc.indexing_error = error_msg[:500]
+                indexed_doc.indexing_duration_seconds = time.time() - processing_start_time
                 await db.commit()
 
                 logger.error(f"Indexing failed for {indexed_doc.title}: {error_msg}")
@@ -548,6 +555,7 @@ class UnifiedIndexingService:
         except Exception as e:
             indexed_doc.indexing_status = "failed"
             indexed_doc.indexing_error = str(e)[:500]
+            indexed_doc.indexing_duration_seconds = time.time() - processing_start_time
             await db.commit()
             raise
 

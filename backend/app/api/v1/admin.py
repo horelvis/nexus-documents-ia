@@ -377,62 +377,185 @@ async def delete_all_documents(
 ):
     """
     Elimina todos los documentos del tenant actual (solo administradores).
+
+    Esta operación:
+    1. Elimina la colección completa de Weaviate (vectores)
+    2. Elimina los archivos de GCS storage (para documentos con file_path)
+    3. Elimina los registros de la base de datos PostgreSQL:
+       - Tabla 'documents' (subidas directas, modo SaaS)
+       - Tabla 'indexed_documents' (documentos de conectores, modo on-premise)
+
+    ADVERTENCIA: Esta operación es irreversible.
     """
     if not confirm:
         raise HTTPException(
             status_code=400,
             detail="Debe confirmar la operación estableciendo confirm=true"
         )
-    
+
     tenant_id = str(current_user.tenant_id)
-    
+    logger.warning(f"🚨 Admin {current_user.id} initiating delete-all-documents for tenant {tenant_id}")
+
+    results = {
+        "weaviate_deleted": False,
+        "storage_deleted": 0,
+        "storage_errors": 0,
+        "database_deleted": 0,
+        "indexed_documents_deleted": 0,
+    }
+
     try:
-        # Delete from vector store first
+        # Step 1: Delete from vector store (Weaviate)
         from app.services.weaviate_client import weaviate_client
 
-        # Delete collection if exists
         collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
         try:
-            # Weaviate client doesn't have a delete_collection method yet
-            # This would need to be implemented in the microservice
-            logger.warning(f"Weaviate collection deletion not yet implemented: {collection_name}")
+            weaviate_deleted = await weaviate_client.delete_collection(collection_name)
+            results["weaviate_deleted"] = weaviate_deleted
+            if weaviate_deleted:
+                logger.info(f"✅ Deleted Weaviate collection: {collection_name}")
+            else:
+                logger.warning(f"⚠️ Could not delete Weaviate collection (may not exist): {collection_name}")
         except Exception as e:
-            logger.warning(f"Could not delete vector collection: {e}")
-        
-        # Delete documents from database
+            logger.warning(f"⚠️ Could not delete vector collection: {e}")
+
+        # Step 2: Get all documents from 'documents' table (SaaS mode / direct uploads)
         stmt = select(Document).filter(Document.tenant_id == tenant_id)
         result = await db.execute(stmt)
         documents = result.scalars().all()
-        
-        deleted_count = 0
+
+        # Step 3: Delete files from storage (only for Document table which has file_path)
+        from app.services.async_storage_service import AsyncStorageService
+        storage_service = AsyncStorageService(tenant_id, str(current_user.id))
+
         for doc in documents:
-            # Delete from storage
-            try:
-                from app.services.async_storage_service import AsyncStorageService
-                storage_service = AsyncStorageService(tenant_id, str(current_user.id))
-                if doc.file_path:
+            if doc.file_path:
+                try:
                     await storage_service.delete_file(doc.file_path)
-                    logger.info(f"Deleted file from storage: {doc.file_path}")
-            except Exception as e:
-                logger.warning(f"Could not delete file from storage: {e}")
-            
-            # Delete document record
+                    results["storage_deleted"] += 1
+                    logger.debug(f"Deleted file from storage: {doc.file_path}")
+                except Exception as e:
+                    results["storage_errors"] += 1
+                    logger.warning(f"Could not delete file from storage: {doc.file_path} - {e}")
+
+        # Step 4: Delete document records from 'documents' table
+        for doc in documents:
             await db.delete(doc)
-            deleted_count += 1
-        
+            results["database_deleted"] += 1
+
+        # Step 5: Get all documents from 'indexed_documents' table (on-premise mode / connectors)
+        stmt = select(IndexedDocument).filter(IndexedDocument.tenant_id == tenant_id)
+        result = await db.execute(stmt)
+        indexed_documents = result.scalars().all()
+
+        logger.info(f"📋 Found {len(indexed_documents)} indexed_documents to delete for tenant {tenant_id}")
+
+        # Step 6: Delete indexed_documents records from database
+        # Note: IndexedDocument stores documents from external connectors (Alfresco, SharePoint)
+        # The actual files are in the source system, not in GCS, so we only delete DB records
+        for idx_doc in indexed_documents:
+            await db.delete(idx_doc)
+            results["indexed_documents_deleted"] += 1
+
         await db.commit()
-        
+
+        total_deleted = results["database_deleted"] + results["indexed_documents_deleted"]
+
+        logger.info(
+            f"✅ Delete-all-documents completed for tenant {tenant_id}: "
+            f"weaviate={results['weaviate_deleted']}, "
+            f"storage={results['storage_deleted']}, "
+            f"documents={results['database_deleted']}, "
+            f"indexed_documents={results['indexed_documents_deleted']}"
+        )
+
         return {
-            "deleted_count": deleted_count,
-            "message": f"Successfully deleted {deleted_count} documents"
+            "success": True,
+            "deleted_count": total_deleted,
+            "message": f"Successfully deleted {total_deleted} documents ({results['database_deleted']} uploads + {results['indexed_documents_deleted']} indexed)",
+            "details": results
         }
-        
+
     except Exception as e:
-        logger.error(f"Error deleting all documents: {str(e)}")
+        logger.error(f"Error deleting all documents: {str(e)}", exc_info=True)
         await db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Error deleting documents: {str(e)}"
+        )
+
+
+@router.post("/retry-failed-indexing", response_model=dict)
+async def retry_failed_indexing(
+    confirm: bool = Body(..., embed=True),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_active_superuser_async)
+):
+    """
+    Reintentar indexado de todos los documentos fallidos del tenant (solo administradores).
+
+    Esta operación:
+    1. Resetea todos los documentos con indexing_status='failed' a 'pending'
+    2. Limpia los mensajes de error anteriores
+    3. Los documentos serán re-procesados en el próximo ciclo de indexado
+
+    Útil después de corregir bugs en el pipeline de indexado.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Debe confirmar la operación estableciendo confirm=true"
+        )
+
+    tenant_id = str(current_user.tenant_id)
+    logger.warning(f"🔄 Admin {current_user.id} retrying failed indexing for tenant {tenant_id}")
+
+    try:
+        from sqlalchemy import func, update
+
+        # Count failed documents before reset
+        failed_count_result = await db.execute(
+            select(func.count(IndexedDocument.id))
+            .where(IndexedDocument.tenant_id == tenant_id)
+            .where(IndexedDocument.indexing_status == "failed")
+        )
+        failed_count = failed_count_result.scalar() or 0
+
+        if failed_count == 0:
+            return {
+                "success": True,
+                "reset_count": 0,
+                "message": "No failed documents to retry",
+            }
+
+        # Reset failed documents to pending
+        await db.execute(
+            update(IndexedDocument)
+            .where(IndexedDocument.tenant_id == tenant_id)
+            .where(IndexedDocument.indexing_status == "failed")
+            .values(
+                indexing_status="pending",
+                indexing_error=None,
+            )
+        )
+        await db.commit()
+
+        logger.info(
+            f"✅ Reset {failed_count} failed documents to pending for tenant {tenant_id}"
+        )
+
+        return {
+            "success": True,
+            "reset_count": failed_count,
+            "message": f"Reset {failed_count} failed documents to pending for re-indexing",
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrying failed indexing: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrying failed indexing: {str(e)}"
         )
 
 
@@ -443,14 +566,22 @@ async def clear_vector_database(
 ):
     """
     Limpia la base de datos vectorial del tenant actual (solo administradores).
+
+    Esta operación elimina SOLO los vectores de Weaviate, NO los documentos
+    de la base de datos ni del storage. Útil para forzar un re-indexado.
+
+    Para eliminar TODO (vectores + storage + database), use /delete-all-documents.
+
+    ADVERTENCIA: Esta operación es irreversible.
     """
     if not confirm:
         raise HTTPException(
             status_code=400,
             detail="Debe confirmar la operación estableciendo confirm=true"
         )
-    
+
     tenant_id = str(current_user.tenant_id)
+    logger.warning(f"🚨 Admin {current_user.id} initiating clear-vector-db for tenant {tenant_id}")
 
     try:
         from app.services.weaviate_client import weaviate_client
@@ -458,28 +589,35 @@ async def clear_vector_database(
         collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
         collections_cleared = []
 
-        # Delete and recreate collection
-        try:
-            # Weaviate client doesn't have delete_collection or _ensure_collection_exists methods
-            # This would need to be implemented in the microservice
-            logger.warning(f"Weaviate collection clear not yet implemented: {collection_name}")
-            raise HTTPException(
-                status_code=501,
-                detail="Vector database clear operation not yet implemented for Weaviate"
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error clearing vector collection: {e}")
-            raise
-        
+        # Check if collection exists
+        exists = await weaviate_client.collection_exists(collection_name)
+
+        if exists:
+            # Delete the collection
+            deleted = await weaviate_client.delete_collection(collection_name)
+            if deleted:
+                collections_cleared.append(collection_name)
+                logger.info(f"✅ Cleared Weaviate collection: {collection_name}")
+            else:
+                logger.warning(f"⚠️ Failed to delete Weaviate collection: {collection_name}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to delete vector collection: {collection_name}"
+                )
+        else:
+            logger.info(f"ℹ️ Collection does not exist, nothing to clear: {collection_name}")
+
         return {
+            "success": True,
             "message": "Vector database cleared successfully",
-            "collections_cleared": collections_cleared
+            "collections_cleared": collections_cleared,
+            "tenant_id": tenant_id
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error clearing vector database: {str(e)}")
+        logger.error(f"Error clearing vector database: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error clearing vector database: {str(e)}"

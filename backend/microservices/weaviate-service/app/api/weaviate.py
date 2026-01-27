@@ -532,6 +532,158 @@ class ConnectorIndexResponse(BaseModel):
     extraction_language: Optional[str] = None
 
 
+# Mapping from MIME type to file extension for filename normalization
+MIME_TO_EXTENSION = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "text/plain": ".txt",
+    "text/html": ".html",
+    "text/csv": ".csv",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/tiff": ".tiff",
+    "application/rtf": ".rtf",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
+}
+
+# Valid file extensions that textextract-service supports
+VALID_EXTENSIONS = {
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
+    ".txt", ".html", ".htm", ".csv", ".rtf", ".xml",
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".gif",
+    ".odt", ".ods", ".odp", ".epub", ".md", ".markdown",
+}
+
+
+def normalize_filename_extension(filename: str, mime_type: str | None) -> str:
+    """
+    Ensure filename has a valid extension for text extraction.
+
+    IMPORTANT: MIME type is prioritized over filename extension because:
+    - MIME type comes from the source system (Alfresco, SharePoint, etc.)
+    - Source systems detect actual file content, not just the filename
+    - Filenames can be misleading: "GESTOR.docx.pdf" might actually be a DOCX
+
+    Handles edge cases like:
+    - "CamScanner 06-18-2020 13.15.09" -> "CamScanner 06-18-2020 13.15.09.pdf"
+    - "GESTOR.docx.pdf" with mime=application/msword -> "GESTOR.docx.pdf.docx" or replace
+    - Files with timestamps that look like extensions
+
+    Args:
+        filename: Original filename (may lack extension or have misleading dots)
+        mime_type: MIME type of the file (trusted source of truth)
+
+    Returns:
+        Filename with proper extension based on MIME type
+    """
+    import os
+
+    # Get the current "extension" from filename
+    _, current_ext = os.path.splitext(filename)
+    current_ext_lower = current_ext.lower()
+
+    # PRIORITY 1: If we have a valid MIME type, use it as the source of truth
+    if mime_type:
+        mime_type_lower = mime_type.lower()
+        expected_ext = MIME_TO_EXTENSION.get(mime_type_lower)
+
+        if expected_ext:
+            # Check if the current extension matches what the MIME type says
+            if current_ext_lower != expected_ext:
+                # Extension mismatch! Trust MIME type over filename
+                # Examples:
+                # - "GESTOR.docx.pdf" + mime=application/msword -> file is actually a DOC
+                # - "report.txt" + mime=application/pdf -> file is actually a PDF
+                logger.info(
+                    f"📎 Filename extension mismatch: '{filename}' has '{current_ext}' "
+                    f"but MIME type '{mime_type}' indicates '{expected_ext}'. "
+                    f"Using MIME-based extension."
+                )
+
+                # Replace the wrong extension with the correct one
+                if current_ext_lower in VALID_EXTENSIONS:
+                    # Has a valid but wrong extension - replace it
+                    base_name = filename[:-len(current_ext)] if current_ext else filename
+                    return f"{base_name}{expected_ext}"
+                else:
+                    # Has invalid extension (like .09) - append correct one
+                    return f"{filename}{expected_ext}"
+            else:
+                # Extension matches MIME type - all good
+                return filename
+
+    # PRIORITY 2: No MIME type available, fall back to extension validation
+    if current_ext_lower in VALID_EXTENSIONS:
+        return filename  # Has valid extension, no MIME to contradict it
+
+    # PRIORITY 3: Invalid extension and no MIME type
+    # This shouldn't happen often if connectors provide MIME types
+    logger.warning(
+        f"⚠️ Cannot determine extension for '{filename}' (mime={mime_type}). "
+        "Will attempt extraction anyway - Tika may auto-detect."
+    )
+
+    return filename
+
+
+def _extract_folder_path(external_path: str) -> str:
+    """
+    Extract folder path from external_path (remove filename).
+
+    Examples:
+        "/Sites/legal/docs/contract.pdf" → "/Sites/legal/docs"
+        "/Contracts/ACME/2024/report.docx" → "/Contracts/ACME/2024"
+        "contract.pdf" → ""
+    """
+    if not external_path:
+        return ""
+
+    # Normalize path separators
+    path = external_path.replace("\\", "/").strip()
+
+    # Remove filename (last component after /)
+    if "/" in path:
+        folder_path = path.rsplit("/", 1)[0]
+        return folder_path if folder_path else "/"
+
+    return ""
+
+
+def _generate_folder_hierarchy(folder_path: str) -> list:
+    """
+    Generate folder hierarchy array from folder path.
+
+    Examples:
+        "/Contracts/ACME/2024" → ["/", "/Contracts", "/Contracts/ACME", "/Contracts/ACME/2024"]
+        "/docs" → ["/", "/docs"]
+        "" → []
+    """
+    if not folder_path:
+        return []
+
+    # Normalize path
+    path = folder_path.replace("\\", "/").strip()
+    if not path.startswith("/"):
+        path = "/" + path
+
+    hierarchy = ["/"]  # Always start with root
+
+    parts = [p for p in path.split("/") if p]  # Filter empty parts
+    current = ""
+
+    for part in parts:
+        current = f"{current}/{part}"
+        hierarchy.append(current)
+
+    return hierarchy
+
+
 @router.post("/index/from-connector", response_model=ConnectorIndexResponse)
 async def index_from_connector(
     request: ConnectorIndexRequest,
@@ -570,11 +722,18 @@ async def index_from_connector(
                 error=f"Invalid base64 content: {e}",
             )
 
+        # Normalize filename to ensure valid extension for text extraction
+        # Handles edge cases like "CamScanner 06-18-2020 13.15.09" -> adds .pdf
+        normalized_filename = normalize_filename_extension(
+            request.filename,
+            request.mime_type
+        )
+
         # Log with learned context info
         has_learned_context = request.learned_context is not None
         has_strategy = request.indexing_strategy is not None
         logger.info(
-            f"📥 Indexing connector document: {request.filename} "
+            f"📥 Indexing connector document: {normalized_filename} "
             f"({len(file_bytes)} bytes) for tenant {request.tenant_id} "
             f"[learned_context={has_learned_context}, strategy={has_strategy}]"
         )
@@ -609,7 +768,7 @@ async def index_from_connector(
         result = await pipeline.process_file(
             document_id=request.document_id,
             file_bytes=file_bytes,
-            filename=request.filename,
+            filename=normalized_filename,  # Use normalized filename with proper extension
             metadata=metadata,
             tenant_id=request.tenant_id,
             indexing_strategy=strategy_config,  # NEW: Pass strategy to pipeline
@@ -617,7 +776,7 @@ async def index_from_connector(
 
         if not result.success:
             error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
-            logger.error(f"❌ Pipeline failed for {request.filename}: {error_msg}")
+            logger.error(f"❌ Pipeline failed for {normalized_filename}: {error_msg}")
             return ConnectorIndexResponse(
                 success=False,
                 document_id=request.document_id,
@@ -632,6 +791,15 @@ async def index_from_connector(
 
         # Ensure collection exists
         await weaviate_service.ensure_collection_exists(collection_name)
+
+        # Extract folder hierarchy from external_path for RAG filtering
+        external_path = request.metadata.get("external_path", "") if request.metadata else ""
+        folder_path = _extract_folder_path(external_path)
+        folder_hierarchy = _generate_folder_hierarchy(folder_path)
+        connector_id = request.metadata.get("connector_id", "") if request.metadata else ""
+
+        if folder_path:
+            logger.info(f"📁 Folder hierarchy: {folder_path} → {folder_hierarchy}")
 
         # Build learned context for storage (enriches retrieval)
         learned_context_dict = None
@@ -648,10 +816,16 @@ async def index_from_connector(
             id=request.document_id,
             title=request.filename,
             tenant_id=request.tenant_id,
-            content=result.extracted_text[:30000] if result.extracted_text else "",  # First 30k chars (unified with upload flow)
+            # Content field stores preview when using chunks, full text otherwise
+            # When chunks are present, each chunk is stored as separate Weaviate object
+            content=result.extracted_text[:2000] if result.chunks else (result.extracted_text or ""),  # Preview for chunked docs
             owner_user_id=request.owner_id,
             external_id=request.metadata.get("external_id", "") if request.metadata else "",
             source_type="connector",
+            # Folder hierarchy for RAG path-based filtering
+            folder_path=folder_path,
+            folder_hierarchy=folder_hierarchy,
+            connector_id=connector_id,
             metadata={
                 **metadata,
                 "filename": request.filename,
@@ -674,6 +848,10 @@ async def index_from_connector(
                         # Enrich each chunk with learned context for retrieval
                         "semantic_type": request.learned_context.semantic_type if request.learned_context else None,
                         "domain": request.learned_context.domain if request.learned_context else None,
+                        # Folder hierarchy for chunk-level filtering
+                        "folder_path": folder_path,
+                        "folder_hierarchy": folder_hierarchy,
+                        "connector_id": connector_id,
                     },
                     "chunk_index": i,
                 }

@@ -1255,3 +1255,93 @@ async def weaviate_service_health():
             "overall_status": "unhealthy",
             "error": str(e)
         }
+
+
+# ============================================================================
+# SLM ROUTER ENDPOINTS (TOON-based query planning)
+# ============================================================================
+
+@router.get("/slm/health")
+async def slm_health():
+    """Check SLM Router health status"""
+    try:
+        return await weaviate_client.slm_health()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SLM health proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/slm/route")
+async def slm_route(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Route a query through the SLM Router.
+
+    Returns structured context based on TOON plan execution.
+    See docs/architecture/SLM_ROUTER.md for details.
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+
+        return await weaviate_client.slm_route(body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except ServiceTimeoutError:
+        raise HTTPException(status_code=504, detail="SLM Router timeout")
+    except Exception as e:
+        logger.error(f"❌ SLM route proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/slm/plan")
+async def slm_plan(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Generate a TOON plan without executing it (for debugging)"""
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+
+        return await weaviate_client.slm_plan(body)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SLM plan proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/slm/schema/{tenant_id}")
+async def slm_get_schema(
+    tenant_id: str,
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get the extracted schema for a tenant"""
+    try:
+        return await weaviate_client.slm_get_schema(tenant_id)
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SLM get schema proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/slm/learning/status")
+async def slm_learning_status(
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get status of the continuous learning system"""
+    try:
+        return await weaviate_client.slm_learning_status()
+    except HTTPClientError as e:
+        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ SLM learning status proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

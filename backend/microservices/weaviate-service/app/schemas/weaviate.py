@@ -19,6 +19,12 @@ class DocumentCreate(BaseModel):
     owner_user_id: Optional[str] = Field(default="", description="User ID who owns this document")
     source_type: Optional[str] = Field(default="upload", description="upload, gmail, google_drive, external_db")
     external_id: Optional[str] = Field(default="", description="External system identifier")
+    # Folder hierarchy for path-based filtering in RAG
+    folder_path: Optional[str] = Field(default="", description="Full folder path (e.g., /Contracts/ACME/2024)")
+    folder_hierarchy: List[str] = Field(default_factory=list, description="Array of folder levels for filtering")
+    connector_id: Optional[str] = Field(default="", description="Connector that indexed this document")
+    # Chunks for batch insertion
+    chunks: List[Dict[str, Any]] = Field(default_factory=list, description="Document chunks with content and metadata")
 
     class Config:
         json_schema_extra = {
@@ -30,7 +36,9 @@ class DocumentCreate(BaseModel):
                 "document_type": "pdf",
                 "tags": ["sample", "test"],
                 "channel_id": "",
-                "source_type": "upload"
+                "source_type": "upload",
+                "folder_path": "/Contracts/ACME",
+                "folder_hierarchy": ["/", "/Contracts", "/Contracts/ACME"]
             }
         }
 
@@ -48,6 +56,10 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
     vector_id: Optional[str] = None
     similarity_score: Optional[float] = None
+    # Folder hierarchy for path-based filtering
+    folder_path: Optional[str] = None
+    folder_hierarchy: List[str] = Field(default_factory=list)
+    connector_id: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -65,6 +77,9 @@ class SearchRequest(BaseModel):
     # Channel filtering options
     include_channels: bool = Field(default=True, description="Include documents from information channels")
     channel_ids: Optional[List[str]] = Field(default=None, description="Filter to specific channel IDs")
+    # Folder hierarchy filtering for path-based RAG queries
+    folder_path: Optional[str] = Field(default=None, description="Filter to exact folder path (e.g., /Contracts/ACME)")
+    folder_hierarchy_contains: Optional[str] = Field(default=None, description="Filter to documents in folder or any subfolder")
 
     class Config:
         json_schema_extra = {
@@ -77,7 +92,9 @@ class SearchRequest(BaseModel):
                 "is_admin": False,
                 "search_type": "hybrid",
                 "min_similarity": 0.5,
-                "include_channels": True
+                "include_channels": True,
+                "folder_path": "/Contracts/ACME",
+                "folder_hierarchy_contains": "/Contracts"
             }
         }
 

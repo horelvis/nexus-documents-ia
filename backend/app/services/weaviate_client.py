@@ -272,6 +272,34 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to delete document | collection=%s doc_id=%s error=%s", collection_name, doc_id, e)
             return False
 
+    async def delete_collection(self, collection_name: str) -> bool:
+        """
+        Delete an entire Weaviate collection.
+
+        WARNING: This permanently removes all documents and embeddings in the collection.
+        Use with caution - typically only for admin operations or tenant cleanup.
+        """
+        try:
+            logger.warning("🗑️ Deleting entire Weaviate collection | collection=%s", collection_name)
+            response = await self.delete(f"/weaviate/collections/{collection_name}")
+            success = response.status_code < 400
+            if success:
+                logger.info("✅ Successfully deleted collection | collection=%s", collection_name)
+            else:
+                logger.error("❌ Failed to delete collection | collection=%s status=%s", collection_name, response.status_code)
+            return success
+        except Exception as e:
+            logger.exception("❌ Failed to delete collection | collection=%s error=%s", collection_name, e)
+            return False
+
+    async def collection_exists(self, collection_name: str) -> bool:
+        """Check if a Weaviate collection exists"""
+        try:
+            response = await self.get(f"/weaviate/collections/{collection_name}/info")
+            return response.status_code == 200
+        except Exception:
+            return False
+
     async def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """Get information about a Weaviate collection"""
         try:
@@ -1049,6 +1077,54 @@ class WeaviateClient(BaseHTTPClient):
             return await self.get_json("/boe/updates")
         except Exception as e:
             logger.exception("❌ Failed to get pending BOE updates | error=%s", e)
+            raise
+
+    # =========================================================================
+    # SLM ROUTER (TOON-based query planning)
+    # =========================================================================
+
+    async def slm_health(self) -> Dict[str, Any]:
+        """Check SLM Router health status"""
+        try:
+            return await self.get_json("/slm/health")
+        except Exception as e:
+            logger.exception("❌ SLM health check failed | error=%s", e)
+            return {"status": "unhealthy", "error": str(e)}
+
+    async def slm_route(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Route a query through the SLM Router"""
+        try:
+            ctx = self._extract_context_headers(request)
+            logger.debug("🧠 SLM route | tenant=%s", ctx.get("tenant_id"))
+            return await self.post_json("/slm/route", json=request, timeout=60.0, **ctx)
+        except Exception as e:
+            logger.exception("❌ SLM route failed | error=%s", e)
+            raise
+
+    async def slm_plan(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a TOON plan without executing it"""
+        try:
+            ctx = self._extract_context_headers(request)
+            logger.debug("🧠 SLM plan | tenant=%s", ctx.get("tenant_id"))
+            return await self.post_json("/slm/plan", json=request, timeout=30.0, **ctx)
+        except Exception as e:
+            logger.exception("❌ SLM plan failed | error=%s", e)
+            raise
+
+    async def slm_get_schema(self, tenant_id: str) -> Dict[str, Any]:
+        """Get the extracted schema for a tenant"""
+        try:
+            return await self.get_json(f"/slm/schema/{tenant_id}")
+        except Exception as e:
+            logger.exception("❌ SLM get schema failed | tenant=%s error=%s", tenant_id, e)
+            raise
+
+    async def slm_learning_status(self) -> Dict[str, Any]:
+        """Get status of the continuous learning system"""
+        try:
+            return await self.get_json("/slm/learning/status")
+        except Exception as e:
+            logger.exception("❌ SLM learning status failed | error=%s", e)
             raise
 
 
