@@ -59,6 +59,22 @@ export interface WorkflowStep {
   error?: string
 }
 
+// SLM Router Chain-of-Thought types
+export interface SLMThinkingStep {
+  step: number
+  type: 'entity_detection' | 'intent_detection' | 'route_decision'
+  content: string
+  entities?: string[]
+  confidence?: number
+}
+
+export interface SLMPlan {
+  route: string
+  confidence: number
+  entities_count?: number
+  reasoning?: string
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -80,6 +96,7 @@ export interface EmmaMessage {
     step?: number
     total_steps?: number
     agent?: string
+    agent_reasoning?: string  // Explanation of why this agent was selected
     plan_id?: string
     workflow_steps?: WorkflowStep[]
     isStreaming?: boolean // Flag indicating content is being streamed
@@ -90,6 +107,12 @@ export interface EmmaMessage {
     failedQuery?: string
     // Human-in-the-Loop clarification
     clarification?: ClarificationData
+    // SLM Router chain-of-thought
+    slmIsThinking?: boolean
+    slmIsExecuting?: boolean
+    slmThinkingSteps?: SLMThinkingStep[]
+    slmPlan?: SLMPlan
+    stage?: string
   }
   suggestions?: string[]
   isStreaming?: boolean

@@ -204,7 +204,7 @@ export function EmmaQueryInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled || isLoading}
-          className="pl-10 pr-14 py-3.5 min-h-[52px] max-h-[200px] resize-none rounded-xl border-2 border-input bg-background transition-colors focus:border-primary/50"
+          className="pl-10 pr-14 py-3.5 min-h-[52px] max-h-[200px] resize-none rounded-xl border border-border/50 bg-background focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/50"
           rows={1}
         />
 

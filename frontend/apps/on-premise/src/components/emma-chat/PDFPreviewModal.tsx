@@ -1,25 +1,19 @@
 'use client'
 
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   IconX,
   IconLoader2,
   IconDownload,
-  IconExternalLink,
-  IconFileText,
   IconAlertCircle,
   IconEye,
 } from '@tabler/icons-react'
-import { cn } from '@/lib/utils'
 import { useDocumentService } from '@/lib/services/document.service'
 import { DocumentInfo } from '@/lib/types/emma'
 
@@ -51,85 +45,98 @@ export function PDFPreviewModal({
   onOpenChange,
 }: PDFPreviewModalProps) {
   const documentService = useDocumentService()
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const blobUrlRef = useRef<string | null>(null)
 
-  // Resolve the PDF URL when document changes
+  // Cleanup blob URL when component unmounts or modal closes
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+    }
+  }, [])
+
+  // Fetch PDF as blob with authentication when document changes
   useEffect(() => {
     if (!document || !open) {
-      setPdfUrl(null)
+      // Cleanup previous blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+      setBlobUrl(null)
       setError(null)
       return
     }
 
-    const resolvePdfUrl = async () => {
+    const fetchPdfAsBlob = async () => {
       setIsLoading(true)
       setError(null)
 
       try {
-        // If we already have a preview URL, use it
-        if (document.previewUrl) {
-          setPdfUrl(document.previewUrl)
-          setIsLoading(false)
-          return
-        }
+        let documentId: string | null = document.id || null
 
-        // If we have a direct URL, use it
-        if (document.url) {
-          setPdfUrl(document.url)
-          setIsLoading(false)
-          return
-        }
-
-        // If we have a document ID, use the stream URL
-        if (document.id) {
-          const streamUrl = documentService.getDocumentStreamUrl(document.id)
-          setPdfUrl(streamUrl)
-        } else {
-          // Try to search by name to get the ID
+        // If no document ID, try to search by name
+        if (!documentId) {
           const searchResult = await documentService.searchDocuments(document.name, 1)
-          if (searchResult.data?.results?.[0]?.id) {
-            const streamUrl = documentService.getDocumentStreamUrl(searchResult.data.results[0].id)
-            setPdfUrl(streamUrl)
-          } else {
-            setError('No se encontró el documento')
-          }
+          documentId = searchResult.data?.results?.[0]?.id || null
         }
+
+        if (!documentId) {
+          setError('No se encontró el documento')
+          return
+        }
+
+        // Use document service to download blob (goes through proxy, avoids CORS)
+        const result = await documentService.downloadDocument(documentId)
+
+        if ('error' in result) {
+          throw new Error(result.error)
+        }
+
+        // Create blob URL
+        const url = URL.createObjectURL(result.blob)
+
+        // Store for cleanup
+        blobUrlRef.current = url
+        setBlobUrl(url)
       } catch (err) {
-        console.error('Error resolving PDF URL:', err)
+        console.error('Error fetching PDF:', err)
         setError(err instanceof Error ? err.message : 'Error al cargar el documento')
       } finally {
         setIsLoading(false)
       }
     }
 
-    resolvePdfUrl()
+    fetchPdfAsBlob()
   }, [document, open, documentService])
 
   const handleClose = useCallback(() => {
     onOpenChange(false)
   }, [onOpenChange])
 
-  const handleOpenExternal = useCallback(() => {
-    if (pdfUrl) {
-      window.open(pdfUrl, '_blank')
-    }
-  }, [pdfUrl])
-
   const handleDownload = useCallback(() => {
-    if (!pdfUrl || !document) return
+    if (!blobUrl || !document) return
 
     const link = window.document.createElement('a')
-    link.href = pdfUrl
+    link.href = blobUrl
     link.download = document.name || 'document.pdf'
     window.document.body.appendChild(link)
     link.click()
     window.document.body.removeChild(link)
-  }, [pdfUrl, document])
+  }, [blobUrl, document])
 
-  const isPdf = document?.fileType?.toLowerCase() === 'pdf' ||
-    document?.name?.toLowerCase().endsWith('.pdf') ||
+  // Detect if document is a PDF (check MIME type, extension, or file type string)
+  const fileTypeLower = document?.fileType?.toLowerCase() || ''
+  const nameLower = document?.name?.toLowerCase() || ''
+  const isPdf = fileTypeLower === 'pdf' ||
+    fileTypeLower === 'application/pdf' ||
+    fileTypeLower.includes('pdf') ||
+    nameLower.endsWith('.pdf') ||
     document?.previewUrl?.toLowerCase().includes('.pdf')
 
   if (!document) return null
@@ -137,65 +144,16 @@ export function PDFPreviewModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
-        {/* Header */}
-        <DialogHeader className="flex-shrink-0 px-4 py-3 border-b bg-card">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10">
-                <IconFileText className="h-5 w-5 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <DialogTitle className="text-base font-semibold truncate">
-                  {document.name}
-                </DialogTitle>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {document.fileType && (
-                    <Badge variant="secondary" className="text-xs">
-                      {document.fileType.toUpperCase()}
-                    </Badge>
-                  )}
-                  {document.relevanceScore && (
-                    <Badge variant="outline" className="text-xs">
-                      {Math.round(document.relevanceScore * 100)}% relevancia
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {pdfUrl && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownload}
-                    className="hidden sm:flex"
-                  >
-                    <IconDownload className="h-4 w-4 mr-2" />
-                    Descargar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <IconExternalLink className="h-4 w-4 mr-2" />
-                    <span className="hidden sm:inline">Abrir completo</span>
-                  </Button>
-                </>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                className="h-8 w-8"
-              >
-                <IconX className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </DialogHeader>
+        {/* Close button - positioned over PDFViewer toolbar */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleClose}
+          className="absolute right-2 top-2 z-50 h-8 w-8 bg-background/80 backdrop-blur-sm hover:bg-background"
+        >
+          <IconX className="h-4 w-4" />
+          <span className="sr-only">Cerrar</span>
+        </Button>
 
         {/* Content */}
         <div className="flex-1 overflow-hidden bg-muted/30">
@@ -223,11 +181,11 @@ export function PDFPreviewModal({
             </div>
           )}
 
-          {!isLoading && !error && pdfUrl && (
+          {!isLoading && !error && blobUrl && (
             <>
               {isPdf ? (
                 <PDFViewer
-                  url={pdfUrl}
+                  url={blobUrl}
                   fileName={document.name}
                   height="100%"
                   showToolbar={true}
@@ -243,16 +201,10 @@ export function PDFPreviewModal({
                   <p className="text-sm text-muted-foreground text-center mb-4">
                     La vista previa en línea solo está disponible para archivos PDF.
                   </p>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleDownload}>
-                      <IconDownload className="h-4 w-4 mr-2" />
-                      Descargar archivo
-                    </Button>
-                    <Button onClick={handleOpenExternal}>
-                      <IconExternalLink className="h-4 w-4 mr-2" />
-                      Abrir en nueva pestaña
-                    </Button>
-                  </div>
+                  <Button variant="outline" onClick={handleDownload}>
+                    <IconDownload className="h-4 w-4 mr-2" />
+                    Descargar archivo
+                  </Button>
                 </div>
               )}
             </>

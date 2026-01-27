@@ -2,10 +2,10 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Send, Loader2, Paperclip } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { TextareaWithMentions } from "@/components/ui/input-with-mentions"
-import { RichTextInput } from "@/components/ui/rich-text-input"
+import { Button } from "../ui/button"
+import { Textarea } from "../ui/textarea"
+import { TextareaWithMentions } from "../ui/input-with-mentions"
+import { RichTextInput } from "../ui/rich-text-input"
 import { cn } from "@/lib/utils"
 
 interface EmmaQueryInputProps {

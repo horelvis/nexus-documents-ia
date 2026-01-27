@@ -344,9 +344,51 @@ export function EmmaChat({
               return // Don't process as other event
             }
 
+            // Handle SLM Router thinking step events - visible chain-of-thought
+            if (event.event === 'slm_thinking' && data.slmThinkingStep) {
+              const newStep = data.slmThinkingStep
+              updateMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id !== progressMessageId) return msg
+                  const existingSteps = msg.metadata?.slmThinkingSteps || []
+                  return {
+                    ...msg,
+                    content: data.message || msg.content,
+                    metadata: {
+                      ...msg.metadata,
+                      slmIsThinking: data.slmIsThinking ?? true,
+                      slmThinkingSteps: [...existingSteps, newStep],
+                    },
+                  }
+                })
+              )
+              return // Don't process as other event
+            }
+
+            // Handle SLM Router plan ready event
+            if (event.event === 'slm_plan' && data.slmPlan) {
+              updateMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === progressMessageId
+                    ? {
+                        ...msg,
+                        content: data.message || msg.content,
+                        metadata: {
+                          ...msg.metadata,
+                          slmIsThinking: false,
+                          slmPlan: data.slmPlan,
+                        },
+                      }
+                    : msg
+                )
+              )
+              return // Don't process as other event
+            }
+
             // Handle other progress events (progress, start, delegation, first_token, etc.)
+            // Also handles slm_reasoning and slm_executing stages via progress events
             if (
-              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token'].includes(
+              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token', 'slm_thinking', 'slm_plan'].includes(
                 event.event
               )
             ) {
@@ -362,6 +404,11 @@ export function EmmaChat({
                           step: data.step,
                           total_steps: data.total_steps,
                           agent: data.agent,
+                          // SLM Router fields from progress events
+                          ...(data.slmIsThinking !== undefined && { slmIsThinking: data.slmIsThinking }),
+                          ...(data.slmIsExecuting !== undefined && { slmIsExecuting: data.slmIsExecuting }),
+                          ...(data.slmThinkingSteps && { slmThinkingSteps: data.slmThinkingSteps }),
+                          ...(data.stage && { stage: data.stage }),
                         },
                       }
                     : msg
@@ -578,7 +625,7 @@ export function EmmaChat({
         <div className="flex-1 flex flex-col items-center justify-center p-8">
           <div className="text-center space-y-4 max-w-md">
             <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
-              <span className="text-3xl">🧠</span>
+              <IconBrain className="h-8 w-8 text-primary-foreground" />
             </div>
             <h2 className="text-2xl font-semibold">Hola, soy Emma</h2>
             <p className="text-muted-foreground">

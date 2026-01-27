@@ -45,6 +45,13 @@ from app.agents.emma_v2 import (
     get_emma_v2,
 )
 from app.agents.emma_v2_tools import EMMA_V2_TOOLS, get_emma_v2_tools
+from app.services.emma_persistence_service import get_emma_persistence_service
+from app.schemas.emma import (
+    EmmaSessionListResponse,
+    EmmaSessionResponse,
+    EmmaSessionUpdate,
+    EmmaContinueSessionResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +359,58 @@ async def emma_v2_query_stream(
                         }
                         yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
 
+                    # SLM Router chain-of-thought events
+                    elif event_type == "slm_thinking_start":
+                        # SLM started reasoning
+                        frontend_data = {
+                            "message": event.get("content", "Analizando consulta..."),
+                            "stage": "slm_reasoning",
+                            "slmIsThinking": True,
+                            "slmThinkingSteps": [],
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_thinking_step":
+                        # SLM reasoning step (entity, intent, route)
+                        frontend_data = {
+                            "message": event.get("content", ""),
+                            "stage": "slm_reasoning",
+                            "slmIsThinking": True,
+                            "slmThinkingStep": {
+                                "step": event.get("step"),
+                                "type": event.get("step_type"),
+                                "content": event.get("content"),
+                                "entities": event.get("entities", []),
+                                "confidence": event.get("confidence", 1.0),
+                            },
+                        }
+                        yield f"event: slm_thinking\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_plan_ready":
+                        # SLM plan generated
+                        frontend_data = {
+                            "message": f"Plan: {event.get('route', 'N/A')} ({event.get('confidence', 0)*100:.0f}% confianza)",
+                            "stage": "slm_plan_ready",
+                            "slmIsThinking": False,
+                            "slmPlan": {
+                                "route": event.get("route"),
+                                "confidence": event.get("confidence", 0),
+                                "entities_count": event.get("entities_count", 0),
+                                "reasoning": event.get("reasoning"),
+                            },
+                        }
+                        yield f"event: slm_plan\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_execution_start":
+                        # SLM starting execution
+                        frontend_data = {
+                            "message": event.get("message", "Ejecutando plan..."),
+                            "stage": "slm_executing",
+                            "slmIsExecuting": True,
+                            "route": event.get("route"),
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
                     elif event_type == "tool_call":
                         # tool_call → delegation
                         tool_name = event.get("name", "unknown")
@@ -584,3 +643,213 @@ async def compare_v1_v2(
         }
 
     return results
+
+
+# =============================================================================
+# Session Persistence Endpoints
+# =============================================================================
+
+@router.get("/sessions", response_model=EmmaSessionListResponse)
+async def list_sessions(
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    include_archived: bool = Query(False, description="Include archived sessions"),
+    limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    List Emma chat sessions for a user.
+
+    Returns paginated list of sessions with previews of first/last messages.
+    Sessions are ordered by:
+    1. Pinned sessions first
+    2. Then by last_message_at (most recent first)
+
+    Use this to build a conversation history sidebar.
+    """
+    persistence = get_emma_persistence_service()
+
+    result = await persistence.get_user_sessions(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+
+    return EmmaSessionListResponse(**result)
+
+
+@router.get("/sessions/{session_id}", response_model=EmmaSessionResponse)
+async def get_session(
+    session_id: str,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Get a full Emma session with all messages.
+
+    Returns the complete conversation history including:
+    - All messages (user and assistant)
+    - Sources cited in responses
+    - Tools used
+    - Metadata
+
+    Use this when the user opens an old conversation.
+    """
+    persistence = get_emma_persistence_service()
+
+    session = await persistence.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify tenant access
+    if session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    return EmmaSessionResponse(**session)
+
+
+@router.post("/sessions/{session_id}/continue", response_model=EmmaContinueSessionResponse)
+async def continue_session(
+    session_id: str,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Continue an old Emma session.
+
+    This endpoint:
+    1. Loads the session from PostgreSQL
+    2. Restores it to Redis (hot cache)
+    3. Returns confirmation
+
+    After calling this, use the regular /query or /query/stream endpoints
+    with the same session_id to continue the conversation.
+    The LLM will have access to the full conversation history.
+    """
+    persistence = get_emma_persistence_service()
+
+    # Check if session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify tenant access
+    if session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Check if already in Redis
+    in_redis = await persistence.session_exists_in_redis(session_id)
+
+    if in_redis:
+        return EmmaContinueSessionResponse(
+            success=True,
+            session_id=session_id,
+            message_count=session["message_count"],
+            loaded_to_redis=False,  # Already there
+            message="Session already active in cache",
+        )
+
+    # Load to Redis
+    loaded = await persistence.load_session_to_redis(session_id)
+
+    if not loaded:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load session to cache. Please try again.",
+        )
+
+    return EmmaContinueSessionResponse(
+        success=True,
+        session_id=session_id,
+        message_count=session["message_count"],
+        loaded_to_redis=True,
+        message=f"Session restored with {session['message_count']} messages",
+    )
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(
+    session_id: str,
+    update: EmmaSessionUpdate,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Update session properties.
+
+    Allows updating:
+    - title: Custom session title
+    - is_archived: Archive/unarchive session
+    - is_pinned: Pin/unpin session
+    """
+    persistence = get_emma_persistence_service()
+
+    # Verify session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify ownership
+    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Update
+    updated = await persistence.update_session(
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        title=update.title,
+        is_archived=update.is_archived,
+        is_pinned=update.is_pinned,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update session")
+
+    return {"success": True, "message": "Session updated"}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Permanently delete an Emma session.
+
+    This action:
+    - Removes the session from PostgreSQL
+    - Clears it from Redis if present
+    - Cannot be undone
+
+    Consider archiving instead for recoverable deletion.
+    """
+    persistence = get_emma_persistence_service()
+
+    # Verify session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify ownership
+    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Delete
+    deleted = await persistence.delete_session(
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+
+    return {"success": True, "message": "Session deleted"}

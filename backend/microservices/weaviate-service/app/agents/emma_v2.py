@@ -125,6 +125,12 @@ except ImportError:
     TOONExecutionResult = None
     SLMRouter = None
 
+# Session Persistence (PostgreSQL)
+from app.services.emma_persistence_service import (
+    get_emma_persistence_service,
+    EmmaPersistenceService,
+)
+
 logger = logging.getLogger(__name__)
 
 # Configuration
@@ -230,6 +236,7 @@ class EmmaV2:
         self._knowledge_router = None  # HybridKnowledgeRouter
         self._sil = None
         self._slm_router = None  # SLM Router for TOON-based query planning
+        self._persistence = get_emma_persistence_service()  # PostgreSQL session persistence
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -415,7 +422,9 @@ class EmmaV2:
                 if context.thread_id:
                     await self._save_to_history(
                         context.thread_id, query, result.answer,
-                        knowledge_source=knowledge_classification.source.value
+                        knowledge_source=knowledge_classification.source.value,
+                        context=context,
+                        tools_used=result.tools_called,
                     )
 
                 # Auto-collect example for learning
@@ -436,7 +445,9 @@ class EmmaV2:
                 if context.thread_id:
                     await self._save_to_history(
                         context.thread_id, query, result.answer,
-                        knowledge_source=knowledge_classification.source.value
+                        knowledge_source=knowledge_classification.source.value,
+                        context=context,
+                        tools_used=result.tools_called,
                     )
 
                 await self._collect_knowledge_example(
@@ -526,7 +537,9 @@ class EmmaV2:
             )
             await self._save_to_history(
                 context.thread_id, query, result.answer,
-                knowledge_source=final_knowledge_source
+                knowledge_source=final_knowledge_source,
+                context=context,
+                tools_used=result.tools_called,
             )
 
         # Step 6: Score the result for Langfuse analytics
@@ -684,35 +697,54 @@ class EmmaV2:
                     yield event
                 return
 
-        # Try SIL fast path first with real LLM streaming
-        # Skip SIL for conversational responses that need conversation context
+        # Skip fast paths for conversational responses that need conversation context
         is_conversational = self._is_conversational_response(query)
 
         if is_conversational:
-            logger.info(f"💬 Stream: Conversational response detected, skipping SIL → agentic loop with history")
-        elif self.config.enable_sil_fast_path and self._sil:
-            sil_stream_result = await self._try_sil_fast_path_stream(query, context.tenant_id)
-            if sil_stream_result is not None:
-                # Stream the SIL response using LLM
-                accumulated_content = ""
-                async for event in sil_stream_result:
-                    if event["type"] == "content":
-                        accumulated_content += event["content"]
-                        yield event
-                    elif event["type"] == "done":
-                        # Add process_info to done event
-                        event["result"]["process_info"] = {
-                            "reasoning_type": event["result"].get("reasoning_type", "STRUCTURAL"),
-                            "reasoning_message": "Respuesta desde SIL con interpretación LLM",
-                            "tokens_saved": event["result"].get("tokens_saved", 0),
-                            "sil_used": True,
-                            "active_tools": [],
-                        }
-                        yield event
+            logger.info(f"💬 Stream: Conversational response detected, skipping fast paths → agentic loop with history")
+        else:
+            # Priority 1: Try SLM Router with visible chain-of-thought reasoning
+            if self.config.enable_slm_router and self._slm_router and SLM_ROUTER_AVAILABLE:
+                logger.info(f"🎯 Stream: Trying SLM Router for query: '{query[:60]}...'")
+                session_id = context.thread_id or context.conversation_id or ""
+
+                slm_responded = False
+                async for event in self._try_slm_router_stream(query, context.tenant_id, session_id):
+                    slm_responded = True
+                    yield event
+                    if event.get("type") == "done":
+                        logger.info(f"✅ Stream: SLM Router answered with visible reasoning")
                         return
-                    else:
-                        yield event
-                return
+
+                if slm_responded:
+                    return
+                else:
+                    logger.info(f"➡️ Stream: SLM Router declined → trying SIL fallback")
+
+            # Priority 2: Try SIL fast path as fallback
+            if self.config.enable_sil_fast_path and self._sil:
+                sil_stream_result = await self._try_sil_fast_path_stream(query, context.tenant_id)
+                if sil_stream_result is not None:
+                    # Stream the SIL response using LLM
+                    accumulated_content = ""
+                    async for event in sil_stream_result:
+                        if event["type"] == "content":
+                            accumulated_content += event["content"]
+                            yield event
+                        elif event["type"] == "done":
+                            # Add process_info to done event
+                            event["result"]["process_info"] = {
+                                "reasoning_type": event["result"].get("reasoning_type", "STRUCTURAL"),
+                                "reasoning_message": "Respuesta desde SIL con interpretación LLM",
+                                "tokens_saved": event["result"].get("tokens_saved", 0),
+                                "sil_used": True,
+                                "active_tools": [],
+                            }
+                            yield event
+                            return
+                        else:
+                            yield event
+                    return
 
         # Detect domain
         domain = DomainType.GENERAL
@@ -798,7 +830,9 @@ class EmmaV2:
                     )
                     await self._save_to_history(
                         context.thread_id, query, accumulated_content,
-                        knowledge_source=final_knowledge_source
+                        knowledge_source=final_knowledge_source,
+                        context=context,
+                        tools_used=tools_called,
                     )
                 return
 
@@ -1141,6 +1175,190 @@ Responde a la pregunta del usuario basándote en el contexto proporcionado:"""
 
         # Fallback: return raw context
         return f"Resultados encontrados:\n{result.context_for_llm}"
+
+    @observe(name="emma.slm_router_stream")
+    async def _try_slm_router_stream(
+        self,
+        query: str,
+        tenant_id: str,
+        session_id: str = "",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Try to route query using SLM Router with visible chain-of-thought streaming.
+
+        Yields events that show the reasoning process:
+        - slm_thinking_start: Indicates start of reasoning
+        - slm_thinking_step: Each reasoning step (entity detection, intent, route)
+        - slm_plan_ready: Plan generated with route and confidence
+        - slm_execution_start: Execution beginning
+        - content: Streamed response tokens
+        - done: Completion with metadata
+
+        Returns None (via StopIteration) if SLM Router can't handle the query.
+        """
+        if not self._slm_router:
+            return
+
+        try:
+            langfuse_context.update_current_observation(
+                input={"query": query, "tenant_id": tenant_id, "session_id": session_id, "streaming": True}
+            )
+
+            execution_result = None
+            plan_route = None
+            plan_confidence = 0.0
+            thinking_steps = []
+
+            # Stream planning and execution phase with visible reasoning
+            async for event in self._slm_router.route_stream(
+                query=query,
+                tenant_id=tenant_id,
+                session_id=session_id
+            ):
+                event_type = event.get("event")
+                event_data = event.get("data", {})
+
+                if event_type == "thinking_start":
+                    yield {
+                        "type": "slm_thinking_start",
+                        "content": event_data.get("message", "Analizando consulta..."),
+                    }
+
+                elif event_type == "thinking_step":
+                    thinking_steps.append(event_data)
+                    yield {
+                        "type": "slm_thinking_step",
+                        "step": event_data.get("step"),
+                        "step_type": event_data.get("type"),
+                        "content": event_data.get("content"),
+                        "entities": event_data.get("entities", []),
+                        "confidence": event_data.get("confidence", 1.0),
+                    }
+
+                elif event_type == "plan_ready":
+                    plan_route = event_data.get("route")
+                    plan_confidence = event_data.get("confidence", 0.0)
+                    yield {
+                        "type": "slm_plan_ready",
+                        "route": plan_route,
+                        "confidence": plan_confidence,
+                        "entities_count": event_data.get("entities_count", 0),
+                        "reasoning": event_data.get("reasoning"),
+                    }
+
+                elif event_type == "execution_start":
+                    yield {
+                        "type": "slm_execution_start",
+                        "message": event_data.get("message", "Ejecutando plan..."),
+                        "route": event_data.get("route"),
+                    }
+
+                elif event_type == "execution_complete":
+                    execution_result = event_data
+
+                elif event_type == "error":
+                    logger.warning(f"SLM Router stream error: {event_data.get('error')}")
+                    return  # Let agentic loop handle
+
+            # If no execution result, fall back
+            if not execution_result:
+                return
+
+            # Handle failures and ASK_CLARIFY
+            if not execution_result.get("success", False):
+                logger.warning(f"SLM Router execution failed: {execution_result.get('error')}")
+                return
+
+            if plan_route == "ASK_CLARIFY":
+                # Yield clarification question if available
+                clarification = execution_result.get("clarification_question")
+                if clarification:
+                    yield {
+                        "type": "content",
+                        "content": clarification,
+                    }
+                    yield {
+                        "type": "done",
+                        "result": {
+                            "success": True,
+                            "answer": clarification,
+                            "slm_router_used": True,
+                            "toon_route": plan_route,
+                            "needs_clarification": True,
+                        }
+                    }
+                    return
+                return  # Let agentic loop handle
+
+            # Check for empty results
+            context_for_llm = execution_result.get("context_for_llm", "")
+            graph_rows = execution_result.get("graph_row_count", 0)
+            vector_results = execution_result.get("vector_result_count", 0)
+
+            if plan_route == "GRAPH_ONLY" and graph_rows == 0:
+                logger.info(f"🔍 SLM Router stream: 0 graph results → falling back")
+                return
+
+            if plan_route == "VECTOR_ONLY" and vector_results == 0:
+                logger.info(f"🔍 SLM Router stream: 0 vector results → falling back")
+                return
+
+            if not context_for_llm:
+                return
+
+            # Format response with LLM streaming
+            system_prompt = """Eres un asistente de documentos. Responde de forma clara y concisa basándote en el contexto.
+
+Reglas:
+1. Responde DIRECTAMENTE a la pregunta
+2. Usa los datos exactos del contexto
+3. Mantén un tono profesional"""
+
+            user_prompt = f"""Pregunta: {query}
+
+Contexto:
+{context_for_llm}
+
+Responde basándote en el contexto:"""
+
+            accumulated_content = ""
+            async for llm_event in self._llm_client.chat_stream(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            ):
+                if llm_event.event_type == "content" and llm_event.content:
+                    accumulated_content += llm_event.content
+                    yield {"type": "content", "content": llm_event.content}
+
+            # Final done event
+            yield {
+                "type": "done",
+                "result": {
+                    "success": True,
+                    "answer": accumulated_content,
+                    "slm_router_used": True,
+                    "toon_route": plan_route,
+                    "toon_confidence": plan_confidence,
+                    "graph_rows": graph_rows,
+                    "vector_results": vector_results,
+                    "execution_time_ms": execution_result.get("time_ms", 0),
+                    "thinking_steps": thinking_steps,
+                    "process_info": {
+                        "reasoning_type": "SLM_ROUTER",
+                        "reasoning_message": f"Razonamiento SLM → {plan_route} ({plan_confidence*100:.0f}% confianza)",
+                        "slm_router_used": True,
+                        "active_tools": [],
+                    }
+                }
+            }
+
+        except Exception as e:
+            logger.warning(f"SLM Router stream error: {e}")
+            return  # Fall back to agentic loop
 
     @observe(name="emma.sil_fast_path")
     async def _try_sil_fast_path(
@@ -1755,7 +1973,9 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
                 if context.thread_id:
                     await self._save_to_history(
                         context.thread_id, query, accumulated_content,
-                        knowledge_source=knowledge_classification.source.value
+                        knowledge_source=knowledge_classification.source.value,
+                        context=context,
+                        tools_used=tools_called,
                     )
 
                 # Collect example for learning
@@ -1907,7 +2127,9 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
                 if context.thread_id:
                     await self._save_to_history(
                         context.thread_id, query, accumulated_content,
-                        knowledge_source=knowledge_classification.source.value
+                        knowledge_source=knowledge_classification.source.value,
+                        context=context,
+                        tools_used=tools_called,
                     )
 
                 # Collect example for learning
@@ -2151,43 +2373,112 @@ Responde de forma completa y útil basándote en esta información. Usa la termi
         query: str,
         answer: str,
         knowledge_source: Optional[str] = None,
+        context: Optional[ExecutionContext] = None,
+        tools_used: Optional[List[str]] = None,
+        sources: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """Save conversation turn to Redis."""
-        if not self._redis:
-            return
+        """
+        Save conversation turn to Redis (hot cache) and PostgreSQL (persistent).
 
-        try:
-            key = f"{THREAD_KEY_PREFIX}{thread_id}"
+        Redis provides fast access for active sessions (1-hour TTL).
+        PostgreSQL provides permanent storage for history and search.
 
-            # Load existing
-            history_json = await self._redis.get(key)
-            history = json.loads(history_json) if history_json else []
+        Args:
+            thread_id: Session/thread identifier
+            query: User's query
+            answer: Emma's response
+            knowledge_source: "documents" | "graph" | "general"
+            context: Execution context (needed for PostgreSQL persistence)
+            tools_used: List of tools called during execution
+            sources: List of document sources cited
+        """
+        # Step 1: Save to Redis (hot cache)
+        if self._redis:
+            try:
+                key = f"{THREAD_KEY_PREFIX}{thread_id}"
 
-            # Append new turn
-            history.append({"role": "user", "content": query})
-            history.append({"role": "assistant", "content": answer})
+                # Load existing
+                history_json = await self._redis.get(key)
+                history = json.loads(history_json) if history_json else []
 
-            # Keep last N messages
-            history = history[-40:]
+                # Append new turn
+                history.append({"role": "user", "content": query})
+                history.append({"role": "assistant", "content": answer})
 
-            # Save with TTL
-            await self._redis.setex(
-                key,
-                self.config.thread_ttl_seconds,
-                json.dumps(history),
+                # Keep last N messages
+                history = history[-40:]
+
+                # Save with TTL
+                await self._redis.setex(
+                    key,
+                    self.config.thread_ttl_seconds,
+                    json.dumps(history),
+                )
+
+                # Also save knowledge_source for follow-up context
+                if knowledge_source:
+                    await self._redis.setex(
+                        f"{key}:knowledge_source",
+                        self.config.thread_ttl_seconds,
+                        knowledge_source,
+                    )
+                    logger.debug(f"Saved knowledge_source={knowledge_source} for thread {thread_id}")
+
+            except Exception as e:
+                logger.warning(f"Failed to save history to Redis: {e}")
+
+        # Step 2: Persist to PostgreSQL (async, non-blocking)
+        # Only persist if we have user context (required for ownership)
+        if context and context.user_id and context.tenant_id:
+            # Use asyncio.create_task to not block the response
+            asyncio.create_task(
+                self._persist_to_db(
+                    session_id=thread_id,
+                    user_id=context.user_id,
+                    tenant_id=context.tenant_id,
+                    query=query,
+                    answer=answer,
+                    knowledge_source=knowledge_source,
+                    tools_used=tools_used,
+                    sources=sources,
+                )
             )
 
-            # Also save knowledge_source for follow-up context
-            if knowledge_source:
-                await self._redis.setex(
-                    f"{key}:knowledge_source",
-                    self.config.thread_ttl_seconds,
-                    knowledge_source,
-                )
-                logger.debug(f"Saved knowledge_source={knowledge_source} for thread {thread_id}")
+    async def _persist_to_db(
+        self,
+        session_id: str,
+        user_id: str,
+        tenant_id: str,
+        query: str,
+        answer: str,
+        knowledge_source: Optional[str] = None,
+        tools_used: Optional[List[str]] = None,
+        sources: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Persist conversation turn to PostgreSQL.
 
+        This runs asynchronously (via create_task) to not block the response.
+        Failures are logged but don't affect the user experience.
+        """
+        try:
+            await self._persistence.save_message(
+                session_id=session_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                user_message=query,
+                assistant_response=answer,
+                sources=sources,
+                tools_used=tools_used,
+                knowledge_source=knowledge_source,
+                session_metadata={
+                    "knowledge_source": knowledge_source,
+                } if knowledge_source else None
+            )
+            logger.debug(f"Persisted session {session_id} to PostgreSQL")
         except Exception as e:
-            logger.warning(f"Failed to save history: {e}")
+            # Log but don't raise - persistence failure shouldn't affect user
+            logger.warning(f"Failed to persist session {session_id} to PostgreSQL: {e}")
 
     async def _get_last_knowledge_source(self, thread_id: str) -> Optional[str]:
         """Get the last knowledge_source from the conversation history."""

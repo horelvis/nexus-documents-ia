@@ -2,11 +2,11 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "../ui/button"
+import { RadioGroup, RadioGroupItem } from "../ui/radio-group"
+import { Checkbox } from "../ui/checkbox"
+import { Label } from "../ui/label"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../ui/card"
 import { AlertCircle, HelpCircle, CheckCircle2, Lightbulb } from "lucide-react"
 
 /**

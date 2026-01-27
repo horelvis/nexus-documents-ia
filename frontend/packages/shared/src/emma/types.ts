@@ -85,6 +85,80 @@ export interface WorkflowStep {
   error?: string
 }
 
+// Stage types for progress tracking
+export type ProgressStage = 'init' | 'loading_document' | 'analyzing' | 'context_preparation' | 'thinking' | 'searching' | 'generating' | 'slm_reasoning'
+
+// =============================================================================
+// SLM Router Types (Chain-of-Thought Reasoning)
+// =============================================================================
+
+/** Types of thinking steps in chain-of-thought reasoning */
+export type SLMThinkingStepType = 'entity_detection' | 'intent_detection' | 'route_decision'
+
+/** A single step in the SLM Router's chain-of-thought reasoning */
+export interface SLMThinkingStep {
+  step: number
+  type: SLMThinkingStepType
+  content: string
+  entities: string[]
+  confidence: number
+}
+
+/** SLM Router plan ready event data */
+export interface SLMPlanReady {
+  route: 'GRAPH_ONLY' | 'VECTOR_ONLY' | 'HYBRID' | 'ASK_CLARIFY'
+  confidence: number
+  entities_count: number
+  reasoning?: string
+}
+
+/** SLM Router execution complete event data */
+export interface SLMExecutionComplete {
+  success: boolean
+  context_for_llm?: string
+  graph_result?: Record<string, unknown>
+  graph_row_count?: number
+  vector_result_count?: number
+  time_ms: number
+  error?: string
+  clarification_question?: string
+  clarification_options?: string[]
+}
+
+/** SLM Router stream event types */
+export type SLMStreamEventType =
+  | 'thinking_start'
+  | 'thinking_step'
+  | 'plan_ready'
+  | 'execution_start'
+  | 'execution_complete'
+  | 'error'
+
+/** SSE event from SLM Router streaming endpoint */
+export interface SLMStreamEvent {
+  event: SLMStreamEventType
+  data: {
+    message?: string
+    step?: number
+    type?: SLMThinkingStepType
+    content?: string
+    entities?: string[]
+    confidence?: number
+    route?: string
+    entities_count?: number
+    reasoning?: string
+    success?: boolean
+    context_for_llm?: string
+    graph_result?: Record<string, unknown>
+    graph_row_count?: number
+    vector_result_count?: number
+    time_ms?: number
+    error?: string
+    clarification_question?: string
+    clarification_options?: string[]
+  }
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -121,6 +195,11 @@ export interface EmmaMessage {
     failedQuery?: string
     // Human-in-the-Loop clarification fields
     clarification?: ClarificationData
+    // SLM Router chain-of-thought fields
+    slmThinkingSteps?: SLMThinkingStep[]
+    slmPlan?: SLMPlanReady
+    slmIsThinking?: boolean
+    slmIsExecuting?: boolean
   }
   suggestions?: string[]
   isStreaming?: boolean

@@ -8,12 +8,12 @@
 "use client";
 
 import { useCallback, useRef, useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "../ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "../ui/tooltip";
 import {
   Volume2,
   Pause,
@@ -21,6 +21,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+// NOTE: useTTS hook must be provided by the app
 import { useTTS, TTSStatus } from "@/hooks/use-tts";
 
 interface TTSControlsProps {

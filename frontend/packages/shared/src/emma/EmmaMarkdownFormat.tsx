@@ -3,8 +3,8 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "../ui/badge"
+import { Button } from "../ui/button"
 import { ExternalLink, FileText, Quote } from "lucide-react"
 
 interface Citation {
