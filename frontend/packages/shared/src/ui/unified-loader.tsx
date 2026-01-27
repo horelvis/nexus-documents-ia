@@ -1,7 +1,7 @@
 "use client"
 
 import { IconLoader2 } from "@tabler/icons-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../lib/utils"
 import { useEffect, useState } from "react"
 
 // Company Logo Component (perfectamente circular)

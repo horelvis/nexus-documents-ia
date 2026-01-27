@@ -1,13 +1,11 @@
 "use client"
 
-import { useState, useRef, forwardRef } from "react"
-import { Input, InputProps } from "@/components/ui/input"
-import { Textarea, TextareaProps } from "@/components/ui/textarea"
-import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
-import { createEntityTag, findEntityAtPosition } from "@/components/ui/entity-renderer"
-import { getCharacterCoordinates } from "@/lib/caret-utils"
+import { useState, useRef, forwardRef, ComponentType } from "react"
+import { Input, InputProps } from "./input"
+import { Textarea, TextareaProps } from "./textarea"
+import { createEntityTag, findEntityAtPosition } from "./entity-renderer"
 
-interface Entity {
+export interface Entity {
   id: string
   name: string
   email: string
@@ -15,7 +13,23 @@ interface Entity {
   role?: string
 }
 
-interface InputWithMentionsProps extends Omit<InputProps, 'onChange' | 'value'> {
+// Props for EntitySearchMenu component (to be provided by the app)
+export interface EntitySearchMenuProps {
+  open: boolean
+  onSelect: (entity: Entity) => void
+  onClose: () => void
+  searchQuery: string
+  anchorRef: HTMLInputElement | HTMLTextAreaElement | null
+  documentId: string
+  cursorPosition?: { top: number; left: number } | null
+}
+
+// Default fallback for getCharacterCoordinates when not provided
+const defaultGetCharacterCoordinates = (_element: HTMLElement, _position: number): { top: number; left: number } => {
+  return { top: 0, left: 0 }
+}
+
+export interface InputWithMentionsProps extends Omit<InputProps, 'onChange' | 'value'> {
   value: string
   onChange: (value: string) => void
   documentId?: string
@@ -23,9 +37,13 @@ interface InputWithMentionsProps extends Omit<InputProps, 'onChange' | 'value'> 
   onEntitySelect?: (entity: Entity) => void
   mentionTrigger?: string // Default: '@'
   autoInsertEntityTag?: boolean
+  /** Optional EntitySearchMenu component - pass from app if entity search is needed */
+  EntitySearchMenu?: ComponentType<EntitySearchMenuProps>
+  /** Optional function to calculate cursor position for dropdown placement */
+  getCharacterCoordinates?: (element: HTMLElement, position: number) => { top: number; left: number }
 }
 
-interface TextareaWithMentionsProps extends Omit<TextareaProps, 'onChange' | 'value'> {
+export interface TextareaWithMentionsProps extends Omit<TextareaProps, 'onChange' | 'value'> {
   value: string
   onChange: (value: string) => void
   documentId?: string
@@ -34,10 +52,14 @@ interface TextareaWithMentionsProps extends Omit<TextareaProps, 'onChange' | 'va
   mentionTrigger?: string // Default: '@'
   variant?: 'input' | 'textarea'
   autoInsertEntityTag?: boolean
+  /** Optional EntitySearchMenu component - pass from app if entity search is needed */
+  EntitySearchMenu?: ComponentType<EntitySearchMenuProps>
+  /** Optional function to calculate cursor position for dropdown placement */
+  getCharacterCoordinates?: (element: HTMLElement, position: number) => { top: number; left: number }
 }
 
 const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, EntitySearchMenu, getCharacterCoordinates = defaultGetCharacterCoordinates, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -173,8 +195,8 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
           {...props}
         />
         
-        {/* Entity Search Menu */}
-        {entitySearchOpen && documentId && (
+        {/* Entity Search Menu - only rendered if component is provided */}
+        {entitySearchOpen && documentId && EntitySearchMenu && (
           <EntitySearchMenu
             open={entitySearchOpen}
             onSelect={handleEntitySelect}
@@ -205,7 +227,7 @@ const InputWithMentions = forwardRef<HTMLInputElement, InputWithMentionsProps>(
 InputWithMentions.displayName = "InputWithMentions"
 
 const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', autoInsertEntityTag = true, EntitySearchMenu, getCharacterCoordinates = defaultGetCharacterCoordinates, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -343,8 +365,8 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
           {...props}
         />
         
-        {/* Entity Search Menu */}
-        {entitySearchOpen && documentId && (
+        {/* Entity Search Menu - only rendered if component is provided */}
+        {entitySearchOpen && documentId && EntitySearchMenu && (
           <EntitySearchMenu
             open={entitySearchOpen}
             onSelect={handleEntitySelect}

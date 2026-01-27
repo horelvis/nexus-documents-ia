@@ -3,24 +3,24 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { forwardRef, MouseEvent } from 'react'
-import { usePageLoader } from '@/components/providers/page-loader'
 
 interface NavLinkProps extends React.ComponentPropsWithoutRef<typeof Link> {
   children: React.ReactNode
+  /** Optional callback to trigger page loading state */
+  onStartLoading?: () => void
 }
 
 export const NavLink = forwardRef<HTMLAnchorElement, NavLinkProps>(
-  ({ children, href, onClick, ...props }, ref) => {
+  ({ children, href, onClick, onStartLoading, ...props }, ref) => {
     const router = useRouter()
-    const { startLoading } = usePageLoader()
 
     const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
       // Don't show loader for same page navigation or hash links
       const currentPath = window.location.pathname
       const targetPath = typeof href === 'string' ? href : href.pathname
-      
+
       if (targetPath && !targetPath.startsWith('#') && targetPath !== currentPath) {
-        startLoading()
+        onStartLoading?.()
       }
 
       // Call original onClick if provided

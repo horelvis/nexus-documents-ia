@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { Check, ChevronsUpDown, FileText, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+import { Button } from './button'
 import {
   Command,
   CommandEmpty,
@@ -11,14 +11,14 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command'
+} from './command'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
+} from './popover'
+import { Badge } from './badge'
+import { Skeleton } from './skeleton'
 
 interface Document {
   id: string

@@ -1,18 +1,27 @@
 "use client"
 
-import { useState, useRef, forwardRef, useEffect } from "react"
-import { cn } from "@/lib/utils"
-import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
-import { createEntityTag, findEntityAtPosition, parseEntityTags } from "@/components/ui/entity-renderer"
-import { Badge } from "@/components/ui/badge"
+import { useState, useRef, forwardRef, useEffect, ComponentType } from "react"
+import { cn } from "../lib/utils"
+import { createEntityTag, findEntityAtPosition, parseEntityTags } from "./entity-renderer"
+import { Badge } from "./badge"
 import { IconUser, IconBuilding, IconRobot } from "@tabler/icons-react"
 
-interface Entity {
+export interface Entity {
   id: string
   name: string
   email: string
   type: string
   role?: string
+}
+
+// Props for EntitySearchMenu component (to be provided by the app)
+export interface EntitySearchMenuProps {
+  open: boolean
+  onSelect: (entity: Entity) => void
+  onClose: () => void
+  searchQuery: string
+  anchorRef: HTMLDivElement | null
+  documentId: string
 }
 
 interface RichInputWithMentionsProps {
@@ -25,10 +34,12 @@ interface RichInputWithMentionsProps {
   className?: string
   disabled?: boolean
   autoInsertEntityTag?: boolean
+  /** Optional EntitySearchMenu component - pass from app if entity search is needed */
+  EntitySearchMenu?: ComponentType<EntitySearchMenuProps>
 }
 
 export const RichInputWithMentions = forwardRef<HTMLDivElement, RichInputWithMentionsProps>(
-  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', className, disabled = false, autoInsertEntityTag = true, ...props }, ref) => {
+  ({ value, onChange, documentId, placeholder, onEntitySelect, mentionTrigger = '@', className, disabled = false, autoInsertEntityTag = true, EntitySearchMenu, ...props }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
     const [mentionStart, setMentionStart] = useState(-1)
@@ -231,8 +242,8 @@ export const RichInputWithMentions = forwardRef<HTMLDivElement, RichInputWithMen
           {value}
         </div>
 
-        {/* Entity Search Menu */}
-        {entitySearchOpen && documentId && (
+        {/* Entity Search Menu - only rendered if component is provided */}
+        {entitySearchOpen && documentId && EntitySearchMenu && (
           <EntitySearchMenu
             open={entitySearchOpen}
             onSelect={handleEntitySelect}
@@ -240,7 +251,7 @@ export const RichInputWithMentions = forwardRef<HTMLDivElement, RichInputWithMen
               setEntitySearchOpen(false)
               setEntitySearchQuery('')
               setMentionStart(-1)
-              
+
               setTimeout(() => {
                 if (editableRef.current) {
                   editableRef.current.focus()

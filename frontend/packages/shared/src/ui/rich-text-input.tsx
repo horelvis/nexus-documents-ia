@@ -1,11 +1,8 @@
 "use client"
 
-import { useState, useRef, forwardRef } from "react"
-import { cn } from "@/lib/utils"
-import { findEntityAtPosition } from "./entity-renderer"
-import { EntitySearchMenu } from "@/components/documents/entity-search-menu"
-import { createEntityTag } from "./entity-renderer"
-import { getCharacterCoordinates } from "@/lib/caret-utils"
+import { useState, useRef, forwardRef, ComponentType } from "react"
+import { cn } from "../lib/utils"
+import { findEntityAtPosition, createEntityTag } from "./entity-renderer"
 
 interface Entity {
   id: string
@@ -13,6 +10,22 @@ interface Entity {
   email: string
   type: string
   role?: string
+}
+
+// Props for EntitySearchMenu component (to be provided by the app)
+interface EntitySearchMenuProps {
+  open: boolean
+  onSelect: (entity: Entity) => void
+  onClose: () => void
+  searchQuery: string
+  anchorRef: HTMLInputElement | null
+  documentId: string
+  cursorPosition?: { top: number; left: number } | null
+}
+
+// Default fallback for getCharacterCoordinates when not provided
+const defaultGetCharacterCoordinates = (_element: HTMLElement, _position: number): { top: number; left: number } => {
+  return { top: 0, left: 0 }
 }
 
 interface RichTextInputProps {
@@ -26,21 +39,27 @@ interface RichTextInputProps {
   mentionTrigger?: string
   autoInsertEntityTag?: boolean
   onKeyDown?: (e: React.KeyboardEvent) => void
+  /** Optional EntitySearchMenu component - pass from app if entity search is needed */
+  EntitySearchMenu?: ComponentType<EntitySearchMenuProps>
+  /** Optional function to calculate cursor position for dropdown placement */
+  getCharacterCoordinates?: (element: HTMLElement, position: number) => { top: number; left: number }
 }
 
 export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
-  ({ 
-    value, 
-    onChange, 
-    placeholder = "Type @ to mention entities...", 
-    className, 
+  ({
+    value,
+    onChange,
+    placeholder = "Type @ to mention entities...",
+    className,
     disabled = false,
     documentId,
     onEntitySelect,
     mentionTrigger = '@',
     autoInsertEntityTag = true,
     onKeyDown,
-    ...props 
+    EntitySearchMenu,
+    getCharacterCoordinates = defaultGetCharacterCoordinates,
+    ...props
   }, ref) => {
     const [entitySearchOpen, setEntitySearchOpen] = useState(false)
     const [entitySearchQuery, setEntitySearchQuery] = useState('')
@@ -171,8 +190,8 @@ export const RichTextInput = forwardRef<HTMLDivElement, RichTextInputProps>(
           )}
         />
         
-        {/* Entity Search Menu */}
-        {entitySearchOpen && documentId && (
+        {/* Entity Search Menu - only rendered if component is provided */}
+        {entitySearchOpen && documentId && EntitySearchMenu && (
           <EntitySearchMenu
             open={entitySearchOpen}
             onSelect={handleEntitySelectInternal}

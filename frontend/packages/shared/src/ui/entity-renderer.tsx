@@ -1,7 +1,7 @@
 "use client"
 
 import { ReactNode } from "react"
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "./badge"
 import { IconUser, IconBuilding, IconRobot } from "@tabler/icons-react"
 
 export interface EntityTag {
