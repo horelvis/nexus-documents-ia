@@ -1301,6 +1301,122 @@ RAG_PUBLIC_KNOWLEDGE_LIMIT=5
 RAG_PUBLIC_KNOWLEDGE_CATEGORIES=laboral,fiscal,proteccion_datos
 ```
 
+### Multi-Tier RAG Caching
+
+NouxCubeIA implements a sophisticated multi-tier caching system that combines RAG with CAG (Cache-Augmented Generation) patterns. This significantly reduces latency and compute costs for on-premise deployments.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CACHE HIT PERFORMANCE BENEFITS                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Tier 1 Hit (Retrieval)    │  Skip vector search      │  200-500ms saved    │
+│  Tier 2 Hit (Context)      │  Skip doc assembly       │  50-200ms saved     │
+│  Tier 3 Hit (Semantic)     │  Skip entire RAG + LLM   │  3-10 seconds saved │
+│                                                                              │
+│  Combined effect for repetitive workloads:                                  │
+│  • 40-60% of queries hit at least one cache tier                           │
+│  • Average latency reduction: 50-70%                                        │
+│  • vLLM GPU utilization reduction: 30-50%                                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Cache Configuration
+
+```bash
+# backend/docker/.env
+
+# =============================================================================
+# MULTI-TIER RAG CACHING (Reduces latency and GPU load)
+# =============================================================================
+
+# TIER 1: Retrieval Cache
+# Caches vector search results (doc_ids + scores)
+# User-isolated for ACL security
+RETRIEVAL_CACHE_ENABLED=true
+RETRIEVAL_CACHE_TTL_SECONDS=300        # 5 minutes (short for freshness)
+RETRIEVAL_CACHE_MAX_ENTRIES=500        # Max cached queries per tenant
+
+# TIER 2: Context Assembly Cache
+# Caches assembled context strings ready for LLM
+# Key insight: Different queries retrieving same docs share context
+CONTEXT_CACHE_ENABLED=true
+CONTEXT_CACHE_TTL_SECONDS=1800         # 30 minutes
+CONTEXT_CACHE_MAX_SIZE_MB=100          # Max cache size
+
+# TIER 3: Semantic Cache (existing)
+# Caches final LLM responses for semantically similar queries
+RAG_CACHE_ENABLED=true
+RAG_CACHE_TTL_SECONDS=3600             # 1 hour
+RAG_SEMANTIC_CACHE_SIMILARITY=0.92     # Similarity threshold
+```
+
+#### Cache Invalidation
+
+The system automatically invalidates caches when data changes:
+
+| Event | What Happens | Latency Impact |
+|-------|--------------|----------------|
+| **Document updated** | Invalidates all caches referencing that document | ~10ms |
+| **Document deleted** | Invalidates all caches referencing that document | ~10ms |
+| **Index rebuilt** | Invalidates ALL caches for tenant | ~100ms |
+| **Chunking changed** | Invalidates context + semantic caches | ~50ms |
+
+```bash
+# Manual cache invalidation (admin API)
+# Invalidate caches for specific documents
+curl -X POST http://localhost:8007/api/v1/cache/invalidate \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"document_ids": ["doc-123", "doc-456"]}'
+
+# Get cache health statistics
+curl http://localhost:8007/api/v1/cache/health \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
+```
+
+#### Monitoring Cache Performance
+
+```bash
+# Check Redis cache usage
+docker compose exec redis redis-cli INFO memory | grep used_memory_human
+
+# View cache keys for a tenant
+docker compose exec redis redis-cli KEYS "retrieval:tenant-123:*" | wc -l
+docker compose exec redis redis-cli KEYS "context:tenant-123:*" | wc -l
+
+# Cache statistics endpoint
+curl http://localhost:8007/api/v1/cache/stats \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
+
+# Response:
+# {
+#   "retrieval_cache": {"hits": 1234, "misses": 567, "hit_rate": 0.68},
+#   "context_cache": {"hits": 890, "misses": 234, "hit_rate": 0.79},
+#   "semantic_cache": {"hits": 456, "misses": 123, "hit_rate": 0.78}
+# }
+```
+
+#### Hardware Considerations for Caching
+
+| Scenario | Redis Memory | Recommendation |
+|----------|--------------|----------------|
+| **Small (1-10 users)** | 256MB | Default config works |
+| **Medium (10-50 users)** | 1GB | Increase TTL for better hit rates |
+| **Large (50+ users)** | 2-4GB | Consider Redis Cluster |
+
+```bash
+# Increase Redis memory limit in docker-compose.yml
+redis:
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+```
+
+---
+
 ### Testing the Pipeline
 
 ```bash

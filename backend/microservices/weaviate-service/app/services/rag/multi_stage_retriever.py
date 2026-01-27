@@ -1351,6 +1351,75 @@ class MultiStageRetriever:
 
         return combined
 
+    # =========================================================================
+    # Cache Support Methods
+    # =========================================================================
+
+    async def fetch_documents_by_ids(
+        self,
+        doc_ids: List[str],
+        tenant_id: str,
+        scores: Optional[List[float]] = None,
+    ) -> List[RetrievedDocument]:
+        """
+        Fetch documents by their IDs (for retrieval cache hits).
+
+        This is much faster than a full vector search when we already know
+        which documents we want. Used when retrieval cache returns doc IDs.
+
+        Args:
+            doc_ids: List of document/chunk UUIDs to fetch
+            tenant_id: Tenant identifier
+            scores: Optional pre-computed scores (from cache)
+
+        Returns:
+            List of RetrievedDocument objects
+        """
+        if not doc_ids:
+            return []
+
+        await self.initialize()
+
+        try:
+            collection_name = _get_tenant_collection_name(tenant_id)
+
+            # Fetch documents from Weaviate by UUID
+            docs = await weaviate_service.fetch_objects_by_ids(
+                collection_name=collection_name,
+                object_ids=doc_ids,
+            )
+
+            # Convert to RetrievedDocument objects
+            retrieved = []
+            for i, doc in enumerate(docs):
+                if doc is None:
+                    continue
+
+                # Use cached score if available, otherwise default
+                score = scores[i] if scores and i < len(scores) else 0.8
+
+                retrieved.append(RetrievedDocument(
+                    id=doc.get("uuid", doc_ids[i] if i < len(doc_ids) else ""),
+                    title=doc.get("title", ""),
+                    content=doc.get("content", ""),
+                    score=score,
+                    document_type=doc.get("document_type"),
+                    tenant_id=doc.get("tenant_id", tenant_id),
+                    metadata={
+                        "chunk_index": doc.get("chunk_index", 0),
+                        "total_chunks": doc.get("total_chunks", 1),
+                        "document_id": doc.get("document_id", ""),
+                        "from_cache": True,
+                    }
+                ))
+
+            logger.debug(f"📄 Fetched {len(retrieved)}/{len(doc_ids)} documents by ID")
+            return retrieved
+
+        except Exception as e:
+            logger.warning(f"⚠️ fetch_documents_by_ids failed: {e}")
+            return []
+
 
 # Global instance
 multi_stage_retriever = MultiStageRetriever()

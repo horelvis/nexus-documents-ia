@@ -7,6 +7,8 @@ export { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
 // Display Components
 export { ThinkingIndicator } from "./displays/Generic/ThinkingIndicator"
 export { WorkflowProgress } from "./displays/Generic/WorkflowProgress"
+export { SLMThinkingDisplay } from "./displays/Generic/SLMThinkingDisplay"
+export { ReasoningDisplay, type ReasoningDisplayProps } from "./displays/Generic/ReasoningDisplay"
 
 // Voice Mode Components
 export {
@@ -32,6 +34,15 @@ export type {
   DocumentInfo,
   ChainOfThoughtData,
   DisplayRendererProps,
+  WorkflowStep,
+  // SLM Router types
+  SLMThinkingStep,
+  SLMThinkingStepType,
+  SLMPlanReady,
+  SLMExecutionComplete,
+  SLMStreamEvent,
+  SLMStreamEventType,
+  ProgressStage,
 } from "./types"
 
 // Voice Types

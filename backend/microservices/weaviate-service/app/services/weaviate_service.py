@@ -496,6 +496,11 @@ class WeaviateService:
                         data_type=weaviate.classes.config.DataType.INT,
                         description="Character end position in full text"
                     ),
+                    weaviate.classes.config.Property(
+                        name="chunk_index",
+                        data_type=weaviate.classes.config.DataType.INT,
+                        description="Index of this chunk within the document (0-based)"
+                    ),
                     # Bbox start coordinates (x0, y0, x1, y1)
                     weaviate.classes.config.Property(
                         name="bbox_start_x0",
@@ -563,6 +568,22 @@ class WeaviateService:
                         name="external_id",
                         data_type=weaviate.classes.config.DataType.TEXT,
                         description="External system identifier for channel documents"
+                    ),
+                    # ========== Folder hierarchy properties for path-based filtering ==========
+                    weaviate.classes.config.Property(
+                        name="folder_path",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Full folder path (e.g., /Contracts/ACME/2024)"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="folder_hierarchy",
+                        data_type=weaviate.classes.config.DataType.TEXT_ARRAY,
+                        description="Array of folder levels [/, /Contracts, /Contracts/ACME]"
+                    ),
+                    weaviate.classes.config.Property(
+                        name="connector_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Connector that indexed this document"
                     ),
                     # ========== ACL properties for document-level access control ==========
                     weaviate.classes.config.Property(
@@ -1399,107 +1420,318 @@ class WeaviateService:
             logger.warning(f"⚠️ Failed to fetch chunks by indices: {e}")
             return []
 
+    async def fetch_objects_by_ids(
+        self,
+        collection_name: str,
+        object_ids: List[str],
+    ) -> List[Optional[Dict[str, Any]]]:
+        """
+        Fetch multiple objects by their UUIDs (for cache support).
+
+        This is optimized for retrieval cache hits where we already know
+        which documents we need. Much faster than re-running vector search.
+
+        Args:
+            collection_name: Weaviate collection name
+            object_ids: List of object UUIDs to fetch
+
+        Returns:
+            List of object dictionaries (None for not-found objects)
+        """
+        if not object_ids:
+            return []
+
+        try:
+            collection = self.client.collections.get(collection_name)
+            results: List[Optional[Dict[str, Any]]] = []
+
+            # Batch fetch in chunks of 100
+            batch_size = 100
+            for i in range(0, len(object_ids), batch_size):
+                batch_ids = object_ids[i:i + batch_size]
+
+                for obj_id in batch_ids:
+                    try:
+                        # Fetch single object by UUID
+                        obj = collection.query.fetch_object_by_id(
+                            uuid=obj_id,
+                            return_properties=[
+                                "content", "title", "document_type", "tenant_id",
+                                "chunk_index", "total_chunks", "document_id",
+                                "folder_path", "file_type", "created_at"
+                            ],
+                        )
+                        if obj:
+                            results.append({
+                                "uuid": str(obj.uuid),
+                                "content": obj.properties.get("content", ""),
+                                "title": obj.properties.get("title", ""),
+                                "document_type": obj.properties.get("document_type"),
+                                "tenant_id": obj.properties.get("tenant_id"),
+                                "chunk_index": obj.properties.get("chunk_index", 0),
+                                "total_chunks": obj.properties.get("total_chunks", 1),
+                                "document_id": obj.properties.get("document_id", ""),
+                                "folder_path": obj.properties.get("folder_path"),
+                                "file_type": obj.properties.get("file_type"),
+                                "created_at": obj.properties.get("created_at"),
+                            })
+                        else:
+                            results.append(None)
+                    except Exception:
+                        results.append(None)
+
+            logger.debug(f"📄 Fetched {len([r for r in results if r])}/{len(object_ids)} objects by ID")
+            return results
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to fetch objects by IDs: {e}")
+            return [None] * len(object_ids)
+
     async def add_document(self, collection_name: str, document: DocumentCreate) -> DocumentResponse:
-        """Add a document to Weaviate"""
+        """
+        Add a document to Weaviate.
+
+        If document.chunks is provided, stores each chunk as a separate Weaviate object
+        for fine-grained RAG retrieval. Otherwise, stores the document as a single object.
+
+        This enables:
+        - Full indexing of long documents (100+ pages)
+        - Precise chunk-level retrieval for RAG
+        - folder_path filtering at chunk level
+        """
         try:
             # Ensure collection exists before adding document
             if not await self.ensure_collection_exists(collection_name):
                 raise Exception(f"Could not create or access collection: {collection_name}")
-            
+
             # Generate ID if not provided
             doc_id = document.id or str(uuid.uuid4())
-            
-            # Prepare document data (removed metadata for now - no nested object schema)
-            doc_data = {
+
+            # Get collection using v4 API
+            collection = self.client.collections.get(collection_name)
+
+            # Common properties for all objects (document or chunks)
+            base_properties = {
+                "document_id": doc_id,
                 "title": document.title,
-                "content": document.content,
-                "document_id": doc_id,  # Store PostgreSQL document ID as property
                 "tenant_id": document.tenant_id,
-                "document_type": document.document_type,
-                "tags": document.tags,
+                "document_type": document.document_type or "document",
+                "tags": document.tags or [],
                 "created_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
                 "updated_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                # Channel properties (defaults for regular uploads)
+                # Channel properties
                 "channel_id": getattr(document, 'channel_id', '') or '',
                 "channel_visibility": getattr(document, 'channel_visibility', '') or '',
                 "owner_user_id": getattr(document, 'owner_user_id', '') or '',
                 "source_type": getattr(document, 'source_type', 'upload') or 'upload',
                 "external_id": getattr(document, 'external_id', '') or '',
-                # ACL properties (defaults for backwards compatibility - everyone can view)
+                # Folder hierarchy for path-based filtering
+                "folder_path": getattr(document, 'folder_path', '') or '',
+                "folder_hierarchy": getattr(document, 'folder_hierarchy', []) or [],
+                "connector_id": getattr(document, 'connector_id', '') or '',
+                # ACL properties
                 "acl_user_ids": getattr(document, 'acl_user_ids', []) or [],
                 "acl_role_ids": getattr(document, 'acl_role_ids', []) or [],
-                "acl_everyone": getattr(document, 'acl_everyone', True),  # Default True for backwards compat
+                "acl_everyone": getattr(document, 'acl_everyone', True),
             }
-            
-            # Get collection and add document using v4 API
-            collection = self.client.collections.get(collection_name)
-            
-            # Generate embedding using configured provider (TEI or Sentence Transformers)
-            embedding_vector = None
-            if self.embedding_model:
+
+            # Check if we have chunks to store individually
+            chunks = getattr(document, 'chunks', None) or []
+
+            if chunks and len(chunks) > 0:
+                # ====== CHUNK-LEVEL STORAGE ======
+                # Store each chunk as a separate Weaviate object for fine-grained RAG
+                logger.info(f"📦 Storing {len(chunks)} chunks for document {doc_id}")
+
+                # First, delete any existing chunks for this document (in case of re-indexing)
+                await self._delete_document_chunks(collection_name, doc_id)
+
+                # Prepare batch objects for all chunks
+                batch_objects = []
+
+                for chunk in chunks:
+                    chunk_content = chunk.get("content", "")
+                    chunk_metadata = chunk.get("metadata", {})
+                    chunk_index = chunk.get("chunk_index", 0)
+
+                    # Generate unique UUID for this chunk
+                    chunk_uuid = str(uuid.uuid4())
+
+                    # Build chunk properties - inherit from base and add chunk-specific
+                    chunk_properties = {
+                        **base_properties,
+                        "content": chunk_content,
+                        # Position properties from chunk metadata
+                        "chunk_index": chunk_index,
+                        "char_start": chunk_metadata.get("char_start", 0),
+                        "char_end": chunk_metadata.get("char_end", 0),
+                        "page_start": chunk_metadata.get("page_start", 0),
+                        "page_end": chunk_metadata.get("page_end", 0),
+                        # Override folder fields if chunk has its own (shouldn't differ, but be safe)
+                        "folder_path": chunk_metadata.get("folder_path") or base_properties["folder_path"],
+                        "folder_hierarchy": chunk_metadata.get("folder_hierarchy") or base_properties["folder_hierarchy"],
+                        "connector_id": chunk_metadata.get("connector_id") or base_properties["connector_id"],
+                    }
+
+                    # Generate embedding for chunk
+                    embedding_vector = None
+                    if self.embedding_model:
+                        try:
+                            text_to_embed = f"{document.title} {chunk_content}"
+                            embedding_vector = await generate_embedding(text_to_embed)
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not generate chunk embedding: {e}")
+
+                    if embedding_vector:
+                        batch_objects.append(weaviate.classes.data.DataObject(
+                            properties=chunk_properties,
+                            uuid=chunk_uuid,
+                            vector=embedding_vector
+                        ))
+                    else:
+                        batch_objects.append(weaviate.classes.data.DataObject(
+                            properties=chunk_properties,
+                            uuid=chunk_uuid
+                        ))
+
+                # Batch insert all chunks
+                if batch_objects:
+                    try:
+                        collection.data.insert_many(batch_objects)
+                        logger.info(f"✅ Inserted {len(batch_objects)} chunks for document {doc_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Batch chunk insert failed: {e}")
+                        raise
+
+                # Return response with first chunk content preview
+                first_chunk_content = chunks[0].get("content", "")[:500] if chunks else ""
+
+                return DocumentResponse(
+                    id=doc_id,
+                    title=document.title,
+                    content=first_chunk_content + f"... [{len(chunks)} chunks total]",
+                    metadata={"chunk_count": len(chunks)},
+                    tenant_id=document.tenant_id,
+                    document_type=document.document_type or "document",
+                    tags=document.tags or [],
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    vector_id=doc_id,
+                    folder_path=base_properties["folder_path"],
+                    folder_hierarchy=base_properties["folder_hierarchy"],
+                    connector_id=base_properties["connector_id"],
+                )
+
+            else:
+                # ====== SINGLE DOCUMENT STORAGE ======
+                # No chunks - store as single document (legacy/upload flow)
+                doc_data = {
+                    **base_properties,
+                    "content": document.content,
+                }
+
+                # Generate embedding for document
+                embedding_vector = None
+                if self.embedding_model:
+                    try:
+                        text_to_embed = f"{document.title} {document.content}"
+                        embedding_vector = await generate_embedding(text_to_embed)
+                        if embedding_vector:
+                            logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not generate embedding: {e}")
+
+                # Insert document; if it exists already, replace it
                 try:
-                    text_to_embed = f"{document.title} {document.content}"
-                    embedding_vector = await generate_embedding(text_to_embed)
                     if embedding_vector:
-                        logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not generate embedding: {e}")
-            
-            # Insert document; if it exists already, replace it
-            try:
-                if embedding_vector:
-                    result = collection.data.insert(
-                        properties=doc_data,
-                        uuid=doc_id,
-                        vector=embedding_vector
-                    )
-                else:
-                    result = collection.data.insert(
-                        properties=doc_data,
-                        uuid=doc_id
-                    )
-                logger.info(f"✅ Inserted document {doc_id} to {collection_name}")
-            except UnexpectedStatusCodeException as exc:
-                if exc.status_code == 422 and "already exists" in str(exc):
-                    logger.info(f"♻️ Document {doc_id} already exists in {collection_name}, replacing")
-                    if embedding_vector:
-                        result = collection.data.replace(
+                        result = collection.data.insert(
                             properties=doc_data,
                             uuid=doc_id,
                             vector=embedding_vector
                         )
                     else:
-                        result = collection.data.replace(
+                        result = collection.data.insert(
                             properties=doc_data,
                             uuid=doc_id
                         )
-                    logger.info(f"✅ Replaced document {doc_id} in {collection_name}")
-                else:
-                    raise
-            
-            vector_identifier = doc_id
-            if result is not None:
-                try:
-                    vector_identifier = str(result)
-                except Exception:
-                    vector_identifier = doc_id
-            
-            return DocumentResponse(
-                id=doc_id,
-                title=document.title,
-                content=document.content,
-                metadata={},  # Empty for now
-                tenant_id=document.tenant_id,
-                document_type=document.document_type,
-                tags=document.tags,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
-                vector_id=vector_identifier
-            )
-            
+                    logger.info(f"✅ Inserted document {doc_id} to {collection_name}")
+                except UnexpectedStatusCodeException as exc:
+                    if exc.status_code == 422 and "already exists" in str(exc):
+                        logger.info(f"♻️ Document {doc_id} already exists, replacing")
+                        if embedding_vector:
+                            result = collection.data.replace(
+                                properties=doc_data,
+                                uuid=doc_id,
+                                vector=embedding_vector
+                            )
+                        else:
+                            result = collection.data.replace(
+                                properties=doc_data,
+                                uuid=doc_id
+                            )
+                        logger.info(f"✅ Replaced document {doc_id}")
+                    else:
+                        raise
+
+                return DocumentResponse(
+                    id=doc_id,
+                    title=document.title,
+                    content=document.content,
+                    metadata={},
+                    tenant_id=document.tenant_id,
+                    document_type=document.document_type or "document",
+                    tags=document.tags or [],
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    vector_id=doc_id,
+                    folder_path=base_properties["folder_path"],
+                    folder_hierarchy=base_properties["folder_hierarchy"],
+                    connector_id=base_properties["connector_id"],
+                )
+
         except Exception as e:
             logger.error(f"❌ Failed to add document to {collection_name}: {e}")
             raise
+
+    async def _delete_document_chunks(self, collection_name: str, document_id: str) -> int:
+        """
+        Delete all chunks belonging to a document before re-indexing.
+
+        Returns the number of chunks deleted.
+        """
+        try:
+            collection = self.client.collections.get(collection_name)
+
+            # Find all objects with this document_id
+            Filter = weaviate.classes.query.Filter
+            doc_filter = Filter.by_property("document_id").equal(document_id)
+
+            result = collection.query.fetch_objects(
+                filters=doc_filter,
+                limit=1000,  # Max chunks we expect per document
+                return_properties=["document_id"]
+            )
+
+            if not result.objects:
+                return 0
+
+            # Delete each chunk
+            deleted = 0
+            for obj in result.objects:
+                try:
+                    collection.data.delete_by_id(obj.uuid)
+                    deleted += 1
+                except Exception:
+                    pass
+
+            if deleted > 0:
+                logger.info(f"🗑️ Deleted {deleted} existing chunks for document {document_id}")
+
+            return deleted
+
+        except Exception as e:
+            logger.warning(f"⚠️ Could not delete existing chunks for {document_id}: {e}")
+            return 0
 
     async def delete_document(self, collection_name: str, document_id: str) -> bool:
         """
@@ -1599,7 +1831,26 @@ class WeaviateService:
                     additional_filter = self._build_property_filter(key, value)
                     if additional_filter is not None:
                         combined_filters = combined_filters & additional_filter
-            
+
+            # Add folder hierarchy filters for path-based RAG queries
+            Filter = weaviate.classes.query.Filter
+
+            # Exact folder path match
+            folder_path = getattr(search_request, 'folder_path', None)
+            if folder_path:
+                folder_filter = Filter.by_property("folder_path").equal(folder_path)
+                combined_filters = combined_filters & folder_filter
+                logger.debug(f"📁 Filtering by exact folder_path: {folder_path}")
+
+            # Folder hierarchy contains (documents in folder or any subfolder)
+            folder_hierarchy_contains = getattr(search_request, 'folder_hierarchy_contains', None)
+            if folder_hierarchy_contains:
+                # folder_hierarchy is an array like ["/", "/Contracts", "/Contracts/ACME"]
+                # We filter for documents where the hierarchy contains this path
+                hierarchy_filter = Filter.by_property("folder_hierarchy").contains_any([folder_hierarchy_contains])
+                combined_filters = combined_filters & hierarchy_filter
+                logger.debug(f"📁 Filtering by folder_hierarchy_contains: {folder_hierarchy_contains}")
+
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":
                 # Generate embedding for query using configured provider
@@ -1695,7 +1946,11 @@ class WeaviateService:
                     tags=item.properties.get("tags", []),
                     created_at=created_at,
                     updated_at=updated_at,
-                    similarity_score=similarity
+                    similarity_score=similarity,
+                    # Folder hierarchy fields for path-based filtering
+                    folder_path=item.properties.get("folder_path", ""),
+                    folder_hierarchy=item.properties.get("folder_hierarchy", []),
+                    connector_id=item.properties.get("connector_id", ""),
                 )
                 documents.append(doc)
             
@@ -2404,12 +2659,25 @@ class WeaviateService:
                     "title": document.title,
                     "content": document.content,
                     "document_id": document.id,  # Store PostgreSQL document ID as property
-                    "metadata": document.metadata,
                     "tenant_id": document.tenant_id,
                     "document_type": document.document_type,
                     "tags": document.tags,
                     "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat()
+                    "updated_at": datetime.now().isoformat(),
+                    # Channel properties
+                    "channel_id": getattr(document, 'channel_id', '') or '',
+                    "channel_visibility": getattr(document, 'channel_visibility', '') or '',
+                    "owner_user_id": getattr(document, 'owner_user_id', '') or '',
+                    "source_type": getattr(document, 'source_type', 'upload') or 'upload',
+                    "external_id": getattr(document, 'external_id', '') or '',
+                    # Folder hierarchy for path-based filtering in RAG
+                    "folder_path": getattr(document, 'folder_path', '') or '',
+                    "folder_hierarchy": getattr(document, 'folder_hierarchy', []) or [],
+                    "connector_id": getattr(document, 'connector_id', '') or '',
+                    # ACL properties
+                    "acl_user_ids": getattr(document, 'acl_user_ids', []) or [],
+                    "acl_role_ids": getattr(document, 'acl_role_ids', []) or [],
+                    "acl_everyone": getattr(document, 'acl_everyone', True),
                 }
                 
                 # Generate embeddings using configured provider (TEI or Sentence Transformers)
@@ -2490,12 +2758,16 @@ class WeaviateService:
                     tags=item.properties.get("tags", []),
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
-                    similarity_score=similarity
+                    similarity_score=similarity,
+                    # Folder hierarchy fields
+                    folder_path=item.properties.get("folder_path", ""),
+                    folder_hierarchy=item.properties.get("folder_hierarchy", []),
+                    connector_id=item.properties.get("connector_id", ""),
                 )
                 documents.append(doc)
-            
+
             search_time = int((datetime.now() - start_time).total_seconds() * 1000)
-            
+
             return SearchResponse(
                 query="vector_query",
                 results=documents,

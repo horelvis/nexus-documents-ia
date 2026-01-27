@@ -131,6 +131,17 @@ class Settings(BaseSettings):
     rag_cache_max_entries: int = int(os.getenv("RAG_CACHE_MAX_ENTRIES", "1000"))
     rag_cache_min_confidence: float = float(os.getenv("RAG_CACHE_MIN_CONFIDENCE", "0.65"))
 
+    # RAG Pipeline - Multi-tier Caching (Retrieval + Context + Semantic)
+    # Retrieval Cache: Caches vector search results (doc IDs + scores)
+    retrieval_cache_enabled: bool = os.getenv("RETRIEVAL_CACHE_ENABLED", "true").lower() == "true"
+    retrieval_cache_ttl_seconds: int = int(os.getenv("RETRIEVAL_CACHE_TTL_SECONDS", "300"))  # 5 minutes
+    retrieval_cache_max_entries: int = int(os.getenv("RETRIEVAL_CACHE_MAX_ENTRIES", "500"))
+
+    # Context Assembly Cache: Caches assembled context ready for LLM
+    context_cache_enabled: bool = os.getenv("CONTEXT_CACHE_ENABLED", "true").lower() == "true"
+    context_cache_ttl_seconds: int = int(os.getenv("CONTEXT_CACHE_TTL_SECONDS", "1800"))  # 30 minutes
+    context_cache_max_size_mb: int = int(os.getenv("CONTEXT_CACHE_MAX_SIZE_MB", "100"))
+
     # RAG Pipeline - RRF Fusion settings
     rag_rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
     rag_dense_weight: float = float(os.getenv("RAG_DENSE_WEIGHT", "1.0"))
@@ -275,6 +286,16 @@ class Settings(BaseSettings):
     mcp_filesystem_enabled: bool = os.getenv("MCP_FILESYSTEM_ENABLED", "false").lower() == "true"
     mcp_filesystem_command: str = os.getenv("MCP_FILESYSTEM_COMMAND", "")
 
+    # ==========================================================================
+    # MEN Service (Mixture of Experts Network) Configuration
+    # ==========================================================================
+    # MEN provides intelligent query routing using specialized small models:
+    # - Orchestrator (1.5B): Domain classification
+    # - Experts (0.5B + LoRA): Tenant-specific knowledge
+    # - LLM Modeler (3B): Response synthesis with conversational memory
+    men_enabled: bool = os.getenv("MEN_ENABLED", "false").lower() == "true"
+    men_service_url: str = os.getenv("MEN_SERVICE_URL", "http://men-service:8010")
+
     # Main API URL
     api_url: str = os.getenv("API_URL", "http://api:8000")
 
@@ -377,6 +398,11 @@ class Settings(BaseSettings):
 
     # Training data collection (for future fine-tuning)
     slm_collect_training_data: bool = os.getenv("SLM_COLLECT_TRAINING_DATA", "true").lower() == "true"
+
+    # Chain-of-Thought Streaming (visible reasoning in UI)
+    # When enabled, the /slm/route/stream endpoint provides real-time
+    # thinking steps: entity detection, intent detection, route decision
+    slm_streaming_enabled: bool = os.getenv("SLM_STREAMING_ENABLED", "true").lower() == "true"
 
     # ==========================================================================
     # Continuous Learning Configuration (Automated Fine-Tuning)

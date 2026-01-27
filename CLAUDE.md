@@ -267,6 +267,84 @@ SLM_MODEL=Qwen/Qwen2-0.5B-Instruct
 SLM_BASE_URL=http://vllm:8000/v1
 ```
 
+#### Multi-Tier RAG Caching System
+
+> **📖 Full Documentation**: [`docs/architecture/RAG_CACHING.md`](docs/architecture/RAG_CACHING.md)
+
+The RAG pipeline implements a multi-tier caching architecture that combines RAG (Retrieval-Augmented Generation) with CAG (Cache-Augmented Generation) patterns for optimal performance:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MULTI-TIER CACHING ARCHITECTURE                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  User Query                                                                  │
+│       │                                                                      │
+│       ▼                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  TIER 1: Retrieval Cache (TTL: 5min)                                │    │
+│  │  • Caches: doc_ids + scores from vector search                      │    │
+│  │  • Key: hash(query_embedding + tenant_id + user_id + filters)       │    │
+│  │  • Hit rate: 40-60% for repetitive workloads                        │    │
+│  │  • Benefit: Skip embedding + vector search (~200-500ms saved)       │    │
+│  └────────────────────────────────┬────────────────────────────────────┘    │
+│                                   │ miss                                    │
+│                                   ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  TIER 2: Context Assembly Cache (TTL: 30min)                        │    │
+│  │  • Caches: assembled context string ready for LLM                   │    │
+│  │  • Key: hash(sorted_doc_ids + chunk_version + index_version)        │    │
+│  │  • Insight: Different queries → same docs → same context            │    │
+│  │  • Benefit: Skip doc fetching + token counting (~50-200ms saved)    │    │
+│  └────────────────────────────────┬────────────────────────────────────┘    │
+│                                   │ miss                                    │
+│                                   ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  TIER 3: Semantic Cache (TTL: 1hr) - Existing                       │    │
+│  │  • Caches: final LLM responses                                      │    │
+│  │  • Key: semantic similarity of query                                │    │
+│  │  • Benefit: Skip entire RAG + LLM (~3-10s saved)                    │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  Version Manager: Coordinates invalidation across all tiers                 │
+│  • Tracks: embedding_model, chunk_strategy, index_version                  │
+│  • On change: Cascading invalidation via registered callbacks              │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Components:**
+- `weaviate-service/app/services/rag/cache/` - Cache modules
+  - `retrieval_cache.py` - Vector search results cache (user-isolated for ACL)
+  - `context_cache.py` - Assembled context string cache
+  - `version_manager.py` - Version tracking and invalidation coordination
+- `weaviate-service/app/services/rag/rag_pipeline.py` - Integration point
+
+**Configuration:**
+```bash
+# Retrieval Cache (Tier 1)
+RETRIEVAL_CACHE_ENABLED=true
+RETRIEVAL_CACHE_TTL_SECONDS=300        # 5 minutes
+RETRIEVAL_CACHE_MAX_ENTRIES=500
+
+# Context Assembly Cache (Tier 2)
+CONTEXT_CACHE_ENABLED=true
+CONTEXT_CACHE_TTL_SECONDS=1800         # 30 minutes
+CONTEXT_CACHE_MAX_SIZE_MB=100
+
+# Semantic Cache (Tier 3) - Existing
+RAG_CACHE_ENABLED=true
+RAG_CACHE_TTL_SECONDS=3600             # 1 hour
+```
+
+**Cache Invalidation Events:**
+| Event | Affected Caches | Trigger |
+|-------|-----------------|---------|
+| Document update/delete | Retrieval + Context | `mark_documents_updated()` |
+| Index rebuild | All caches for tenant | `bump_index_version()` |
+| Chunking strategy change | Context + Semantic | `set_chunk_strategy()` |
+| Embedding model change | All caches | `set_embedding_model()` |
+
 ### File Structure Conventions
 
 #### Backend (`/backend/app/`)

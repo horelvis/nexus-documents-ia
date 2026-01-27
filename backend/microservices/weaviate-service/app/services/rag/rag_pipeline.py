@@ -38,12 +38,19 @@ from .context_assembler import ContextAssembler, context_assembler
 from .validated_generator import ValidatedGenerator, validated_generator
 from .semantic_cache import SemanticCache, semantic_cache, CachedResponse
 from .monitoring import RAGMonitor, rag_monitor, QueryMetrics
+from .cache import (
+    RetrievalCache, retrieval_cache,
+    ContextAssemblyCache, context_cache,
+    CacheVersionManager, cache_version_manager,
+)
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Configuration
 CACHE_ENABLED = os.environ.get("RAG_CACHE_ENABLED", "true").lower() == "true"
+RETRIEVAL_CACHE_ENABLED = os.environ.get("RETRIEVAL_CACHE_ENABLED", "true").lower() == "true"
+CONTEXT_CACHE_ENABLED = os.environ.get("CONTEXT_CACHE_ENABLED", "true").lower() == "true"
 MONITORING_ENABLED = os.environ.get("RAG_MONITORING_ENABLED", "true").lower() == "true"
 
 
@@ -71,6 +78,9 @@ class RAGPipeline:
         generator: Optional[ValidatedGenerator] = None,
         cache: Optional[SemanticCache] = None,
         monitor: Optional[RAGMonitor] = None,
+        retrieval_cache_instance: Optional[RetrievalCache] = None,
+        context_cache_instance: Optional[ContextAssemblyCache] = None,
+        version_manager: Optional[CacheVersionManager] = None,
     ):
         # Use provided components or global instances
         self.query_intel = query_intel or query_intelligence
@@ -80,8 +90,15 @@ class RAGPipeline:
         self.cache = cache or semantic_cache
         self.monitor = monitor or rag_monitor
 
+        # Multi-tier caching components
+        self.retrieval_cache = retrieval_cache_instance or retrieval_cache
+        self.context_cache = context_cache_instance or context_cache
+        self.version_manager = version_manager or cache_version_manager
+
         self._initialized = False
         self._cache_enabled = CACHE_ENABLED
+        self._retrieval_cache_enabled = RETRIEVAL_CACHE_ENABLED
+        self._context_cache_enabled = CONTEXT_CACHE_ENABLED
         self._monitoring_enabled = MONITORING_ENABLED
 
     async def initialize(self):
@@ -89,22 +106,64 @@ class RAGPipeline:
         if self._initialized:
             return
 
-        logger.info("🚀 Initializing RAG Pipeline (7-layer production)...")
+        logger.info("🚀 Initializing RAG Pipeline (7-layer production + multi-tier caching)...")
 
         # Initialize retriever (which initializes Weaviate)
         await self.retriever.initialize()
 
-        # Initialize cache
+        # Initialize semantic cache (Layer 6 - final responses)
         if self._cache_enabled:
             try:
                 await self.cache.initialize()
                 logger.info("✅ Semantic cache initialized")
             except Exception as e:
-                logger.warning(f"⚠️ Cache initialization failed, continuing without cache: {e}")
+                logger.warning(f"⚠️ Semantic cache initialization failed: {e}")
                 self._cache_enabled = False
 
+        # Initialize retrieval cache (Layer 3.5 - search results)
+        if self._retrieval_cache_enabled:
+            try:
+                await self.retrieval_cache.initialize()
+                logger.info("✅ Retrieval cache initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Retrieval cache initialization failed: {e}")
+                self._retrieval_cache_enabled = False
+
+        # Initialize context cache (Layer 4.5 - assembled context)
+        if self._context_cache_enabled:
+            try:
+                await self.context_cache.initialize()
+                logger.info("✅ Context cache initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Context cache initialization failed: {e}")
+                self._context_cache_enabled = False
+
+        # Initialize version manager and register invalidation callbacks
+        try:
+            await self.version_manager.initialize()
+            # Register caches for automatic invalidation on document changes
+            if self._retrieval_cache_enabled:
+                self.version_manager.register_invalidation_callback(
+                    self.retrieval_cache.invalidate_by_documents
+                )
+            if self._context_cache_enabled:
+                self.version_manager.register_invalidation_callback(
+                    self.context_cache.invalidate_by_documents
+                )
+            if self._cache_enabled:
+                # Wrapper to adapt semantic_cache's single-doc method to multi-doc callback
+                async def semantic_cache_invalidator(tenant_id: str, doc_ids: List[str]) -> int:
+                    total = 0
+                    for doc_id in doc_ids:
+                        total += await self.cache.invalidate_by_document(tenant_id, doc_id)
+                    return total
+                self.version_manager.register_invalidation_callback(semantic_cache_invalidator)
+            logger.info("✅ Version manager initialized with invalidation callbacks")
+        except Exception as e:
+            logger.warning(f"⚠️ Version manager initialization failed: {e}")
+
         self._initialized = True
-        logger.info("✅ RAG Pipeline initialized successfully")
+        logger.info("✅ RAG Pipeline initialized successfully (3-tier caching active)")
 
     async def process_query(
         self,
@@ -239,23 +298,70 @@ class RAGPipeline:
             # === Layer 3: Hybrid Retrieval + RRF + Public Knowledge + Soft Selection ===
             retrieval_start = time.time()
             logger.info("  Layer 3: Hybrid Retrieval + RRF + Public Knowledge + Soft Selection")
-            retrieved_docs, selection_metadata = await self.retriever.retrieve(
-                query_analysis=query_analysis,
-                tenant_id=tenant_id,
-                user_id=user_id,  # ACL: user identification
-                user_role_ids=user_role_ids,  # ACL: role-based access
-                is_admin=is_admin,  # ACL: admin bypass
-                collection_name=collection_name,
-                top_k=top_k,
-                include_public_knowledge=include_public_knowledge,
-            )
+
+            # Get current versions for cache validation
+            versions = await self.version_manager.get_versions(tenant_id)
+            current_index_version = versions.index_version
+
+            # === NEW: Retrieval Cache Check ===
+            cached_retrieval = None
+            if self._retrieval_cache_enabled and query_embedding and user_id:
+                cached_retrieval = await self.retrieval_cache.get(
+                    query_embedding=query_embedding,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    collection_name=collection_name,
+                    top_k=top_k,
+                    include_public=include_public_knowledge if include_public_knowledge is not None else settings.rag_public_knowledge_enabled,
+                    current_version=current_index_version,
+                )
+
+            if cached_retrieval:
+                # Retrieval cache HIT - reconstruct documents from IDs
+                logger.info(f"    ✅ Retrieval cache HIT: {len(cached_retrieval.doc_ids)} doc IDs")
+                # Fetch actual documents by IDs (much faster than full search)
+                retrieved_docs = await self.retriever.fetch_documents_by_ids(
+                    doc_ids=cached_retrieval.doc_ids,
+                    tenant_id=tenant_id,
+                    scores=cached_retrieval.scores,
+                )
+                selection_metadata = cached_retrieval.metadata
+            else:
+                # Retrieval cache MISS - full search
+                retrieved_docs, selection_metadata = await self.retriever.retrieve(
+                    query_analysis=query_analysis,
+                    tenant_id=tenant_id,
+                    user_id=user_id,  # ACL: user identification
+                    user_role_ids=user_role_ids,  # ACL: role-based access
+                    is_admin=is_admin,  # ACL: admin bypass
+                    collection_name=collection_name,
+                    top_k=top_k,
+                    include_public_knowledge=include_public_knowledge,
+                )
+
+                # === NEW: Store in Retrieval Cache ===
+                if self._retrieval_cache_enabled and query_embedding and user_id and retrieved_docs:
+                    await self.retrieval_cache.set(
+                        query_embedding=query_embedding,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        doc_ids=[d.id for d in retrieved_docs],
+                        scores=[d.score for d in retrieved_docs],
+                        metadata=selection_metadata or {},
+                        collection_name=collection_name,
+                        top_k=top_k,
+                        include_public=include_public_knowledge if include_public_knowledge is not None else settings.rag_public_knowledge_enabled,
+                        version=current_index_version,
+                    )
+
             # Log public vs tenant document count
             public_count = sum(1 for d in retrieved_docs if d.tenant_id == "public")
             tenant_count = len(retrieved_docs) - public_count
             soft_selection_info = ""
-            if selection_metadata.get("soft_selection_enabled"):
+            if selection_metadata and selection_metadata.get("soft_selection_enabled"):
                 soft_selection_info = f", diversity={selection_metadata.get('diversity_score', 0):.2f}, coverage={selection_metadata.get('coverage_score', 0):.2f}"
-            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({tenant_count} tenant, {public_count} public{soft_selection_info})")
+            cache_info = " (from cache)" if cached_retrieval else ""
+            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({tenant_count} tenant, {public_count} public{soft_selection_info}){cache_info}")
 
             if metrics:
                 metrics.retrieval_ms = (time.time() - retrieval_start) * 1000
@@ -278,15 +384,58 @@ class RAGPipeline:
             # === Layer 4: Context Assembly (with proportional token allocation) ===
             context_start = time.time()
             logger.info("  Layer 4: Context Assembly (proportional allocation)")
-            assembled_context = self.assembler.assemble_context(
-                query_analysis=query_analysis,
-                documents=retrieved_docs,
-                model_type=model_type,
-                soft_weights=selection_metadata.get("soft_weights") if selection_metadata else None,
-                selection_metadata=selection_metadata,
-            )
+
+            # === NEW: Context Cache Check ===
+            cached_context = None
+            doc_ids_for_context = [d.id for d in retrieved_docs]
+            chunk_version = versions.chunk_strategy
+            index_version = versions.index_version
+
+            if self._context_cache_enabled and doc_ids_for_context:
+                cached_context = await self.context_cache.get(
+                    doc_ids=doc_ids_for_context,
+                    tenant_id=tenant_id,
+                    chunk_version=chunk_version,
+                    index_version=index_version,
+                    model_type=model_type,
+                )
+
+            if cached_context:
+                # Context cache HIT - use cached context
+                logger.info(f"    ✅ Context cache HIT: {cached_context.total_tokens} tokens")
+                # Reconstruct AssembledContext from cache
+                assembled_context = AssembledContext(
+                    formatted_context=cached_context.context_string,
+                    total_tokens=cached_context.total_tokens,
+                    documents=retrieved_docs[:cached_context.doc_count],  # Match cached doc count
+                    metadata=cached_context.metadata,
+                )
+            else:
+                # Context cache MISS - full assembly
+                assembled_context = self.assembler.assemble_context(
+                    query_analysis=query_analysis,
+                    documents=retrieved_docs,
+                    model_type=model_type,
+                    soft_weights=selection_metadata.get("soft_weights") if selection_metadata else None,
+                    selection_metadata=selection_metadata,
+                )
+
+                # === NEW: Store in Context Cache ===
+                if self._context_cache_enabled and assembled_context.formatted_context:
+                    await self.context_cache.set(
+                        doc_ids=doc_ids_for_context,
+                        tenant_id=tenant_id,
+                        context_string=assembled_context.formatted_context,
+                        total_tokens=assembled_context.total_tokens,
+                        metadata=assembled_context.to_dict(),
+                        chunk_version=chunk_version,
+                        index_version=index_version,
+                        model_type=model_type,
+                    )
+
+            context_cache_info = " (from cache)" if cached_context else ""
             logger.info(f"    Context: {assembled_context.total_tokens} tokens, "
-                       f"{len(assembled_context.documents)} docs included")
+                       f"{len(assembled_context.documents)} docs included{context_cache_info}")
 
             if metrics:
                 metrics.context_assembly_ms = (time.time() - context_start) * 1000
