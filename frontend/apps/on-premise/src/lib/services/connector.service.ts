@@ -577,6 +577,78 @@ class ConnectorService {
     }
     return { data: response.data, error: null }
   }
+
+  /**
+   * Get connector stats with error breakdown (admin)
+   */
+  async getConnectorStats(connectorId: string): Promise<{ data: ConnectorStats | null; error: string | null }> {
+    const response = await apiClient.get<ConnectorStats>(`/connectors/${connectorId}/stats`)
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Get failed documents with details (admin)
+   */
+  async getFailedDocuments(
+    connectorId: string,
+    params?: { limit?: number; offset?: number; error_filter?: string }
+  ): Promise<{ data: FailedDocumentsResponse | null; error: string | null }> {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.append('limit', params.limit.toString())
+    if (params?.offset) searchParams.append('offset', params.offset.toString())
+    if (params?.error_filter) searchParams.append('error_filter', params.error_filter)
+
+    const url = `/connectors/${connectorId}/failed-documents?${searchParams.toString()}`
+    const response = await apiClient.get<FailedDocumentsResponse>(url)
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Retry failed documents (admin)
+   */
+  async retryFailedDocuments(
+    connectorId: string,
+    params?: { document_ids?: string[]; error_filter?: string }
+  ): Promise<{ data: RetryFailedResponse | null; error: string | null }> {
+    const response = await apiClient.post<RetryFailedResponse>(
+      `/connectors/${connectorId}/retry-failed`,
+      {
+        document_ids: params?.document_ids || null,
+        error_filter: params?.error_filter || null,
+      }
+    )
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Index pending with retry failed option (admin)
+   */
+  async indexPendingWithRetry(
+    connectorId: string,
+    options?: { batchSize?: number; maxDocuments?: number; retryFailed?: boolean }
+  ): Promise<{ data: IndexPendingResponse | null; error: string | null }> {
+    const params = new URLSearchParams()
+    params.append('batch_size', (options?.batchSize || 10).toString())
+    if (options?.maxDocuments) params.append('max_documents', options.maxDocuments.toString())
+    if (options?.retryFailed) params.append('retry_failed', 'true')
+
+    const response = await apiClient.post<IndexPendingResponse>(
+      `/connectors/${connectorId}/index-pending?${params.toString()}`
+    )
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
 }
 
 // Health check response type
@@ -625,6 +697,76 @@ export interface PendingDocumentsResponse {
   page: number
   page_size: number
   total_pages: number
+}
+
+// Failed document with full details
+export interface FailedDocument {
+  id: string
+  title: string
+  external_id: string | null
+  external_path: string | null
+  external_url: string | null
+  file_extension: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  indexing_error: string | null
+  updated_at: string | null
+  source_modified_at: string | null
+  actions: {
+    can_retry: boolean
+    can_skip: boolean
+    can_preview: boolean
+  }
+}
+
+// Failed documents list response
+export interface FailedDocumentsResponse {
+  connector_id: string
+  total_count: number
+  offset: number
+  limit: number
+  items: FailedDocument[]
+}
+
+// Retry failed response
+export interface RetryFailedResponse {
+  success: boolean
+  reset_count: number
+  message: string
+}
+
+// Error breakdown type
+export interface ErrorBreakdown {
+  count: number
+  error: string
+}
+
+// Enhanced connector stats with error breakdown
+export interface ConnectorStats {
+  connector_id: string
+  authorizations: {
+    total: number
+    valid: number
+  }
+  syncs: {
+    total_users: number
+    users_enabled: number
+    documents_total: number
+    documents_indexed: number
+    documents_failed: number
+    total_size_bytes: number
+  }
+  documents: {
+    total: number
+    pending: number
+    processing: number
+    indexed: number
+    failed: number
+    total_size_bytes: number
+    last_indexed_at: string | null
+    avg_indexing_seconds: number | null  // Historical average time per document
+    errors_by_type: ErrorBreakdown[]
+  }
 }
 
 export const connectorService = new ConnectorService()

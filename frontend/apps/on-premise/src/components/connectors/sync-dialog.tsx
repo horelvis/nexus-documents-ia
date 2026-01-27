@@ -44,6 +44,30 @@ interface SyncDialogProps {
   onSyncComplete?: () => void
 }
 
+/**
+ * Estimate indexing time based on document count and historical average.
+ * Falls back to 6 seconds per document if no historical data available.
+ */
+function formatEstimatedTime(docCount: number, avgSecondsPerDoc: number | null): string {
+  // Use historical average if available, otherwise fall back to conservative estimate
+  const secondsPerDoc = avgSecondsPerDoc && avgSecondsPerDoc > 0 ? avgSecondsPerDoc : 6
+  const totalSeconds = Math.round(docCount * secondsPerDoc)
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds} segundos`
+  } else if (totalSeconds < 3600) {
+    const minutes = Math.ceil(totalSeconds / 60)
+    return `${minutes} minuto${minutes > 1 ? 's' : ''}`
+  } else {
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.ceil((totalSeconds % 3600) / 60)
+    if (minutes === 0) {
+      return `${hours} hora${hours > 1 ? 's' : ''}`
+    }
+    return `${hours}h ${minutes}m`
+  }
+}
+
 export function SyncDialog({
   open,
   onOpenChange,
@@ -58,6 +82,8 @@ export function SyncDialog({
   const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([])
   const [pendingTotal, setPendingTotal] = useState(0)
   const [currentConnector, setCurrentConnector] = useState<Connector | null>(null)
+  // Historical average indexing time per document (from backend stats)
+  const [avgIndexingSeconds, setAvgIndexingSeconds] = useState<number | null>(null)
 
   useEffect(() => {
     if (open && connector) {
@@ -65,7 +91,19 @@ export function SyncDialog({
       setError(null)
       setSuccessMessage(null)
       loadPendingDocuments()
+      loadConnectorStats()
     }
+  }, [open, connector])
+
+  // Auto-refresh every 10 seconds while dialog is open (silent - no loaders)
+  useEffect(() => {
+    if (!open || !connector) return
+
+    const interval = setInterval(() => {
+      silentRefresh()
+    }, 10000) // 10 seconds
+
+    return () => clearInterval(interval)
   }, [open, connector])
 
   useEffect(() => {
@@ -75,9 +113,9 @@ export function SyncDialog({
     }
   }, [successMessage])
 
-  const loadPendingDocuments = async () => {
+  const loadPendingDocuments = async (silent = false) => {
     if (!connector) return
-    setIsLoadingPending(true)
+    if (!silent) setIsLoadingPending(true)
     try {
       const result = await connectorService.getPendingDocuments(connector.id, 1, 5)
       if (result.data) {
@@ -87,7 +125,47 @@ export function SyncDialog({
     } catch (err) {
       console.error('Failed to load pending documents:', err)
     } finally {
-      setIsLoadingPending(false)
+      if (!silent) setIsLoadingPending(false)
+    }
+  }
+
+  // Silent refresh - updates values without showing loaders (for auto-refresh)
+  const silentRefresh = async () => {
+    if (!connector) return
+    try {
+      // Fetch all data in parallel
+      const [connectorResult, statsResult, pendingResult] = await Promise.all([
+        connectorService.getConnector(connector.id),
+        connectorService.getConnectorStats(connector.id),
+        connectorService.getPendingDocuments(connector.id, 1, 5),
+      ])
+
+      // Update state only if we got valid data
+      if (connectorResult.data) {
+        setCurrentConnector(connectorResult.data)
+      }
+      if (statsResult.data?.documents?.avg_indexing_seconds) {
+        setAvgIndexingSeconds(statsResult.data.documents.avg_indexing_seconds)
+      }
+      if (pendingResult.data) {
+        setPendingDocs(pendingResult.data.items)
+        setPendingTotal(pendingResult.data.total)
+      }
+    } catch (err) {
+      // Silent fail - don't show errors on auto-refresh
+      console.error('Silent refresh failed:', err)
+    }
+  }
+
+  const loadConnectorStats = async () => {
+    if (!connector) return
+    try {
+      const result = await connectorService.getConnectorStats(connector.id)
+      if (result.data?.documents?.avg_indexing_seconds) {
+        setAvgIndexingSeconds(result.data.documents.avg_indexing_seconds)
+      }
+    } catch (err) {
+      console.error('Failed to load connector stats:', err)
     }
   }
 
@@ -139,7 +217,7 @@ export function SyncDialog({
       if (result.error) {
         setError(result.error)
       } else if (result.data) {
-        setSuccessMessage(`Indexando ${result.data.pending_count} documentos...`)
+        setSuccessMessage(`Indexación iniciada (${result.data.pending_count} docs en cola). Los totales se actualizan automáticamente.`)
         setTimeout(() => {
           refreshConnectorData()
           loadPendingDocuments()
@@ -179,21 +257,19 @@ export function SyncDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Message area - fixed height */}
-          <div className="h-10">
-            {error && (
-              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded">
-                <IconAlertCircle className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">{error}</span>
-              </div>
-            )}
-            {successMessage && !error && (
-              <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950/30 px-3 py-2 rounded">
-                <IconCheck className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">{successMessage}</span>
-              </div>
-            )}
-          </div>
+          {/* Message area */}
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded">
+              <IconAlertCircle className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate">{error}</span>
+            </div>
+          )}
+          {successMessage && !error && (
+            <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950/30 px-3 py-2 rounded">
+              <IconCheck className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate">{successMessage}</span>
+            </div>
+          )}
 
           {/* Statistics - fixed grid */}
           <div className="grid grid-cols-4 gap-2">
@@ -201,28 +277,60 @@ export function SyncDialog({
               <div className="text-xl font-bold">{totalDocs}</div>
               <div className="text-[10px] text-muted-foreground">Total</div>
             </div>
-            <div className={`text-center p-2 rounded border ${pendingCount > 0 ? 'border-yellow-500/50 bg-yellow-50/50 dark:bg-yellow-950/20' : 'bg-muted/30'}`}>
+            <div className="text-center p-2 rounded border bg-muted/30">
               <div className={`text-xl font-bold ${pendingCount > 0 ? 'text-yellow-600' : ''}`}>{pendingCount}</div>
               <div className="text-[10px] text-muted-foreground">Pendientes</div>
             </div>
-            <div className="text-center p-2 rounded border border-green-500/50 bg-green-50/50 dark:bg-green-950/20">
+            <div className="text-center p-2 rounded border bg-muted/30">
               <div className="text-xl font-bold text-green-600">{indexedCount}</div>
               <div className="text-[10px] text-muted-foreground">Indexados</div>
             </div>
-            <div className={`text-center p-2 rounded border ${failedCount > 0 ? 'border-red-500/50 bg-red-50/50 dark:bg-red-950/20' : 'bg-muted/30'}`}>
+            <div className="text-center p-2 rounded border bg-muted/30">
               <div className={`text-xl font-bold ${failedCount > 0 ? 'text-red-600' : ''}`}>{failedCount}</div>
               <div className="text-[10px] text-muted-foreground">Fallidos</div>
             </div>
           </div>
 
-          {/* Progress */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Progreso</span>
-              <span>{progressPercent}%</span>
+          {/* Progress / Active operation indicator */}
+          {isSyncing || isIndexing ? (
+            // Show loader during active operations with time estimate
+            <div className="flex flex-col items-center justify-center gap-2 py-3 rounded border bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+              <div className="flex items-center gap-3">
+                <IconLoader2 className="h-5 w-5 animate-spin text-blue-500" />
+                <span className="text-sm text-blue-600 dark:text-blue-400">
+                  {isSyncing ? 'Sincronizando con el origen...' : 'Indexando documentos...'}
+                </span>
+              </div>
+              {isIndexing && pendingCount > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Tiempo estimado: ~{formatEstimatedTime(pendingCount, avgIndexingSeconds)}
+                </span>
+              )}
             </div>
-            <Progress value={progressPercent} className="h-1.5" />
-          </div>
+          ) : (
+            // Show progress when idle (auto-refreshes every 10s)
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground flex items-center gap-1">
+                  Documentos indexados
+                  {pendingCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-blue-500">
+                      <IconLoader2 className="h-2.5 w-2.5 animate-spin" />
+                      auto
+                    </span>
+                  )}
+                </span>
+                <span>{indexedCount} / {totalDocs}</span>
+              </div>
+              <Progress value={progressPercent} className="h-1.5" />
+              {pendingCount > 0 && (
+                <div className="text-xs text-muted-foreground text-right">
+                  Pendientes: {pendingCount} (~{formatEstimatedTime(pendingCount, avgIndexingSeconds)})
+                  {avgIndexingSeconds && <span className="ml-1 text-[10px] opacity-70">({avgIndexingSeconds.toFixed(1)}s/doc)</span>}
+                </div>
+              )}
+            </div>
+          )}
 
           <Separator />
 

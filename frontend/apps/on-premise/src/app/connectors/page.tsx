@@ -61,7 +61,7 @@ import {
   Connector,
   ConnectorType,
 } from '@/lib/services/connector.service'
-import { ConnectorIcon, HealthCheckDialog, SyncDialog, EditConnectorDialog } from '@/components/connectors'
+import { ConnectorIcon, HealthCheckDialog, SyncDialog, EditConnectorDialog, FailedDocumentsDialog } from '@/components/connectors'
 
 function getHealthBadge(status: string) {
   const config: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -106,6 +106,10 @@ export default function ConnectorsPage() {
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null)
+
+  // Failed documents dialog state
+  const [failedDialogOpen, setFailedDialogOpen] = useState(false)
+  const [failedConnector, setFailedConnector] = useState<Connector | null>(null)
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
@@ -167,6 +171,15 @@ export default function ConnectorsPage() {
   const handleDeleteClick = (connector: Connector) => {
     setConnectorToDelete(connector)
     setDeleteDialogOpen(true)
+  }
+
+  const handleFailedDocuments = (connector: Connector) => {
+    setFailedConnector(connector)
+    setFailedDialogOpen(true)
+  }
+
+  const handleFailedRetryComplete = () => {
+    loadData()
   }
 
   const handleDeleteConfirm = async () => {
@@ -327,9 +340,12 @@ export default function ConnectorsPage() {
                                       </span>
                                     )}
                                     {connector.documents_failed > 0 && (
-                                      <span className="text-red-600">
+                                      <button
+                                        className="text-red-600 hover:text-red-700 hover:underline cursor-pointer"
+                                        onClick={() => handleFailedDocuments(connector)}
+                                      >
                                         {connector.documents_failed} fallidos
-                                      </span>
+                                      </button>
                                     )}
                                   </div>
                                 )}
@@ -498,6 +514,14 @@ export default function ConnectorsPage() {
         onOpenChange={setEditDialogOpen}
         connector={editConnector}
         onSave={handleEditSave}
+      />
+
+      {/* Failed Documents Dialog */}
+      <FailedDocumentsDialog
+        open={failedDialogOpen}
+        onOpenChange={setFailedDialogOpen}
+        connector={failedConnector}
+        onRetryComplete={handleFailedRetryComplete}
       />
 
       {/* Delete Confirmation Dialog */}

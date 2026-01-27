@@ -6,11 +6,11 @@ Users then authorize and sync their data through these connectors.
 """
 import logging
 from math import ceil
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -487,6 +487,59 @@ async def get_connector_stats(
     )
     last_indexed_at = last_indexed.scalar_one_or_none()
 
+    # Get error breakdown for failed documents
+    error_breakdown = await db.execute(
+        select(
+            func.count(IndexedDocument.id).label("count"),
+            IndexedDocument.indexing_error,
+        )
+        .where(IndexedDocument.connector_id == connector_id)
+        .where(IndexedDocument.indexing_status == "failed")
+        .group_by(IndexedDocument.indexing_error)
+        .order_by(func.count(IndexedDocument.id).desc())
+        .limit(10)  # Top 10 error types
+    )
+    error_rows = error_breakdown.fetchall()
+
+    # Format error breakdown
+    errors_by_type = []
+    for row in error_rows:
+        error_msg = row.indexing_error or "Unknown error"
+        # Truncate long error messages for display
+        if len(error_msg) > 100:
+            error_msg = error_msg[:100] + "..."
+        errors_by_type.append({
+            "count": row.count,
+            "error": error_msg,
+        })
+
+    # Calculate average indexing time from historical data
+    # Priority: Use indexing_duration_seconds (actual processing time) if available
+    avg_indexing_seconds = None
+
+    # Try to get actual processing time from the new column
+    try:
+        avg_indexing_time = await db.execute(
+            select(
+                func.avg(IndexedDocument.indexing_duration_seconds).label("avg_seconds")
+            )
+            .where(IndexedDocument.connector_id == connector_id)
+            .where(IndexedDocument.indexing_status == "indexed")
+            .where(IndexedDocument.indexing_duration_seconds.isnot(None))
+            .where(IndexedDocument.indexing_duration_seconds > 0)
+        )
+        avg_seconds_row = avg_indexing_time.first()
+        if avg_seconds_row and avg_seconds_row.avg_seconds:
+            avg_indexing_seconds = float(avg_seconds_row.avg_seconds)
+    except Exception:
+        # Column might not exist yet (migration not applied)
+        pass
+
+    # Fallback: Use reasonable default based on typical processing times
+    # ~2-3 seconds for text extraction + chunking + embedding + storage
+    if avg_indexing_seconds is None:
+        avg_indexing_seconds = 3.0  # Reasonable estimate for typical documents
+
     return {
         "connector_id": str(connector_id),
         "authorizations": {
@@ -501,7 +554,7 @@ async def get_connector_stats(
             "documents_failed": (sync_row.documents_failed or 0) if sync_row else 0,
             "total_size_bytes": (sync_row.total_size_bytes or 0) if sync_row else 0,
         },
-        # NEW: Real document processing stats
+        # Real document processing stats with error breakdown
         "documents": {
             "total": (doc_row.total or 0) if doc_row else 0,
             "pending": (doc_row.pending or 0) if doc_row else 0,
@@ -510,7 +563,196 @@ async def get_connector_stats(
             "failed": (doc_row.failed or 0) if doc_row else 0,
             "total_size_bytes": (doc_row.total_size_bytes or 0) if doc_row else 0,
             "last_indexed_at": last_indexed_at.isoformat() if last_indexed_at else None,
+            "avg_indexing_seconds": avg_indexing_seconds,  # Historical average time per document
+            "errors_by_type": errors_by_type,
         },
+    }
+
+
+@router.get("/{connector_id}/failed-documents")
+async def get_failed_documents(
+    connector_id: UUID,
+    limit: int = Query(50, ge=1, le=200, description="Maximum documents to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    error_filter: Optional[str] = Query(None, description="Filter by error message (partial match)"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    List failed documents for a connector with full details (admin only).
+
+    Returns documents that failed indexing with:
+    - Document metadata (title, path, size, type)
+    - Error message and timestamp
+    - External URL for preview (if available)
+    - Actions available (retry, skip, etc.)
+
+    Use error_filter to find specific error types, e.g.:
+    - "No text content" - PDFs without extractable text
+    - "Unsupported extension" - Files with unrecognized extensions
+    - "timeout" - Processing timeouts
+    """
+    from app.db.models import IndexedDocument
+
+    await _check_admin_permission(current_user, tenant_id)
+
+    # Verify connector exists
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    # Build query for failed documents
+    query = (
+        select(IndexedDocument)
+        .where(IndexedDocument.connector_id == connector_id)
+        .where(IndexedDocument.indexing_status == "failed")
+    )
+
+    # Apply error filter if provided
+    if error_filter:
+        query = query.where(IndexedDocument.indexing_error.ilike(f"%{error_filter}%"))
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total_count = total_result.scalar() or 0
+
+    # Get paginated results
+    query = query.order_by(IndexedDocument.updated_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    documents = result.scalars().all()
+
+    # Format response with preview URLs and actions
+    items = []
+    for doc in documents:
+        # Build external URL for preview (Alfresco document library)
+        external_preview_url = None
+        if doc.external_url:
+            external_preview_url = doc.external_url
+        elif doc.external_id and connector.connector_type == "alfresco":
+            # Build Alfresco document library URL
+            base_url = connector.config.get("base_url", "").rstrip("/")
+            if base_url:
+                external_preview_url = f"{base_url}/share/page/document-details?nodeRef=workspace://SpacesStore/{doc.external_id}"
+
+        items.append({
+            "id": str(doc.id),
+            "title": doc.title,
+            "external_id": doc.external_id,
+            "external_path": doc.external_path,
+            "external_url": external_preview_url,
+            "file_extension": doc.file_extension,
+            "mime_type": doc.mime_type,
+            "size_bytes": doc.size_bytes,
+            "indexing_error": doc.indexing_error,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+            "source_modified_at": doc.source_modified_at.isoformat() if doc.source_modified_at else None,
+            "actions": {
+                "can_retry": True,
+                "can_skip": True,
+                "can_preview": external_preview_url is not None,
+            },
+        })
+
+    return {
+        "connector_id": str(connector_id),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
+        "items": items,
+    }
+
+
+@router.post("/{connector_id}/retry-failed")
+async def retry_failed_documents(
+    connector_id: UUID,
+    document_ids: Optional[List[str]] = Body(None, description="Specific document IDs to retry, or null for all"),
+    error_filter: Optional[str] = Body(None, description="Only retry documents matching this error"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Retry indexing for failed documents (admin only).
+
+    Options:
+    - document_ids: List of specific document IDs to retry
+    - error_filter: Only retry documents matching this error pattern
+    - Both null: Retry ALL failed documents for this connector
+    """
+    from sqlalchemy import update as sql_update
+    from app.db.models import IndexedDocument
+
+    await _check_admin_permission(current_user, tenant_id)
+
+    # Verify connector exists
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    # Build update query
+    update_query = (
+        sql_update(IndexedDocument)
+        .where(IndexedDocument.connector_id == connector_id)
+        .where(IndexedDocument.indexing_status == "failed")
+    )
+
+    # Apply filters
+    if document_ids:
+        update_query = update_query.where(IndexedDocument.id.in_([UUID(did) for did in document_ids]))
+
+    if error_filter:
+        update_query = update_query.where(IndexedDocument.indexing_error.ilike(f"%{error_filter}%"))
+
+    # Count before update
+    count_query = (
+        select(func.count(IndexedDocument.id))
+        .where(IndexedDocument.connector_id == connector_id)
+        .where(IndexedDocument.indexing_status == "failed")
+    )
+    if document_ids:
+        count_query = count_query.where(IndexedDocument.id.in_([UUID(did) for did in document_ids]))
+    if error_filter:
+        count_query = count_query.where(IndexedDocument.indexing_error.ilike(f"%{error_filter}%"))
+
+    count_result = await db.execute(count_query)
+    affected_count = count_result.scalar() or 0
+
+    if affected_count == 0:
+        return {
+            "success": True,
+            "reset_count": 0,
+            "message": "No matching failed documents to retry",
+        }
+
+    # Reset to pending
+    update_query = update_query.values(
+        indexing_status="pending",
+        indexing_error=None,
+    )
+    await db.execute(update_query)
+    await db.commit()
+
+    logger.info(
+        f"🔄 Reset {affected_count} failed documents to pending "
+        f"for connector {connector_id} (filter={error_filter})"
+    )
+
+    return {
+        "success": True,
+        "reset_count": affected_count,
+        "message": f"Reset {affected_count} documents to pending for re-indexing",
     }
 
 
@@ -765,6 +1007,7 @@ async def sync_folders(
 async def trigger_connector_sync(
     connector_id: UUID,
     full_sync: bool = Query(False, description="Force full resync instead of incremental"),
+    retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
     tenant_id: str = Depends(get_current_tenant_id_async),
@@ -779,10 +1022,13 @@ async def trigger_connector_sync(
     Args:
         connector_id: UUID of the connector to sync
         full_sync: If True, resync all documents instead of incremental
+        retry_failed: If True, reset failed documents to pending before sync
 
     Returns:
         Task ID and status message
     """
+    from sqlalchemy import func, update
+
     await _check_admin_permission(current_user, tenant_id)
 
     result = await db.execute(
@@ -797,6 +1043,31 @@ async def trigger_connector_sync(
 
     if not connector.is_active:
         raise HTTPException(status_code=400, detail="Connector is not active")
+
+    # If retry_failed is True, reset failed documents to pending
+    failed_reset_count = 0
+    if retry_failed:
+        from app.db.models import IndexedDocument
+
+        failed_count_result = await db.execute(
+            select(func.count(IndexedDocument.id))
+            .where(IndexedDocument.connector_id == connector_id)
+            .where(IndexedDocument.indexing_status == "failed")
+        )
+        failed_reset_count = failed_count_result.scalar() or 0
+
+        if failed_reset_count > 0:
+            await db.execute(
+                update(IndexedDocument)
+                .where(IndexedDocument.connector_id == connector_id)
+                .where(IndexedDocument.indexing_status == "failed")
+                .values(indexing_status="pending", indexing_error=None)
+            )
+            await db.commit()
+            logger.info(
+                f"🔄 Reset {failed_reset_count} failed documents to pending "
+                f"for connector {connector_id}"
+            )
 
     # Dispatch task via background-worker HTTP API
     try:
@@ -814,13 +1085,22 @@ async def trigger_connector_sync(
             result = response.json()
             task_id = result.get("job_id", "unknown")
 
-        logger.info(f"Triggered sync for connector {connector_id}, task_id={task_id}")
+        sync_type = "full" if full_sync else "incremental"
+        logger.info(
+            f"Triggered sync for connector {connector_id}, "
+            f"type={sync_type}, failed_reset={failed_reset_count}, task_id={task_id}"
+        )
+
+        message = f"Sync ({sync_type}) queued for processing"
+        if failed_reset_count > 0:
+            message += f" - reset {failed_reset_count} failed documents"
 
         return {
             "status": "queued",
             "task_id": task_id,
             "connector_id": str(connector_id),
-            "message": f"Sync {'(full)' if full_sync else '(incremental)'} queued for processing",
+            "failed_reset": failed_reset_count,
+            "message": message,
         }
 
     except httpx.HTTPStatusError as e:
@@ -842,6 +1122,7 @@ async def trigger_index_pending(
     connector_id: UUID,
     batch_size: int = Query(10, ge=1, le=100, description="Documents per batch"),
     max_documents: Optional[int] = Query(None, ge=1, description="Max documents to process"),
+    retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
     tenant_id: str = Depends(get_current_tenant_id_async),
@@ -856,11 +1137,12 @@ async def trigger_index_pending(
         connector_id: UUID of the connector
         batch_size: Number of documents to process per batch
         max_documents: Maximum documents to process (None = all pending)
+        retry_failed: If True, reset failed documents to pending before indexing
 
     Returns:
         Task ID and status message
     """
-    from sqlalchemy import func
+    from sqlalchemy import func, update
 
     await _check_admin_permission(current_user, tenant_id)
 
@@ -877,9 +1159,33 @@ async def trigger_index_pending(
     if not connector.is_active:
         raise HTTPException(status_code=400, detail="Connector is not active")
 
-    # Count pending documents
+    # Import IndexedDocument model
     from app.db.models import IndexedDocument
 
+    # If retry_failed is True, reset failed documents to pending
+    failed_reset_count = 0
+    if retry_failed:
+        failed_count_result = await db.execute(
+            select(func.count(IndexedDocument.id))
+            .where(IndexedDocument.connector_id == connector_id)
+            .where(IndexedDocument.indexing_status == "failed")
+        )
+        failed_reset_count = failed_count_result.scalar() or 0
+
+        if failed_reset_count > 0:
+            await db.execute(
+                update(IndexedDocument)
+                .where(IndexedDocument.connector_id == connector_id)
+                .where(IndexedDocument.indexing_status == "failed")
+                .values(indexing_status="pending", indexing_error=None)
+            )
+            await db.commit()
+            logger.info(
+                f"🔄 Reset {failed_reset_count} failed documents to pending "
+                f"for connector {connector_id}"
+            )
+
+    # Count pending documents (now includes reset failed ones)
     pending_count_result = await db.execute(
         select(func.count(IndexedDocument.id))
         .where(IndexedDocument.connector_id == connector_id)
@@ -892,6 +1198,7 @@ async def trigger_index_pending(
             "status": "no_pending",
             "connector_id": str(connector_id),
             "pending_count": 0,
+            "failed_reset": failed_reset_count,
             "message": "No pending documents to index",
         }
 
@@ -913,15 +1220,20 @@ async def trigger_index_pending(
 
         logger.info(
             f"Triggered index-pending for connector {connector_id}, "
-            f"pending={pending_count}, task_id={task_id}"
+            f"pending={pending_count}, failed_reset={failed_reset_count}, task_id={task_id}"
         )
+
+        message = f"Indexing {pending_count} pending documents"
+        if failed_reset_count > 0:
+            message += f" (including {failed_reset_count} previously failed)"
 
         return {
             "status": "queued",
             "task_id": task_id,
             "connector_id": str(connector_id),
             "pending_count": pending_count,
-            "message": f"Indexing {pending_count} pending documents",
+            "failed_reset": failed_reset_count,
+            "message": message,
         }
 
     except httpx.HTTPStatusError as e:
