@@ -1,14 +1,11 @@
-# Weaviate Service - Multi-Agent RAG Pipeline
-# Primary LLM: vLLM (high-throughput GPU inference)
-# Models: Qwen3-VL-4B-Instruct + Qwen3-VL-Embedding-2B + Qwen3-VL-Reranker-2B
-# Framework: Qwen-Agent (optimized for Qwen models)
+# Weaviate Service - RAG Pipeline and Vector Search
+# Primary function: Vector storage, indexing, retrieval, RAG
+# Note: Agent orchestration moved to emma-agent-service
 
 # Weaviate vector database
 weaviate-client>=4.9.0
 
 # MCP (Model Context Protocol) - External data source integration
-# Enables connecting to storage, databases, REST APIs via MCP servers
-# Documentation: https://modelcontextprotocol.io/
 mcp>=1.8.0
 pyyaml>=6.0.0
 
@@ -27,68 +24,24 @@ sentence-transformers>=2.2.2
 torch>=1.11.0
 numpy>=1.24.0
 
-# NLP for Structural Intelligence Layer (SIL)
-# spaCy: Lemmatization, NER, POS tagging
-# Install models after: python -m spacy download es_core_news_md && python -m spacy download en_core_web_md
-spacy>=3.7.0
-
-# rapidfuzz: Fast fuzzy string matching for typo tolerance
-rapidfuzz>=3.5.0
-
-# transformers: Zero-shot classification
-# Note: Uses MiniLM-based models for speed (not full LLMs)
+# transformers: For embeddings and reranking
 transformers>=4.36.0
 
-# Semantic Router - Fast intent classification via embeddings
-# Use base package (no [local]) to avoid llama-cpp build dependency
-semantic-router>=0.0.50
-
-# FastEmbed - ONNX-optimized embeddings for ultra-low latency (~1-3ms vs ~10ms)
-# Uses quantized models and ONNX Runtime for 10-15x speedup over sentence-transformers
+# FastEmbed - ONNX-optimized embeddings for ultra-low latency
 fastembed>=0.4.0
-
-# SetFit - Few-shot fine-tuning for intent classification
-# NexusRouter uses SetFit for trainable ML-based intent classification
-# Requires minimal training data (8-16 examples per class)
-# Documentation: https://github.com/huggingface/setfit
-setfit>=1.0.0
-datasets>=2.14.0  # HuggingFace datasets for SetFit training
-scikit-learn>=1.3.0  # Required for metrics (F1 score, etc.)
-
-# LoRA Fine-Tuning - Continuous Learning for SLM Router
-# Enables automated fine-tuning of Qwen2-0.5B for better routing accuracy
-# Runs during maintenance windows with ~2-4GB VRAM requirement
-# Documentation: https://github.com/huggingface/peft
-peft>=0.9.0  # Parameter-Efficient Fine-Tuning (LoRA)
-bitsandbytes>=0.42.0  # 4-bit quantization for efficient training
-accelerate>=0.27.0  # HuggingFace distributed training
 
 # Database and storage
 asyncpg>=0.29.0
 redis>=5.0.0
 
 # PDF manipulation
-PyMuPDF>=1.24.0  # For PDF annotation service
-pymupdf4llm>=0.0.17  # For converting PDFs to LLM-optimized Markdown
-python-multipart>=0.0.9  # For Form data handling in FastAPI
+PyMuPDF>=1.24.0
+pymupdf4llm>=0.0.17
+python-multipart>=0.0.9
 
 # Logging and monitoring
 structlog>=23.2.0
 loguru>=0.7.0
-
-# LLM Observability - Langfuse (self-hosted)
-# Tracing, sessions, generations, scores for Emma v2 agent
-# Dashboard: http://localhost:3002
-# Documentation: https://langfuse.com/docs
-langfuse>=2.36.0
-
-# Qwen-Agent Framework
-# Multi-agent orchestration optimized for Qwen models (Qwen3-VL)
-# Features: Function calling, MCP support, Code Interpreter, RAG
-# Documentation: https://github.com/QwenLM/Qwen-Agent
-# Handles tool parsing internally (no vLLM --tool-call-parser needed)
-qwen-agent>=0.0.14
-python-dateutil>=2.8.0  # Required by qwen-agent for DateRuntime
 
 # OpenAI client for vLLM compatibility layer
 openai>=1.0.0

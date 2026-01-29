@@ -1,5 +1,5 @@
 # Docker Compose for On-Premise deployment
-# Minimal services required for SIL and RAG functionality
+# Minimal services required for RAG functionality with Emma AI
 #
 # Usage:
 #   docker compose -f docker-compose.onpremise.yml up -d
@@ -8,10 +8,10 @@
 #   - db: PostgreSQL with Apache AGE for knowledge graph
 #   - redis: Cache and session storage
 #   - weaviate: Vector database for embeddings
-#   - weaviate-service: RAG pipeline + SIL (Structural Intelligence Layer)
-#   - vllm: GPU inference for LLM
+#   - weaviate-service: RAG pipeline (vector search and retrieval)
+#   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
+#   - vllm: GPU inference for LLM (Qwen3-4B)
 #   - api: Main backend API (optional, for UI integration)
-#   - langfuse: LLM observability & tracing (http://localhost:3002)
 
 services:
   # =============================================================================
@@ -102,10 +102,11 @@ services:
       - "--model"
       - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
       - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-32768}"
+      - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
-      - "0.60"
+      - "0.80"
       - "--trust-remote-code"
+      - "--enforce-eager"  # Skip CUDA graph compilation for faster startup
       # Enable tool calling for Emma v2 (native async client)
       - "--enable-auto-tool-choice"
       - "--tool-call-parser"
@@ -125,73 +126,18 @@ services:
       start_period: 180s
     restart: unless-stopped
 
-  # =============================================================================
-  # TGI - Text Generation Inference for SLM (GPU)
-  # =============================================================================
-  # Small Language Model for fast query planning (~10-50ms on GPU)
-  # Model: Qwen2-0.5B-Instruct (~1GB VRAM)
-  # Shares GPU with vLLM (vLLM uses 60%, TGI uses remaining ~10GB)
-  tgi-slm:
-    image: ghcr.io/huggingface/text-generation-inference:2.4.1
-    environment:
-      - MODEL_ID=Qwen/Qwen2-0.5B-Instruct
-      - MAX_INPUT_LENGTH=2048
-      - MAX_TOTAL_TOKENS=2560
-      - MAX_BATCH_PREFILL_TOKENS=4096
-      - MAX_CONCURRENT_REQUESTS=32
-      - HF_TOKEN=${HF_TOKEN}
-      - CUDA_VISIBLE_DEVICES=0
-    volumes:
-      - tgi_cache:/data
-    networks:
-      - backend-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # =============================================================================
-  # LiteLLM - LLM Gateway/Proxy (DISABLED - direct TGI connection is simpler)
-  # =============================================================================
-  # Note: LiteLLM requires PostgreSQL which adds complexity.
-  # We use direct TGI connection instead for SLM.
-  # Uncomment if you need unified gateway with database features.
-  # litellm:
-  #   image: ghcr.io/berriai/litellm:main-latest
-  #   ports:
-  #     - "4000:4000"
-  #   depends_on:
-  #     vllm:
-  #       condition: service_healthy
-  #     tgi-slm:
-  #       condition: service_started
-  #     redis:
-  #       condition: service_healthy
-  #   networks:
-  #     - backend-network
-  #   environment:
-  #     - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
-  #     - DATABASE_URL=postgresql://user:pass@db:5432/litellm
-  #   volumes:
-  #     - ./litellm-config.yaml:/app/config.yaml:ro
-  #   command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
-  #   restart: unless-stopped
 
   # =============================================================================
   # Apache Tika - Document Text Extraction
   # =============================================================================
   tika:
     image: apache/tika:3.1.0.0
+    environment:
+      - JAVA_OPTS=-Xms1g -Xmx8g
+    deploy:
+      resources:
+        limits:
+          memory: 10g
     networks:
       - backend-network
     restart: unless-stopped
@@ -203,6 +149,10 @@ services:
     build:
       context: ../microservices/textextract-service
       dockerfile: Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 10g
     depends_on:
       - tika
     networks:
@@ -214,6 +164,7 @@ services:
       - TIKA_URL=http://tika:9998
     volumes:
       - ../microservices/textextract-service/app:/app/app:ro
+      - easyocr_models:/root/.EasyOCR
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -223,7 +174,7 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Weaviate Service - RAG Pipeline + SIL
+  # Weaviate Service - RAG Pipeline
   # =============================================================================
   weaviate-service:
     build:
@@ -235,8 +186,6 @@ services:
       weaviate:
         condition: service_healthy
       vllm:
-        condition: service_healthy
-      tgi-slm:
         condition: service_healthy
       db:
         condition: service_healthy
@@ -252,6 +201,8 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+      # OCR: disabled during bulk indexing (Tika handles text extraction)
+      - ENHANCED_OCR_ENABLED=false
       # vLLM Configuration
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
@@ -268,30 +219,8 @@ services:
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
       - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
-      # SLM Router Configuration (direct TGI connection)
-      - SLM_ROUTER_ENABLED=${SLM_ROUTER_ENABLED:-true}
-      - SLM_PROVIDER=${SLM_PROVIDER:-tgi}
-      - SLM_BASE_URL=${SLM_BASE_URL:-http://tgi-slm:80}
-      - SLM_MODEL=${SLM_MODEL:-Qwen/Qwen2-0.5B-Instruct}
-      - SLM_TIMEOUT_MS=${SLM_TIMEOUT_MS:-5000}
-      - SLM_TEMPERATURE=${SLM_TEMPERATURE:-0.0}
-      - SLM_MAX_TOKENS=${SLM_MAX_TOKENS:-512}
-      # Continuous Learning Configuration (automated fine-tuning)
-      # System automatically improves SLM routing accuracy based on usage
-      - CONTINUOUS_LEARNING_ENABLED=${CONTINUOUS_LEARNING_ENABLED:-true}
-      - LEARNING_MIN_EXAMPLES=${LEARNING_MIN_EXAMPLES:-500}
-      - LEARNING_MAINTENANCE_HOUR=${LEARNING_MAINTENANCE_HOUR:-3}
-      - LEARNING_CHECK_INTERVAL=${LEARNING_CHECK_INTERVAL:-3600}
-      - LEARNING_MODELS_DIR=/data/models
-      - LEARNING_ADAPTERS_DIR=/data/adapters
-      # Langfuse Observability Configuration (Emma v2 agent tracing)
-      # Dashboard: http://localhost:3002
-      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-true}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_FLUSH_AT=${LANGFUSE_FLUSH_AT:-10}
-      - LANGFUSE_FLUSH_INTERVAL=${LANGFUSE_FLUSH_INTERVAL:-5}
+      # Knowledge Tree Service
+      - KNOWLEDGE_TREE_SERVICE_URL=http://knowledge-tree-service:8011
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
     volumes:
@@ -299,7 +228,6 @@ services:
       - ../microservices/weaviate-service/config:/app/config:ro
       - ../microservices/weaviate-service/scripts:/app/scripts:ro
       - huggingface_cache:/root/.cache/huggingface
-      - slm_models_data:/data  # SLM fine-tuned models (continuous learning)
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     deploy:
       resources:
@@ -308,6 +236,146 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Knowledge Tree Service - Structural Context (Apache AGE)
+  # =============================================================================
+  knowledge-tree-service:
+    build:
+      context: ../microservices/knowledge-tree-service
+      dockerfile: Dockerfile
+    ports:
+      - "8011:8011"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - AGE_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
+      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-knowledge_graph}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../microservices/knowledge-tree-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Emma Agent Service - AI Agent Orchestration
+  # =============================================================================
+  # Provides:
+  #   - Emma v2 agent with LLM-based reasoning (replaces SLM Router)
+  #   - LangGraph multi-agent orchestration
+  #   - Session and conversation management
+  #   - Domain-specific specialists (legal, fiscal, privacy, etc.)
+  # =============================================================================
+  emma-agent-service:
+    build:
+      context: ../microservices/emma-agent-service
+      dockerfile: Dockerfile
+    ports:
+      - "8009:8009"
+    depends_on:
+      weaviate-service:
+        condition: service_healthy
+      knowledge-tree-service:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # Weaviate Service connection (for RAG)
+      - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
+      - WEAVIATE_SERVICE_TIMEOUT=120
+      # Knowledge Tree Service (structural context)
+      - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
+      - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
+      # vLLM Configuration
+      - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      # Redis for sessions
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Database for persistence
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      # Agent settings
+      - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
+      - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
+      - AGENT_MAX_TURNS=15
+      - AGENT_TIMEOUT_SECONDS=300
+      # Single-tenant mode for on-premise
+      - SINGLE_TENANT_MODE=true
+      - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      # Langfuse disabled (removed from stack)
+      - LANGFUSE_ENABLED=false
+      # Suppress warnings
+      - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
+    volumes:
+      - ../microservices/emma-agent-service/app:/app/app:ro
+      - ../microservices/emma-agent-service/config:/app/config:ro
+      - huggingface_cache:/root/.cache/huggingface
+      - fastembed_cache:/tmp/fastembed_cache
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8009", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # =============================================================================
+  # MCP Alfresco Server - Alfresco sync, indexing & MCP tools
+  # =============================================================================
+  mcp-alfresco:
+    build:
+      context: ../microservices/mcp-alfresco-server
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+    volumes:
+      - ../microservices/mcp-alfresco-server/app:/app/app:ro
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -335,10 +403,12 @@ services:
         condition: service_healthy
       weaviate-service:
         condition: service_healthy
+      emma-agent-service:
+        condition: service_healthy
       mcp-storage:
         condition: service_healthy
-      podcast-service:
-        condition: service_started
+      mcp-alfresco:
+        condition: service_healthy
       presentation-service:
         condition: service_started
       keycloak:
@@ -353,9 +423,11 @@ services:
       - ALLOW_ALL_CORS=true
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
-      - PODCAST_SERVICE_URL=${PODCAST_SERVICE_URL:-http://podcast-service:8000}
+      # Emma Agent Service (AI chat)
+      - EMMA_SERVICE_URL=${EMMA_SERVICE_URL:-http://emma-agent-service:8009}
       - PRESENTATION_SERVICE_URL=${PRESENTATION_SERVICE_URL:-http://presentation-service:8000}
       - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
       - MCP_ENABLED=${MCP_ENABLED:-true}
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
@@ -438,139 +510,6 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Langfuse - LLM Observability & Tracing (Self-Hosted)
-  # =============================================================================
-  # Open source LLM observability platform for monitoring Emma v2 agent
-  # Dashboard: http://localhost:3002
-  # Docs: https://langfuse.com/docs/self-hosting
-  langfuse:
-    image: langfuse/langfuse:latest
-    ports:
-      - "3002:3000"
-    depends_on:
-      langfuse-db:
-        condition: service_healthy
-      langfuse-clickhouse:
-        condition: service_healthy
-      langfuse-minio:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - backend-network
-    environment:
-      - DATABASE_URL=postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse}
-      - CLICKHOUSE_MIGRATION_URL=clickhouse://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:9000/${LANGFUSE_CLICKHOUSE_DB:-langfuse}
-      - CLICKHOUSE_URL=http://${LANGFUSE_CLICKHOUSE_USER:-default}:${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}@langfuse-clickhouse:8123
-      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}
-      # Single-node mode (no Zookeeper/cluster)
-      - CLICKHOUSE_CLUSTER_ENABLED=false
-      # Redis connection (required for v3)
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=
-      # S3/MinIO for event storage (required for v3)
-      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
-      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=langfuse
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=langfuse123
-      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio:9000
-      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
-      # S3/MinIO for media upload
-      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
-      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=langfuse
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=langfuse123
-      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio:9000
-      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
-      # Authentication secrets
-      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-please-change-this-secret-in-production}
-      - SALT=${LANGFUSE_SALT:-please-change-this-salt-in-production}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
-      - NEXTAUTH_URL=${LANGFUSE_URL:-http://localhost:3002}
-      - TELEMETRY_ENABLED=${LANGFUSE_TELEMETRY:-false}
-      - NEXT_PUBLIC_SIGN_UP_DISABLED=${LANGFUSE_SIGNUP_DISABLED:-false}
-      - LOG_LEVEL=${LANGFUSE_LOG_LEVEL:-info}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/public/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-
-  # MinIO for Langfuse S3-compatible storage
-  langfuse-minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=langfuse
-      - MINIO_ROOT_PASSWORD=langfuse123
-    volumes:
-      - langfuse_minio_data:/data
-    networks:
-      - backend-network
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
-
-  # MinIO bucket initialization
-  langfuse-minio-init:
-    image: minio/mc:latest
-    depends_on:
-      langfuse-minio:
-        condition: service_healthy
-    networks:
-      - backend-network
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set myminio http://langfuse-minio:9000 langfuse langfuse123;
-      mc mb myminio/langfuse --ignore-existing;
-      mc anonymous set public myminio/langfuse;
-      exit 0;
-      "
-
-  langfuse-db:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_DB=${LANGFUSE_DB_NAME:-langfuse}
-      - POSTGRES_USER=${LANGFUSE_DB_USER:-langfuse}
-      - POSTGRES_PASSWORD=${LANGFUSE_DB_PASSWORD:-langfuse}
-    volumes:
-      - langfuse_postgres_data:/var/lib/postgresql/data
-    networks:
-      - backend-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-langfuse} -d ${LANGFUSE_DB_NAME:-langfuse}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  langfuse-clickhouse:
-    image: clickhouse/clickhouse-server:24.3
-    environment:
-      - CLICKHOUSE_DB=${LANGFUSE_CLICKHOUSE_DB:-langfuse}
-      - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse}
-      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
-    volumes:
-      - langfuse_clickhouse_data:/var/lib/clickhouse
-    networks:
-      - backend-network
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
-  # =============================================================================
   # MCP Storage Server - Local File Storage (On-Premise)
   # =============================================================================
   mcp-storage:
@@ -600,106 +539,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: unless-stopped
-
-  # =============================================================================
-  # TTS Service - Text-to-Speech using Microsoft VibeVoice
-  # =============================================================================
-  tts-service:
-    build:
-      context: ../microservices/tts-service
-      dockerfile: Dockerfile
-    ports:
-      - "8010:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - TTS_PROVIDER=${TTS_PROVIDER:-vibevoice}
-      - VIBEVOICE_MODEL_PATH=${VIBEVOICE_MODEL_PATH:-microsoft/VibeVoice-Realtime-0.5B}
-      - VIBEVOICE_DEVICE=${VIBEVOICE_DEVICE:-cuda}
-      - VIBEVOICE_DEFAULT_VOICE=${VIBEVOICE_DEFAULT_VOICE:-Carter}
-      - GOOGLE_TTS_ENABLED=${GOOGLE_TTS_ENABLED:-false}
-      - HF_TOKEN=${HF_TOKEN}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CACHE_ENABLED=${TTS_CACHE_ENABLED:-true}
-    volumes:
-      - ../microservices/tts-service/app:/app/app:ro
-      - ../microservices/tts-service/voice_prompts:/app/voice_prompts:ro
-      - tts_model_cache:/app/.cache/huggingface
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-    restart: unless-stopped
-
-  # =============================================================================
-  # NouxCube Podcast Service - AI Podcast Generation
-  # =============================================================================
-  podcast-service:
-    build:
-      context: ../microservices/podcast-service
-      dockerfile: Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-      vllm:
-        condition: service_healthy
-      tts-service:
-        condition: service_healthy
-      mcp-storage:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - PODCAST_API_KEY=${MICROSERVICES_API_KEY}
-      - PODCAST_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PODCAST_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
-      - PODCAST_TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
-      - PODCAST_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
-      - PODCAST_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
-      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
-      - MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - AUDIO_OUTPUT_FORMAT=${PODCAST_AUDIO_FORMAT:-mp3}
-      - AUDIO_BITRATE=${PODCAST_AUDIO_BITRATE:-192k}
-      - AUDIO_SAMPLE_RATE=${PODCAST_AUDIO_SAMPLE_RATE:-24000}
-      - DEFAULT_LANGUAGE=${PODCAST_DEFAULT_LANGUAGE:-es-ES}
-      - DEFAULT_TONE=${PODCAST_DEFAULT_TONE:-conversational}
-      - DEFAULT_LENGTH=${PODCAST_DEFAULT_LENGTH:-standard}
-    volumes:
-      - ../microservices/podcast-service/app:/app/app:ro
-      - ../microservices/podcast-service/config:/app/config:ro
-      - podcast_temp:/app/temp
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
     restart: unless-stopped
 
   # =============================================================================
@@ -754,13 +593,8 @@ volumes:
   redis_data:
   weaviate_data:
   vllm_cache:
-  tgi_cache:
   huggingface_cache:
+  fastembed_cache:
   keycloak_data:
-  langfuse_postgres_data:
-  langfuse_clickhouse_data:
-  langfuse_minio_data:
-  tts_model_cache:
-  podcast_temp:
   local_storage_data:
-  slm_models_data:  # SLM fine-tuned models storage (continuous learning)
+  easyocr_models:

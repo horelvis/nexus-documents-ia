@@ -469,7 +469,7 @@ class MultiStageRetriever:
             # Extract chunk metadata
             chunk_index = doc.metadata.get("chunk_index", 0)
             total_chunks = doc.metadata.get("total_chunks", 1)
-            document_id = doc.metadata.get("document_id") or doc.document_id
+            document_id = doc.metadata.get("document_id") or doc.id
 
             # Skip if no document_id or already processed
             chunk_key = f"{document_id}:{chunk_index}"
@@ -1236,10 +1236,10 @@ class MultiStageRetriever:
         # Convert to unified format for RRF
         text_ranked = [
             {
-                "id": doc.chunk_id or doc.document_id,
+                "id": doc.metadata.get("chunk_id") or doc.id,
                 "type": "text",
                 "score": doc.score,
-                "document_id": doc.document_id,
+                "document_id": doc.id,
                 "content": doc.content,
                 "title": doc.title,
                 "metadata": doc.metadata,

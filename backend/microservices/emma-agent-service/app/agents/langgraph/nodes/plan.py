@@ -335,8 +335,8 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
                 "execution_plan": [],
                 "plan_reasoning": "Consulta de identidad: respuesta directa sin agentes",
                 "reasoning_steps": tracker.get_steps(),
-                "slm_fast_path_used": True,
-                "slm_answer": response,
+                "fast_path_used": True,
+                "fast_path_answer": response,
                 "final_answer": response,
                 "success": True,
                 "metadata": {
@@ -376,8 +376,8 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             "execution_plan": [],
             "plan_reasoning": "Consulta conversacional: respuesta directa sin agentes",
             "reasoning_steps": tracker.get_steps(),
-            "slm_fast_path_used": True,
-            "slm_answer": response,
+            "fast_path_used": True,
+            "fast_path_answer": response,
             "final_answer": response,
             "success": True,
             "metadata": {
@@ -424,8 +424,8 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             "execution_plan": ["general_agent"],
             "plan_reasoning": plan_reasoning,
             "reasoning_steps": tracker.get_steps(),
-            "slm_fast_path_used": False,
-            "slm_answer": None,
+            "fast_path_used": False,
+            "fast_path_answer": None,
             "current_agent_index": 0,
             "metadata": {
                 **state.get("metadata", {}),
@@ -501,6 +501,21 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
     seen = set()
     execution_plan = [a for a in execution_plan if not (a in seen or seen.add(a))]
 
+    # Filter agents by active sector (if configured)
+    sector_config = state.get("sector_config")
+    if sector_config:
+        allowed_agents = set(sector_config.get("agents", []))
+        filtered_plan = [a for a in execution_plan if a in allowed_agents]
+        if not filtered_plan:
+            # All planned agents were outside the sector — use sector default
+            filtered_plan = [sector_config.get("default_agent", "general_agent")]
+        if filtered_plan != execution_plan:
+            logger.info(
+                f"🏷️ PLAN: Sector '{sector_config.get('sector')}' filtered agents: "
+                f"{execution_plan} → {filtered_plan}"
+            )
+        execution_plan = filtered_plan
+
     latency_ms = (time.time() - start_time) * 1000
 
     # Final step
@@ -521,8 +536,8 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
         "execution_plan": execution_plan,
         "plan_reasoning": plan_reasoning,
         "reasoning_steps": tracker.get_steps(),
-        "slm_fast_path_used": False,
-        "slm_answer": None,
+        "fast_path_used": False,
+        "fast_path_answer": None,
         "current_agent_index": 0,
         "metadata": {
             **state.get("metadata", {}),
@@ -535,8 +550,7 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
     }
 
 
-# NOTE: SLM Router fast-path removed - SLM Router is in weaviate-service, not emma-agent-service.
-# Structural queries are now handled via general_agent's structural_query tool which calls
+# Structural queries are handled via general_agent's structural_query tool which calls
 # weaviate-service's /weaviate/structural/query endpoint (Apache AGE graph).
 
 

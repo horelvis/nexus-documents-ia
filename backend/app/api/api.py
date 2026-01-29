@@ -16,7 +16,7 @@ from app.api.v1 import (
     agents, webhooks, search, teams, users, entities,
     assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
-    document_acl, folders, classification, sharing_insights,
+    document_acl, folders, classification, sharing_insights, emma,
 )
 from fastapi import APIRouter
 from app.core.features import Feature, FeatureFlags
@@ -57,6 +57,9 @@ api_router.include_router(google_drive.router)
 
 # AI Agents (always enabled - core Emma functionality)
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
+
+# Emma AI Assistant - dedicated endpoints (replaces /weaviate/emma/*)
+api_router.include_router(emma.router, prefix="/emma", tags=["emma"])
 
 # === CONDITIONAL: Digital Signatures ===
 if FeatureFlags.is_enabled(Feature.DIGITAL_SIGNATURES):

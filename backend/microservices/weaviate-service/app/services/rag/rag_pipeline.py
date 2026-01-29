@@ -404,11 +404,15 @@ class RAGPipeline:
                 # Context cache HIT - use cached context
                 logger.info(f"    ✅ Context cache HIT: {cached_context.total_tokens} tokens")
                 # Reconstruct AssembledContext from cache
+                cached_docs = retrieved_docs[:cached_context.doc_count]
                 assembled_context = AssembledContext(
                     formatted_context=cached_context.context_string,
                     total_tokens=cached_context.total_tokens,
-                    documents=retrieved_docs[:cached_context.doc_count],  # Match cached doc count
-                    metadata=cached_context.metadata,
+                    max_tokens=cached_context.metadata.get("max_tokens", 12000) if cached_context.metadata else 12000,
+                    documents=cached_docs,
+                    query_analysis=query_analysis,
+                    document_headers=[d.title for d in cached_docs],
+                    selection_metadata=cached_context.metadata,
                 )
             else:
                 # Context cache MISS - full assembly

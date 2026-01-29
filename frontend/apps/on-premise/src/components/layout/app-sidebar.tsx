@@ -20,6 +20,7 @@ import {
   IconSchool,
   IconDatabase,
   IconDashboard,
+  IconBinaryTree,
 } from '@tabler/icons-react'
 import {
   Sidebar,
@@ -96,6 +97,11 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       title: 'Base de Conocimiento',
       href: '/admin/public-knowledge',
       icon: IconDatabase,
+    },
+    {
+      title: 'Knowledge Tree',
+      href: '/admin/knowledge-tree',
+      icon: IconBinaryTree,
     },
   ]
 

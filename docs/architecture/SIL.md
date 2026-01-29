@@ -1,9 +1,9 @@
 # Structural Intelligence Layer (SIL)
 
-> ⚠️ **DEPRECATED**: SIL has evolved into **SLM Router** (Small Language Model Router).
-> See [SLM_ROUTER.md](./SLM_ROUTER.md) for the current architecture.
->
-> The SLM Router replaces SIL's rule-based intent detection with LLM-powered query planning using TOON (Task-Oriented Orchestration Notation). The core concepts remain the same, but the implementation is more flexible and includes continuous learning.
+> ⚠️ **REMOVED**: Both SIL and its successor SLM Router have been removed from the codebase.
+> They have been replaced by **Multi-Pipeline RAG Sectors** — per-deployment RAG tuning via `ACTIVE_SECTOR` env var.
+> See `emma-agent-service/app/agents/langgraph/sectors/` for the current architecture.
+> This document is kept for historical reference only.
 
 ---
 

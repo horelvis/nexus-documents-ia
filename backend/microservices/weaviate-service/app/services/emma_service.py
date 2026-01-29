@@ -351,7 +351,7 @@ Responde SOLO una palabra:"""
                 except Exception as e:
                     logger.warning(f"⚠️ NexusRouter init failed (using fallback): {e}")
 
-            # Build available tools list (using nexus_ prefix to avoid Qwen-Agent conflicts)
+            # Build available tools list (nexus_ prefix for search tools)
             legacy_tools = [
                 "nexus_semantic_search", "nexus_hybrid_search", "nexus_keyword_search",
                 "nexus_search_public_knowledge", "nexus_search_with_legal_context",
@@ -1039,7 +1039,7 @@ Responde SOLO una palabra:"""
             )
             import json
 
-            # Map tool names to Qwen-Agent tool classes (nexus_ prefix for search tools)
+            # Map tool names to tool classes (nexus_ prefix for search tools)
             tool_class_map = {
                 "nexus_semantic_search": SemanticSearchTool,
                 "nexus_hybrid_search": HybridSearchTool,

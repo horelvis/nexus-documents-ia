@@ -94,10 +94,10 @@ class HierarchicalIndexer:
             return
 
         try:
-            # Import LLM client for summary generation
-            from ...agents.model_client import get_model_client
+            # Import LLM client for summary generation (Emma v2)
+            from ...agents.llm_client import get_llm_client
 
-            self._llm_client = await get_model_client()
+            self._llm_client = await get_llm_client()
 
             # Import Weaviate service
             from ..weaviate_service import weaviate_service
@@ -161,7 +161,7 @@ class HierarchicalIndexer:
             # Generate summary using LLM
             prompt = self._build_summary_prompt(title, text_for_summary, document_type)
 
-            response = await self._llm_client.complete(
+            response = await self._llm_client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=self._max_summary_tokens + 200,  # Buffer for JSON structure
                 temperature=0.3,  # Low temperature for consistent summaries

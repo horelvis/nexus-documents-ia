@@ -1,6 +1,17 @@
 """
-Weaviate Microservice with Emma AI Integration
-Provides advanced RAG capabilities using Weaviate + Emma AI (PlanningFlow orchestration)
+Weaviate Microservice - RAG and Vector Search
+
+This service provides:
+- Weaviate vector database operations
+- RAG Pipeline (7-layer retrieval-augmented generation)
+- Document indexing and chunking
+- Semantic and hybrid search
+- Knowledge graph operations (Apache AGE)
+- Cache management (retrieval, context, semantic)
+
+Note: Agent orchestration (Emma v2, LangGraph) has been separated into
+emma-agent-service for independent scaling. Query understanding is now
+handled by LLM-based reasoning via Multi-Pipeline RAG sectors.
 """
 import warnings
 
@@ -46,13 +57,15 @@ import time
 
 from app.core.config import settings
 from app.core.security import verify_api_key
-from app.api import weaviate_router, emma_router, public_knowledge_router, knowledge_router, learning_router, sil_router, verified_router
-from app.api.agents import router as agents_router
-from app.api.router_admin import router as router_admin_router  # NexusRouter admin API
-from app.api.emma_v2 import router as emma_v2_router  # Emma v2 API
-from app.api.boe_legislation import router as boe_router  # BOE legislation download API
-from app.api.legal_graph import router as legal_graph_router  # Legal Knowledge Graph API
-from app.api.slm_router import router as slm_router  # SLM Router API
+from app.api import (
+    weaviate_router,
+    public_knowledge_router,
+    knowledge_router,
+    learning_router,
+    verified_router,
+)
+from app.api.boe_legislation import router as boe_router
+from app.api.legal_graph import router as legal_graph_router
 from app.cag.api.cag import router as cag_router
 from app.cag.api.vector import router as cag_vector_router
 
@@ -63,145 +76,63 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reduce verbosity of agent framework logs
-logging.getLogger("autogen_core.events").setLevel(logging.WARNING)
-logging.getLogger("autogen_core").setLevel(logging.WARNING)
-logging.getLogger("autogen_agentchat").setLevel(logging.WARNING)
-logging.getLogger("agent_framework").setLevel(logging.WARNING)
+# Reduce verbosity of noisy logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    logger.info("🚀 Starting Weaviate Service with Emma AI...")
-    logger.info(f"🔧 Service Port: {settings.service_port}")
-    logger.info(f"🗄️ Weaviate URL: {settings.weaviate_url}")
-    logger.info(f"🤖 PlanningFlow enabled: {settings.agents_enabled}")
+    logger.info("Starting Weaviate Service (RAG & Vector Search)...")
+    logger.info(f"Service Port: {settings.service_port}")
+    logger.info(f"Weaviate URL: {settings.weaviate_url}")
 
     # Initialize connections
     try:
         from app.services.weaviate_service import weaviate_service
         await weaviate_service.initialize()
-        logger.info("✅ Weaviate connection established")
-
-        # Preload Semantic Routers (downloads HuggingFace model if needed)
-        # This must happen BEFORE Emma AI to avoid 45s delay on first request
-        try:
-            from app.agents.orchestration import preload_semantic_routers, _SEMANTIC_ROUTER_AVAILABLE
-            if _SEMANTIC_ROUTER_AVAILABLE and preload_semantic_routers:
-                preload_semantic_routers()
-            else:
-                logger.warning("⚠️ Semantic Router not available, skipping preload")
-        except Exception as router_error:
-            logger.warning(f"⚠️ Semantic Router preload failed: {router_error}")
-
-        # Initialize Emma AI (PlanningFlow orchestration)
-        if settings.agents_enabled:
-            try:
-                from app.services.emma_service import emma_service
-                await emma_service.initialize()
-                logger.info("✅ Emma AI initialized (PlanningFlow orchestration)")
-            except Exception as emma_error:
-                logger.warning(f"⚠️ Emma AI initialization skipped: {emma_error}")
+        logger.info("Weaviate connection established")
 
         # Initialize integrated CAG engine
         try:
             from app.cag.services.cag_service import cag_service
             await cag_service.initialize()
-            logger.info("✅ CAG engine initialized inside weaviate-service")
+            logger.info("CAG engine initialized")
         except Exception as cag_error:
-            logger.error(f"❌ Failed to initialize integrated CAG engine: {cag_error}")
+            logger.error(f"Failed to initialize CAG engine: {cag_error}")
             raise cag_error
 
-        # Initialize SLM Router (TOON-based query planning)
-        if settings.slm_router_enabled:
-            try:
-                from app.services.slm_router import initialize_slm_router, SLMRouterConfig, SLMConfig
-                slm_config = SLMConfig(
-                    provider=settings.slm_provider,
-                    # TGI settings (recommended: direct connection to TGI)
-                    tgi_base_url=settings.slm_base_url,
-                    tgi_model=settings.slm_model,
-                    # vLLM settings (fallback)
-                    vllm_base_url=settings.slm_base_url,
-                    vllm_model=settings.slm_model,
-                    # Inference settings
-                    max_tokens=settings.slm_max_tokens,
-                    temperature=settings.slm_temperature,
-                    timeout_ms=settings.slm_timeout_ms
-                )
-                router_config = SLMRouterConfig(
-                    enabled=True,
-                    slm_config=slm_config,
-                    fallback_to_vector=settings.slm_fallback_to_vector,
-                    min_confidence_threshold=settings.slm_min_confidence,
-                    collect_training_data=settings.slm_collect_training_data
-                )
-                await initialize_slm_router(router_config)
-                logger.info("✅ SLM Router initialized (TOON-based query planning)")
-
-                # Initialize Continuous Learning (zero-intervention fine-tuning)
-                if settings.continuous_learning_enabled:
-                    try:
-                        from app.services.slm_router.continuous_learning import (
-                            LearningConfig,
-                            initialize_continuous_learning
-                        )
-                        learning_config = LearningConfig(
-                            enabled=True,
-                            min_examples=settings.learning_min_examples,
-                            maintenance_hour=settings.learning_maintenance_hour,
-                            check_interval_seconds=settings.learning_check_interval,
-                            min_success_rate=settings.learning_min_success_rate,
-                            models_dir=settings.learning_models_dir,
-                            adapter_dir=settings.learning_adapters_dir,
-                            model_name=settings.slm_model
-                        )
-                        learning_service = await initialize_continuous_learning(
-                            redis_url=settings.redis_url,
-                            config=learning_config
-                        )
-                        if learning_service:
-                            # Store reference for shutdown
-                            app.state.continuous_learning_service = learning_service
-                            logger.info("✅ Continuous Learning started (automated fine-tuning)")
-                            logger.info(f"   └─ Maintenance window: {settings.learning_maintenance_hour}:00")
-                            logger.info(f"   └─ Min examples: {settings.learning_min_examples}")
-                    except Exception as learning_error:
-                        logger.warning(f"⚠️ Continuous Learning skipped: {learning_error}")
-
-            except Exception as slm_error:
-                logger.warning(f"⚠️ SLM Router initialization skipped: {slm_error}")
+        # Initialize RAG Pipeline
+        try:
+            from app.services.rag.rag_pipeline import RAGPipeline
+            pipeline = RAGPipeline()
+            await pipeline.initialize()
+            logger.info("RAG Pipeline initialized")
+        except Exception as rag_error:
+            logger.warning(f"RAG Pipeline initialization skipped: {rag_error}")
 
     except Exception as e:
-        logger.error(f"❌ Service initialization failed: {e}")
+        logger.error(f"Service initialization failed: {e}")
         # Continue startup but log error
 
     yield
 
     # Cleanup
-    logger.info("🛑 Shutting down Weaviate Service...")
-
-    # Stop Continuous Learning monitor
-    try:
-        if hasattr(app.state, 'continuous_learning_service'):
-            await app.state.continuous_learning_service.stop()
-            logger.info("✅ Continuous Learning stopped")
-    except Exception as e:
-        logger.warning(f"⚠️ Error stopping Continuous Learning: {e}")
+    logger.info("Shutting down Weaviate Service...")
 
     try:
         from app.services.weaviate_service import weaviate_service
         await weaviate_service.cleanup()
-        logger.info("✅ Weaviate connections closed")
-    except:
+        logger.info("Weaviate connections closed")
+    except Exception:
         pass
+
 
 # Create FastAPI app
 app = FastAPI(
-    title="Weaviate Service with Emma AI",
-    description="Advanced RAG service using Weaviate vector database and Emma AI (PlanningFlow orchestration)",
+    title="Weaviate Service - RAG & Vector Search",
+    description="Vector database operations, RAG pipeline, and knowledge graph queries",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
@@ -217,6 +148,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+
 # Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -227,32 +159,28 @@ async def log_requests(request: Request, call_next):
 
     # Skip health check spam
     if request.url.path != "/health":
-        logger.info(f"📨 {request.method} {request.url.path}")
+        logger.info(f"{request.method} {request.url.path}")
 
     response = await call_next(request)
     process_time = time.time() - start_time
 
     if request.url.path != "/health":
-        logger.info(f"✅ {response.status_code} completed in {process_time:.3f}s")
+        logger.info(f"{response.status_code} completed in {process_time:.3f}s")
 
     return response
 
+
 # Include routers
 app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
-app.include_router(emma_router, prefix="/emma", tags=["emma"])
-app.include_router(emma_v2_router, prefix="/emma", tags=["emma-v2"])  # Emma v2: /emma/v2/*
-app.include_router(agents_router, tags=["agents"])  # OpenManus-style orchestration
 app.include_router(public_knowledge_router, tags=["public-knowledge"])
-app.include_router(boe_router, tags=["boe-legislation"])  # BOE legislation download API
-app.include_router(knowledge_router, tags=["knowledge"])  # Knowledge graph API
-app.include_router(learning_router, tags=["learning"])  # User learning API
-app.include_router(sil_router, tags=["structural-intelligence"])  # SIL API
-app.include_router(verified_router, tags=["verified-generation"])  # Verified Generation API
-app.include_router(router_admin_router, tags=["nexus-router"])  # NexusRouter admin API
-app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])  # Legal Knowledge Graph API
-app.include_router(slm_router, tags=["slm-router"])  # SLM Router API (TOON-based query planning)
+app.include_router(boe_router, tags=["boe-legislation"])
+app.include_router(knowledge_router, tags=["knowledge"])
+app.include_router(learning_router, tags=["learning"])
+app.include_router(verified_router, tags=["verified-generation"])
+app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
+
 
 # Health check
 @app.get("/health")
@@ -263,8 +191,9 @@ async def health_check():
         "service": "weaviate-service",
         "version": "2.0.0",
         "weaviate_url": settings.weaviate_url,
-        "agents_enabled": settings.agents_enabled
+        "capabilities": ["vector-search", "rag-pipeline", "indexing", "caching"]
     }
+
 
 # Service info
 @app.get("/info")
@@ -272,71 +201,29 @@ async def service_info():
     """Service information and capabilities"""
     return {
         "service": "weaviate-service",
-        "description": "Advanced RAG with Weaviate + AutoGen multi-agent orchestration",
+        "description": "RAG and Vector Search service using Weaviate",
         "capabilities": [
             "Vector storage and retrieval",
             "Semantic search",
-            "Multi-agent orchestration (AutoGen)",
+            "Hybrid search (vector + keyword)",
             "RAG Pipeline (7 layers)",
-            "Dynamic data visualization",
-            "Multi-provider LLM support",
-            "Knowledge extraction from documents",
-            "User preference learning",
-            "Verified document generation (Agent Self-Verifies)"
-        ],
-        "agents": [
-            "SearchAgent",
-            "AnalystAgent",
-            "ContractAgent",
-            "ComplianceAgent",
-            "SummarizerAgent"
-        ],
-        "workflows": [
-            "Sequential (RoundRobinGroupChat)",
-            "GroupChat (SelectorGroupChat)",
-            "Swarm (Handoffs)",
-            "PlanningFlow (OpenManus-style)"
+            "Document indexing and chunking",
+            "Multi-tier caching",
         ],
         "endpoints": {
-            "weaviate": "/weaviate/*",
-            "emma": "/emma/* (chatbot)",
-            "agents": "/agents/* (orchestration)",
+            "weaviate": "/weaviate/* (vector operations)",
+            "rag": "/weaviate/rag/* (RAG queries)",
             "knowledge": "/knowledge/* (knowledge graph)",
             "learning": "/learning/* (user learning)",
-            "sil": "/sil/* (structural intelligence)",
             "legal": "/legal/* (legal knowledge graph)",
             "verified": "/verified/* (verified generation)",
-            "router": "/router/* (intent classification admin)",
             "cag": "/cag/*",
             "health": "/health",
             "docs": "/docs" if settings.debug else None
-        }
+        },
+        "note": "Agent orchestration moved to emma-agent-service (port 8009)"
     }
 
-# Agent status endpoint
-@app.get("/agents/status")
-async def agents_status():
-    """AutoGen agents status"""
-    try:
-        from app.agents import get_orchestrator, agent_config
-        orchestrator = get_orchestrator()
-        return {
-            "status": "available" if agent_config.enabled else "disabled",
-            "config": {
-                "enabled": agent_config.enabled,
-                "default_workflow": agent_config.default_workflow.value,
-                "max_turns": agent_config.max_turns,
-                "timeout_seconds": agent_config.timeout_seconds,
-                "fallback_to_rag": agent_config.fallback_to_rag,
-                "model_provider": agent_config.model_provider,
-                "ollama_model": agent_config.ollama_model
-            }
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
 
 if __name__ == "__main__":
     import uvicorn

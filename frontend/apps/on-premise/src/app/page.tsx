@@ -5,7 +5,6 @@
  *
  * Full-screen Emma chat interface for on-premise deployment.
  * Uses shadcn sidebar layout matching the SaaS version design.
- * Includes NexusLM notebook panel on the right (NotebookLM-style).
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -20,7 +19,6 @@ import { useAuth } from '@/contexts/auth-context'
 import { EmmaChat } from '@/components/emma-chat'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { ConversationSidebar } from '@/components/conversation-sidebar'
-import { NotebookPanel } from '@/components/notebook-panel'
 import { conversationService } from '@/lib/services/conversation.service'
 import { EmmaMessage } from '@/lib/types/emma'
 
@@ -30,7 +28,6 @@ export default function EmmaPage() {
 
   // Sidebar and conversation state
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [notebookPanelOpen, setNotebookPanelOpen] = useState(true) // Open by default
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [conversationMessages, setConversationMessages] = useState<EmmaMessage[]>([])
 
@@ -140,22 +137,13 @@ export default function EmmaPage() {
           </div>
         </header>
 
-        {/* Main Content Area - Chat + Notebook Panel */}
-        <main className="flex-1 min-h-0 overflow-hidden flex">
-          {/* Emma Chat - takes remaining space */}
-          <div className="flex-1 min-w-0">
-            <EmmaChat
-              className="h-full"
-              messages={conversationMessages}
-              onMessagesChange={handleMessagesChange}
-              conversationId={activeConversationId}
-            />
-          </div>
-
-          {/* NexusLM Notebook Panel - inline on the right */}
-          <NotebookPanel
-            isOpen={notebookPanelOpen}
-            onOpenChange={setNotebookPanelOpen}
+        {/* Main Content Area - Emma Chat */}
+        <main className="flex-1 min-h-0 overflow-hidden">
+          <EmmaChat
+            className="h-full"
+            messages={conversationMessages}
+            onMessagesChange={handleMessagesChange}
+            conversationId={activeConversationId}
           />
         </main>
       </SidebarInset>

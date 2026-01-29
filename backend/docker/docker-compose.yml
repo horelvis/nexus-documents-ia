@@ -24,8 +24,6 @@ services:
         condition: service_healthy
       background-worker:
         condition: service_started
-      podcast-service:
-        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -41,7 +39,6 @@ services:
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - LANGEXTRACT_SERVICE_URL=${LANGEXTRACT_SERVICE_URL:-http://langextract-service:8000}
-      - PODCAST_SERVICE_URL=${PODCAST_SERVICE_URL:-http://podcast-service:8000}
       # MCP Configuration (NEW - replaces direct storage-service calls)
       - MCP_ENABLED=${MCP_ENABLED:-true}
       - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
@@ -352,6 +349,124 @@ services:
       timeout: 10s
       retries: 3
 
+  # =============================================================================
+  # Knowledge Tree Service - Structural Context (Apache AGE)
+  # =============================================================================
+  knowledge-tree-service:
+    build:
+      context: ../microservices/knowledge-tree-service
+      dockerfile: Dockerfile
+    ports:
+      - "8011:8011"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - AGE_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
+      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-knowledge_graph}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Emma Agent Service - AI Agent Orchestration
+  # =============================================================================
+  # Separated from weaviate-service for independent scaling and fault isolation
+  # Provides: Emma v2, LangGraph, SLM Router, conversation management
+  # Calls weaviate-service via HTTP for RAG and vector search
+  emma-agent-service:
+    build:
+      context: ../microservices/emma-agent-service
+      dockerfile: Dockerfile
+    ports:
+      - "8009:8009"
+    depends_on:
+      weaviate-service:
+        condition: service_healthy
+      knowledge-tree-service:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # Weaviate Service Connection (HTTP client)
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - WEAVIATE_SERVICE_TIMEOUT=${WEAVIATE_SERVICE_TIMEOUT:-120}
+      # Knowledge Tree Service (structural context)
+      - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
+      - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
+      # Redis for sessions
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Database for persistence
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      # vLLM Configuration (PRIMARY - high-throughput GPU inference)
+      - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
+      - VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS:-4096}
+      - VLLM_TEMPERATURE=${VLLM_TEMPERATURE:-0.6}
+      # LLM Provider Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # Agent Framework settings
+      - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
+      - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
+      - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-15}
+      - AGENT_TIMEOUT_SECONDS=${AGENT_TIMEOUT_SECONDS:-300}
+      - AGENT_FALLBACK_TO_RAG=${AGENT_FALLBACK_TO_RAG:-true}
+      # Langfuse Observability
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-true}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      # SLM Router Configuration
+      - SLM_ROUTER_ENABLED=${SLM_ROUTER_ENABLED:-true}
+      - SLM_PROVIDER=${SLM_PROVIDER:-tgi}
+      - SLM_BASE_URL=${SLM_BASE_URL:-http://tgi-slm:80}
+      - SLM_MODEL=${SLM_MODEL:-Qwen/Qwen2-0.5B-Instruct}
+      - SLM_TIMEOUT_MS=${SLM_TIMEOUT_MS:-5000}
+      # Continuous Learning
+      - CONTINUOUS_LEARNING_ENABLED=${CONTINUOUS_LEARNING_ENABLED:-true}
+      - LEARNING_MIN_EXAMPLES=${LEARNING_MIN_EXAMPLES:-500}
+      - LEARNING_MAINTENANCE_HOUR=${LEARNING_MAINTENANCE_HOUR:-3}
+      # Suppress deprecation warnings
+      - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
+    volumes:
+      # Mount source code for development
+      - ../microservices/emma-agent-service/app:/app/app:ro
+      # Mount prompts configuration
+      - ../microservices/emma-agent-service/config:/app/config:ro
+      # Persistent cache for HuggingFace models
+      - huggingface_cache:/root/.cache/huggingface
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8009", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Background worker microservice (previews, emails, indexing retries)
   background-worker:
     build:
@@ -587,137 +702,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
-  # TTS Service - Text-to-Speech using Microsoft VibeVoice
-  # Real-time streaming TTS with ~300ms latency
-  # Supports: English, Spanish (experimental)
-  # GPU required for acceptable performance
-  tts-service:
-    build:
-      context: ../microservices/tts-service
-      dockerfile: Dockerfile
-    # Expose port for WebSocket connections from frontend
-    ports:
-      - "0.0.0.0:8010:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # TTS Provider Configuration
-      - TTS_PROVIDER=${TTS_PROVIDER:-vibevoice}
-      - VIBEVOICE_MODEL_PATH=${VIBEVOICE_MODEL_PATH:-microsoft/VibeVoice-Realtime-0.5B}
-      - VIBEVOICE_DEVICE=${VIBEVOICE_DEVICE:-cuda}
-      - VIBEVOICE_DEFAULT_VOICE=${VIBEVOICE_DEFAULT_VOICE:-Carter}
-      # Google TTS Fallback
-      - GOOGLE_TTS_ENABLED=${GOOGLE_TTS_ENABLED:-true}
-      - GOOGLE_TTS_DEFAULT_VOICE=${GOOGLE_TTS_DEFAULT_VOICE:-es-ES-Neural2-A}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/nexus-document-ia-1eb963df24a4.json}
-      # HuggingFace token for model download
-      - HF_TOKEN=${HF_TOKEN}
-      # Redis for audio caching
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CACHE_ENABLED=${TTS_CACHE_ENABLED:-true}
-    volumes:
-      # Mount source code for development
-      - ../microservices/tts-service/app:/app/app:ro
-      # Mount voice prompts for VibeVoice speakers
-      - ../microservices/tts-service/voice_prompts:/app/voice_prompts:ro
-      # Mount credentials for Google TTS fallback
-      - ../../credentials:/app/credentials:ro
-      # HuggingFace cache for model persistence (accessible to appuser)
-      - tts_model_cache:/app/.cache/huggingface
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    # GPU access for VibeVoice model
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s  # Model loading takes time
-    restart: unless-stopped
-
-  # =============================================================================
-  # NouxCube Podcast Service - AI Podcast Generation
-  # =============================================================================
-  # Generates AI podcasts from document notebooks (NotebookLM alternative)
-  # Pipeline: Analyze sources → Generate script → Synthesize audio → Stitch
-  # Uses:
-  #   - vLLM (Qwen3-4B-Thinking) for script generation
-  #   - TTS Service (VibeVoice) for voice synthesis
-  #   - pydub/ffmpeg for audio stitching
-  podcast-service:
-    build:
-      context: ../microservices/podcast-service
-      dockerfile: Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-      vllm:
-        condition: service_healthy
-      tts-service:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # API Key for podcast-service config (uses PODCAST_ prefix)
-      - PODCAST_API_KEY=${MICROSERVICES_API_KEY}
-      # vLLM for script generation
-      - PODCAST_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PODCAST_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
-      # TTS Service URL (with prefix for config.py)
-      - PODCAST_TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
-      # Storage service URL
-      - PODCAST_STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8000}
-      # Main API for status updates
-      - PODCAST_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      # Legacy env vars (without prefix)
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B-Thinking-2507}
-      # TTS Service for audio synthesis
-      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts-service:8000}
-      # Main API for status updates
-      - MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      # Redis for job queue
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      # Audio output settings
-      - AUDIO_OUTPUT_FORMAT=${PODCAST_AUDIO_FORMAT:-mp3}
-      - AUDIO_BITRATE=${PODCAST_AUDIO_BITRATE:-192k}
-      - AUDIO_SAMPLE_RATE=${PODCAST_AUDIO_SAMPLE_RATE:-24000}
-      # Default podcast settings
-      - DEFAULT_LANGUAGE=${PODCAST_DEFAULT_LANGUAGE:-es-ES}
-      - DEFAULT_TONE=${PODCAST_DEFAULT_TONE:-conversational}
-      - DEFAULT_LENGTH=${PODCAST_DEFAULT_LENGTH:-standard}
-    volumes:
-      # Mount source code for development
-      - ../microservices/podcast-service/app:/app/app:ro
-      - ../microservices/podcast-service/config:/app/config:ro
-      # Temporary audio files (cleaned after upload)
-      - podcast_temp:/app/temp
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
 
   # =============================================================================
   # MEN Service - Mixture of Experts Network for Document Intelligence
@@ -1003,9 +987,7 @@ volumes:
   tgi_cache:  # Cache for TGI-SLM model (Qwen2-0.5B for TOON planning)
   embedding_cache:  # Cache for embedding model (multimodal embeddings service)
   huggingface_cache:  # Cache for HuggingFace models (BGE-M3, FastEmbed, CrossEncoder, spaCy)
-  tts_model_cache:  # Cache for VibeVoice TTS models
   keycloak_data:  # KeyCloak PostgreSQL data
-  podcast_temp:  # Temporary audio files for podcast generation
   langfuse_postgres_data:  # Langfuse PostgreSQL data
   langfuse_clickhouse_data:  # Langfuse ClickHouse analytics data
   langfuse_minio_data:  # Langfuse MinIO S3 storage

@@ -1,1 +1,0 @@
-# Schemas module - Pydantic models

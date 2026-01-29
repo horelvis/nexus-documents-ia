@@ -135,32 +135,6 @@ interface TopFolder {
   count: number
 }
 
-interface SLMRouterStats {
-  status: string
-  initialized: boolean
-  enabled: boolean
-  slm: {
-    model?: string
-    endpoint?: string
-    status?: string
-  }
-  executor: {
-    graph_backend?: string
-    vector_backend?: string
-    status?: string
-  }
-  metrics: {
-    total_requests?: number
-    graph_requests?: number
-    vector_requests?: number
-    hybrid_requests?: number
-    avg_latency_ms?: number
-    cache_hits?: number
-    cache_misses?: number
-  }
-  error?: string
-}
-
 interface BOEPreset {
   name: string
   description: string
@@ -203,8 +177,7 @@ export default function AdminDashboardPage() {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null)
   const [weaviateHealth, setWeaviateHealth] = useState<WeaviateHealth | null>(null)
   const [knowledgeStats, setKnowledgeStats] = useState<KnowledgeStats | null>(null)
-  const [slmStats, setSlmStats] = useState<SLMRouterStats | null>(null)
-  const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
+const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
   const [publicKnowledgeStats, setPublicKnowledgeStats] = useState<PublicKnowledgeStats | null>(null)
 
   // Loading states
@@ -280,8 +253,7 @@ export default function AdminDashboardPage() {
         loadSystemStats(),
         loadWeaviateHealth(),
         loadKnowledgeStats(),
-        loadSlmStats(),
-        loadBoePresets(),
+loadBoePresets(),
         loadPublicKnowledgeStats(),
       ])
     } catch (error: unknown) {
@@ -330,19 +302,7 @@ export default function AdminDashboardPage() {
     }
   }
 
-  const loadSlmStats = async () => {
-    try {
-      // Call /weaviate/slm/health endpoint
-      const response = await apiClient.get<SLMRouterStats>('/weaviate/slm/health')
-      if (!response.error && response.data) {
-        setSlmStats(response.data)
-      }
-    } catch (error) {
-      console.error('Failed to load SLM Router stats:', error)
-    }
-  }
-
-  const loadBoePresets = async () => {
+const loadBoePresets = async () => {
     try {
       // Call /weaviate/boe/presets endpoint
       const response = await apiClient.get<BOEPreset[]>('/weaviate/boe/presets')
@@ -739,7 +699,7 @@ export default function AdminDashboardPage() {
 
             {/* Tabs for different admin sections */}
             <Tabs defaultValue="system" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-6">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="system">
                   <IconServer className="h-4 w-4 mr-2" />
                   Sistema
@@ -751,10 +711,6 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="knowledge">
                   <IconBinaryTree className="h-4 w-4 mr-2" />
                   Knowledge
-                </TabsTrigger>
-                <TabsTrigger value="slm">
-                  <IconBrain className="h-4 w-4 mr-2" />
-                  SLM Router
                 </TabsTrigger>
                 <TabsTrigger value="boe">
                   <IconDatabase className="h-4 w-4 mr-2" />
@@ -981,234 +937,7 @@ export default function AdminDashboardPage() {
                 )}
               </TabsContent>
 
-              {/* SLM Router Tab */}
-              <TabsContent value="slm" className="space-y-4">
-                {/* SLM Info Banner */}
-                <Alert>
-                  <IconBrain className="h-4 w-4" />
-                  <AlertDescription>
-                    <strong>SLM Router (Small Language Model)</strong> — Sistema de planificación de queries que
-                    genera planes TOON (Task-Oriented Orchestration Notation) para enrutar consultas al origen
-                    de datos óptimo. Ahorra hasta 70-90% de tokens comparado con RAG tradicional.
-                  </AlertDescription>
-                </Alert>
-
-                {/* Overview Stats Cards */}
-                <div className="grid gap-4 md:grid-cols-4">
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Estado</CardTitle>
-                      <IconHeart className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center gap-2">
-                        {getStatusBadge(slmStats?.status === 'healthy')}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {slmStats?.initialized ? 'Inicializado' : 'No inicializado'}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
-                      <IconChartBar className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{formatNumber(slmStats?.metrics?.total_requests)}</div>
-                      <p className="text-xs text-muted-foreground">Consultas procesadas</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Latencia Promedio</CardTitle>
-                      <IconActivity className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        {slmStats?.metrics?.avg_latency_ms ? `${Math.round(slmStats.metrics.avg_latency_ms)}ms` : '-'}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Tiempo de respuesta</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Cache Hit Rate</CardTitle>
-                      <IconServer className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        {slmStats?.metrics?.cache_hits !== undefined && slmStats?.metrics?.cache_misses !== undefined
-                          ? `${Math.round((slmStats.metrics.cache_hits / (slmStats.metrics.cache_hits + slmStats.metrics.cache_misses || 1)) * 100)}%`
-                          : '-'}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {formatNumber(slmStats?.metrics?.cache_hits)} hits / {formatNumber(slmStats?.metrics?.cache_misses)} misses
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  {/* Route Distribution */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconChartPie className="h-5 w-5" />
-                        Distribución de Rutas
-                      </CardTitle>
-                      <CardDescription>Tipos de enrutamiento utilizados</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                          <div className="flex items-center gap-2">
-                            <IconBinaryTree className="h-4 w-4 text-blue-500" />
-                            <span className="text-sm">GRAPH_ONLY</span>
-                          </div>
-                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.graph_requests)}</Badge>
-                        </div>
-                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                          <div className="flex items-center gap-2">
-                            <IconDatabase className="h-4 w-4 text-green-500" />
-                            <span className="text-sm">VECTOR_ONLY</span>
-                          </div>
-                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.vector_requests)}</Badge>
-                        </div>
-                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                          <div className="flex items-center gap-2">
-                            <IconBrain className="h-4 w-4 text-purple-500" />
-                            <span className="text-sm">HYBRID</span>
-                          </div>
-                          <Badge variant="outline">{formatNumber(slmStats?.metrics?.hybrid_requests)}</Badge>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-4">
-                        GRAPH_ONLY: Consultas estructurales. VECTOR_ONLY: Búsqueda semántica. HYBRID: Combinación.
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Backend Status */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconServer className="h-5 w-5" />
-                        Estado de Backends
-                      </CardTitle>
-                      <CardDescription>Servicios de datos conectados</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="p-3 bg-muted/50 rounded">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium">SLM Client</span>
-                            {getStatusBadge(slmStats?.slm?.status === 'ok')}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Modelo: {slmStats?.slm?.model || 'No configurado'}
-                          </p>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium">Graph Backend (AGE)</span>
-                            {getStatusBadge(slmStats?.executor?.status === 'ok')}
-                          </div>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium">Vector Backend (Weaviate)</span>
-                            {getStatusBadge(slmStats?.executor?.status === 'ok')}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* TOON Routes Explanation */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <IconBrain className="h-5 w-5" />
-                      TOON - Task-Oriented Orchestration Notation
-                    </CardTitle>
-                    <CardDescription>
-                      El SLM Router genera planes estructurados para cada consulta
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-medium mb-2 flex items-center gap-2">
-                          <IconBinaryTree className="h-4 w-4 text-blue-500" />
-                          GRAPH_ONLY
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Para consultas estructurales: conteos, existencia, relaciones.
-                          Ejecuta Cypher queries en Apache AGE. Latencia &lt;500ms.
-                        </p>
-                        <p className="text-xs mt-2 italic">
-                          Ejemplo: &quot;¿Cuántos contratos tiene ACME?&quot;
-                        </p>
-                      </div>
-                      <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-medium mb-2 flex items-center gap-2">
-                          <IconDatabase className="h-4 w-4 text-green-500" />
-                          VECTOR_ONLY
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Para búsqueda semántica de contenido. Usa embeddings BGE-M3
-                          y busca en Weaviate.
-                        </p>
-                        <p className="text-xs mt-2 italic">
-                          Ejemplo: &quot;Encuentra cláusulas sobre confidencialidad&quot;
-                        </p>
-                      </div>
-                      <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-medium mb-2 flex items-center gap-2">
-                          <IconBrain className="h-4 w-4 text-purple-500" />
-                          HYBRID
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Combina graph y vector search cuando la consulta requiere
-                          contexto estructural y semántico.
-                        </p>
-                        <p className="text-xs mt-2 italic">
-                          Ejemplo: &quot;Analiza el contrato de ACME sobre privacidad&quot;
-                        </p>
-                      </div>
-                      <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-medium mb-2 flex items-center gap-2">
-                          <IconAlertCircle className="h-4 w-4 text-yellow-500" />
-                          ASK_CLARIFY
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Cuando la consulta es ambigua, el sistema solicita
-                          clarificación antes de ejecutar.
-                        </p>
-                        <p className="text-xs mt-2 italic">
-                          Ejemplo: &quot;Busca el documento&quot; → &quot;¿Qué documento?&quot;
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Refresh Button */}
-                <div className="flex justify-end">
-                  <Button
-                    variant="outline"
-                    onClick={loadSlmStats}
-                    disabled={isLoading}
-                  >
-                    <IconRefresh className="mr-2 h-4 w-4" />
-                    Actualizar Estadísticas
-                  </Button>
-                </div>
-              </TabsContent>
-
-              {/* BOE (Public Knowledge Base) Tab */}
+{/* BOE (Public Knowledge Base) Tab */}
               <TabsContent value="boe" className="space-y-4">
                 {/* BOE Info Banner */}
                 <Alert>

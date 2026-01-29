@@ -807,6 +807,13 @@ LOG_LEVEL=DEBUG
 DEBUG=True
 ```
 
+Database logging (manual controls, independent of DEBUG):
+```bash
+# In .env
+SQL_ECHO=true        # Log SQL statements
+DB_POOL_DEBUG=true   # Log connection pool checkout/checkin
+```
+
 View detailed logs:
 ```bash
 docker compose logs -f api | jq '.'

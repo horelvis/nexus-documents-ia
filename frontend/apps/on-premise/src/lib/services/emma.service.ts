@@ -130,8 +130,10 @@ export interface ClarificationOption {
   description?: string
 }
 
+import { ReasoningStepType } from '@/lib/types/emma'
+
 export interface EmmaStreamEvent {
-  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available' | 'progress' | 'slm_thinking' | 'slm_plan'
+  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
   data: {
     message?: string
     text?: string // Token text for streaming events
@@ -165,6 +167,11 @@ export interface EmmaStreamEvent {
     slmThinkingSteps?: SLMThinkingStep[] // All thinking steps so far
     slmPlan?: SLMPlanReady // Generated plan
     route?: string // TOON route for execution
+    // Interleaved thinking / structural_step fields
+    step_type?: ReasoningStepType
+    content?: string
+    entities?: string[]
+    confidence?: number
   }
 }
 
@@ -186,23 +193,35 @@ const normalizedBaseUrl = (API_CONFIG.BASE_URL || '').replace(/\/$/, '')
 const BASE_API_URL = `${normalizedBaseUrl}${API_CONFIG.API_V1}`
 // For SSE streaming, use direct backend URL to bypass Next.js proxy buffering
 const STREAMING_API_URL = `${API_CONFIG.STREAMING_BASE_URL}/api/v1`
-const EMMA_QUERY_PATH = '/weaviate/emma/v2/query'
-const EMMA_QUERY_STREAM_PATH = '/weaviate/emma/v2/query/stream'
-const EMMA_TOOLS_PATH = '/weaviate/emma/tools'
-const SLM_ROUTE_STREAM_PATH = '/weaviate/slm/route/stream'
+const EMMA_QUERY_PATH = '/emma/query'
+const EMMA_QUERY_STREAM_PATH = '/emma/query/stream'
+const EMMA_TOOLS_PATH = '/emma/tools'
 
 // =============================================================================
 // SLM Router Types (Chain-of-Thought Reasoning)
 // =============================================================================
 
-export type SLMThinkingStepType = 'entity_detection' | 'intent_detection' | 'route_decision'
+// Extended to support all backend event types
+export type SLMThinkingStepType =
+  | 'entity_detection'
+  | 'intent_detection'
+  | 'route_decision'
+  | 'retrieval'
+  | 'domain_detection'
+  | 'agent_selection'
+  | 'agent_execution'
+  | 'structural'
+  | 'thinking'
+  | 'observation'
+  | 'tool_call'
+  | 'custom'
 
 export interface SLMThinkingStep {
   step: number
   type: SLMThinkingStepType
   content: string
-  entities: string[]
-  confidence: number
+  entities?: string[]
+  confidence?: number
 }
 
 export interface SLMPlanReady {
@@ -303,6 +322,26 @@ const parseResponse = async <T>(response: Response, defaultErrorPrefix: string):
 
 export function useEmmaService() {
   const apiBase = BASE_API_URL
+
+  const uploadTempDocument = async (file: File): Promise<{ upload_id: string; filename: string; characters?: number }> => {
+    const token = getAccessToken()
+    const formData = new FormData()
+    formData.append('file', file, file.name)
+
+    const response = await fetchWithTimeout(
+      `${apiBase}${API_CONFIG.ENDPOINTS.EMMA_UPLOAD_TEMP}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token || ''}`
+        },
+        body: formData
+      },
+      true
+    )
+
+    return await parseResponse(response, 'Temp upload failed')
+  }
 
   const queryEmma = async (query: EmmaQuery): Promise<EmmaResponse> => {
     const token = getAccessToken()
@@ -507,117 +546,13 @@ export function useEmmaService() {
     })
   }
 
-  /**
-   * Query SLM Router with streaming chain-of-thought reasoning.
-   *
-   * This enables the UI to show visible reasoning steps:
-   * 1. Entity detection - What entities are in the query
-   * 2. Intent detection - What the user wants (COUNT, LIST, etc.)
-   * 3. Route decision - Which data source to use (Graph, Vector, Hybrid)
-   *
-   * @param query - The query to route
-   * @param tenantId - Tenant identifier
-   * @param sessionId - Session ID for conversation history
-   * @param onEvent - Callback for each SSE event
-   */
-  const querySLMRouterStream = async (
-    query: string,
-    tenantId: string,
-    sessionId: string,
-    onEvent: (event: SLMStreamEvent) => void
-  ): Promise<void> => {
-    const token = getAccessToken()
-    const streamUrl = `${STREAMING_API_URL}${SLM_ROUTE_STREAM_PATH}`
-
-    const response = await fetch(streamUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token || ''}`
-      },
-      body: JSON.stringify({
-        query,
-        tenant_id: tenantId,
-        session_id: sessionId
-      })
-    })
-
-    if (!response.ok) {
-      let errorDetail = ''
-      try {
-        const errorBody = await response.json()
-        errorDetail = errorBody?.detail || errorBody?.message || ''
-      } catch {
-        // Response body not JSON
-      }
-      throw new Error(errorDetail || `SLM Router stream failed: ${response.status}`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('No response body')
-    }
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let currentEvent: string | null = null
-    let currentData: string | null = null
-
-    const processLines = (lines: string[]) => {
-      for (const line of lines) {
-        if (line.startsWith('event: ')) {
-          currentEvent = line.slice(7).trim()
-        } else if (line.startsWith('data: ')) {
-          currentData = line.slice(6)
-        } else if (line === '' && currentEvent && currentData) {
-          try {
-            const parsedData = JSON.parse(currentData)
-            onEvent({
-              event: currentEvent as SLMStreamEventType,
-              data: parsedData
-            })
-          } catch (e) {
-            console.warn('[SLM] Failed to parse SSE data:', currentData?.slice(0, 100))
-          }
-          currentEvent = null
-          currentData = null
-        }
-      }
-    }
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-
-        if (value) {
-          buffer += decoder.decode(value, { stream: !done })
-        }
-
-        const lines = buffer.split('\n')
-        buffer = done ? '' : (lines.pop() || '')
-
-        processLines(lines)
-
-        if (done) {
-          if (buffer) {
-            processLines([buffer, ''])
-          }
-          break
-        }
-      }
-    } finally {
-      reader.releaseLock()
-    }
-  }
-
   return {
     queryEmma,
     queryEmmaStream,
     queryEmmaStreamGenerator,
+    uploadTempDocument,
     getAvailableAgents,
     sendMessage,
     getWelcomeMessage,
-    // SLM Router with chain-of-thought reasoning
-    querySLMRouterStream,
   }
 }

@@ -45,6 +45,7 @@ from .nodes.retrieve import retrieve_node
 from .nodes.coordinator import coordinator_node
 from .nodes.plan import plan_node
 from .nodes.synthesize import synthesize_node
+from .nodes.graph_expand import graph_expand_node
 from .nodes.router import (
     route_to_agents,
     check_remaining_agents,
@@ -95,6 +96,7 @@ def create_rag_graph(
     workflow.add_node("coordinator", coordinator_node)
     workflow.add_node("context_tree", context_tree_node)
     workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("graph_expand", graph_expand_node)
     workflow.add_node("plan", plan_node)
     workflow.add_node("synthesize", synthesize_node)
 
@@ -135,8 +137,9 @@ def create_rag_graph(
     # context_tree → retrieve
     workflow.add_edge("context_tree", "retrieve")
 
-    # retrieve → plan
-    workflow.add_edge("retrieve", "plan")
+    # retrieve → graph_expand → plan
+    workflow.add_edge("retrieve", "graph_expand")
+    workflow.add_edge("graph_expand", "plan")
 
     # plan → route_to_agents (conditional)
     workflow.add_conditional_edges(
@@ -209,9 +212,9 @@ def _route_from_plan(state: RAGState) -> str:
     Determines which agent should execute first based on
     the execution plan created by the plan node.
     """
-    # Check if SLM fast-path already provided answer
-    if state.get("slm_fast_path_used"):
-        logger.info("⚡ SLM fast-path: skipping to end")
+    # Check if fast-path already provided answer (conversational/identity shortcut)
+    if state.get("fast_path_used"):
+        logger.info("⚡ Fast-path: skipping to end")
         return "end"
 
     execution_plan = state.get("execution_plan", [])
@@ -359,7 +362,7 @@ async def execute_rag_query(
             "thread_id": thread_id or "",
             "agents_used": [],
             "domains": [],
-            "slm_fast_path": False,
+            "fast_path": False,
             "latency_ms": 0,
             "metadata": {"error": "tenant_id_required"},
         }
@@ -411,7 +414,7 @@ async def execute_rag_query(
             "thread_id": result.get("thread_id", ""),
             "agents_used": list(result.get("agent_results", {}).keys()),
             "domains": result.get("detected_domains", []),
-            "slm_fast_path": result.get("slm_fast_path_used", False),
+            "fast_path": result.get("fast_path_used", False),
             "latency_ms": result.get("total_latency_ms", 0),
             "metadata": result.get("metadata", {}),
         }

@@ -6,10 +6,10 @@ data sources through standardized MCP servers.
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────────┐
-    │                    Agent Framework (Qwen-Agent)                  │
+    │                    Emma Agent Framework                          │
     │  ┌──────────────────────────────────────────────────────────┐   │
     │  │  Native Tools          │   MCP Tools (Dynamic)           │   │
-    │  │  (@register_tool)      │   (from MCP servers)            │   │
+    │  │  (emma_v2_tools)       │   (from MCP servers)            │   │
     │  └──────────────────────────────────────────────────────────┘   │
     └────────────────────────────────┬────────────────────────────────┘
                                      │

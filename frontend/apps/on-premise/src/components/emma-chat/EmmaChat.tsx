@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { useEmmaService, classifyError, EmmaStreamEvent } from '@/lib/services/emma.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { PDFPreviewModal } from './PDFPreviewModal'
-import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep } from '@/lib/types/emma'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
@@ -40,36 +41,66 @@ export function EmmaChat({
   conversationId,
 }: EmmaChatProps) {
   const { user, tenantId, isAuthenticated, login } = useAuth()
-  const { queryEmmaStream } = useEmmaService()
+  const { queryEmmaStream, uploadTempDocument } = useEmmaService()
 
   // Use internal state if no external messages provided (uncontrolled mode)
   const [internalMessages, setInternalMessages] = useState<EmmaMessage[]>([])
-  const messages = externalMessages !== undefined ? externalMessages : internalMessages
-
-  // Use ref to track current messages without causing callback recreation
-  // This fixes the circular dependency: updateMessages -> messages -> updateMessages
-  const messagesRef = useRef(messages)
-  messagesRef.current = messages
+  const isControlled = externalMessages !== undefined
+  const messages = isControlled ? externalMessages : internalMessages
 
   // Stable callback refs for parent handlers
   const onMessagesChangeRef = useRef(onMessagesChange)
   onMessagesChangeRef.current = onMessagesChange
 
-  // Wrapper to update messages (supports both controlled and uncontrolled modes)
-  // IMPORTANT: No dependencies on 'messages' to prevent recreation during streaming
-  const updateMessages = useCallback(
-    (updater: EmmaMessage[] | ((prev: EmmaMessage[]) => EmmaMessage[])) => {
-      const currentMessages = messagesRef.current
-      const newMessages = typeof updater === 'function' ? updater(currentMessages) : updater
+  // IMPORTANT: Use a separate ref to track the "working" state during rapid updates
+  // This ref is updated immediately after each change, ensuring subsequent updates
+  // see the latest state even before React re-renders
+  const latestMessagesRef = useRef<EmmaMessage[]>(messages)
 
-      if (onMessagesChangeRef.current) {
-        onMessagesChangeRef.current(newMessages)
+  // Sync the ref when messages change (from props or internal state)
+  useEffect(() => {
+    latestMessagesRef.current = messages
+  }, [messages])
+
+  // Wrapper to update messages (supports both controlled and uncontrolled modes)
+  // Uses latestMessagesRef to ensure we always have the latest state during rapid updates
+  // Set immediate=true to force synchronous render (for real-time streaming updates)
+  const updateMessages = useCallback(
+    (updater: EmmaMessage[] | ((prev: EmmaMessage[]) => EmmaMessage[]), immediate = false) => {
+      // Get the most recent messages from our ref
+      const currentMessages = latestMessagesRef.current
+
+      // Calculate new messages
+      const newMessages = typeof updater === 'function'
+        ? updater(currentMessages)
+        : updater
+
+      // Update the ref IMMEDIATELY for subsequent rapid calls
+      latestMessagesRef.current = newMessages
+
+      // Update state (controlled or uncontrolled)
+      const doUpdate = () => {
+        if (onMessagesChangeRef.current) {
+          // Controlled mode: notify parent
+          onMessagesChangeRef.current(newMessages)
+        } else {
+          // Uncontrolled mode: update internal state
+          setInternalMessages(newMessages)
+        }
+      }
+
+      // Force immediate render for streaming updates
+      if (immediate) {
+        flushSync(doUpdate)
       } else {
-        setInternalMessages(newMessages)
+        doUpdate()
       }
     },
     [] // No dependencies - uses refs for current values
   )
+
+  // Legacy ref for backwards compatibility (if any code uses messagesRef)
+  const messagesRef = latestMessagesRef
 
   const [isLoading, setIsLoadingInternal] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -89,8 +120,13 @@ export function EmmaChat({
   const [previewDoc, setPreviewDoc] = useState<DocumentInfo | null>(null)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
 
-  // Generate stable session ID
-  const [sessionId] = useState(() => {
+  // Retain uploaded file IDs across follow-up queries in the same session
+  const sessionUploadIdsRef = useRef<string[]>([])
+  const sessionDocIdRef = useRef<string | null>(null)
+  const sessionIndexedDocIdsRef = useRef<string[]>([])
+
+  // Generate stable session ID (migrate from default when tenantId becomes available)
+  const [sessionId, setSessionId] = useState(() => {
     if (typeof window !== 'undefined') {
       const storageKey = `emma_session_${tenantId || 'default'}`
       const stored = sessionStorage.getItem(storageKey)
@@ -102,6 +138,31 @@ export function EmmaChat({
     }
     return `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
   })
+
+  useEffect(() => {
+    if (!tenantId || typeof window === 'undefined') return
+    const tenantKey = `emma_session_${tenantId}`
+    const storedTenant = sessionStorage.getItem(tenantKey)
+    if (storedTenant && storedTenant !== sessionId) {
+      setSessionId(storedTenant)
+      return
+    }
+
+    const defaultKey = 'emma_session_default'
+    const storedDefault = sessionStorage.getItem(defaultKey)
+    if (storedDefault && storedDefault !== sessionId) {
+      sessionStorage.setItem(tenantKey, storedDefault)
+      sessionStorage.removeItem(defaultKey)
+      setSessionId(storedDefault)
+      return
+    }
+
+    if (!storedTenant) {
+      const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+      sessionStorage.setItem(tenantKey, newId)
+      setSessionId(newId)
+    }
+  }, [tenantId, sessionId])
 
   // Handle sending queries
   const handleSendQuery = useCallback(
@@ -160,8 +221,44 @@ export function EmmaChat({
       let workflowSteps: WorkflowStep[] = []
       let streamedAnswer = ''
 
+      // Track SLM thinking steps (old format)
+      let slmThinkingSteps: SLMThinkingStep[] = []
+
       // Prepare attachment context for backend
       const attachmentContext: Record<string, unknown> = {}
+      const uploadedDocs = attachments?.filter((a) => a.type === 'upload') || []
+      if (uploadedDocs.length > 0) {
+        updateMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === progressMessageId
+              ? {
+                  ...msg,
+                  content: 'Subiendo documentos...',
+                  metadata: {
+                    ...msg.metadata,
+                    progress: 5,
+                  },
+                }
+              : msg
+          )
+        )
+
+        const uploadResults = await Promise.all(
+          uploadedDocs.map(async (doc) => {
+            const result = await uploadTempDocument(doc.file)
+            return { name: doc.name, uploadId: result.upload_id }
+          })
+        )
+
+        const newUploadIds = uploadResults.map((r) => r.uploadId)
+        attachmentContext.uploaded_file_ids = newUploadIds
+        attachmentContext.uploaded_files = uploadResults.map((r) => ({
+          name: r.name,
+          upload_id: r.uploadId,
+        }))
+        // Retain IDs so follow-up queries keep the document context
+        sessionUploadIdsRef.current = [...new Set([...sessionUploadIdsRef.current, ...newUploadIds])]
+      }
       if (attachments && attachments.length > 0) {
         // Indexed documents - send their IDs
         const indexedDocs = attachments.filter((a) => a.type === 'indexed')
@@ -170,20 +267,25 @@ export function EmmaChat({
           attachmentContext.document_id = indexedDocs[0].documentId
           // All indexed document IDs for multi-document queries
           attachmentContext.indexed_document_ids = indexedDocs.map((a) => a.documentId)
+          // Retain for follow-up queries
+          sessionDocIdRef.current = attachmentContext.document_id
+          sessionIndexedDocIdsRef.current = attachmentContext.indexed_document_ids
         }
 
         // Uploaded files - prepare metadata (files stay in memory for now)
-        const uploadedDocs = attachments.filter((a) => a.type === 'upload')
-        if (uploadedDocs.length > 0) {
-          attachmentContext.uploaded_files = uploadedDocs.map((a) => ({
-            name: a.name,
-            type: a.fileType,
-            size: a.size,
-          }))
-        }
-
         // Attachment summary for the AI
         attachmentContext.attachment_summary = `Usuario adjuntó ${attachments.length} documento(s): ${attachments.map((a) => a.name).join(', ')}`
+      }
+
+      // Re-attach previous document context for follow-up queries
+      if (!attachmentContext.uploaded_file_ids && sessionUploadIdsRef.current.length > 0) {
+        attachmentContext.uploaded_file_ids = sessionUploadIdsRef.current
+      }
+      if (!attachmentContext.document_id && sessionDocIdRef.current) {
+        attachmentContext.document_id = sessionDocIdRef.current
+      }
+      if (!attachmentContext.indexed_document_ids && sessionIndexedDocIdsRef.current.length > 0) {
+        attachmentContext.indexed_document_ids = sessionIndexedDocIdsRef.current
       }
 
       let streamCompleted = false // Track if we received a terminal event
@@ -326,43 +428,86 @@ export function EmmaChat({
             // Handle token events - accumulate streamed text
             if (event.event === 'token' && data.text) {
               streamedAnswer += data.text
-              updateMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === progressMessageId
-                    ? {
-                        ...msg,
-                        metadata: {
-                          ...msg.metadata,
-                          agent: data.agent || msg.metadata?.agent,
-                          isStreaming: true,
-                          streaming_text: streamedAnswer,
-                        },
-                      }
-                    : msg
-                )
+              updateMessages(
+                (prev) =>
+                  prev.map((msg) =>
+                    msg.id === progressMessageId
+                      ? {
+                          ...msg,
+                          metadata: {
+                            ...msg.metadata,
+                            agent: data.agent || msg.metadata?.agent,
+                            isStreaming: true,
+                            streaming_text: streamedAnswer,
+                          },
+                        }
+                      : msg
+                  ),
+                true // immediate render for real-time streaming
               )
               return // Don't process as other event
             }
 
             // Handle SLM Router thinking step events - visible chain-of-thought
-            if (event.event === 'slm_thinking' && data.slmThinkingStep) {
-              const newStep = data.slmThinkingStep
-              updateMessages((prev) =>
-                prev.map((msg) => {
-                  if (msg.id !== progressMessageId) return msg
-                  const existingSteps = msg.metadata?.slmThinkingSteps || []
-                  return {
-                    ...msg,
-                    content: data.message || msg.content,
-                    metadata: {
-                      ...msg.metadata,
-                      slmIsThinking: data.slmIsThinking ?? true,
-                      slmThinkingSteps: [...existingSteps, newStep],
-                    },
-                  }
-                })
-              )
-              return // Don't process as other event
+            // Support both old format (slmThinkingStep object) and new format (type at data level)
+            if (event.event === 'slm_thinking') {
+              // Check if this has inline thinking data (type at data level, no slmThinkingStep wrapper)
+              // Backend sends: { step, type, content, slmIsThinking } without slmThinkingStep wrapper for some events
+              const inlineStepType = data.step_type || data.type
+              if (inlineStepType && !data.slmThinkingStep) {
+                // Normalize inline step into SLMThinkingStep
+                const newStep: SLMThinkingStep = {
+                  step: typeof data.step === 'number' ? data.step : slmThinkingSteps.length + 1,
+                  type: inlineStepType as SLMThinkingStep['type'],
+                  content: data.content || data.message || '',
+                  confidence: data.confidence,
+                  entities: data.entities,
+                }
+                slmThinkingSteps = [...slmThinkingSteps, newStep]
+
+                updateMessages(
+                  (prev) =>
+                    prev.map((msg) =>
+                      msg.id === progressMessageId
+                        ? {
+                            ...msg,
+                            content: data.message || msg.content,
+                            metadata: {
+                              ...msg.metadata,
+                              slmIsThinking: data.slmIsThinking ?? true,
+                              slmThinkingSteps: [...slmThinkingSteps],
+                            },
+                          }
+                        : msg
+                    ),
+                  true // immediate render for real-time streaming
+                )
+                return // Don't process as other event
+              }
+
+              // Old format with slmThinkingStep object
+              if (data.slmThinkingStep) {
+                slmThinkingSteps = [...slmThinkingSteps, data.slmThinkingStep]
+
+                updateMessages(
+                  (prev) =>
+                    prev.map((msg) =>
+                      msg.id === progressMessageId
+                        ? {
+                            ...msg,
+                            content: data.message || msg.content,
+                            metadata: {
+                              ...msg.metadata,
+                              slmIsThinking: data.slmIsThinking ?? true,
+                              slmThinkingSteps: [...slmThinkingSteps],
+                            },
+                          }
+                        : msg
+                    ),
+                  true // immediate render for real-time streaming
+                )
+                return // Don't process as other event
+              }
             }
 
             // Handle SLM Router plan ready event
@@ -444,6 +589,16 @@ export function EmmaChat({
                     msg.content ||
                     'Análisis completado'
 
+                  // Merge steps: prefer local accumulated, fallback to message metadata
+                  const finalSlmSteps = slmThinkingSteps.length > 0
+                    ? [...slmThinkingSteps]
+                    : msg.metadata?.slmThinkingSteps || []
+                  // Use backend suggestions if available, otherwise generate contextual ones
+                  const backendSuggestions = data.suggestions || (data.final_result as any)?.suggestions
+                  const finalSuggestions = Array.isArray(backendSuggestions) && backendSuggestions.length > 0
+                    ? backendSuggestions
+                    : getContextualSuggestions(query, finalContent, (data.final_result as any)?.tools_used)
+
                   return {
                     ...msg,
                     type: 'result' as const,
@@ -457,12 +612,15 @@ export function EmmaChat({
                         (data.final_result as any)?.decision_path || [],
                       tools_used: (data.final_result as any)?.tools_used || [],
                       agent_flow: workflowSteps.map((s) => s.agent),
-                      suggestions: getContextualSuggestions(),
+                      suggestions: finalSuggestions,
                       isStreaming: false,
                       // Include attached documents as sources with real names
                       documents: documentSources.length > 0 ? documentSources : undefined,
+                      // Preserve SLM thinking steps from progress phase
+                      slmThinkingSteps: finalSlmSteps.length > 0 ? finalSlmSteps : undefined,
+                      slmIsThinking: false,
                     },
-                    suggestions: getContextualSuggestions(),
+                    suggestions: finalSuggestions,
                   }
                 })
               )
@@ -544,7 +702,7 @@ export function EmmaChat({
         setIsLoading(false)
       }
     },
-    [user, tenantId, queryEmmaStream, sessionId, login, updateMessages, deepReasoning]
+    [user, tenantId, queryEmmaStream, uploadTempDocument, sessionId, login, updateMessages, deepReasoning]
   )
 
   // Handle feedback
@@ -738,11 +896,78 @@ const EXAMPLE_PROMPTS = [
   '¿Qué documentos vencen pronto?',
 ]
 
-// Contextual suggestions
-function getContextualSuggestions(): string[] {
+// Contextual suggestions based on query and response
+function getContextualSuggestions(query?: string, response?: string, toolsUsed?: string[]): string[] {
+  const queryLower = (query || '').toLowerCase()
+  const responseLower = (response || '').toLowerCase()
+
+  // If tools were used (documents found), suggest follow-up actions
+  if (toolsUsed && toolsUsed.length > 0) {
+    if (toolsUsed.some(t => t.includes('search') || t.includes('semantic'))) {
+      return [
+        '¿Puedes resumir los documentos encontrados?',
+        'Analiza los riesgos de estos documentos',
+        '¿Qué otros documentos están relacionados?',
+      ]
+    }
+    if (toolsUsed.some(t => t.includes('analyze'))) {
+      return [
+        '¿Qué acciones recomiendas?',
+        'Explica los riesgos en detalle',
+        '¿Hay problemas de cumplimiento?',
+      ]
+    }
+  }
+
+  // Contract-related queries
+  if (queryLower.includes('contrato') || queryLower.includes('contract')) {
+    return [
+      '¿Cuáles son las cláusulas más importantes?',
+      'Identifica los riesgos del contrato',
+      '¿Cuándo vence este contrato?',
+    ]
+  }
+
+  // Count/list queries
+  if (queryLower.includes('cuántos') || queryLower.includes('cuantos') || queryLower.includes('lista')) {
+    return [
+      'Muestra los más recientes',
+      '¿Cuáles requieren atención?',
+      'Filtra por fecha',
+    ]
+  }
+
+  // Document analysis
+  if (queryLower.includes('analiza') || queryLower.includes('revisa') || queryLower.includes('verifica')) {
+    return [
+      '¿Qué riesgos encontraste?',
+      'Resume los puntos clave',
+      '¿Cumple con la normativa?',
+    ]
+  }
+
+  // If response mentions documents were not found
+  if (responseLower.includes('no se encontraron') || responseLower.includes('no encontré')) {
+    return [
+      'Buscar con términos diferentes',
+      '¿Qué documentos tengo disponibles?',
+      'Ayúdame a reformular la búsqueda',
+    ]
+  }
+
+  // Greeting/intro - suggest getting started
+  if (queryLower.includes('hola') || queryLower.includes('me llamo') || queryLower.includes('buenos')) {
+    return [
+      '¿Cuántos documentos tengo?',
+      'Muestra mis contratos recientes',
+      '¿Qué puedes hacer por mí?',
+    ]
+  }
+
+  // Default contextual suggestions
   return [
     '¿Puedes darme más detalles?',
-    'Buscar información relacionada',
-    '¿Qué documentos mencionan esto?',
+    'Muestra documentos relacionados',
+    '¿Qué más puedo preguntarte?',
   ]
 }

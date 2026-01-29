@@ -106,32 +106,7 @@ class LearningProviders:
             Service is lazily imported to avoid circular dependencies.
         """
         if cls._continuous_learning_service is None:
-            # Lazy import to avoid circular dependencies
-            from app.services.slm_router.continuous_learning import (
-                ContinuousLearningService,
-                LearningConfig,
-            )
-
-            settings = cls.get_settings()
-
-            # Create config from centralized settings
-            config = LearningConfig(
-                enabled=settings.continuous_learning_enabled,
-                min_examples=settings.min_examples_for_training,
-                max_examples=settings.max_examples_per_training,
-                maintenance_hour=settings.maintenance_hour,
-                maintenance_minute=settings.maintenance_minute,
-                check_interval_seconds=settings.check_interval_seconds,
-                model_name=settings.slm_model_name,
-                training_epochs=settings.training_epochs,
-                batch_size=settings.training_batch_size,
-                models_dir=settings.models_base_dir,
-                adapter_dir=settings.adapters_base_dir,
-                min_success_rate=settings.min_success_rate,
-            )
-
-            cls._continuous_learning_service = ContinuousLearningService(config)
-            logger.debug("Created ContinuousLearningService from provider")
+            logger.info("ContinuousLearningService: SLM Router removed, service unavailable")
 
         return cls._continuous_learning_service
 
@@ -441,9 +416,8 @@ def _deprecated_get_learning_service(config=None):
         DeprecationWarning,
         stacklevel=2
     )
-    # Import the original for compatibility
-    from app.services.slm_router.continuous_learning import get_learning_service
-    return get_learning_service(config)
+    logger.warning("get_learning_service: SLM Router has been removed")
+    return None
 
 
 def _deprecated_get_knowledge_classifier_singleton():

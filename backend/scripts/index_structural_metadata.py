@@ -60,9 +60,12 @@ def get_database_url() -> str:
     )
 
 
-def get_weaviate_service_url() -> str:
-    """Get Weaviate service URL."""
-    return os.getenv("WEAVIATE_SERVICE_URL", "http://localhost:8007")
+def get_knowledge_tree_service_url() -> str:
+    """Get Knowledge Tree service URL (fallback to Weaviate if not set)."""
+    return os.getenv(
+        "KNOWLEDGE_TREE_SERVICE_URL",
+        os.getenv("WEAVIATE_SERVICE_URL", "http://localhost:8011"),
+    )
 
 
 def get_api_key() -> str:
@@ -86,7 +89,7 @@ async def index_document_structural(
     Returns:
         Response from SIL service
     """
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
     # Build request payload
     payload = {
@@ -101,7 +104,7 @@ async def index_document_structural(
 
     try:
         response = await client.post(
-            f"{weaviate_url}/sil/index-structural",
+            f"{knowledge_tree_url}/tree/index",
             json=payload,
             headers={"X-API-Key": api_key},
             timeout=30.0,
@@ -129,7 +132,7 @@ async def clear_sil_graph(api_key: str, tenant_id: Optional[str] = None) -> bool
     Returns:
         True if successful, False otherwise
     """
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
     try:
         async with httpx.AsyncClient() as client:
@@ -139,7 +142,7 @@ async def clear_sil_graph(api_key: str, tenant_id: Optional[str] = None) -> bool
                 params["tenant_id"] = tenant_id
 
             response = await client.delete(
-                f"{weaviate_url}/sil/graph/clear",
+                f"{knowledge_tree_url}/tree/graph/clear",
                 headers={"X-API-Key": api_key},
                 params=params,
                 timeout=60.0,
@@ -169,7 +172,7 @@ async def get_indexed_document_ids(api_key: str, tenant_id: Optional[str] = None
     Returns:
         Set of document IDs already in the graph
     """
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
     try:
         async with httpx.AsyncClient() as client:
@@ -178,7 +181,7 @@ async def get_indexed_document_ids(api_key: str, tenant_id: Optional[str] = None
                 params["tenant_id"] = tenant_id
 
             response = await client.get(
-                f"{weaviate_url}/sil/graph/document-ids",
+                f"{knowledge_tree_url}/tree/graph/document-ids",
                 headers={"X-API-Key": api_key},
                 params=params,
                 timeout=30.0,
@@ -219,9 +222,9 @@ async def main(
     session = Session()
 
     api_key = get_api_key()
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
-    logger.info(f"Weaviate Service URL: {weaviate_url}")
+    logger.info(f"Knowledge Tree Service URL: {knowledge_tree_url}")
     logger.info(f"Mode: {'FULL RE-INDEX' if full_reindex else 'INCREMENTAL (new only)'}")
     logger.info(f"Dry run: {dry_run}")
 

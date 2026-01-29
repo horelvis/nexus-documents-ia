@@ -56,9 +56,12 @@ def get_database_url() -> str:
     )
 
 
-def get_weaviate_service_url() -> str:
-    """Get Weaviate service URL."""
-    return os.getenv("WEAVIATE_SERVICE_URL", "http://localhost:8007")
+def get_knowledge_tree_service_url() -> str:
+    """Get Knowledge Tree service URL (fallback to Weaviate if not set)."""
+    return os.getenv(
+        "KNOWLEDGE_TREE_SERVICE_URL",
+        os.getenv("WEAVIATE_SERVICE_URL", "http://localhost:8011"),
+    )
 
 
 def get_api_key() -> str:
@@ -206,7 +209,7 @@ async def index_folder_to_sil(
     Returns:
         Response from SIL service
     """
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
     # Build connector_metadata that looks like document metadata
     # but indicates this is a folder
@@ -234,7 +237,7 @@ async def index_folder_to_sil(
 
     try:
         response = await client.post(
-            f"{weaviate_url}/sil/index-structural",
+            f"{knowledge_tree_url}/tree/index",
             json=payload,
             headers={"X-API-Key": api_key},
             timeout=30.0,
@@ -264,9 +267,9 @@ async def main(
     session = Session()
 
     api_key = get_api_key()
-    weaviate_url = get_weaviate_service_url()
+    knowledge_tree_url = get_knowledge_tree_service_url()
 
-    logger.info(f"Weaviate Service URL: {weaviate_url}")
+    logger.info(f"Knowledge Tree Service URL: {knowledge_tree_url}")
     logger.info(f"Dry run: {dry_run}")
 
     # Get connector(s)

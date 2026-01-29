@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     
     # Development/Debug mode
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    SQL_ECHO: bool = os.getenv("SQL_ECHO", "false").lower() == "true"
+    DB_POOL_DEBUG: bool = os.getenv("DB_POOL_DEBUG", "false").lower() == "true"
 
     # ==========================================================================
     # DEPLOYMENT MODE: Single Tenant vs Multi-Tenant
@@ -183,6 +185,9 @@ class Settings(BaseSettings):
     WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
     USE_WEAVIATE_ELYSIA: bool = os.getenv("USE_WEAVIATE_ELYSIA", "true").lower() == "true"  # Default to true
 
+    # Emma Agent Service (AI orchestration)
+    EMMA_SERVICE_URL: str = os.getenv("EMMA_SERVICE_URL", "http://emma-agent-service:8009")
+
     # Text extraction microservice
     TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
@@ -199,6 +204,7 @@ class Settings(BaseSettings):
     # LangExtract Service (Entity Extraction)
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
+    MCP_ALFRESCO_URL: str = os.getenv("MCP_ALFRESCO_URL", "http://mcp-alfresco:8000")
 
     # Identity Document Processing (GDPR-compliant)
     IDENTITY_DOC_ENABLED: bool = os.getenv("IDENTITY_DOC_ENABLED", "true").lower() == "true"

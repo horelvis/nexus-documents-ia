@@ -369,55 +369,13 @@ class Settings(BaseSettings):
     langfuse_debug: bool = os.getenv("LANGFUSE_DEBUG", "false").lower() == "true"
 
     # ==========================================================================
-    # SLM Router Configuration (Structured Query Planning)
+    # Continuous Learning Configuration
     # ==========================================================================
-    # SLM Router uses a Small Language Model to generate structured TOON plans
-    # for routing queries to the appropriate data source (Graph, Vector, Hybrid)
-    # Architecture: TGI (CPU) → LiteLLM Gateway → Fast TOON planning (~50-100ms)
-    # Docs: See services/slm_router/README.md
-    slm_router_enabled: bool = os.getenv("SLM_ROUTER_ENABLED", "true").lower() == "true"
-
-    # SLM Provider: tgi (recommended), vllm, ollama, transformers
-    # TGI provides fast inference for query planning (~10-50ms on GPU)
-    slm_provider: str = os.getenv("SLM_PROVIDER", "tgi")
-
-    # SLM Model: Model served by TGI
-    # Default: Qwen2-0.5B-Instruct on TGI (GPU shared with vLLM)
-    slm_model: str = os.getenv("SLM_MODEL", "Qwen/Qwen2-0.5B-Instruct")
-    slm_base_url: str = os.getenv("SLM_BASE_URL", "http://tgi-slm:80")
-
-    # Inference settings (keep temperature low for deterministic routing)
-    slm_max_tokens: int = int(os.getenv("SLM_MAX_TOKENS", "512"))
-    slm_temperature: float = float(os.getenv("SLM_TEMPERATURE", "0.0"))
-    # Timeout: 5s for Qwen2-0.5B on TGI, increase to 15s for larger models
-    slm_timeout_ms: int = int(os.getenv("SLM_TIMEOUT_MS", "5000"))
-
-    # Fallback behavior
-    slm_fallback_to_vector: bool = os.getenv("SLM_FALLBACK_TO_VECTOR", "true").lower() == "true"
-    slm_min_confidence: float = float(os.getenv("SLM_MIN_CONFIDENCE", "0.4"))
-
-    # Training data collection (for future fine-tuning)
-    slm_collect_training_data: bool = os.getenv("SLM_COLLECT_TRAINING_DATA", "true").lower() == "true"
-
-    # Chain-of-Thought Streaming (visible reasoning in UI)
-    # When enabled, the /slm/route/stream endpoint provides real-time
-    # thinking steps: entity detection, intent detection, route decision
-    slm_streaming_enabled: bool = os.getenv("SLM_STREAMING_ENABLED", "true").lower() == "true"
-
-    # ==========================================================================
-    # Continuous Learning Configuration (Automated Fine-Tuning)
-    # ==========================================================================
-    # The system automatically improves SLM routing accuracy based on usage:
-    # 1. Collects training examples from successful query executions
-    # 2. Monitors data quality (success rate) and quantity
-    # 3. Triggers LoRA fine-tuning during maintenance windows (default: 3 AM)
-    # 4. Hot-swaps improved model with zero downtime
-    # ZERO user intervention required - fully automated
     continuous_learning_enabled: bool = os.getenv("CONTINUOUS_LEARNING_ENABLED", "true").lower() == "true"
-    learning_min_examples: int = int(os.getenv("LEARNING_MIN_EXAMPLES", "500"))  # Min examples before training
-    learning_maintenance_hour: int = int(os.getenv("LEARNING_MAINTENANCE_HOUR", "3"))  # 3 AM default
-    learning_check_interval: int = int(os.getenv("LEARNING_CHECK_INTERVAL", "3600"))  # Check every hour
-    learning_min_success_rate: float = float(os.getenv("LEARNING_MIN_SUCCESS_RATE", "0.7"))  # 70% success rate required
+    learning_min_examples: int = int(os.getenv("LEARNING_MIN_EXAMPLES", "500"))
+    learning_maintenance_hour: int = int(os.getenv("LEARNING_MAINTENANCE_HOUR", "3"))
+    learning_check_interval: int = int(os.getenv("LEARNING_CHECK_INTERVAL", "3600"))
+    learning_min_success_rate: float = float(os.getenv("LEARNING_MIN_SUCCESS_RATE", "0.7"))
     learning_models_dir: str = os.getenv("LEARNING_MODELS_DIR", "/data/models")
     learning_adapters_dir: str = os.getenv("LEARNING_ADAPTERS_DIR", "/data/adapters")
 

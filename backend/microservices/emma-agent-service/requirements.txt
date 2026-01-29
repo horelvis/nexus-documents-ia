@@ -1,0 +1,68 @@
+# Emma Agent Service - AI Agent Orchestration
+# Primary LLM: vLLM (high-throughput GPU inference)
+# Models: Qwen3-4B-Thinking + Domain specialists
+# Framework: Emma (native async) + LangGraph
+
+# FastAPI and core
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP clients (for calling weaviate-service)
+httpx>=0.25.0
+aiohttp>=3.9.0
+python-multipart>=0.0.9
+
+# Database and storage (for sessions)
+asyncpg>=0.29.0
+redis>=5.0.0
+
+# LLM clients
+openai>=1.0.0  # For vLLM OpenAI-compatible API
+
+# LangGraph - Multi-Agent RAG Orchestration
+# State-based graph execution for multi-agent workflows
+# Documentation: https://langchain-ai.github.io/langgraph/
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+
+# Semantic Router - Fast intent classification
+semantic-router>=0.0.50
+fastembed>=0.4.0
+
+# NLP for domain routing
+spacy>=3.7.0
+rapidfuzz>=3.5.0
+transformers>=4.36.0
+
+# ML dependencies
+torch>=1.11.0
+numpy>=1.24.0
+sentence-transformers>=2.2.2
+scikit-learn>=1.3.0
+
+# SetFit - Few-shot fine-tuning for intent classification
+setfit>=1.0.0
+datasets>=2.14.0
+
+# LoRA Fine-Tuning - Continuous Learning
+peft>=0.9.0
+bitsandbytes>=0.42.0
+accelerate>=0.27.0
+
+# LLM Observability - Langfuse
+langfuse>=2.36.0
+
+# YAML for prompts
+pyyaml>=6.0.0
+
+# Logging
+structlog>=23.2.0
+loguru>=0.7.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

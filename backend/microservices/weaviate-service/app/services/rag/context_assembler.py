@@ -30,10 +30,9 @@ STRUCTURAL_CONTEXT_MAX_TOKENS = 500  # Reserve for structural context header
 
 
 # Token budgets per model type
-# RLM Long Context: vLLM expanded from 12K to 28K to utilize Qwen3-VL's 32K window
-# Remaining 4K reserved for system prompt, query, and response generation
+# Reserve ~4K tokens for system prompt, query, and response generation
 TOKEN_BUDGETS = {
-    "vllm": 28000,       # vLLM with Qwen3-VL-8B-Thinking (32K context, RLM-ready)
+    "vllm": 12000,       # vLLM default (adjust based on model's max_model_len)
     "openai": 12000,     # GPT-4o-mini and above (128K context available)
     "anthropic": 12000,  # Claude models (200K context available)
     "ollama": 4000,      # Legacy/conservative for local models

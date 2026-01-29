@@ -60,12 +60,65 @@ export interface WorkflowStep {
 }
 
 // SLM Router Chain-of-Thought types
+// Extended to support all backend event types
+export type SLMThinkingStepType =
+  | 'entity_detection'    // Entity extraction
+  | 'intent_detection'    // Intent classification
+  | 'route_decision'      // Routing decision
+  | 'retrieval'           // Document retrieval step
+  | 'domain_detection'    // Domain detection
+  | 'agent_selection'     // Agent selection
+  | 'agent_execution'     // Agent execution
+  | 'structural'          // Structural query step
+  | 'thinking'            // General thinking
+  | 'observation'         // Observation step
+  | 'tool_call'           // Tool call
+  | 'custom'              // Custom step
+
 export interface SLMThinkingStep {
   step: number
-  type: 'entity_detection' | 'intent_detection' | 'route_decision'
+  type: SLMThinkingStepType
   content: string
   entities?: string[]
   confidence?: number
+}
+
+// Interleaved Thinking Step Types (ReACT-style reasoning)
+export type ReasoningStepType =
+  | 'query_analysis'
+  | 'routing'
+  | 'thinking'
+  | 'tool_call'
+  | 'tool_execution'
+  | 'observation'
+  | 'reflection'
+  | 'connection'
+  | 'connector'
+  | 'search'
+  | 'data_extraction'
+  | 'transformation'
+  | 'validation'
+  | 'response'
+  | 'error'
+  | 'custom'
+  // LangGraph specific types
+  | 'retrieval'
+  | 'domain_detection'
+  | 'agent_selection'
+  | 'agent_execution'
+  | 'structural'
+  | 'entity_detection'
+  | 'intent_detection'
+  | 'route_decision'
+
+export interface ReasoningStep {
+  type: ReasoningStepType
+  content: string
+  confidence?: number
+  entities?: string[]
+  source?: string
+  timestamp_ms?: number
+  metadata?: Record<string, unknown>
 }
 
 export interface SLMPlan {
@@ -152,6 +205,10 @@ export interface EmmaStreamEvent {
     options?: ClarificationOption[]
     multi_select?: boolean
     severity?: 'info' | 'warning' | 'critical'
+    // Interleaved thinking / structural_step fields
+    step_type?: ReasoningStepType
+    content?: string
+    entities?: string[]
   }
 }
 

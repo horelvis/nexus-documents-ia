@@ -1,900 +1,503 @@
-"""Emma API endpoints for advanced agentic RAG"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
-from typing import Dict, Any, List, Optional, AsyncGenerator
-import logging
-import base64
-import uuid
-import json
-import asyncio
+"""
+Emma API Endpoints
 
+Main API endpoints for Emma AI assistant.
+
+Endpoints:
+- POST /emma/query - Execute query (non-streaming)
+- POST /emma/query/stream - Execute query with SSE streaming
+- GET /emma/tools - List available tools
+- GET /emma/health - Health check
+- GET /emma/sessions - List conversation sessions
+- POST /emma/sessions/{id}/continue - Continue a session
+- PATCH /emma/sessions/{id} - Update session metadata
+- DELETE /emma/sessions/{id} - Delete a session
+
+Architecture:
+- Uses EmmaV2 agent with SIL fast path and domain routing
+- LangGraph integration available via LANGGRAPH_RAG_ENABLED flag
+- Session persistence in PostgreSQL + Redis cache
+"""
+
+import asyncio
+import json
+import logging
+import uuid
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from app.core.config import settings
+from app.core.langfuse_config import (
+    flush_langfuse,
+    langfuse_context,
+    score_emma_result,
+    trace_context,
+    trace_emma_query,
+)
 from app.core.security import verify_api_key
-from app.services.emma_service import emma_service
-from app.services.pdf_annotation_service import pdf_annotation_service
-from app.services.document_text_service import document_text_service
-from app.services.pdf_markdown_service import get_pdf_markdown_service
+from app.agents.emma_v2 import (
+    EmmaV2,
+    EmmaV2Config,
+    EmmaV2Result,
+    ExecutionContext,
+    get_emma_v2,
+)
+from app.agents.emma_v2_tools import EMMA_V2_TOOLS, get_emma_v2_tools
+from app.services.emma_persistence_service import get_emma_persistence_service
 from app.schemas.emma import (
-    EmmaQuery, EmmaResponse, ToolExecution, DecisionTreeState,
-    FeedbackRequest, VisualizationRequest,
-    AnalyzeWithAnnotationsRequest, AnnotatedPDFResponse,
-    AnalysisRisk, AnalysisRecommendation, DocumentAnalysisResult,
-    PDFAnnotation, AnnotationRect,
-    MarkdownPage, DocumentMarkdownResponse, AnalysisWithMarkdownResponse
+    EmmaSessionListResponse,
+    EmmaSessionResponse,
+    EmmaSessionUpdate,
+    EmmaContinueSessionResponse,
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
-@router.post("/query", response_model=EmmaResponse)
-async def emma_query(
-    query: EmmaQuery,
-    _: bool = Depends(verify_api_key)
+router = APIRouter(tags=["Emma"])
+
+
+# =============================================================================
+# Request/Response Models
+# =============================================================================
+
+class EmmaV2Query(BaseModel):
+    """Query request for Emma v2."""
+    query: str = Field(..., description="User's natural language query")
+    tenant_id: str = Field(..., description="Tenant identifier")
+    user_id: Optional[str] = Field(None, description="User identifier")
+    thread_id: Optional[str] = Field(None, description="Conversation thread ID for history")
+    session_id: Optional[str] = Field(None, description="Session ID (alias for thread_id)")
+    enable_sil: bool = Field(True, description="Enable SIL fast path for structural queries")
+    enable_domain_routing: bool = Field(True, description="Enable domain-specific prompts")
+    enable_streaming: bool = Field(False, description="Enable streaming (use /stream endpoint instead)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "¿Cuántos contratos laborales tengo?",
+                "tenant_id": "tenant-123",
+                "user_id": "user-456",
+                "thread_id": "thread-789",
+                "enable_sil": True,
+            }
+        }
+
+
+class EmmaV2Response(BaseModel):
+    """Response from Emma v2."""
+    success: bool
+    answer: str
+    domain: str = "general"
+    tools_called: List[str] = Field(default_factory=list)
+    iterations: int = 0
+    sil_answered: bool = False
+    tokens_saved: int = 0
+    latency_ms: float = 0.0
+    thread_id: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "answer": "Tienes 5 contratos laborales.",
+                "domain": "labor",
+                "tools_called": [],
+                "iterations": 0,
+                "sil_answered": True,
+                "tokens_saved": 2500,
+                "latency_ms": 45.2,
+                "thread_id": "thread-789",
+            }
+        }
+
+
+class ToolInfo(BaseModel):
+    """Information about a tool."""
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+
+
+class ToolsResponse(BaseModel):
+    """Response listing available tools."""
+    tools: List[ToolInfo]
+    count: int
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str
+    version: str = "2.0"
+    llm_connected: bool
+    sil_enabled: bool
+    features: Dict[str, bool]
+
+
+# =============================================================================
+# Feature Flag
+# =============================================================================
+
+def is_emma_v2_enabled() -> bool:
+    """Check if Emma v2 is enabled."""
+    # Can be controlled via environment variable
+    import os
+    return os.getenv("EMMA_V2_ENABLED", "true").lower() == "true"
+
+
+# =============================================================================
+# Endpoints
+# =============================================================================
+
+@router.post("/query", response_model=EmmaV2Response)
+async def emma_v2_query(
+    query: EmmaV2Query,
+    _: bool = Depends(verify_api_key),
 ):
-    """Execute Emma agentic query with decision trees"""
-    try:
-        # Enhanced logging for debug mode
-        if query.enable_debug:
-            logger.info(f"🧠 DEBUG MODE ENABLED for query: {query.query[:100]}...")
-            logger.info(f"📊 Debug parameters: tenant_id={query.tenant_id}, session_id={query.session_id}")
+    """
+    Execute a query with Emma v2.
 
-        response = await emma_service.execute_query(query)
+    This endpoint uses the new Emma v2 architecture:
+    1. SIL fast path for structural queries (70-90% token savings)
+    2. Domain-specific dynamic prompts
+    3. Native async LLM client
+    4. Consolidated tool set (6 tools)
 
-        if query.enable_debug and response.data:
-            logger.info(f"🔍 Chain of thought data generated: {len(response.data.get('decision_trace', []))} decision steps")
+    Use thread_id to maintain conversation context across requests.
+    """
+    if not is_emma_v2_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Emma v2 is not enabled. Set EMMA_V2_ENABLED=true",
+        )
 
-        return response
-    except Exception as e:
-        logger.error(f"❌ Emma query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Build context
+    thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
+
+    # Create Langfuse trace for this query
+    with trace_context(
+        name="emma.query",
+        session_id=thread_id,
+        user_id=query.user_id,
+        metadata={
+            "tenant_id": query.tenant_id,
+            "sil_enabled": query.enable_sil,
+            "domain_routing_enabled": query.enable_domain_routing,
+        },
+        input={"query": query.query},
+        tags=["emma-v2", "api"],
+    ) as trace:
+        try:
+            emma = await get_emma_v2()
+
+            context = ExecutionContext(
+                tenant_id=query.tenant_id,
+                user_id=query.user_id,
+                thread_id=thread_id,
+            )
+
+            # Configure Emma based on request
+            emma.config.enable_sil_fast_path = query.enable_sil
+            emma.config.enable_domain_routing = query.enable_domain_routing
+
+            # Execute query
+            result = await emma.execute(query.query, context)
+
+            # Update trace with output
+            if trace:
+                trace.update(
+                    output={
+                        "answer": result.answer[:500] + "..." if len(result.answer) > 500 else result.answer,
+                        "domain": result.domain.value,
+                        "sil_answered": result.sil_answered,
+                    }
+                )
+
+            return EmmaV2Response(
+                success=result.success,
+                answer=result.answer,
+                domain=result.domain.value,
+                tools_called=result.tools_called,
+                iterations=result.iterations,
+                sil_answered=result.sil_answered,
+                tokens_saved=result.tokens_saved,
+                latency_ms=result.latency_ms,
+                thread_id=result.thread_id,
+                metadata=result.metadata,
+            )
+
+        except Exception as e:
+            logger.error(f"Emma v2 query error: {e}", exc_info=True)
+            if trace:
+                trace.update(level="ERROR", status_message=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/query/stream")
-async def emma_query_stream(
-    query: EmmaQuery,
-    _: bool = Depends(verify_api_key)
+async def emma_v2_query_stream(
+    query: EmmaV2Query,
+    _: bool = Depends(verify_api_key),
 ):
     """
-    Execute Emma query with Server-Sent Events (SSE) streaming.
+    Execute a query with Emma v2 using Server-Sent Events (SSE) streaming.
 
-    Returns real-time progress updates as agents execute.
+    Events:
+    - `thinking`: LLM reasoning process (if thinking mode enabled)
+    - `content`: Response text chunks
+    - `tool_call`: Tool invocation with name and arguments
+    - `tool_result`: Result from tool execution
+    - `done`: Final result with full metadata
+    - `error`: Error message
 
-    SSE Event format:
-    - event: start | planning | plan_created | step_start | step_complete | step_error | consolidating | complete
-    - data: JSON with progress info
-
-    Example events:
+    Example SSE stream:
     ```
-    event: step_start
-    data: {"step": 1, "total_steps": 4, "agent": "ContractAgent", "progress": 25}
+    event: content
+    data: {"content": "Analizando tu consulta..."}
 
-    event: step_complete
-    data: {"step": 1, "findings_count": 3, "progress": 30}
+    event: tool_call
+    data: {"name": "search", "arguments": {"query": "contratos laborales"}}
 
-    event: complete
-    data: {"success": true, "final_result": {...}, "progress": 100}
+    event: tool_result
+    data: {"name": "search", "result": {"count": 5}}
+
+    event: content
+    data: {"content": "Encontré 5 contratos laborales."}
+
+    event: done
+    data: {"success": true, "answer": "...", "latency_ms": 1234.5}
     ```
     """
-    async def generate_sse() -> AsyncGenerator[str, None]:
-        try:
-            async for event in emma_service.execute_query_stream(query):
-                event_type = event.get("event", "message")
-                event_data = event.get("data", {})
-
-                # Format as SSE - yield as single message to ensure atomicity
-                sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                yield sse_message
-                # Force immediate flush to client (prevents buffering)
-                await asyncio.sleep(0)
-
-        except Exception as e:
-            logger.error(f"❌ Stream error: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-            await asyncio.sleep(0)
-
-    return StreamingResponse(
-        generate_sse(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
-    )
-
-@router.post("/tools/execute", response_model=Dict[str, Any])
-async def execute_tool(
-    tool_execution: ToolExecution,
-    _: bool = Depends(verify_api_key)
-):
-    """Execute a specific tool through Emma decision tree"""
-    try:
-        result = await emma_service.execute_tool(tool_execution)
-        return result
-    except Exception as e:
-        logger.error(f"❌ Tool execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/tools")
-async def list_available_tools(_: bool = Depends(verify_api_key)):
-    """List all available Emma tools"""
-    try:
-        tools = await emma_service.list_tools()
-        return {"tools": tools}
-    except Exception as e:
-        logger.error(f"❌ Failed to list tools: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/decision-tree/{session_id}/state", response_model=DecisionTreeState)
-async def get_decision_tree_state(
-    session_id: str,
-    _: bool = Depends(verify_api_key)
-):
-    """Get current decision tree state for a session"""
-    try:
-        state = await emma_service.get_decision_tree_state(session_id)
-        return state
-    except Exception as e:
-        logger.error(f"❌ Failed to get decision tree state: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/visualize")
-async def create_visualization(
-    viz_request: VisualizationRequest,
-    _: bool = Depends(verify_api_key)
-):
-    """Create dynamic visualization based on data type"""
-    try:
-        visualization = await emma_service.create_visualization(viz_request)
-        return visualization
-    except Exception as e:
-        logger.error(f"❌ Visualization failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/feedback")
-async def submit_feedback(
-    feedback: FeedbackRequest,
-    _: bool = Depends(verify_api_key)
-):
-    """Submit feedback for learning and improvement"""
-    try:
-        result = await emma_service.process_feedback(feedback)
-        return {"status": "success", "feedback_id": result}
-    except Exception as e:
-        logger.error(f"❌ Feedback processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/analytics/session/{session_id}")
-async def get_session_analytics(
-    session_id: str,
-    _: bool = Depends(verify_api_key)
-):
-    """Get analytics for a specific Emma session"""
-    try:
-        analytics = await emma_service.get_session_analytics(session_id)
-        return analytics
-    except Exception as e:
-        logger.error(f"❌ Failed to get session analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/health")
-async def emma_health_check():
-    """Emma service health check"""
-    try:
-        status = await emma_service.health_check()
-        return status
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
-
-
-@router.get("/concurrency/stats")
-async def get_concurrency_stats(_: bool = Depends(verify_api_key)):
-    """
-    Get concurrency statistics for monitoring.
-
-    Returns current LLM slot usage, queue depth, and per-tenant stats.
-    Useful for monitoring system load and debugging capacity issues.
-    """
-    from app.core.concurrency import get_concurrency_manager
-
-    try:
-        manager = get_concurrency_manager()
-        stats = await manager.get_stats()
-        return {
-            "status": "ok",
-            "concurrency": stats
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to get concurrency stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/prompts/reload")
-async def reload_prompts(_: bool = Depends(verify_api_key)):
-    """
-    Reload Emma prompts from YAML configuration file.
-
-    Use this after editing config/prompts/emma_prompts.yaml
-    to apply changes without restarting the service.
-    """
-    try:
-        from app.services.rag.prompt_loader import reload_prompts, list_available_prompts
-        success = reload_prompts()
-        if success:
-            available = list_available_prompts()
-            return {
-                "status": "success",
-                "message": "Prompts reloaded successfully",
-                "available_prompts": available
-            }
-        else:
-            return {
-                "status": "warning",
-                "message": "Prompt file not found, using defaults"
-            }
-    except Exception as e:
-        logger.error(f"❌ Failed to reload prompts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/prompts")
-async def get_available_prompts(_: bool = Depends(verify_api_key)):
-    """List available prompts in the configuration file"""
-    try:
-        from app.services.rag.prompt_loader import list_available_prompts, load_prompts
-        available = list_available_prompts()
-        prompts = load_prompts()
-        return {
-            "available_prompts": available,
-            "prompt_count": len(available),
-            "prompts_preview": {k: v[:200] + "..." if len(v) > 200 else v for k, v in prompts.items()}
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to list prompts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/migrate-from-qdrant")
-async def migrate_from_qdrant(
-    source_collection: str,
-    target_collection: str,
-    tenant_id: str,
-    batch_size: int = 100,
-    _: bool = Depends(verify_api_key)
-):
-    """Migrate data from Qdrant to Weaviate (TRANSITION HELPER)"""
-    try:
-        result = await emma_service.migrate_from_qdrant(
-            source_collection, target_collection, tenant_id, batch_size
+    if not is_emma_v2_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Emma v2 is not enabled. Set EMMA_V2_ENABLED=true",
         )
-        return {
-            "status": "success",
-            "migrated_documents": result.get("migrated", 0),
-            "migration_id": result.get("migration_id"),
-            "collection": target_collection
-        }
-    except Exception as e:
-        logger.error(f"❌ Migration from Qdrant failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/analyze-with-annotations", response_model=AnnotatedPDFResponse)
-async def analyze_document_with_annotations(
-    document_id: str = Form(...),
-    tenant_id: str = Form(...),
-    analysis_type: str = Form("legal"),
-    file: Optional[UploadFile] = File(None),
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Analyze a document and return the PDF with native annotations (highlights).
-
-    This endpoint uses the DocumentAnalysisFlow (SwarmWorkflow native) with specialized agents:
-    1. Receives PDF (either uploaded or fetched from storage by document_id)
-    2. Extracts text with page markers [PÁGINA N] using DocumentTextService
-    3. Runs SwarmWorkflow analysis with specialized agents (ContractAgent, ComplianceAgent, etc.)
-    4. Uses fuzzy matching to locate quotes in the PDF
-    5. Adds native PDF annotations with OCG layers at the exact locations
-    6. Returns base64-encoded annotated PDF plus annotation metadata
-
-    The annotations are native PDF highlights with toggleable layers that work in any PDF viewer.
-    Each highlight has a popup with title, severity, and description.
-
-    Args:
-        document_id: Document ID in the system
-        tenant_id: Tenant ID for isolation
-        analysis_type: Type of analysis ("legal", "compliance", "financial", "general")
-        file: Optional PDF file upload (if not provided, fetched from storage)
-
-    Returns:
-        AnnotatedPDFResponse with:
-        - annotated_pdf: Base64-encoded PDF with highlights
-        - annotations: List of annotation metadata with page numbers and rects
-        - analysis: Full analysis result (summary, risks, recommendations)
-    """
-    from app.agents.flows.document_analysis_flow import get_document_analysis_flow
-
-    try:
-        logger.info(f"📄 Analyzing document {document_id} for tenant {tenant_id} (type: {analysis_type})")
-
-        # 1. Get PDF bytes
-        if file:
-            pdf_bytes = await file.read()
-            logger.info(f"📥 Received uploaded PDF: {len(pdf_bytes)} bytes")
-        else:
-            # Fetch from storage service
-            pdf_bytes = await _fetch_document_from_storage(document_id, tenant_id)
-            if not pdf_bytes:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Document {document_id} not found"
-                )
-            logger.info(f"📥 Fetched PDF from storage: {len(pdf_bytes)} bytes")
-
-        # 2. Extract text with page markers using DocumentTextService
-        doc_content = document_text_service.extract_document_content(
-            pdf_bytes,
-            include_page_markers=True,
-            max_chars=50000,  # Generous limit for large documents
-        )
-
-        if not doc_content.full_text:
-            raise HTTPException(
-                status_code=400,
-                detail="Could not extract text from PDF"
-            )
-
-        logger.info(
-            f"📝 Text extracted: {doc_content.total_pages} pages, "
-            f"{doc_content.total_chars} chars with page markers"
-        )
-
-        # 3. Run analysis with DocumentAnalysisFlow (SwarmWorkflow native)
-        flow = get_document_analysis_flow()
-        result = await flow.execute(
-            task=f"Analizar documento {document_id}",
-            tenant_id=tenant_id,
-            document_id=document_id,
-            document_content=doc_content.full_text,  # Text with [PÁGINA N] markers
-            analysis_type=analysis_type,
-        )
-
-        logger.info(
-            f"🤖 DocumentAnalysisFlow completed: success={result.success}, "
-            f"agents_used={result.agents_used}, execution_time={result.execution_time_ms}ms"
-        )
-
-        # 4. Convert analysis result to annotation items with fuzzy matching
-        annotation_items = []
-
-        for risk in result.risks:
-            quote = risk.get("quote", "")
-            item = {
-                "id": risk.get("id", f"risk_{len(annotation_items)}"),
-                "type": "risk",
-                "severity": risk.get("severity", "medium"),
-                "title": risk.get("title", ""),
-                "description": risk.get("description", ""),
-                "quote": quote,
-                "clause": risk.get("clause"),
-            }
-
-            # Use cross-block search for better localization
-            if quote:
-                match = document_text_service.find_text_position_cross_block(
-                    doc_content, quote, max_block_span=3,
-                    page_hint=risk.get("page_hint")
-                )
-                if match:
-                    item["page_hint"] = match.page_number
-                    item["match_confidence"] = match.confidence
-                    item["match_type"] = match.match_type
-                    # Add bbox for position_data
-                    if match.bbox and match.bbox[2] > match.bbox[0]:
-                        item["bbox_start_x0"] = match.bbox[0]
-                        item["bbox_start_y0"] = match.bbox[1]
-                        item["bbox_start_x1"] = match.bbox[2]
-                        item["bbox_start_y1"] = match.bbox[3]
-                        item["page_start"] = match.page_number
-                        item["page_end"] = match.page_number
-                    logger.debug(
-                        f"Quote located: page {match.page_number}, "
-                        f"confidence {match.confidence:.2f} ({match.match_type})"
-                    )
-
-            annotation_items.append(item)
-
-        for rec in result.recommendations:
-            quote = rec.get("quote", "")
-            item = {
-                "id": rec.get("id", f"rec_{len(annotation_items)}"),
-                "type": "recommendation",
-                "severity": rec.get("priority", "medium"),  # Use priority as severity
-                "title": rec.get("title", ""),
-                "description": rec.get("description", ""),
-                "quote": quote,
-            }
-
-            # Use cross-block search for better localization
-            if quote:
-                match = document_text_service.find_text_position_cross_block(
-                    doc_content, quote, max_block_span=3,
-                    page_hint=rec.get("page_hint")
-                )
-                if match:
-                    item["page_hint"] = match.page_number
-                    item["match_confidence"] = match.confidence
-                    item["match_type"] = match.match_type
-                    # Add bbox for position_data
-                    if match.bbox and match.bbox[2] > match.bbox[0]:
-                        item["bbox_start_x0"] = match.bbox[0]
-                        item["bbox_start_y0"] = match.bbox[1]
-                        item["bbox_start_x1"] = match.bbox[2]
-                        item["bbox_start_y1"] = match.bbox[3]
-                        item["page_start"] = match.page_number
-                        item["page_end"] = match.page_number
-
-            annotation_items.append(item)
-
-        logger.info(f"📝 Prepared {len(annotation_items)} items for annotation")
-
-        # 5. Deduplicate annotation items by quote to avoid overlapping annotations
-        seen_quotes = set()
-        unique_items = []
-        for item in annotation_items:
-            quote = item.get("quote", "").strip()[:100]  # Normalize: first 100 chars
-            if quote and quote not in seen_quotes:
-                seen_quotes.add(quote)
-                unique_items.append(item)
-            elif not quote:
-                unique_items.append(item)  # Keep items without quotes
-
-        if len(unique_items) < len(annotation_items):
-            logger.info(
-                f"🔄 Deduplicated: {len(annotation_items)} → {len(unique_items)} items "
-                f"({len(annotation_items) - len(unique_items)} duplicates removed)"
-            )
-        annotation_items = unique_items
-
-        # 6. Add annotations to PDF with OCG layers
-        annotation_result = pdf_annotation_service.annotate_pdf(pdf_bytes, annotation_items)
-
-        # 6. Build response with converted types
-        risks = []
-        for r in result.risks:
-            risks.append(AnalysisRisk(
-                id=r.get("id", f"risk_{uuid.uuid4().hex[:8]}"),
-                type="risk",
-                severity=r.get("severity", "medium"),
-                title=r.get("title", "Riesgo identificado"),
-                description=r.get("description", ""),
-                quote=r.get("quote"),
-                clause=r.get("clause"),
-                recommendation=r.get("recommendation"),
-            ))
-
-        recommendations = []
-        for r in result.recommendations:
-            recommendations.append(AnalysisRecommendation(
-                id=r.get("id", f"rec_{uuid.uuid4().hex[:8]}"),
-                type="recommendation",
-                title=r.get("title", "Recomendación"),
-                description=r.get("description", ""),
-                quote=r.get("quote"),
-                priority=r.get("priority", "medium"),
-                action_required=r.get("action_required"),
-            ))
-
-        analysis = DocumentAnalysisResult(
-            document_id=document_id,
-            summary=result.summary or "Análisis completado",
-            risks=risks,
-            recommendations=recommendations,
-            confidence_score=result.confidence_score or 0.8,
-            analysis_type=analysis_type,
-        )
-
-        # Build annotation response
-        annotations = []
-        for ann in annotation_result.annotations:
-            rect_data = ann.get("rect", {})
-            annotations.append(PDFAnnotation(
-                id=ann.get("id", ""),
-                type=ann.get("type", "risk"),
-                severity=ann.get("severity"),
-                title=ann.get("title", ""),
-                description=ann.get("description", ""),
-                page_number=ann.get("page_number", 1),
-                rect=AnnotationRect(
-                    x0=rect_data.get("x0", 0),
-                    y0=rect_data.get("y0", 0),
-                    x1=rect_data.get("x1", 0),
-                    y1=rect_data.get("y1", 0),
-                ),
-                text_found=ann.get("text_found", ""),
-                confidence=ann.get("confidence", 0.0),
-            ))
-
-        response = AnnotatedPDFResponse(
-            annotated_pdf=base64.b64encode(annotation_result.pdf_bytes).decode("utf-8"),
-            annotations=annotations,
-            pages_annotated=annotation_result.pages_annotated,
-            total_annotations=annotation_result.total_annotations,
-            failed_annotations=annotation_result.failed_annotations,
-            analysis=analysis,
-        )
-
-        logger.info(
-            f"✅ Document analyzed: {annotation_result.total_annotations} annotations, "
-            f"{annotation_result.pages_annotated} pages, {annotation_result.failed_annotations} failed, "
-            f"agents={result.agents_used}, execution_time={result.execution_time_ms:.0f}ms"
-        )
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"❌ Analysis with annotations failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/analysis/{job_id}")
-async def get_analysis_by_id(
-    job_id: str,
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Get a completed analysis by job ID.
-
-    Returns the full analysis data including summary, risks, recommendations,
-    findings, and annotations. Use this to display previously completed analyses.
-
-    Returns 404 if job not found, or the analysis data if found.
-    """
-    from app.services.analysis_persistence_service import get_persistence_service
-
-    try:
-        persistence = get_persistence_service()
-        result = await persistence.get_analysis(job_id)
-
-        if not result:
-            raise HTTPException(status_code=404, detail=f"Analysis job {job_id} not found")
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"❌ Failed to get analysis {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/analyze-with-annotations/stream")
-async def analyze_document_with_annotations_stream(
-    document_id: str = Form(...),
-    tenant_id: str = Form(...),
-    analysis_type: str = Form("legal"),
-    job_id: Optional[str] = Form(None),  # Optional: existing job ID to update
-    file: Optional[UploadFile] = File(None),
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Analyze a document with real-time streaming progress.
-
-    Returns Server-Sent Events (SSE) with progress updates as each agent executes.
-    The final event contains the annotated PDF.
-
-    If job_id is provided, updates the existing job in the database.
-    Otherwise, creates a new job for persistence.
-
-    SSE Events:
-    - start: Analysis started
-    - extracting: Extracting text from PDF
-    - planning: Creating analysis plan
-    - plan_created: Plan ready with steps
-    - step_start: Agent starting execution
-    - step_complete: Agent finished with findings
-    - annotating: Adding highlights to PDF
-    - complete: Final result with annotated PDF
-    - error: Error occurred
-    """
-    from app.agents.flows.document_analysis_flow import get_document_analysis_flow
-    from app.services.analysis_persistence_service import get_persistence_service
-
-    persistence = get_persistence_service()
 
     async def generate_sse() -> AsyncGenerator[str, None]:
-        pdf_bytes = None
-        doc_content = None
-        current_job_id = job_id
-        start_time = asyncio.get_event_loop().time()
+        """
+        Generate SSE events, transforming Emma v2 internal events to frontend format.
 
-        # Helper to yield and flush immediately
-        async def flush():
-            await asyncio.sleep(0)
+        Emma v2 internal → Frontend expected:
+        - content → token (with text field)
+        - thinking → progress (with stage='thinking')
+        - tool_call → delegation (with tool field)
+        - tool_result → step_complete
+        - done → complete (with answer, success, tools_used)
+        - error → error
+        """
+        thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
+
+        # Create Langfuse trace for this streaming query
+        trace = trace_emma_query(
+            query=query.query,
+            tenant_id=query.tenant_id,
+            user_id=query.user_id,
+            thread_id=thread_id,
+        )
+        if trace:
+            trace.update(metadata={"streaming": True})
+            langfuse_context.push_observation(trace)
 
         try:
-            # Create or get job ID for persistence
-            if not current_job_id:
-                current_job_id = await persistence.create_job(
-                    document_id=document_id,
-                    tenant_id=tenant_id,
-                    analysis_type=analysis_type
-                )
+            logger.info(f"[Emma v2 Stream] Starting for tenant={query.tenant_id}, query={query.query[:50]}...")
 
-            # Mark job as started
-            if current_job_id:
-                await persistence.mark_started(current_job_id)
+            # Send start event
+            yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis...', 'progress': 0})}\n\n"
+            await asyncio.sleep(0)
 
-            # 1. Get PDF bytes
-            yield f"event: start\ndata: {json.dumps({'message': 'Voy a revisar este documento, dame un momento...', 'progress': 0, 'job_id': current_job_id})}\n\n"
-            await flush()
-
-            if file:
-                pdf_bytes = await file.read()
-                logger.info(f"📥 Received uploaded PDF: {len(pdf_bytes)} bytes")
-            else:
-                pdf_bytes = await _fetch_document_from_storage(document_id, tenant_id)
-                if not pdf_bytes:
-                    if current_job_id:
-                        await persistence.mark_failed(current_job_id, "Document not found")
-                    yield f"event: error\ndata: {json.dumps({'error': 'Document not found'})}\n\n"
-                    return
-
-            # 2. Extract text
-            yield f"event: extracting\ndata: {json.dumps({'message': 'Extrayendo texto del documento...', 'progress': 5})}\n\n"
-            await flush()
-
-            doc_content = document_text_service.extract_document_content(
-                pdf_bytes,
-                include_page_markers=True,
-                max_chars=50000,
-            )
-
-            if not doc_content.full_text:
-                if current_job_id:
-                    await persistence.mark_failed(current_job_id, "Could not extract text from PDF")
-                yield f"event: error\ndata: {json.dumps({'error': 'Could not extract text from PDF'})}\n\n"
+            try:
+                emma = await get_emma_v2()
+                logger.info("[Emma v2 Stream] Emma instance created")
+            except Exception as init_err:
+                logger.error(f"[Emma v2 Stream] Failed to create Emma instance: {init_err}")
+                yield f"event: error\ndata: {json.dumps({'error': f'Error inicializando Emma: {str(init_err)}'})}\n\n"
                 return
 
-            yield f"event: extracted\ndata: {json.dumps({'message': f'Texto extraído: {doc_content.total_pages} páginas', 'pages': doc_content.total_pages, 'chars': doc_content.total_chars, 'progress': 10})}\n\n"
-            await flush()
+            yield f"event: progress\ndata: {json.dumps({'message': 'Emma inicializada...', 'stage': 'init', 'progress': 5})}\n\n"
+            await asyncio.sleep(0)
 
-            # Update progress in database
-            if current_job_id:
-                await persistence.update_progress(current_job_id, 10, "Texto extraído")
+            context = ExecutionContext(
+                tenant_id=query.tenant_id,
+                user_id=query.user_id,
+                thread_id=thread_id,
+            )
 
-            # 3. Stream document analysis with native Agent Framework
-            flow = get_document_analysis_flow()
-            all_findings = []
-            final_result = {}
+            emma.config.enable_sil_fast_path = query.enable_sil
+            emma.config.enable_domain_routing = query.enable_domain_routing
 
-            async for event in flow.execute_stream(
-                task=f"Analizar documento {document_id}",
-                tenant_id=tenant_id,
-                document_id=document_id,
-                document_content=doc_content.full_text,
-                analysis_type=analysis_type,
-            ):
-                event_type = event.get("event", "message")
-                event_data = event.get("data", {})
+            # Send progress event
+            yield f"event: progress\ndata: {json.dumps({'message': 'Procesando consulta...', 'stage': 'context_preparation', 'progress': 10})}\n\n"
+            await asyncio.sleep(0)
 
-                # Skip duplicate events - we handle these ourselves
-                # 'start' - we already sent one above
-                # 'complete' - we'll send our own with annotated PDF data
-                if event_type in ("start", "complete"):
-                    # For 'complete', capture the final_result before skipping
-                    if event_type == "complete":
-                        final_result = event_data.get("final_result", {})
-                    continue
+            logger.info(f"[Emma v2 Stream] Starting execute_stream loop (SIL={query.enable_sil})")
+            event_count = 0
+            has_complete = False
 
-                # Adjust progress range (10-85% for analysis)
-                if "progress" in event_data:
-                    original_progress = event_data["progress"]
-                    event_data["progress"] = 10 + int(original_progress * 0.75)
+            try:
+                async for event in emma.execute_stream(query.query, context):
+                    event_count += 1
+                    event_type = event.get("type", "message")
+                    logger.debug(f"[Emma v2 Stream] Event {event_count}: {event_type}")
 
-                # Collect findings from step completions
-                if event_type == "step_complete":
-                    findings = event_data.get("findings", [])
-                    if findings:
-                        all_findings.extend(findings)
+                    # Transform events to frontend expected format
+                    if event_type == "content":
+                        # content → token (text streaming)
+                        frontend_data = {
+                            "text": event.get("content", ""),
+                            "token": event.get("content", ""),
+                        }
+                        yield f"event: token\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
 
-                # Update progress in database for key events
-                if current_job_id and event_type in ("plan_created", "step_start", "step_complete"):
-                    progress = event_data.get("progress", 0)
-                    step = event_data.get("step", 0)
-                    total = event_data.get("total_steps", 0)
-                    current_step = event_data.get("description") or event_data.get("agent", "")
-                    await persistence.update_progress(
-                        current_job_id,
-                        progress=progress,
-                        current_step=current_step[:200] if current_step else None,
-                        total_steps=total if total > 0 else None,
-                        steps_completed=step if step > 0 else None
+                    elif event_type == "thinking":
+                        # thinking → progress with stage
+                        frontend_data = {
+                            "message": "Razonando...",
+                            "stage": "thinking",
+                            "text": event.get("content", ""),
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    # SLM Router chain-of-thought events
+                    elif event_type == "slm_thinking_start":
+                        # SLM started reasoning
+                        frontend_data = {
+                            "message": event.get("content", "Analizando consulta..."),
+                            "stage": "slm_reasoning",
+                            "slmIsThinking": True,
+                            "slmThinkingSteps": [],
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_thinking_step":
+                        # SLM reasoning step (entity, intent, route)
+                        frontend_data = {
+                            "message": event.get("content", ""),
+                            "stage": "slm_reasoning",
+                            "slmIsThinking": True,
+                            "slmThinkingStep": {
+                                "step": event.get("step"),
+                                "type": event.get("step_type"),
+                                "content": event.get("content"),
+                                "entities": event.get("entities", []),
+                                "confidence": event.get("confidence", 1.0),
+                            },
+                        }
+                        yield f"event: slm_thinking\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_plan_ready":
+                        # SLM plan generated
+                        frontend_data = {
+                            "message": f"Plan: {event.get('route', 'N/A')} ({event.get('confidence', 0)*100:.0f}% confianza)",
+                            "stage": "slm_plan_ready",
+                            "slmIsThinking": False,
+                            "slmPlan": {
+                                "route": event.get("route"),
+                                "confidence": event.get("confidence", 0),
+                                "entities_count": event.get("entities_count", 0),
+                                "reasoning": event.get("reasoning"),
+                            },
+                        }
+                        yield f"event: slm_plan\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "slm_execution_start":
+                        # SLM starting execution
+                        frontend_data = {
+                            "message": event.get("message", "Ejecutando plan..."),
+                            "stage": "slm_executing",
+                            "slmIsExecuting": True,
+                            "route": event.get("route"),
+                        }
+                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_call":
+                        # tool_call → delegation
+                        tool_name = event.get("name", "unknown")
+                        frontend_data = {
+                            "tool": tool_name,
+                            "message": f"Ejecutando {tool_name}...",
+                            "stage": "searching" if "search" in tool_name.lower() else "analyzing",
+                            "process_info": event.get("process_info", {}),
+                        }
+                        yield f"event: delegation\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_result":
+                        # tool_result → step_complete
+                        tool_name = event.get("name", "unknown")
+                        frontend_data = {
+                            "tool": tool_name,
+                            "message": f"{tool_name} completado",
+                            "process_info": event.get("process_info", {}),
+                        }
+                        yield f"event: step_complete\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "done":
+                        # done → complete
+                        has_complete = True
+                        result = event.get("result", {})
+                        frontend_data = {
+                            "success": result.get("success", True),
+                            "answer": result.get("answer", ""),
+                            "tools_used": result.get("tools_called", []),
+                            "execution_time_ms": result.get("latency_ms", 0),
+                            "session_id": result.get("thread_id", thread_id),
+                            "process_info": result.get("process_info", {}),
+                            "final_result": result,
+                        }
+                        yield f"event: complete\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "error":
+                        # error stays as error
+                        frontend_data = {"error": event.get("error", "Unknown error")}
+                        yield f"event: error\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+
+                    else:
+                        # Unknown event types → progress
+                        event_data = {k: v for k, v in event.items() if k != "type"}
+                        event_data["message"] = event_data.get("message", f"Procesando ({event_type})...")
+                        yield f"event: progress\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                    # Force immediate flush after each event
+                    await asyncio.sleep(0)
+
+                # After loop: Check if we got events
+                logger.info(f"[Emma v2 Stream] Loop finished with {event_count} events, has_complete={has_complete}")
+                if event_count == 0:
+                    logger.warning("[Emma v2 Stream] No events received from execute_stream!")
+                    if trace:
+                        trace.update(level="WARNING", status_message="No events received")
+                    yield f"event: error\ndata: {json.dumps({'error': 'No se recibieron eventos del procesamiento'})}\n\n"
+                elif not has_complete:
+                    logger.warning("[Emma v2 Stream] Stream ended without 'done' event")
+
+                # Finalize trace on success
+                if trace and has_complete:
+                    trace.update(
+                        output={"event_count": event_count, "completed": has_complete}
                     )
 
-                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                await flush()  # Force immediate send to client
-
-            # 4. Annotate PDF
-            yield f"event: annotating\ndata: {json.dumps({'message': 'Añadiendo anotaciones al PDF...', 'progress': 88})}\n\n"
-            await flush()
-
-            # Prepare annotation items - PARALLELIZED for performance
-            async def locate_item(item_data: dict, item_type: str, idx: int) -> dict:
-                """Locate a single item's quote in the document (runs in thread pool)."""
-                quote = item_data.get("quote", "")
-                item = {
-                    "id": item_data.get("id", f"{item_type}_{idx}"),
-                    "type": "risk" if item_type == "risk" else "recommendation",
-                    "severity": item_data.get("severity" if item_type == "risk" else "priority", "medium"),
-                    "title": item_data.get("title", ""),
-                    "description": item_data.get("description", ""),
-                    "quote": quote,
-                }
-                if quote:
-                    # Run sync function in thread pool for parallelization
-                    match = await asyncio.to_thread(
-                        document_text_service.find_text_position_cross_block,
-                        doc_content, quote, 3, item_data.get("page_hint")
-                    )
-                    if match:
-                        item["page_hint"] = match.page_number
-                        item["match_confidence"] = match.confidence
-                        item["match_type"] = match.match_type
-                        if match.bbox and match.bbox[2] > match.bbox[0]:
-                            item["bbox_start_x0"] = match.bbox[0]
-                            item["bbox_start_y0"] = match.bbox[1]
-                            item["bbox_start_x1"] = match.bbox[2]
-                            item["bbox_start_y1"] = match.bbox[3]
-                            item["page_start"] = match.page_number
-                            item["page_end"] = match.page_number
-                return item
-
-            # Create tasks for all items (risks + recommendations)
-            locate_tasks = []
-            for idx, risk in enumerate(final_result.get("risks", [])):
-                locate_tasks.append(locate_item(risk, "risk", idx))
-            for idx, rec in enumerate(final_result.get("recommendations", [])):
-                locate_tasks.append(locate_item(rec, "rec", idx))
-
-            # Execute all localization in parallel
-            annotation_items = await asyncio.gather(*locate_tasks)
-
-            # Deduplicate annotation items by quote to avoid overlapping annotations
-            seen_quotes = set()
-            unique_items = []
-            for item in annotation_items:
-                quote = item.get("quote", "").strip()[:100]  # Normalize: first 100 chars
-                if quote and quote not in seen_quotes:
-                    seen_quotes.add(quote)
-                    unique_items.append(item)
-                elif not quote:
-                    unique_items.append(item)
-
-            duplicates_removed = len(annotation_items) - len(unique_items)
-            if duplicates_removed > 0:
-                logger.info(f"🔄 Deduplicated: {len(annotation_items)} → {len(unique_items)} items")
-            annotation_items = unique_items
-
-            # Add annotations to PDF
-            annotation_result = pdf_annotation_service.annotate_pdf(pdf_bytes, annotation_items)
-
-            yield f"event: annotated\ndata: {json.dumps({'message': f'{annotation_result.total_annotations} anotaciones añadidas', 'total': annotation_result.total_annotations, 'pages': annotation_result.pages_annotated, 'duplicates_removed': duplicates_removed, 'progress': 95})}\n\n"
-            await flush()
-
-            # 5. Build final response
-            risks = []
-            for r in final_result.get("risks", []):
-                risks.append({
-                    "id": r.get("id", f"risk_{uuid.uuid4().hex[:8]}"),
-                    "type": "risk",
-                    "severity": r.get("severity", "medium"),
-                    "title": r.get("title", "Riesgo identificado"),
-                    "description": r.get("description", ""),
-                    "quote": r.get("quote"),
-                    "clause": r.get("clause"),
-                })
-
-            recommendations = []
-            for r in final_result.get("recommendations", []):
-                recommendations.append({
-                    "id": r.get("id", f"rec_{uuid.uuid4().hex[:8]}"),
-                    "type": "recommendation",
-                    "title": r.get("title", "Recomendación"),
-                    "description": r.get("description", ""),
-                    "quote": r.get("quote"),
-                    "priority": r.get("priority", "medium"),
-                })
-
-            # Build annotations for response
-            annotations = []
-            for ann in annotation_result.annotations:
-                rect_data = ann.get("rect", {})
-                annotations.append({
-                    "id": ann.get("id", ""),
-                    "type": ann.get("type", "risk"),
-                    "severity": ann.get("severity"),
-                    "title": ann.get("title", ""),
-                    "description": ann.get("description", ""),
-                    "page_number": ann.get("page_number", 1),
-                    "rect": {
-                        "x0": rect_data.get("x0", 0),
-                        "y0": rect_data.get("y0", 0),
-                        "x1": rect_data.get("x1", 0),
-                        "y1": rect_data.get("y1", 0),
-                    },
-                    "confidence": ann.get("confidence", 0.0),
-                })
-
-            # Final complete event with all data
-            complete_data = {
-                "success": True,
-                "progress": 100,
-                "annotated_pdf": base64.b64encode(annotation_result.pdf_bytes).decode("utf-8"),
-                "annotations": annotations,
-                "pages_annotated": annotation_result.pages_annotated,
-                "total_annotations": annotation_result.total_annotations,
-                "failed_annotations": annotation_result.failed_annotations,
-                "analysis": {
-                    "document_id": document_id,
-                    "summary": final_result.get("summary", "Análisis completado"),
-                    "risks": risks,
-                    "recommendations": recommendations,
-                    "confidence_score": final_result.get("confidence_score", 0.8),
-                    "analysis_type": analysis_type,
-                },
-            }
-
-            # Calculate execution time
-            end_time = asyncio.get_event_loop().time()
-            execution_time_ms = int((end_time - start_time) * 1000)
-
-            # Persist final results to database
-            if current_job_id:
-                # Convert annotations to serializable format
-                annotations_for_db = []
-                for ann in annotation_result.annotations:
-                    rect_data = ann.get("rect", {})
-                    annotations_for_db.append({
-                        "id": ann.get("id", ""),
-                        "type": ann.get("type", "risk"),
-                        "severity": ann.get("severity"),
-                        "title": ann.get("title", ""),
-                        "description": ann.get("description", ""),
-                        "page_number": ann.get("page_number", 1),
-                        "rect": {
-                            "x0": rect_data.get("x0", 0),
-                            "y0": rect_data.get("y0", 0),
-                            "x1": rect_data.get("x1", 0),
-                            "y1": rect_data.get("y1", 0),
-                        },
-                        "confidence": ann.get("confidence", 0.0),
-                    })
-
-                await persistence.mark_completed(
-                    job_id=current_job_id,
-                    summary=final_result.get("summary", "Análisis completado"),
-                    risks=risks,
-                    recommendations=recommendations,
-                    findings=all_findings,
-                    annotations=annotations_for_db,
-                    confidence_score=final_result.get("confidence_score", 0.8),
-                    execution_time_ms=execution_time_ms,
-                )
-
-            # Add job_id and execution_time to complete_data
-            complete_data["job_id"] = current_job_id
-            complete_data["execution_time_ms"] = execution_time_ms
-
-            yield f"event: complete\ndata: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
-
-            logger.info(f"✅ Streaming analysis complete: {annotation_result.total_annotations} annotations, persisted to job {current_job_id}")
+            except Exception as stream_err:
+                import traceback
+                error_details = traceback.format_exc()
+                logger.error(f"[Emma v2 Stream] Error in execute_stream: {stream_err}\n{error_details}")
+                if trace:
+                    trace.update(level="ERROR", status_message=str(stream_err))
+                yield f"event: error\ndata: {json.dumps({'error': f'Error en procesamiento: {str(stream_err)}'})}\n\n"
 
         except Exception as e:
-            logger.exception(f"❌ Streaming analysis failed: {e}")
-            # Persist error to database
-            if current_job_id:
-                await persistence.mark_failed(current_job_id, str(e))
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Emma v2 stream error: {e}\n{error_details}")
+            if trace:
+                trace.update(level="ERROR", status_message=str(e))
+            yield f"event: error\ndata: {json.dumps({'error': str(e), 'details': error_details[:500]})}\n\n"
+        finally:
+            # Cleanup: pop trace from context and flush
+            if trace:
+                langfuse_context.pop_observation()
+                flush_langfuse()
 
     return StreamingResponse(
         generate_sse(),
@@ -903,706 +506,351 @@ async def analyze_document_with_annotations_stream(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 
-async def _fetch_document_from_storage(
-    document_id: str,
-    tenant_id: str
-) -> Optional[bytes]:
+@router.get("/tools", response_model=ToolsResponse)
+async def list_tools(_: bool = Depends(verify_api_key)):
     """
-    Fetch document PDF from storage service.
+    List all available Emma v2 tools.
 
-    The storage-service requires:
-    - X-API-Key: microservice auth
-    - X-Tenant-ID: tenant for path construction
-    - X-User-ID: user who owns the document (created_by)
-
-    The storage path is constructed internally as:
-    tenant-{tenant_id}/user-{user_id}/{filename}
+    Emma v2 uses a consolidated set of 6 tools:
+    - search: Semantic/keyword/hybrid document search
+    - read_document: Get full document content
+    - analyze: Deep RAG-based document analysis
+    - sil_query: Structural queries via SIL/Cypher
+    - ask_user: Human-in-the-loop clarification
+    - legal_search: Public legal knowledge search
     """
-    try:
-        import httpx
-        from app.core.config import settings
+    tools = get_emma_v2_tools()
 
-        # Step 1: Get document info from PostgreSQL directly
-        # (Main API requires Bearer token which we don't have in microservice context)
-        file_path = None
-        user_id = None
-
-        try:
-            import asyncpg
-            import os
-
-            # Parse database URL for asyncpg
-            # Format: postgresql+asyncpg://user:pass@host:port/db
-            db_url = settings.database_url
-            # Convert SQLAlchemy URL to asyncpg format
-            if "postgresql+asyncpg://" in db_url:
-                db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-
-            conn = await asyncpg.connect(db_url)
-            try:
-                row = await conn.fetchrow(
-                    """
-                    SELECT file_path, created_by
-                    FROM documents
-                    WHERE id = $1 AND tenant_id = $2
-                    """,
-                    document_id, tenant_id
-                )
-                if row:
-                    file_path = row["file_path"]
-                    user_id = row["created_by"]
-                    logger.info(f"Got document info from DB: file_path={file_path}, user_id={user_id}")
-                else:
-                    logger.warning(f"Document {document_id} not found in database")
-                    return None
-            finally:
-                await conn.close()
-
-        except Exception as db_error:
-            logger.error(f"Database query failed: {db_error}")
-            return None
-
-        if not file_path:
-            logger.warning(f"No file_path for document {document_id}")
-            return None
-
-        if not user_id:
-            logger.warning(f"No created_by in document {document_id}, trying with 'system'")
-            user_id = "system"
-
-        # Step 2: Download from storage-service with proper headers
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # The storage-service /proxy/{path} endpoint constructs the full path:
-            # tenant-{tenant_id}/user-{user_id}/{path}
-            response = await client.get(
-                f"{settings.storage_service_url}/api/v1/storage/proxy/{file_path}",
-                headers={
-                    "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
-                    "X-User-ID": str(user_id),
-                }
+    return ToolsResponse(
+        tools=[
+            ToolInfo(
+                name=t["name"],
+                description=t["description"],
+                parameters=t["parameters"],
             )
-
-            if response.status_code == 200:
-                logger.info(f"PDF fetched successfully: {len(response.content)} bytes")
-                return response.content
-
-            logger.warning(f"Proxy endpoint failed: {response.status_code}")
-
-            # Fallback: Try /download/ endpoint
-            response = await client.get(
-                f"{settings.storage_service_url}/api/v1/storage/download/{file_path}",
-                headers={
-                    "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
-                    "X-User-ID": str(user_id),
-                }
-            )
-
-            if response.status_code == 200:
-                logger.info(f"PDF fetched via download endpoint: {len(response.content)} bytes")
-                return response.content
-
-            logger.error(f"All storage endpoints failed for {file_path}: {response.status_code}")
-            return None
-
-    except Exception as e:
-        logger.error(f"Error fetching document from storage: {e}")
-        return None
-
-
-async def _extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Extract text content from PDF using PyMuPDF."""
-    try:
-        import fitz
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text_parts = []
-
-        for page in doc:
-            text_parts.append(page.get_text())
-
-        doc.close()
-        return "\n\n".join(text_parts)
-    except Exception as e:
-        logger.error(f"Error extracting PDF text: {e}")
-        return ""
-
-
-async def _run_document_analysis(
-    document_id: str,
-    tenant_id: str,
-    text_content: str,
-    analysis_type: str
-) -> DocumentAnalysisResult:
-    """
-    Run document analysis using LLM with structured JSON output.
-
-    This calls the LLM directly with the document content and a specialized
-    prompt that returns JSON with exact quotes for PDF annotation.
-
-    The system prompt is loaded from config/prompts/emma_prompts.yaml (document_analysis_json)
-    """
-    import json
-    import re
-    import httpx
-    from app.services.rag.prompt_loader import load_prompts
-    from app.core.config import settings
-
-    try:
-        # Load prompt from YAML configuration
-        prompts = load_prompts("emma_prompts.yaml")
-        system_prompt = prompts.get("document_analysis_json", "")
-
-        if not system_prompt:
-            logger.warning("⚠️ document_analysis_json prompt not found in YAML, using fallback")
-            system_prompt = """Eres un analista legal. Analiza el documento y devuelve JSON con:
-- summary: resumen ejecutivo
-- risks: lista de riesgos con id, severity, title, description, quote (cita exacta del documento)
-- recommendations: lista de recomendaciones
-- confidence_score: 0-1"""
-
-        # Truncate content for context (to fit in context window)
-        max_context_len = 12000
-        if len(text_content) > max_context_len:
-            half = max_context_len // 2
-            truncated_content = text_content[:half] + "\n\n[...contenido intermedio...]\n\n" + text_content[-half:]
-        else:
-            truncated_content = text_content
-
-        # Build the user prompt with document content
-        user_prompt = f"""DOCUMENTO A ANALIZAR (ID: {document_id}):
----
-{truncated_content}
----
-
-Analiza este documento e identifica todos los riesgos y recomendaciones.
-IMPORTANTE: Para cada hallazgo, incluye una cita textual EXACTA del documento (campo "quote")."""
-
-        logger.info(f"🧠 Running direct LLM analysis for document {document_id} (content: {len(text_content)} chars)")
-
-        # Call LLM directly (vLLM - OpenAI compatible API)
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.vllm_base_url}/chat/completions",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "model": settings.vllm_model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "stream": False,
-                    "temperature": 0.3,
-                    "max_tokens": 4000,
-                }
-            )
-            response.raise_for_status()
-            result = response.json()
-            answer = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        logger.info(f"📝 LLM response length: {len(answer)} chars")
-
-        # Parse JSON from Emma's response
-        parsed = _parse_analysis_json(answer)
-
-        if parsed:
-            logger.info(f"✅ Parsed analysis: {len(parsed.get('risks', []))} risks, {len(parsed.get('recommendations', []))} recommendations")
-
-            risks = []
-            for r in parsed.get("risks", []):
-                risks.append(AnalysisRisk(
-                    id=r.get("id", f"risk_{uuid.uuid4().hex[:8]}"),
-                    type="risk",
-                    severity=r.get("severity", "medium"),
-                    title=r.get("title", "Riesgo identificado"),
-                    description=r.get("description", ""),
-                    quote=r.get("quote"),
-                    clause=r.get("clause"),
-                    recommendation=r.get("recommendation"),
-                ))
-
-            recommendations = []
-            for r in parsed.get("recommendations", []):
-                recommendations.append(AnalysisRecommendation(
-                    id=r.get("id", f"rec_{uuid.uuid4().hex[:8]}"),
-                    type="recommendation",
-                    title=r.get("title", "Recomendación"),
-                    description=r.get("description", ""),
-                    quote=r.get("quote"),
-                    priority=r.get("priority", "medium"),
-                    action_required=r.get("action_required"),
-                ))
-
-            return DocumentAnalysisResult(
-                document_id=document_id,
-                summary=parsed.get("summary", "Análisis completado"),
-                risks=risks,
-                recommendations=recommendations,
-                confidence_score=parsed.get("confidence_score", 0.7),
-                analysis_type=analysis_type,
-            )
-
-        # Fallback: Parse natural language response for risks
-        logger.warning(f"⚠️ JSON parsing failed, attempting natural language extraction")
-        return _extract_from_natural_language(document_id, answer, analysis_type)
-
-    except Exception as e:
-        logger.exception(f"Error running document analysis: {e}")
-        return DocumentAnalysisResult(
-            document_id=document_id,
-            summary=f"Error en el análisis: {str(e)}",
-            risks=[],
-            recommendations=[],
-            confidence_score=0.0,
-            analysis_type=analysis_type,
-        )
-
-
-def _parse_analysis_json(answer: str) -> Optional[dict]:
-    """Parse JSON from Emma's response using centralized extraction utility."""
-    # Import from shared utilities (handles thinking tags, code blocks, common fixes)
-    try:
-        from app.utils.json_extraction import extract_json_from_llm_response
-        return extract_json_from_llm_response(answer, default=None)
-    except ImportError:
-        # Fallback for when running in microservice context
-        pass
-
-    # Inline fallback implementation for microservice isolation
-    import json
-    import re
-
-    def clean_json_string(s: str) -> str:
-        """Clean JSON string by fixing common LLM issues."""
-        s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', s)
-        s = re.sub(r',\s*([}\]])', r'\1', s)
-        return s
-
-    # Remove thinking tags
-    cleaned = re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL)
-
-    # Try direct parse
-    try:
-        return json.loads(cleaned.strip())
-    except json.JSONDecodeError:
-        pass
-
-    # Extract from code block
-    json_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned)
-    if json_block:
-        try:
-            return json.loads(clean_json_string(json_block.group(1)))
-        except json.JSONDecodeError:
-            pass
-
-    # Find JSON object
-    json_match = re.search(r'\{[\s\S]*\}', cleaned)
-    if json_match:
-        try:
-            return json.loads(clean_json_string(json_match.group()))
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON parse failed: {e}")
-
-    return None
-
-
-def _extract_from_natural_language(
-    document_id: str,
-    answer: str,
-    analysis_type: str
-) -> DocumentAnalysisResult:
-    """Extract risks and recommendations from natural language response."""
-    import re
-
-    risks = []
-    recommendations = []
-
-    # Look for risk patterns in Spanish
-    risk_patterns = [
-        r'[Rr]iesgo\s*(?:alto|medio|bajo)?[:\s]+([^.]+\.)',
-        r'⚠️\s*([^.]+\.)',
-        r'[Pp]roblema[:\s]+([^.]+\.)',
-        r'[Ii]ncumplimiento[:\s]+([^.]+\.)',
-    ]
-
-    for pattern in risk_patterns:
-        matches = re.findall(pattern, answer)
-        for i, match in enumerate(matches[:5]):  # Limit to 5 per pattern
-            # Try to extract a quote (text in quotes)
-            quote_match = re.search(r'"([^"]{15,})"', match)
-            quote = quote_match.group(1) if quote_match else None
-
-            risks.append(AnalysisRisk(
-                id=f"risk_{i}_{uuid.uuid4().hex[:4]}",
-                type="risk",
-                severity="medium",
-                title=match[:50] + "..." if len(match) > 50 else match,
-                description=match,
-                quote=quote,
-            ))
-
-    # Look for recommendation patterns
-    rec_patterns = [
-        r'[Rr]ecomendaci[oó]n[:\s]+([^.]+\.)',
-        r'[Ss]e\s+recomienda[:\s]+([^.]+\.)',
-        r'✅\s*([^.]+\.)',
-        r'[Dd]eber[ií]a[:\s]+([^.]+\.)',
-    ]
-
-    for pattern in rec_patterns:
-        matches = re.findall(pattern, answer)
-        for i, match in enumerate(matches[:5]):
-            quote_match = re.search(r'"([^"]{15,})"', match)
-            quote = quote_match.group(1) if quote_match else None
-
-            recommendations.append(AnalysisRecommendation(
-                id=f"rec_{i}_{uuid.uuid4().hex[:4]}",
-                type="recommendation",
-                title=match[:50] + "..." if len(match) > 50 else match,
-                description=match,
-                quote=quote,
-                priority="medium",
-            ))
-
-    # Extract summary (first paragraph or first 300 chars)
-    summary_match = re.match(r'^([^.]+\.[^.]+\.)', answer)
-    summary = summary_match.group(1) if summary_match else answer[:300]
-
-    return DocumentAnalysisResult(
-        document_id=document_id,
-        summary=summary,
-        risks=risks,
-        recommendations=recommendations,
-        confidence_score=0.5 if (risks or recommendations) else 0.2,
-        analysis_type=analysis_type,
+            for t in tools
+        ],
+        count=len(tools),
     )
 
 
-@router.post("/document/markdown", response_model=DocumentMarkdownResponse)
-async def get_document_markdown(
-    pdf_file: UploadFile = File(...),
-    document_id: str = Form(...),
-    _: bool = Depends(verify_api_key)
-):
+@router.get("/health", response_model=HealthResponse)
+async def health_check():
     """
-    Convert a PDF document to Markdown format using PyMuPDF4LLM.
-
-    This endpoint extracts the document content and converts it to
-    LLM-optimized Markdown, preserving structure like headings,
-    tables, and lists.
+    Check Emma v2 health status.
 
     Returns:
-        DocumentMarkdownResponse with full markdown and per-page breakdown
+    - LLM connection status
+    - SIL availability
+    - Enabled features
     """
     try:
-        pdf_bytes = await pdf_file.read()
-        markdown_service = get_pdf_markdown_service()
+        emma = await get_emma_v2()
 
-        # Convert PDF to Markdown with caching
-        result = markdown_service.convert_pdf_bytes(
-            pdf_bytes,
-            cache_key=document_id,
-            page_chunks=True
-        )
+        # Check LLM connection
+        llm_connected, llm_msg = await emma._llm_client.validate_connection()
 
-        return DocumentMarkdownResponse(
-            document_id=document_id,
-            full_markdown=result.full_markdown,
-            pages=[
-                MarkdownPage(
-                    page_number=p.page_number,
-                    content=p.content,
-                    char_count=p.char_count
-                )
-                for p in result.pages
-            ],
-            total_pages=result.total_pages,
-            total_chars=result.total_chars,
-            metadata=result.metadata
+        return HealthResponse(
+            status="healthy" if llm_connected else "degraded",
+            version="2.0",
+            llm_connected=llm_connected,
+            sil_enabled=emma.config.enable_sil_fast_path and emma._sil is not None,
+            features={
+                "sil_fast_path": emma.config.enable_sil_fast_path,
+                "domain_routing": emma.config.enable_domain_routing,
+                "streaming": emma.config.enable_streaming,
+                "emma_v2_enabled": is_emma_v2_enabled(),
+            },
         )
 
     except Exception as e:
-        logger.error(f"Error converting PDF to Markdown: {e}")
-        raise HTTPException(status_code=500, detail=f"Error converting PDF: {str(e)}")
-
-
-@router.post("/analyze/markdown", response_model=AnalysisWithMarkdownResponse)
-async def analyze_document_with_markdown(
-    pdf_file: UploadFile = File(...),
-    document_id: str = Form(...),
-    tenant_id: str = Form(...),
-    analysis_type: str = Form(default="legal"),
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Analyze a document and return results with Markdown view instead of PDF.
-
-    This combines the analysis workflow with Markdown conversion:
-    1. Converts PDF to Markdown using PyMuPDF4LLM
-    2. Runs the full analysis pipeline
-    3. Injects analysis findings as inline Markdown annotations
-    4. Returns both raw and annotated Markdown
-
-    Use this instead of /analyze/with-annotations when you want a
-    text-based view rather than PDF rendering.
-    """
-    try:
-        pdf_bytes = await pdf_file.read()
-        markdown_service = get_pdf_markdown_service()
-
-        # Step 1: Convert PDF to Markdown
-        logger.info(f"Converting PDF to Markdown for document {document_id}")
-        md_result = markdown_service.convert_pdf_bytes(
-            pdf_bytes,
-            cache_key=document_id,
-            page_chunks=True
+        logger.error(f"Health check error: {e}")
+        return HealthResponse(
+            status="unhealthy",
+            version="2.0",
+            llm_connected=False,
+            sil_enabled=False,
+            features={"error": str(e)},
         )
 
-        # Step 2: Run analysis (reuse existing emma service)
-        # Extract text for analysis
-        text_content = md_result.full_markdown
 
-        # Build analysis query
-        query = EmmaQuery(
-            query=f"Analiza el siguiente documento legal y extrae riesgos y recomendaciones:\n\n{text_content[:50000]}",
-            query_type="analyze",
+@router.get("/compare")
+async def compare_v1_v2(
+    query: str = Query(..., description="Query to compare"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Compare Emma v1 and v2 responses for the same query.
+
+    Useful for A/B testing during migration.
+    Returns both responses with timing information.
+    """
+    import time
+    from app.services.emma_service import emma_service
+    from app.schemas.emma import EmmaQuery
+
+    results = {}
+
+    # Execute v1
+    try:
+        v1_start = time.time()
+        v1_query = EmmaQuery(
+            query=query,
             tenant_id=tenant_id,
-            enable_debug=False
         )
+        v1_response = await emma_service.execute_query(v1_query)
+        v1_latency = (time.time() - v1_start) * 1000
 
-        logger.info(f"Running analysis for document {document_id}")
-        analysis_response = await emma_service.execute_query(query)
-
-        # Parse analysis result from Emma response
-        analysis_result = _extract_analysis_from_response(
-            analysis_response,
-            document_id,
-            analysis_type
-        )
-
-        # Step 3: Build annotation list for frontend compatibility
-        annotations: List[PDFAnnotation] = []
-        for risk in analysis_result.risks:
-            if risk.quote:
-                annotations.append(PDFAnnotation(
-                    id=risk.id,
-                    type="risk",
-                    severity=risk.severity,
-                    title=risk.title,
-                    description=risk.description,
-                    page_number=1,  # Will be updated based on quote location
-                    rect=AnnotationRect(x0=0, y0=0, x1=0, y1=0),
-                    text_found=risk.quote,
-                    confidence=0.8
-                ))
-
-        for rec in analysis_result.recommendations:
-            if rec.quote:
-                annotations.append(PDFAnnotation(
-                    id=rec.id,
-                    type="recommendation",
-                    severity=None,
-                    title=rec.title,
-                    description=rec.description,
-                    page_number=1,
-                    rect=AnnotationRect(x0=0, y0=0, x1=0, y1=0),
-                    text_found=rec.quote,
-                    confidence=0.8
-                ))
-
-        # Find actual page numbers for annotations by searching markdown pages
-        for ann in annotations:
-            for page in md_result.pages:
-                if ann.text_found and ann.text_found.lower() in page.content.lower():
-                    ann.page_number = page.page_number
-                    break
-
-        # Step 4: Create annotated markdown with inline highlights
-        annotated_markdown = markdown_service.inject_annotations(
-            md_result.full_markdown,
-            [
-                {
-                    "id": ann.id,
-                    "type": ann.type,
-                    "severity": ann.severity,
-                    "title": ann.title,
-                    "quote": ann.text_found
-                }
-                for ann in annotations
-            ],
-            style="highlight"
-        )
-
-        return AnalysisWithMarkdownResponse(
-            markdown=DocumentMarkdownResponse(
-                document_id=document_id,
-                full_markdown=md_result.full_markdown,
-                pages=[
-                    MarkdownPage(
-                        page_number=p.page_number,
-                        content=p.content,
-                        char_count=p.char_count
-                    )
-                    for p in md_result.pages
-                ],
-                total_pages=md_result.total_pages,
-                total_chars=md_result.total_chars,
-                metadata=md_result.metadata
-            ),
-            annotations=annotations,
-            annotated_markdown=annotated_markdown,
-            analysis=analysis_result
-        )
-
+        results["v1"] = {
+            "success": v1_response.success,
+            "answer": v1_response.answer[:500] + "..." if len(v1_response.answer) > 500 else v1_response.answer,
+            "latency_ms": v1_latency,
+        }
     except Exception as e:
-        logger.error(f"Error in markdown analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        results["v1"] = {"error": str(e)}
 
-
-# ========================================================================
-# Human-in-the-Loop (HITL) / Clarification Endpoints
-# OpenCode-style permission resolution
-# ========================================================================
-
-from pydantic import BaseModel
-
-
-class ClarificationResolutionRequest(BaseModel):
-    """Request to resolve a clarification prompt."""
-    session_id: str
-    tenant_id: str
-    request_id: Optional[str] = None  # Optional: specific request ID
-    selected_values: List[str]  # User's selected option values
-    follow_up_query: Optional[str] = None  # Optional: continue with this query
-
-
-class ClarificationResolutionResponse(BaseModel):
-    """Response after resolving a clarification."""
-    success: bool
-    message: str
-    selected_document: Optional[Dict[str, Any]] = None
-    continue_analysis: bool = False
-
-
-@router.post("/clarification/resolve", response_model=ClarificationResolutionResponse)
-async def resolve_clarification(
-    request: ClarificationResolutionRequest,
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Resolve a pending clarification request with user's selection.
-
-    This endpoint is called when the user makes a selection in the
-    clarification UI (e.g., selecting which document to analyze).
-
-    The selection is stored in the session context so the next query
-    can continue with the selected document.
-
-    Args:
-        request: Contains session_id, selected_values, and optional follow_up_query
-
-    Returns:
-        ClarificationResolutionResponse with success status and next steps
-    """
-    from app.agents.tools.clarification_tools import extract_selected_document
-    from app.agents.permissions import get_tool_interceptor
-
+    # Execute v2
     try:
-        logger.info(
-            f"🔄 Resolving clarification: session={request.session_id[:16]}..., "
-            f"selected={request.selected_values}"
-        )
+        emma = await get_emma_v2()
+        v2_start = time.time()
+        context = ExecutionContext(tenant_id=tenant_id)
+        v2_result = await emma.execute(query, context)
+        v2_latency = (time.time() - v2_start) * 1000
 
-        # If we have a request_id, resolve it in the interceptor
-        if request.request_id:
-            interceptor = get_tool_interceptor()
-            resolved = interceptor.resolve_request(
-                request.request_id,
-                request.selected_values
-            )
-            if resolved:
-                logger.info(f"✅ Resolved request {request.request_id}")
-
-        # Store the selection in session context for the next query
-        # This allows Emma to continue with the selected document
-        selected_doc = None
-        if request.selected_values:
-            selected_value = request.selected_values[0]  # Primary selection
-
-            # Store in Redis for session continuity
-            import redis.asyncio as redis
-            from app.agents.emma_coordinator import get_redis_pool
-
-            pool = get_redis_pool()
-            redis_client = redis.Redis(connection_pool=pool)
-
-            # Store clarification context
-            context_key = f"emma:clarification:{request.tenant_id}:{request.session_id}"
-            await redis_client.setex(
-                context_key,
-                3600,  # 1 hour TTL
-                json.dumps({
-                    "selected_values": request.selected_values,
-                    "selected_document_id": selected_value,
-                    "timestamp": asyncio.get_event_loop().time(),
-                })
-            )
-
-            logger.info(f"💾 Stored clarification context: {context_key}")
-
-            selected_doc = {
-                "id": selected_value,
-                "selected_values": request.selected_values,
-            }
-
-        return ClarificationResolutionResponse(
-            success=True,
-            message="Selección registrada. Puedes continuar con tu consulta.",
-            selected_document=selected_doc,
-            continue_analysis=request.follow_up_query is not None,
-        )
-
+        results["v2"] = {
+            "success": v2_result.success,
+            "answer": v2_result.answer[:500] + "..." if len(v2_result.answer) > 500 else v2_result.answer,
+            "latency_ms": v2_latency,
+            "sil_answered": v2_result.sil_answered,
+            "tokens_saved": v2_result.tokens_saved,
+            "domain": v2_result.domain.value,
+        }
     except Exception as e:
-        logger.error(f"❌ Clarification resolution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        results["v2"] = {"error": str(e)}
 
-
-@router.get("/clarification/pending/{session_id}")
-async def get_pending_clarification(
-    session_id: str,
-    tenant_id: str,
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Check if there's a pending clarification for a session.
-
-    Returns any stored clarification context from a previous interaction.
-    """
-    try:
-        import redis.asyncio as redis
-        from app.agents.emma_coordinator import get_redis_pool
-
-        pool = get_redis_pool()
-        redis_client = redis.Redis(connection_pool=pool)
-
-        context_key = f"emma:clarification:{tenant_id}:{session_id}"
-        context_data = await redis_client.get(context_key)
-
-        if context_data:
-            return {
-                "has_pending": True,
-                "context": json.loads(context_data)
-            }
-
-        return {
-            "has_pending": False,
-            "context": None
+    # Calculate comparison
+    if "latency_ms" in results.get("v1", {}) and "latency_ms" in results.get("v2", {}):
+        v1_lat = results["v1"]["latency_ms"]
+        v2_lat = results["v2"]["latency_ms"]
+        results["comparison"] = {
+            "latency_improvement_pct": round((v1_lat - v2_lat) / v1_lat * 100, 1) if v1_lat > 0 else 0,
+            "v2_sil_fast_path": results["v2"].get("sil_answered", False),
+            "v2_tokens_saved": results["v2"].get("tokens_saved", 0),
         }
 
-    except Exception as e:
-        logger.error(f"❌ Failed to get pending clarification: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return results
+
+
+# =============================================================================
+# Session Persistence Endpoints
+# =============================================================================
+
+@router.get("/sessions", response_model=EmmaSessionListResponse)
+async def list_sessions(
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    include_archived: bool = Query(False, description="Include archived sessions"),
+    limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    List Emma chat sessions for a user.
+
+    Returns paginated list of sessions with previews of first/last messages.
+    Sessions are ordered by:
+    1. Pinned sessions first
+    2. Then by last_message_at (most recent first)
+
+    Use this to build a conversation history sidebar.
+    """
+    persistence = get_emma_persistence_service()
+
+    result = await persistence.get_user_sessions(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+
+    return EmmaSessionListResponse(**result)
+
+
+@router.get("/sessions/{session_id}", response_model=EmmaSessionResponse)
+async def get_session(
+    session_id: str,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Get a full Emma session with all messages.
+
+    Returns the complete conversation history including:
+    - All messages (user and assistant)
+    - Sources cited in responses
+    - Tools used
+    - Metadata
+
+    Use this when the user opens an old conversation.
+    """
+    persistence = get_emma_persistence_service()
+
+    session = await persistence.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify tenant access
+    if session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    return EmmaSessionResponse(**session)
+
+
+@router.post("/sessions/{session_id}/continue", response_model=EmmaContinueSessionResponse)
+async def continue_session(
+    session_id: str,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Continue an old Emma session.
+
+    This endpoint:
+    1. Loads the session from PostgreSQL
+    2. Restores it to Redis (hot cache)
+    3. Returns confirmation
+
+    After calling this, use the regular /query or /query/stream endpoints
+    with the same session_id to continue the conversation.
+    The LLM will have access to the full conversation history.
+    """
+    persistence = get_emma_persistence_service()
+
+    # Check if session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify tenant access
+    if session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Check if already in Redis
+    in_redis = await persistence.session_exists_in_redis(session_id)
+
+    if in_redis:
+        return EmmaContinueSessionResponse(
+            success=True,
+            session_id=session_id,
+            message_count=session["message_count"],
+            loaded_to_redis=False,  # Already there
+            message="Session already active in cache",
+        )
+
+    # Load to Redis
+    loaded = await persistence.load_session_to_redis(session_id)
+
+    if not loaded:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load session to cache. Please try again.",
+        )
+
+    return EmmaContinueSessionResponse(
+        success=True,
+        session_id=session_id,
+        message_count=session["message_count"],
+        loaded_to_redis=True,
+        message=f"Session restored with {session['message_count']} messages",
+    )
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(
+    session_id: str,
+    update: EmmaSessionUpdate,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Update session properties.
+
+    Allows updating:
+    - title: Custom session title
+    - is_archived: Archive/unarchive session
+    - is_pinned: Pin/unpin session
+    """
+    persistence = get_emma_persistence_service()
+
+    # Verify session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify ownership
+    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Update
+    updated = await persistence.update_session(
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        title=update.title,
+        is_archived=update.is_archived,
+        is_pinned=update.is_pinned,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update session")
+
+    return {"success": True, "message": "Session updated"}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Permanently delete an Emma session.
+
+    This action:
+    - Removes the session from PostgreSQL
+    - Clears it from Redis if present
+    - Cannot be undone
+
+    Consider archiving instead for recoverable deletion.
+    """
+    persistence = get_emma_persistence_service()
+
+    # Verify session exists
+    session = await persistence.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Verify ownership
+    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    # Delete
+    deleted = await persistence.delete_session(
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+
+    return {"success": True, "message": "Session deleted"}

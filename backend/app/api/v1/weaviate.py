@@ -1,19 +1,26 @@
 """Weaviate API endpoints as gateway to Weaviate microservice
 
 Uses the normalized WeaviateClient with standardized X-API-Key authentication.
+Emma endpoints are proxied to emma-agent-service.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Optional, AsyncGenerator, List
 import logging
+import os
+import httpx
 
 from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
 from app.db.models import User
 from app.services.weaviate_client import weaviate_client
 from app.clients.exceptions import HTTPClientError, ServiceTimeoutError
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Emma Agent Service URL
+EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 
 
 # ============================================================================
@@ -26,7 +33,7 @@ async def emma_query(
     tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
-    """Proxy Emma AI queries to Weaviate service with ACL context"""
+    """Proxy Emma AI queries to Emma Agent Service with ACL context"""
     try:
         body = await request.json()
         body["tenant_id"] = tenant_id
@@ -38,13 +45,24 @@ async def emma_query(
 
         logger.debug(f"🔐 Emma query with ACL: user={current_user.id}, roles={len(body['user_role_ids'])}, admin={body['is_admin']}")
 
-        return await weaviate_client.emma_query(body)
-    except HTTPClientError as e:
-        logger.error(f"❌ Emma AI service error: {e}")
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except ServiceTimeoutError:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/query",
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Emma service error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
         logger.error("⏱️ Emma AI service timeout")
         raise HTTPException(status_code=504, detail="Emma AI service timeout")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Emma AI proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -57,7 +75,7 @@ async def emma_query_stream(
     current_user: User = Depends(get_current_user_async)
 ):
     """
-    Proxy Emma AI streaming queries to Weaviate service with ACL context.
+    Proxy Emma AI streaming queries to Emma Agent Service with ACL context.
 
     Returns Server-Sent Events (SSE) with progress updates during analysis.
     """
@@ -71,16 +89,20 @@ async def emma_query_stream(
         body["is_admin"] = current_user.is_admin
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
-            """Stream SSE events from Weaviate service to client."""
+            """Stream SSE events from Emma Agent Service to client."""
             import asyncio
-            async with weaviate_client.stream_client(timeout=300.0) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(300.0, connect=10.0),
+                http2=False,  # Disable HTTP/2 to avoid buffering issues
+            ) as client:
                 async with client.stream(
                     "POST",
-                    f"{weaviate_client.base_url}/emma/query/stream",
+                    f"{EMMA_SERVICE_URL}/emma/query/stream",
                     json=body,
                     headers={
-                        **weaviate_client.get_stream_headers(),
                         "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
                     },
                 ) as response:
                     if response.status_code != 200:
@@ -89,18 +111,22 @@ async def emma_query_stream(
                         yield f"event: error\ndata: {{\"error\": \"Service error: {response.status_code}\"}}\n\n".encode()
                         return
 
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-                        # Force immediate flush to prevent buffering
+                    # Use aiter_lines for SSE - each line is yielded immediately
+                    async for line in response.aiter_lines():
+                        if line:
+                            yield (line + "\n").encode()
+                        else:
+                            # Empty line marks end of SSE event
+                            yield b"\n"
                         await asyncio.sleep(0)
 
         return StreamingResponse(
             stream_sse(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
+                "X-Accel-Buffering": "no",
             }
         )
 
@@ -109,10 +135,56 @@ async def emma_query_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/emma/uploads/temp")
+async def emma_upload_temp(
+    file: UploadFile = File(...),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """Proxy temporary upload for non-indexed documents to Emma Agent Service."""
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        headers = {
+            "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+            "X-Tenant-ID": tenant_id,
+            "X-User-ID": str(current_user.id),
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/uploads/temp",
+                headers=headers,
+                files={"file": (file.filename or "document", file_bytes, file.content_type)},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Emma upload error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Emma upload proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/emma/health")
 async def emma_health():
-    """Check Emma AI service health"""
-    return await weaviate_client.emma_health()
+    """Check Emma AI service health from Emma Agent Service"""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/health",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                return {"status": "unhealthy", "error": f"Status {response.status_code}"}
+            return response.json()
+    except Exception as e:
+        logger.error(f"❌ Emma health check failed: {e}")
+        return {"status": "unhealthy", "error": str(e)}
 
 
 # ============================================================================
@@ -126,12 +198,12 @@ async def emma_v2_query(
     current_user: User = Depends(get_current_user_async)
 ):
     """
-    Proxy Emma v2 queries to Weaviate service with ACL context.
+    Proxy Emma v2 queries to Emma Agent Service with ACL context.
 
     Emma v2 features:
-    - SIL fast path for structural queries (70-90% token savings)
-    - Domain-specific dynamic prompts
-    - Improved expedientes/folder counting
+    - LangGraph multi-agent orchestration
+    - Domain-specific specialist agents
+    - Interleaved thinking with reasoning steps
     """
     try:
         body = await request.json()
@@ -142,13 +214,24 @@ async def emma_v2_query(
 
         logger.debug(f"🧠 Emma v2 query with ACL: user={current_user.id}, admin={body['is_admin']}")
 
-        return await weaviate_client.emma_v2_query(body)
-    except HTTPClientError as e:
-        logger.error(f"❌ Emma v2 service error: {e}")
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except ServiceTimeoutError:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/query",
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Emma v2 service error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
         logger.error("⏱️ Emma v2 service timeout")
         raise HTTPException(status_code=504, detail="Emma v2 service timeout")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Emma v2 proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -161,10 +244,10 @@ async def emma_v2_query_stream(
     current_user: User = Depends(get_current_user_async)
 ):
     """
-    Proxy Emma v2 streaming queries to Weaviate service with ACL context.
+    Proxy Emma v2 streaming queries to Emma Agent Service with ACL context.
 
     Returns Server-Sent Events (SSE) with progress updates during analysis.
-    Emma v2 includes SIL integration for structural queries.
+    Emma v2 uses LangGraph multi-agent orchestration with interleaved thinking.
     """
     try:
         body = await request.json()
@@ -174,16 +257,21 @@ async def emma_v2_query_stream(
         body["is_admin"] = current_user.is_admin
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
-            """Stream SSE events from Weaviate service to client."""
+            """Stream SSE events from Emma Agent Service to client."""
             import asyncio
-            async with weaviate_client.stream_client(timeout=300.0) as client:
+            transport = httpx.AsyncHTTPTransport(retries=0)
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(300.0, connect=10.0),
+                transport=transport,
+            ) as client:
                 async with client.stream(
                     "POST",
-                    f"{weaviate_client.base_url}/emma/v2/query/stream",
+                    f"{EMMA_SERVICE_URL}/emma/query/stream",
                     json=body,
                     headers={
-                        **weaviate_client.get_stream_headers(),
                         "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
                     },
                 ) as response:
                     if response.status_code != 200:
@@ -193,16 +281,18 @@ async def emma_v2_query_stream(
                         return
 
                     async for chunk in response.aiter_bytes():
-                        yield chunk
-                        await asyncio.sleep(0)
+                        if chunk:
+                            yield chunk
+                            await asyncio.sleep(0)
 
         return StreamingResponse(
             stream_sse(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
+                "X-Accel-Buffering": "no",
+                "Transfer-Encoding": "chunked",
             }
         )
 
@@ -213,11 +303,20 @@ async def emma_v2_query_stream(
 
 @router.get("/emma/tools")
 async def emma_list_tools():
-    """List available Emma AI tools"""
+    """List available Emma AI tools from Emma Agent Service"""
     try:
-        return await weaviate_client.emma_list_tools()
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/tools",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Emma tools service timeout")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Failed to list Emma tools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1258,90 +1357,57 @@ async def weaviate_service_health():
 
 
 # ============================================================================
-# SLM ROUTER ENDPOINTS (TOON-based query planning)
+# KNOWLEDGE TREE ENDPOINTS (Apache AGE graph visualization)
 # ============================================================================
 
-@router.get("/slm/health")
-async def slm_health():
-    """Check SLM Router health status"""
-    try:
-        return await weaviate_client.slm_health()
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except Exception as e:
-        logger.error(f"❌ SLM health proxy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+KNOWLEDGE_TREE_SERVICE_URL = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
 
 
-@router.post("/slm/route")
-async def slm_route(
-    request: Request,
+@router.get("/tree/stats")
+async def tree_stats(
     tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async)
 ):
-    """
-    Route a query through the SLM Router.
-
-    Returns structured context based on TOON plan execution.
-    See docs/architecture/SLM_ROUTER.md for details.
-    """
+    """Get knowledge tree stats from Apache AGE via knowledge-tree-service"""
     try:
-        body = await request.json()
-        body["tenant_id"] = tenant_id
-
-        return await weaviate_client.slm_route(body)
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except ServiceTimeoutError:
-        raise HTTPException(status_code=504, detail="SLM Router timeout")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{KNOWLEDGE_TREE_SERVICE_URL}/tree/stats",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Knowledge tree service timeout")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ SLM route proxy error: {e}")
+        logger.error(f"Knowledge tree stats proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/slm/plan")
-async def slm_plan(
-    request: Request,
+@router.get("/tree/graph/structure")
+async def tree_graph_structure(
     tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async)
 ):
-    """Generate a TOON plan without executing it (for debugging)"""
+    """Get full graph structure (nodes + edges) for visualization"""
     try:
-        body = await request.json()
-        body["tenant_id"] = tenant_id
-
-        return await weaviate_client.slm_plan(body)
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.get(
+                f"{KNOWLEDGE_TREE_SERVICE_URL}/tree/graph/structure",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Knowledge tree service timeout")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ SLM plan proxy error: {e}")
+        logger.error(f"Knowledge tree graph structure proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/slm/schema/{tenant_id}")
-async def slm_get_schema(
-    tenant_id: str,
-    current_user: User = Depends(get_current_user_async)
-):
-    """Get the extracted schema for a tenant"""
-    try:
-        return await weaviate_client.slm_get_schema(tenant_id)
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except Exception as e:
-        logger.error(f"❌ SLM get schema proxy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/slm/learning/status")
-async def slm_learning_status(
-    current_user: User = Depends(get_current_user_async)
-):
-    """Get status of the continuous learning system"""
-    try:
-        return await weaviate_client.slm_learning_status()
-    except HTTPClientError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
-    except Exception as e:
-        logger.error(f"❌ SLM learning status proxy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))

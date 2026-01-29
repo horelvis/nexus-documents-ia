@@ -637,6 +637,15 @@ class IndexingPipeline:
                     f"[{document_id}] Applying learned strategy: "
                     f"chunking_type={chunking_type}, config={chunking_config}"
                 )
+            elif self._get_sector_strategy():
+                sector_strategy = self._get_sector_strategy()
+                logger.info(
+                    f"[{document_id}] Applying sector strategy: "
+                    f"chunk_strategy={sector_strategy.get('chunking_type')}, "
+                    f"chunk_size={sector_strategy.get('chunking_config', {}).get('target_chunk_size')}"
+                )
+                # Use sector strategy as indexing_strategy
+                indexing_strategy = sector_strategy
             else:
                 logger.info(f"[{document_id}] Using default strategy for type={doc_type}")
 
@@ -744,7 +753,7 @@ class IndexingPipeline:
         extracted_entities = []
         entity_extraction_time = 0.0
 
-        if self._knowledge_extraction_enabled and indexing_strategy.get("extract_entities", True):
+        if self._knowledge_extraction_enabled and (indexing_strategy or {}).get("extract_entities", True):
             logger.info(f"[{document_id}] Extracting named entities...")
             entity_start = time.time()
 
@@ -897,6 +906,46 @@ class IndexingPipeline:
             return DocumentType.FINANCIAL_REPORT
 
         return DocumentType.GENERAL
+
+    @staticmethod
+    def _get_sector_strategy() -> Optional[Dict[str, Any]]:
+        """
+        Get chunking strategy from ACTIVE_SECTOR env var.
+
+        Returns an indexing_strategy dict if a sector is configured,
+        or None for generic mode.
+        """
+        import os
+        active_sector = os.getenv("ACTIVE_SECTOR", "").strip().lower()
+        if not active_sector:
+            return None
+
+        # Sector → chunking parameters mapping
+        sector_strategies = {
+            "legal": {
+                "chunking_type": "legal_sections",
+                "chunking_config": {
+                    "target_chunk_size": 1500,
+                    "overlap": 200,
+                },
+            },
+            "medical": {
+                "chunking_type": "paragraph",
+                "chunking_config": {
+                    "target_chunk_size": 1200,
+                    "overlap": 150,
+                },
+            },
+            "documental": {
+                "chunking_type": "semantic",
+                "chunking_config": {
+                    "target_chunk_size": 1000,
+                    "overlap": 100,
+                },
+            },
+        }
+
+        return sector_strategies.get(active_sector)
 
     def _get_document_type_from_strategy(
         self,

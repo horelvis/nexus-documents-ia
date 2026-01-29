@@ -197,74 +197,54 @@ DEPLOYMENT_MODE=on_premise  # or: saas, custom
 - **Agent system**: AI agents with conversation history and execution tracking
 - **ACL JSONB**: Fine-grained access control stored in IndexedDocument
 
-#### SLM Router - Small Language Model Query Planning
+#### Multi-Pipeline RAG Sectors
 
-> **📖 Full Documentation**: [`docs/architecture/SLM_ROUTER.md`](docs/architecture/SLM_ROUTER.md)
+The system supports sector-based RAG pipeline configuration via `ACTIVE_SECTOR` environment variable. One sector is active per deployment, tuning the entire RAG pipeline (retrieval parameters, agent filtering, graph schema, chunking strategy) for a specific domain.
 
-The SLM Router is a unified query routing system that uses a Small Language Model to generate **TOON (Task-Oriented Orchestration Notation)** plans:
+**Available Sectors:**
+| Sector | Agents | hybrid_alpha | top_k | Chunk Strategy |
+|--------|--------|-------------|-------|----------------|
+| `legal` | legal, labor, fiscal, contract, compliance, privacy | 0.7 | 12 | legal_sections (1500/200) |
+| `medical` | general | 0.6 | 15 | paragraph (1200/150) |
+| `documental` | general, education, realestate | 0.5 | 10 | semantic (1000/100) |
 
+**Pipeline Flow with Active Sector:**
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  TRADITIONAL RAG                    →    SLM ROUTER APPROACH                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ❌ Always invoke full RAG          →    ✅ Route to optimal data source     │
-│  ❌ Hardcoded routing rules         →    ✅ LLM-generated execution plans    │
-│  ❌ 10K+ tokens per query           →    ✅ 500-1000 tokens (70-90% savings) │
-│  ❌ No learning capability          →    ✅ Continuous learning from usage   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Route Types:**
-| Route | Description | Data Source |
-|-------|-------------|-------------|
-| `GRAPH_ONLY` | Structural/counting queries | Apache AGE |
-| `VECTOR_ONLY` | Semantic search queries | Weaviate |
-| `HYBRID` | Structure + content | Both |
-| `ASK_CLARIFY` | Ambiguous query | User input |
-
-**Query Flow:**
-```
-User: "¿Cuántos contratos tiene ACME?"
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ SLM Router                                                                   │
-│ 1. SLM generates TOON plan: route=GRAPH_ONLY, operation=COUNT               │
-│ 2. Executor runs Cypher: MATCH (d:structural_document) WHERE...             │
-│ 3. Returns: count=5, context="ACME has 5 contracts"                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-         │
-         ▼
-Emma receives structured context → "ACME tiene 5 contratos..."
-         │
-         ▼
-🎯 NO DOCUMENT CONTENT READ - 70% token savings
+User Query
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Coordinator → Context Tree → Retrieve (sector alpha/top_k) │
+│  → Graph Expand (sector entities + AGE) → Plan (filtered    │
+│    agents) → Specialist Agents → Synthesize (MEN optional)  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **Key Components:**
-- `weaviate-service/app/services/slm_router/` - SLM Router package
-  - `router.py` - Main orchestrator
-  - `toon_schema.py` - TOON models and guardrails
-  - `slm_client.py` - SLM client (Qwen2-0.5B)
-  - `toon_executor.py` - Plan execution
-  - `tenant_schema.py` - Tenant context
-  - `history_manager.py` - Conversation history
-  - `continuous_learning.py` - Automated fine-tuning
-- `weaviate-service/app/api/slm_router.py` - REST endpoints (`/slm/*`)
-
-**API Endpoints:**
-| Endpoint | Description |
-|----------|-------------|
-| `POST /slm/route` | Plan and execute a query |
-| `POST /slm/plan` | Generate TOON plan only |
-| `GET /slm/health` | Health check |
-| `GET /slm/metrics` | Router metrics |
+- `emma-agent-service/app/agents/langgraph/sectors/` - Sector configuration
+  - `config.py` - `SectorConfig` dataclass + `Sector` enum
+  - `registry.py` - Sector registry + `get_active_sector_config()` singleton
+  - `entity_extractor.py` - Regex-based entity extraction per sector
+  - `graph_expander.py` - Apache AGE graph expansion per sector
+- `emma-agent-service/app/agents/langgraph/nodes/graph_expand.py` - LangGraph graph expansion node
+- `emma-agent-service/config/graphs/*.cypher` - AGE graph schemas per sector
 
 **Configuration:**
 ```bash
-SLM_ROUTER_ENABLED=true
-SLM_MODEL=Qwen/Qwen2-0.5B-Instruct
-SLM_BASE_URL=http://vllm:8000/v1
+# Sector (set before ingestion — changing sector requires data re-ingestion)
+ACTIVE_SECTOR=legal  # legal | medical | documental | (empty = generic mode)
+
+# Optional: MEN service for sector-specialized generation
+MEN_ENABLED=true
+MEN_SERVICE_URL=http://men-service:8010
+```
+
+**Deployment:**
+```bash
+# 1. Set sector in .env
+# 2. Initialize graph: python scripts/init_sector_graphs.py
+# 3. Start services and ingest data
+# To change sector: python scripts/change_sector.py --sector=medical
 ```
 
 #### Multi-Tier RAG Caching System
@@ -368,7 +348,7 @@ RAG_CACHE_TTL_SECONDS=3600             # 1 hour
 - **Alembic**: Database migration management
 - **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
 - **Weaviate**: Vector database for semantic search
-- **Apache AGE**: PostgreSQL graph extension for SLM Router (structural queries via Cypher)
+- **Apache AGE**: PostgreSQL graph extension for sector-aware structural queries via Cypher
 - **Anthropic Skill Custom**: Multi-agent orchestration with ChatAgent, @ai_function decorators
 - **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing

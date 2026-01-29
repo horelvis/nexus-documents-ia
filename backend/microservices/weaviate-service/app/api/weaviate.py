@@ -949,3 +949,270 @@ async def get_document_full_content(
     except Exception as e:
         logger.error(f"❌ Failed to get document content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
+# Emma Agent Service Endpoints
+# ========================================
+# These endpoints are called by emma-agent-service via HTTP
+# They provide SIL structural queries, RAG queries, and document access
+
+class StructuralSummaryRequest(BaseModel):
+    """Request for structural summary (terminology)"""
+    tenant_id: str
+
+
+class StructuralSummaryResponse(BaseModel):
+    """Response with structural summary text"""
+    summary: str = ""
+
+
+@router.post("/structural/summary", response_model=StructuralSummaryResponse)
+async def structural_summary(
+    request: StructuralSummaryRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Get tenant structural summary (terminology) from SIL graph.
+    """
+    try:
+        from app.services.tenant_knowledge_service import tenant_knowledge_service
+
+        summary = await tenant_knowledge_service.get_structural_summary(
+            tenant_id=request.tenant_id
+        )
+        return StructuralSummaryResponse(summary=summary or "")
+    except Exception as e:
+        logger.error(f"Structural summary failed: {e}", exc_info=True)
+        return StructuralSummaryResponse(summary="")
+
+
+class RAGQueryRequest(BaseModel):
+    """Request for RAG query (from emma-agent-service)"""
+    tenant_id: str
+    query: str
+    user_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    max_tokens: int = 4096
+    include_sources: bool = True
+
+
+class RAGQueryResponse(BaseModel):
+    """Response from RAG query"""
+    answer: str
+    sources: List[Dict[str, Any]] = []
+    confidence: float = 0.0
+    metadata: Dict[str, Any] = {}
+
+
+@router.post("/rag/query", response_model=RAGQueryResponse)
+async def rag_query(
+    request: RAGQueryRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Execute RAG query through the full pipeline.
+
+    This endpoint is called by emma-agent-service for the analyze tool.
+    It runs the complete 7-layer RAG pipeline.
+    """
+    try:
+        from app.services.rag.rag_pipeline import RAGPipeline
+        from app.core.security import get_tenant_collection_name
+
+        pipeline = RAGPipeline()
+        await pipeline.initialize()
+
+        collection = get_tenant_collection_name(request.tenant_id)
+
+        # Execute RAG pipeline
+        result = await pipeline.answer_with_context(
+            collection_name=collection,
+            query=request.query,
+            max_chunks=10,
+        )
+
+        sources = []
+        if request.include_sources and result.get("sources"):
+            sources = result["sources"]
+
+        return RAGQueryResponse(
+            answer=result.get("answer", ""),
+            sources=sources,
+            confidence=result.get("confidence", 0.8),
+            metadata={
+                "tokens_used": result.get("tokens_used", 0),
+                "chunks_retrieved": len(result.get("sources", [])),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ RAG query failed: {e}", exc_info=True)
+        return RAGQueryResponse(
+            answer=f"Error processing query: {e}",
+            sources=[],
+            confidence=0.0,
+            metadata={"error": str(e)}
+        )
+
+
+class HybridSearchRequest(BaseModel):
+    """Request for hybrid search (from emma-agent-service)"""
+    tenant_id: str
+    query: str
+    limit: int = 10
+    alpha: float = 0.5  # 0=keyword, 1=vector
+    filters: Optional[Dict[str, Any]] = None
+
+
+@router.post("/collections/documents/hybrid", response_model=SearchResponse)
+async def hybrid_search(
+    request: HybridSearchRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Execute hybrid search combining vector and keyword search.
+
+    This endpoint is called by emma-agent-service for the search tool.
+    Alpha controls the balance: 0=pure keyword, 1=pure vector, 0.5=balanced.
+    """
+    try:
+        from app.core.security import get_tenant_collection_name
+        from app.schemas.weaviate import SearchRequest as WeaviateSearchRequest
+
+        collection = get_tenant_collection_name(request.tenant_id)
+
+        # Build search request
+        search_request = WeaviateSearchRequest(
+            query=request.query,
+            limit=request.limit,
+            tenant_id=request.tenant_id,
+            search_type="hybrid",
+            filters=request.filters,
+            alpha=request.alpha,
+        )
+
+        # Execute search
+        results = await weaviate_service.search_documents(collection, search_request)
+        return results
+
+    except Exception as e:
+        logger.error(f"❌ Hybrid search failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{tenant_id}/{document_id}/chunks")
+async def get_document_chunks(
+    tenant_id: str,
+    document_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Get document chunks with pagination.
+
+    This endpoint is called by emma-agent-service for document reading.
+    """
+    try:
+        from app.core.security import get_tenant_collection_name
+
+        collection = get_tenant_collection_name(tenant_id)
+
+        # Get chunks from Weaviate
+        chunks = await weaviate_service.get_document_chunks(
+            collection_name=collection,
+            document_id=document_id,
+            offset=offset,
+            limit=limit,
+        )
+
+        return {
+            "chunks": chunks,
+            "offset": offset,
+            "limit": limit,
+            "total": len(chunks),
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Get document chunks failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/knowledge/related")
+async def get_related_entities(
+    request: Dict[str, Any],
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Get entities related to a given entity via knowledge graph.
+
+    This endpoint is called by emma-agent-service for graph exploration.
+    """
+    try:
+        tenant_id = request.get("tenant_id")
+        entity_id = request.get("entity_id")
+        relationship_types = request.get("relationship_types")
+        depth = request.get("depth", 1)
+        limit = request.get("limit", 20)
+
+        if not tenant_id or not entity_id:
+            raise HTTPException(
+                status_code=400,
+                detail="tenant_id and entity_id are required"
+            )
+
+        # Use legal graph service for entity relationships
+        from app.services.legal_graph_service import legal_graph_service
+
+        await legal_graph_service.initialize()
+
+        entities = await legal_graph_service.get_related_entities(
+            tenant_id=tenant_id,
+            entity_id=entity_id,
+            relationship_types=relationship_types,
+            depth=depth,
+            limit=limit,
+        )
+
+        return {"entities": entities}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Get related entities failed: {e}", exc_info=True)
+        return {"entities": [], "error": str(e)}
+
+
+@router.get("/collections/{tenant_id}/stats")
+async def get_collection_stats(
+    tenant_id: str,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Get collection statistics for a tenant.
+
+    Returns document count, chunk count, and other metrics.
+    """
+    try:
+        from app.core.security import get_tenant_collection_name
+
+        collection = get_tenant_collection_name(tenant_id)
+
+        # Get collection info
+        info = await weaviate_service.get_collection_info(collection)
+
+        return {
+            "tenant_id": tenant_id,
+            "collection": collection,
+            "document_count": info.object_count if info else 0,
+            "status": "active" if info else "not_found",
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Get collection stats failed: {e}", exc_info=True)
+        return {
+            "tenant_id": tenant_id,
+            "error": str(e),
+            "status": "error",
+        }

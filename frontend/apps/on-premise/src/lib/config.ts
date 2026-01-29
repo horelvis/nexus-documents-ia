@@ -8,7 +8,9 @@ const rawBaseUrl =
   ""
 
 const isProxyBase = !rawBaseUrl || rawBaseUrl.startsWith("/")
-const baseUrl = isProxyBase ? "/api" : rawBaseUrl
+const cleanedRawBaseUrl = rawBaseUrl.replace(/\/+$/, '')
+const alreadyHasApiV1 = /\/api\/v1$/i.test(cleanedRawBaseUrl)
+const baseUrl = isProxyBase ? "/api" : (alreadyHasApiV1 ? cleanedRawBaseUrl.replace(/\/api\/v1$/i, '') : cleanedRawBaseUrl)
 
 // For SSE streaming, we MUST bypass Next.js proxy (rewrites buffer responses)
 // Use direct backend URL for streaming endpoints
@@ -58,10 +60,10 @@ export const API_CONFIG = {
     TENANTS_CURRENT: '/tenants/current',
 
     // Emma AI
-    EMMA_QUERY: '/weaviate/emma/query',
-    EMMA_TOOLS: '/weaviate/emma/tools',
-    EMMA_HEALTH: '/weaviate/emma/health',
-    EMMA_FEEDBACK: '/weaviate/emma/feedback',
+    EMMA_QUERY: '/emma/query',
+    EMMA_TOOLS: '/emma/tools',
+    EMMA_HEALTH: '/emma/health',
+    EMMA_UPLOAD_TEMP: '/emma/uploads/temp',
 
     // Connectors
     CONNECTORS: '/connectors',

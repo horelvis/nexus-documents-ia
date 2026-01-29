@@ -1,8 +1,13 @@
 # SLM Router: Small Language Model Based Query Planning
 
-## Overview
+> ⚠️ **REMOVED**: The SLM Router has been removed from the codebase and replaced by **Multi-Pipeline RAG Sectors**.
+> See `emma-agent-service/app/agents/langgraph/sectors/` for the current architecture.
+> Sectors provide per-deployment RAG tuning (retrieval parameters, agent filtering, graph schemas, chunking strategies) configured via `ACTIVE_SECTOR` environment variable.
+> This document is kept for historical reference only.
 
-The **SLM Router** is a unified query routing system that replaces fragmented routing approaches with a single, deterministic planning system using a Small Language Model (SLM). It generates **TOON (Task-Oriented Orchestration Notation)** plans that describe exactly how to answer a query.
+## Overview (Legacy)
+
+The **SLM Router** was a unified query routing system that replaced fragmented routing approaches with a single, deterministic planning system using a Small Language Model (SLM). It generated **TOON (Task-Oriented Orchestration Notation)** plans that described how to answer a query.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

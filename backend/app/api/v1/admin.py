@@ -7,6 +7,7 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 import logging
+import os
 
 from app.api.async_dependencies import get_current_active_superuser_async
 from app.db.async_database import get_async_db
@@ -459,6 +460,26 @@ async def delete_all_documents(
 
         await db.commit()
 
+        # Step 7: Clear knowledge graph (Apache AGE) for this tenant
+        results["knowledge_graph_cleared"] = False
+        try:
+            import httpx
+            knowledge_tree_url = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
+            api_key = os.getenv("MICROSERVICES_API_KEY", "")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(
+                    f"{knowledge_tree_url}/tree/graph/clear",
+                    headers={"X-API-Key": api_key},
+                    params={"tenant_id": tenant_id},
+                )
+                results["knowledge_graph_cleared"] = resp.status_code == 200
+                if results["knowledge_graph_cleared"]:
+                    logger.info(f"✅ Cleared knowledge graph for tenant {tenant_id}")
+                else:
+                    logger.warning(f"⚠️ Could not clear knowledge graph: {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not clear knowledge graph: {e}")
+
         total_deleted = results["database_deleted"] + results["indexed_documents_deleted"]
 
         logger.info(
@@ -466,7 +487,8 @@ async def delete_all_documents(
             f"weaviate={results['weaviate_deleted']}, "
             f"storage={results['storage_deleted']}, "
             f"documents={results['database_deleted']}, "
-            f"indexed_documents={results['indexed_documents_deleted']}"
+            f"indexed_documents={results['indexed_documents_deleted']}, "
+            f"knowledge_graph={results['knowledge_graph_cleared']}"
         )
 
         return {

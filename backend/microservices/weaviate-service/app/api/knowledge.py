@@ -291,39 +291,49 @@ async def get_knowledge_stats(
 
         total_entities = len(results)
 
-        # If no entities in Weaviate, also check SIL structural graph
+        # If no entities in Weaviate, check knowledge-tree-service (Apache AGE)
         # This is important for on-premise deployments where documents
         # come from connectors and may not have extracted entities yet
         if total_entities == 0:
             try:
-                from app.services.sil.structural_graph import structural_graph
+                import httpx
+                import os
 
-                sil_stats = await structural_graph.get_graph_stats(tenant_id=tenant_id)
+                tree_url = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
+                api_key = os.getenv("MICROSERVICES_API_KEY", "")
 
-                if not sil_stats.get("error"):
-                    # Use SIL document types as entity types
-                    types_breakdown = sil_stats.get("types_breakdown", {})
-                    total_docs = sil_stats.get("total_documents", 0)
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(
+                        f"{tree_url}/tree/stats",
+                        params={"tenant_id": tenant_id},
+                        headers={"X-API-Key": api_key},
+                    )
+                    if resp.status_code == 200:
+                        tree_stats = resp.json()
+                        types_breakdown = tree_stats.get("types_breakdown", {})
+                        total_docs = tree_stats.get("total_documents", 0)
+                        total_folders = tree_stats.get("total_folders", 0)
 
-                    if total_docs > 0:
-                        # Map document types to entity-like representation
-                        for doc_type, count in types_breakdown.items():
-                            # Convert document types to entity type format
-                            entity_type = f"document:{doc_type}" if doc_type else "document:unknown"
-                            entities_by_type[entity_type] = count
+                        if total_docs > 0 or total_folders > 0:
+                            for doc_type, count in types_breakdown.items():
+                                entity_type = f"document:{doc_type}" if doc_type else "document:unknown"
+                                entities_by_type[entity_type] = count
 
-                        # Set total to documents in SIL graph
-                        total_entities = total_docs
+                            total_entities = total_docs + total_folders
 
-                        # Add domain based on document presence
-                        entities_by_domain["structural"] = total_docs
+                            domains_breakdown = tree_stats.get("domains_breakdown", {})
+                            for domain_key, count in domains_breakdown.items():
+                                entities_by_domain[domain_key] = count
 
-                        logger.info(
-                            f"Knowledge stats enriched from SIL: {total_docs} documents, "
-                            f"{len(types_breakdown)} types"
-                        )
-            except Exception as sil_error:
-                logger.warning(f"Could not get SIL stats for knowledge enrichment: {sil_error}")
+                            if total_folders > 0:
+                                entities_by_domain["folders"] = total_folders
+
+                            logger.info(
+                                f"Knowledge stats from tree-service: {total_docs} documents, "
+                                f"{total_folders} folders, {len(types_breakdown)} types"
+                            )
+            except Exception as tree_error:
+                logger.warning(f"Could not get knowledge-tree-service stats: {tree_error}")
 
         return KnowledgeStatsResponse(
             tenant_id=tenant_id,

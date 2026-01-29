@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleCheck, IconPaperclip, IconSearch, IconBulb, IconGitBranch, IconBrain, IconArrowRight } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -8,9 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, SLMPlan } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, SLMPlan, ReasoningStep } from '@/lib/types/emma'
 import { EmmaMarkdown } from './EmmaMarkdown'
 import { DocumentDisplay } from './DocumentDisplay'
+import { ReasoningCollapsible } from './ReasoningCollapsible'
 
 interface EmmaRenderChatProps {
   messages: EmmaMessage[]
@@ -203,19 +204,25 @@ function MessageBubble({
               </div>
             )}
 
+            {/* Reasoning steps (collapsed after completion, expandable) */}
+            {(() => {
+              const slmSteps = message.metadata?.slmThinkingSteps || []
+              if (slmSteps.length === 0) return null
+              const allSteps: ReasoningStep[] = slmSteps.map((s: SLMThinkingStep) => ({
+                type: s.type as ReasoningStep['type'],
+                content: s.content,
+                entities: s.entities,
+                confidence: s.confidence,
+              }))
+              return (
+                <ReasoningCollapsible
+                  steps={allSteps}
+                />
+              )
+            })()}
+
               {/* Response content */}
               <EmmaMarkdown content={message.content} />
-
-              {/* Tools used */}
-              {message.metadata?.tools_used && message.metadata.tools_used.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-2">
-                  {message.metadata.tools_used.map((tool, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-[10px] font-mono">
-                      {tool}
-                    </Badge>
-                  ))}
-                </div>
-              )}
 
               {/* Related documents */}
               {message.metadata?.documents && message.metadata.documents.length > 0 && (
@@ -291,9 +298,46 @@ function MessageBubble({
   )
 }
 
+// Typewriter effect hook for streaming-like text display
+function useTypewriter(text: string, speed: number = 20, enabled: boolean = true) {
+  const [displayedText, setDisplayedText] = useState('')
+  const [isComplete, setIsComplete] = useState(false)
+
+  useEffect(() => {
+    if (!enabled) {
+      setDisplayedText(text)
+      setIsComplete(true)
+      return
+    }
+
+    setDisplayedText('')
+    setIsComplete(false)
+
+    if (!text) return
+
+    let currentIndex = 0
+    const interval = setInterval(() => {
+      if (currentIndex < text.length) {
+        // Add characters in small chunks for smoother effect
+        const chunkSize = Math.min(3, text.length - currentIndex)
+        setDisplayedText(text.slice(0, currentIndex + chunkSize))
+        currentIndex += chunkSize
+      } else {
+        setIsComplete(true)
+        clearInterval(interval)
+      }
+    }, speed)
+
+    return () => clearInterval(interval)
+  }, [text, speed, enabled])
+
+  return { displayedText, isComplete }
+}
+
 // Progress Bubble with Workflow Steps and Streaming Content
 // SLM Thinking Step Display (terminal style)
-function SLMThinkingStepItem({ step, isLast }: { step: SLMThinkingStep; isLast: boolean }) {
+function SLMThinkingStepItem({ step, isLast, animate = true }: { step: SLMThinkingStep; isLast: boolean; animate?: boolean }) {
+  const { displayedText, isComplete } = useTypewriter(step.content, 15, animate && isLast)
   const getStepIcon = () => {
     switch (step.type) {
       case 'entity_detection':
@@ -302,6 +346,24 @@ function SLMThinkingStepItem({ step, isLast }: { step: SLMThinkingStep; isLast: 
         return <IconBulb className="h-3 w-3" />
       case 'route_decision':
         return <IconGitBranch className="h-3 w-3" />
+      case 'retrieval':
+        return <IconSearch className="h-3 w-3" />
+      case 'domain_detection':
+        return <IconBulb className="h-3 w-3" />
+      case 'agent_selection':
+        return <IconGitBranch className="h-3 w-3" />
+      case 'agent_execution':
+        return <IconBrain className="h-3 w-3" />
+      case 'structural':
+        return <IconGitBranch className="h-3 w-3" />
+      case 'thinking':
+        return <IconBrain className="h-3 w-3" />
+      case 'observation':
+        return <IconSearch className="h-3 w-3" />
+      case 'tool_call':
+        return <IconGitBranch className="h-3 w-3" />
+      default:
+        return <IconBulb className="h-3 w-3" />
     }
   }
 
@@ -313,18 +375,43 @@ function SLMThinkingStepItem({ step, isLast }: { step: SLMThinkingStep; isLast: 
         return 'INTENT'
       case 'route_decision':
         return 'ROUTE'
+      case 'retrieval':
+        return 'RETRIEVAL'
+      case 'domain_detection':
+        return 'DOMAIN'
+      case 'agent_selection':
+        return 'AGENTS'
+      case 'agent_execution':
+        return 'EXEC'
+      case 'structural':
+        return 'STRUCTURAL'
+      case 'thinking':
+        return 'THINKING'
+      case 'observation':
+        return 'OBSERVED'
+      case 'tool_call':
+        return 'TOOL'
+      default:
+        return 'STEP'
     }
   }
 
+  // Show full text for completed steps, animated text for current step
+  const textToShow = (animate && isLast) ? displayedText : step.content
+  const showCursor = animate && isLast && !isComplete
+
   return (
-    <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+    <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
       <div className="flex items-center justify-center h-4 w-4 text-primary/70 shrink-0 mt-0.5">
         {getStepIcon()}
       </div>
       <div className="flex-1 min-w-0">
-        <span className="text-primary/70">{getStepLabel()}:</span>{' '}
-        <span className="text-foreground/70">{step.content}</span>
-        {step.entities && step.entities.length > 0 && (
+        <span className="text-primary/70 font-mono text-xs">{getStepLabel()}:</span>{' '}
+        <span className="text-foreground/80">{textToShow}</span>
+        {showCursor && (
+          <span className="inline-block w-1.5 h-4 bg-primary/70 animate-pulse ml-0.5 align-middle" />
+        )}
+        {step.entities && step.entities.length > 0 && isComplete && (
           <div className="flex flex-wrap gap-1 mt-1">
             {step.entities.map((entity, idx) => (
               <Badge key={idx} variant="outline" className="text-[10px] py-0 font-mono bg-primary/10 text-primary border-primary/20">
@@ -332,9 +419,6 @@ function SLMThinkingStepItem({ step, isLast }: { step: SLMThinkingStep; isLast: 
               </Badge>
             ))}
           </div>
-        )}
-        {isLast && (
-          <span className="inline-block w-2 h-2 rounded-full bg-primary/50 animate-pulse ml-1 align-middle" />
         )}
       </div>
     </div>

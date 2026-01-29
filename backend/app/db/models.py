@@ -2096,7 +2096,8 @@ class Connector(Base):
     user_auths = relationship("UserConnectorAuth", back_populates="connector", cascade="all, delete-orphan")
     user_syncs = relationship("UserDocumentSync", back_populates="connector", cascade="all, delete-orphan")
     indexed_documents = relationship("IndexedDocument", back_populates="connector")
-    
+    content_models = relationship("ConnectorContentModel", cascade="all, delete-orphan", passive_deletes=True)
+
     __table_args__ = (
         UniqueConstraint('tenant_id', 'connector_type', 'name', name='uq_connector_tenant_type_name'),
         Index('idx_connector_tenant_active', 'tenant_id', 'is_active'),

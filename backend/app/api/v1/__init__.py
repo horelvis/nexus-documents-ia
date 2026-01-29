@@ -12,13 +12,14 @@ from app.api.v1.entities import router as entities_router
 from app.api.v1.workflows import router as workflows_router
 from app.api.v1.analysis_queue import router as analysis_queue_router
 from app.api.v1.channels import router as channels_router
+from app.api.v1.emma import router as emma_router
 
 # Import all modules needed by api.py
 from app.api.v1 import (
     document_insights, documents, document_shares, document_acl, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
     assistant, migration, workflows, analysis_queue, channels, gemini_voice,
-    site_guests, site_portal,
+    site_guests, site_portal, emma,
 )
 # from app.api.v1.document_analyzer import router as document_analyzer_router
 # from app.api.v1.contract_intelligence import router as contract_intelligence_router
@@ -42,6 +43,7 @@ __all__ = [
     "workflows_router",
     "analysis_queue_router",
     "channels_router",
+    "emma_router",
     # "document_analyzer_router",
     # "contract_intelligence_router",
     # "compliance_checker_router",

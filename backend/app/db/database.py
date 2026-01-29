@@ -42,11 +42,11 @@ if not settings.DEBUG:
 # Crear motor de base de datos con configuración optimizada
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URI,
-    echo=settings.DEBUG,
+    echo=settings.SQL_ECHO,
     **POOL_CONFIG
 )
 
-if settings.DEBUG:
+if settings.DB_POOL_DEBUG:
     # Configurar logging de conexiones sólo en modo debug
     @event.listens_for(engine, "connect")
     def connect_event(connection, connection_record):

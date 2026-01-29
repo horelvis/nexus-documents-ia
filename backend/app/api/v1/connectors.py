@@ -11,13 +11,13 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select, Integer
+from sqlalchemy import delete, func, select, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
-# Background worker URL for task dispatch
-BACKGROUND_WORKER_URL = getattr(settings, 'BACKGROUND_TASKS_URL', 'http://background-worker:8100')
+# MCP Alfresco URL for sync/indexing task dispatch
+MCP_ALFRESCO_URL = getattr(settings, 'MCP_ALFRESCO_URL', 'http://mcp-alfresco:8000')
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
@@ -325,8 +325,9 @@ async def delete_connector(
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    # Delete will cascade to user_connector_auths and user_document_syncs
-    await db.delete(connector)
+    # Use raw SQL DELETE to trigger DB-level CASCADE on all related tables
+    from sqlalchemy import text
+    await db.execute(text("DELETE FROM connectors WHERE id = :id"), {"id": str(connector_id)})
     await db.commit()
 
     logger.info(f"Deleted connector {connector_id}")
@@ -1073,7 +1074,7 @@ async def trigger_connector_sync(
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{BACKGROUND_WORKER_URL}/tasks/connector/sync",
+                f"{MCP_ALFRESCO_URL}/sync",
                 json={
                     "connector_id": str(connector_id),
                     "full_sync": full_sync,
@@ -1206,7 +1207,7 @@ async def trigger_index_pending(
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{BACKGROUND_WORKER_URL}/tasks/connector/index-pending",
+                f"{MCP_ALFRESCO_URL}/index-pending",
                 json={
                     "connector_id": str(connector_id),
                     "batch_size": batch_size,

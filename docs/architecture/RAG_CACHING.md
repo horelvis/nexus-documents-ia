@@ -429,5 +429,5 @@ curl -X POST http://localhost:8007/api/v1/cache/invalidate \
 ## Related Documentation
 
 - [RAG Pipeline Architecture](./RAG_PIPELINE.md)
-- [SLM Router](./SLM_ROUTER.md)
+- [Multi-Pipeline RAG Sectors](../../backend/microservices/emma-agent-service/app/agents/langgraph/sectors/)
 - [On-Premise Deployment](../../README-ONPREMISE.md)
