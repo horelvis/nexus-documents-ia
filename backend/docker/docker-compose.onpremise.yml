@@ -178,10 +178,14 @@ services:
       - MEN_UNLOAD_EXPERTS=${MEN_UNLOAD_EXPERTS:-true}
       # HuggingFace
       - HF_TOKEN=${HF_TOKEN}
+      - HF_HOME=/app/.cache/huggingface
+      - TRANSFORMERS_CACHE=/app/.cache/huggingface
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HUB_DISABLE_XET=1
     volumes:
       - ../microservices/men-service/app:/app/app:ro
       - men_experts_data:/app/trained_experts
-      - men_model_cache:/root/.cache/huggingface
+      - men_model_cache:/app/.cache/huggingface
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010", "--reload", "--reload-dir", "/app/app"]
     deploy:
       resources:

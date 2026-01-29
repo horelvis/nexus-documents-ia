@@ -12,7 +12,7 @@ from .orchestrator import Orchestrator
 from .llm_modeler import LLMModeler
 from .expert import MicroLLMExpert
 from .tenant_expert_manager import TenantExpertManager
-from .men_system import MENSystem, get_men_system
+from .men_system import MENSystem, get_men_system, initialize_men_system
 
 __all__ = [
     "Orchestrator",
@@ -21,4 +21,5 @@ __all__ = [
     "TenantExpertManager",
     "MENSystem",
     "get_men_system",
+    "initialize_men_system",
 ]

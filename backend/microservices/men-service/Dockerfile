@@ -35,9 +35,10 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY app/ ./app/
 
-# Create directories for experts
+# Create directories for experts and HF cache
 RUN mkdir -p /app/trained_experts/_generic_ && \
-    mkdir -p /app/trained_experts/example_tenant
+    mkdir -p /app/trained_experts/example_tenant && \
+    mkdir -p /app/.cache/huggingface
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \
