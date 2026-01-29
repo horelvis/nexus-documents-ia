@@ -2,7 +2,14 @@
 # Minimal services required for RAG functionality with Emma AI
 #
 # Usage:
+#   # Default mode (vLLM for GPU inference):
 #   docker compose -f docker-compose.onpremise.yml up -d
+#
+#   # MEN mode (Mixture of Experts Network, replaces vLLM):
+#   docker compose -f docker-compose.onpremise.yml --profile men up -d
+#
+#   NOTE: vLLM and MEN are mutually exclusive — both require the GPU.
+#   To use MEN, set VLLM_ENABLED=false in .env and use --profile men.
 #
 # Services:
 #   - db: PostgreSQL with Apache AGE for knowledge graph
@@ -10,7 +17,8 @@
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
 #   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
-#   - vllm: GPU inference for LLM (Qwen3-4B)
+#   - vllm: GPU inference for LLM (Qwen3-4B) — default profile
+#   - men-service: Mixture of Experts Network (4-bit quantized) — "men" profile
 #   - api: Main backend API (optional, for UI integration)
 
 services:
@@ -126,6 +134,69 @@ services:
       start_period: 180s
     restart: unless-stopped
 
+
+  # =============================================================================
+  # MEN Service - Mixture of Experts Network (alternative to vLLM)
+  # =============================================================================
+  # Activated with: docker compose --profile men up -d
+  # Requires VLLM_ENABLED=false in .env (vLLM and MEN share the GPU)
+  #
+  # Architecture: 3 quantized models (4-bit) totaling ~4.5 GB VRAM
+  #   - Orchestrator (1.5B): Domain classification
+  #   - Expert (0.5B + LoRA): Specialized knowledge per tenant/domain
+  #   - Modeler (3B): Response synthesis with conversational memory
+  # =============================================================================
+  men-service:
+    profiles:
+      - men
+    build:
+      context: ../microservices/men-service
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8010"
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Feature flags
+      - MEN_ENABLED=${MEN_ENABLED:-true}
+      - MEN_MODELER_ENABLED=${MEN_MODELER_ENABLED:-true}
+      - MEN_EXPERTS_ENABLED=${MEN_EXPERTS_ENABLED:-true}
+      # Model selection (4-bit quantized)
+      - MEN_ORCHESTRATOR_MODEL=${MEN_ORCHESTRATOR_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      - MEN_MODELER_MODEL=${MEN_MODELER_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      - MEN_EXPERT_BASE_MODEL=${MEN_EXPERT_BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      # Modeler settings
+      - MEN_MODELER_MAX_TOKENS=${MEN_MODELER_MAX_TOKENS:-500}
+      - MEN_MODELER_TEMPERATURE=${MEN_MODELER_TEMPERATURE:-0.7}
+      - MEN_MODELER_HISTORY_TURNS=${MEN_MODELER_HISTORY_TURNS:-5}
+      # Expert settings
+      - MEN_EXPERT_MAX_TOKENS=${MEN_EXPERT_MAX_TOKENS:-300}
+      - MEN_UNLOAD_EXPERTS=${MEN_UNLOAD_EXPERTS:-true}
+      # HuggingFace
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - ../microservices/men-service/app:/app/app:ro
+      - men_experts_data:/app/trained_experts
+      - men_model_cache:/root/.cache/huggingface
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010", "--reload", "--reload-dir", "/app/app"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
 
   # =============================================================================
   # Apache Tika - Document Text Extraction
@@ -332,6 +403,9 @@ services:
       # Single-tenant mode for on-premise
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      # MEN Service (alternative to vLLM, activated with --profile men)
+      - MEN_ENABLED=${MEN_ENABLED:-false}
+      - MEN_SERVICE_URL=${MEN_SERVICE_URL:-http://men-service:8010}
       # Langfuse disabled (removed from stack)
       - LANGFUSE_ENABLED=false
       # Suppress warnings
@@ -598,3 +672,5 @@ volumes:
   keycloak_data:
   local_storage_data:
   easyocr_models:
+  men_experts_data:
+  men_model_cache:
