@@ -11,6 +11,8 @@ export type EmmaMessageType =
   | 'info'
   | 'progress'
   | 'clarification'
+  | 'verified_progress'
+  | 'verified_result'
 
 export interface Citation {
   id?: string
@@ -128,11 +130,39 @@ export interface SLMPlan {
   reasoning?: string
 }
 
+// Verified Generation types
+export type VerifiedClaimStatus = 'generating' | 'verifying' | 'verified' | 'rejected' | 'corrected'
+
+export interface VerifiedClaimInfo {
+  claim_id: string
+  claim_number: number
+  total_expected: number
+  claim_text: string
+  status: VerifiedClaimStatus
+  confidence?: number
+  evidence_count?: number
+}
+
+export interface VerifiedGenerationMetadata {
+  session_id: string
+  tenant_id?: string
+  topic: string
+  claims: VerifiedClaimInfo[]
+  current_phase: 'generating' | 'verifying' | 'complete'
+  verified_count: number
+  rejected_count: number
+  total_claims: number
+  document_text?: string
+  execution_time_ms?: number
+  average_confidence?: number
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
   content: string
   timestamp: Date
+  verified?: VerifiedGenerationMetadata
   metadata?: {
     confidence_score?: number
     decision_path?: string[]

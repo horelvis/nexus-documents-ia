@@ -83,9 +83,18 @@ function clearTokens(): void {
   }
 }
 
+// Refresh token 2 minutes before expiry to avoid race conditions
+const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000
+
 function isTokenExpired(tokens: SSOTokens): boolean {
   if (!tokens.expires_at) return false
-  return Date.now() >= tokens.expires_at - 60000 // 1 minute buffer
+  return Date.now() >= tokens.expires_at - TOKEN_REFRESH_BUFFER_MS
+}
+
+/** Milliseconds until the token should be refreshed (0 if already expired). */
+function msUntilRefresh(tokens: SSOTokens): number {
+  if (!tokens.expires_at) return 0
+  return Math.max(0, tokens.expires_at - Date.now() - TOKEN_REFRESH_BUFFER_MS)
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -268,6 +277,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     checkAuth()
   }, [searchParams, pathname, handleCallback, fetchUser, tryRefreshTokens])
+
+  // Proactive token refresh: schedule a refresh before the access token expires
+  // so the user stays authenticated for the full SSO session (e.g. 6 hours)
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const tokens = getStoredTokens()
+    if (!tokens?.refresh_token) return
+
+    const delay = msUntilRefresh(tokens)
+    console.log(`[Auth] Scheduling token refresh in ${Math.round(delay / 1000)}s`)
+
+    const timer = setTimeout(async () => {
+      console.log('[Auth] Proactive token refresh...')
+      const ok = await tryRefreshTokens(tokens)
+      if (!ok) {
+        console.warn('[Auth] Proactive refresh failed, session may expire')
+      }
+    }, delay)
+
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, tryRefreshTokens])
 
   // Login - redirect to KeyCloak
   const login = useCallback(async () => {

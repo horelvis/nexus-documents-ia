@@ -60,14 +60,21 @@ export function ReasoningCollapsible({
           isExpanded && 'rounded-b-none border-b-0',
         )}
       >
-        <span className="text-xs font-mono text-primary/70 flex-1">
-          Cadena de razonamiento
-        </span>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-mono text-primary/70 block">
+            Plan de ejecución
+          </span>
+          {steps.length > 0 && (
+            <span className="text-[10px] font-mono text-foreground/60 block">
+              {steps[steps.length - 1].content}
+            </span>
+          )}
+        </div>
 
         {/* Steps count */}
         {steps.length > 0 && (
-          <Badge variant="outline" className="text-[10px] font-mono">
-            {steps.length} steps
+          <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+            {steps.length}
           </Badge>
         )}
 

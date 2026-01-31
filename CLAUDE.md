@@ -80,7 +80,7 @@ cd backend/docker && docker compose -f docker-compose.test.yml up
 **Frontend**: Next.js 15 with App Router, TypeScript, and OIDC/SAML authentication
 **Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
 **Storage**: Google Cloud Storage for files
-**AI/ML**: vLLM (GPU inference) + Anthropic Skill Custom for multi-agent orchestration (Emma AI)
+**AI/ML**: vLLM (GPU inference) + LangGraph multi-agent orchestration (Emma AI)
 
 ### Key Architectural Patterns
 
@@ -142,14 +142,16 @@ OIDC_USER_GROUP=NouxCubeIA-Users
 
 #### Microservices Design
 - **Main API** (port 8000): Core business logic, authentication, document management
-- **Storage Service** (port 8003): Google Cloud Storage operations with signed URLs
-- **Weaviate Service** (port 8007): Vector search, RAG pipeline (7-layer), Emma AI (Agent Framework orchestration)
-- **vLLM Server** (internal): High-throughput GPU inference with OpenAI-compatible API
+- **Emma Agent Service** (port 8009): LangGraph multi-agent RAG orchestration, Verified Generation, Intent Router, RLM Processor
+- **Weaviate Service** (port 8007): Vector search, RAG pipeline, embedding (BGE-M3)
+- **Knowledge Tree Service** (port 8011): Apache AGE graph queries for sector-aware entity expansion
+- **vLLM Server** (internal): High-throughput GPU inference with OpenAI-compatible API (Qwen3-4B)
 - **Elasticsearch Service** (port 8008): Full-text search, document indexing, hybrid search
-- **Gotenberg Service** (port 3000): Document conversion, PDF generation, thumbnail creation
+- **MCP Storage** (port 8000): Google Cloud Storage operations (MCP-based, replaces legacy storage-service)
 - **Background Worker** (port 8100): Async task processing with Celery
-- **Camunda Service** (port 8080): BPMN workflow orchestration for document pipelines
 - **LangExtract Service** (port 8009): Structured document extraction with LLM providers
+- **Langfuse** (port 3000): Observability and tracing dashboard
+- **TextExtract Service** (internal): Tika wrapper for document text extraction
 
 #### Modular Architecture (SaaS vs On-Premise)
 
@@ -214,9 +216,15 @@ User Query
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Coordinator → Context Tree → Retrieve (sector alpha/top_k) │
-│  → Graph Expand (sector entities + AGE) → Plan (filtered    │
-│    agents) → Specialist Agents → Synthesize (MEN optional)  │
+│  Coordinator (intent_router) → Context Tree → Retrieve      │
+│  (sector alpha/top_k) → Graph Expand (AGE + sector entities)│
+│       ┌──────────┴──────────┐                                │
+│       ▼                     ▼                                │
+│  RLM Pipeline          Plan (filtered agents)                │
+│  (plan→map→reduce)     → Specialist Agents                   │
+│       └──────────┬──────────┘                                │
+│                  ▼                                            │
+│             Synthesize → END                                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -233,10 +241,6 @@ User Query
 ```bash
 # Sector (set before ingestion — changing sector requires data re-ingestion)
 ACTIVE_SECTOR=legal  # legal | medical | documental | (empty = generic mode)
-
-# Optional: MEN service for sector-specialized generation
-MEN_ENABLED=true
-MEN_SERVICE_URL=http://men-service:8010
 ```
 
 **Deployment:**
@@ -246,6 +250,53 @@ MEN_SERVICE_URL=http://men-service:8010
 # 3. Start services and ingest data
 # To change sector: python scripts/change_sector.py --sector=medical
 ```
+
+#### Intent Router (Hybrid Classification)
+
+The coordinator node uses a 3-tier intent classification to route queries efficiently:
+
+| Tier | Method | Latency | Routes |
+|------|--------|---------|--------|
+| 1 | FastEmbed semantic (all-MiniLM-L6-v2 ONNX) | ~1-3ms | conversational, identity |
+| 2 | LLM fallback | ~200ms | CONVERSATIONAL, IDENTITY, DOCUMENT_QUERY |
+| 3 | Default | 0ms | document_query |
+
+**Key file:** `emma-agent-service/app/agents/langgraph/nodes/intent_router.py`
+
+#### RLM Processor (Recursive Language Models)
+
+For documents exceeding the context window, the RLM processor splits, maps, and reduces recursively:
+
+```
+rlm_plan → rlm_map (parallel chunks) → rlm_reduce (recursive aggregation)
+```
+
+**Configuration:**
+```bash
+RLM_ENABLED=false              # Feature flag (off by default)
+RLM_TOKEN_THRESHOLD=16000      # Trigger RLM when tokens exceed this
+RLM_CHUNK_SIZE=6000            # Tokens per chunk
+RLM_CHUNK_OVERLAP=500          # Overlap between chunks
+RLM_MAX_DEPTH=3                # Max recursive reduce depth
+RLM_MAX_CHUNKS=20              # Max chunks per document
+```
+
+**Key file:** `emma-agent-service/app/agents/langgraph/nodes/rlm_processor.py`
+
+#### Verified Generation
+
+Claim-by-claim document verification with SSE streaming. Moved from weaviate-service to emma-agent-service.
+
+**Key files:**
+- `emma-agent-service/app/services/verified_generation/service.py` - Core verification logic
+- `emma-agent-service/app/services/verified_generation/verified_cache.py` - Redis caching
+- `emma-agent-service/app/services/verified_generation/writer_agent.py` - Claim verification agent
+- `emma-agent-service/app/api/verified_generation.py` - SSE streaming endpoint
+
+**Frontend components:**
+- `frontend/apps/on-premise/src/components/emma-chat/VerifiedDocumentResult.tsx`
+- `frontend/apps/on-premise/src/components/emma-chat/VerifiedGenerationDialog.tsx`
+- `frontend/apps/on-premise/src/components/emma-chat/VerifiedGenerationProgress.tsx`
 
 #### Multi-Tier RAG Caching System
 
@@ -348,13 +399,12 @@ RAG_CACHE_TTL_SECONDS=3600             # 1 hour
 - **Alembic**: Database migration management
 - **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
 - **Weaviate**: Vector database for semantic search
-- **Apache AGE**: PostgreSQL graph extension for sector-aware structural queries via Cypher
-- **Anthropic Skill Custom**: Multi-agent orchestration with ChatAgent, @ai_function decorators
-- **vLLM**: High-throughput GPU inference server (Qwen3-14B, OpenAI-compatible API)
+- **Apache AGE**: PostgreSQL graph extension for sector-aware entity expansion via Cypher
+- **LangGraph**: Multi-agent orchestration with StateGraph, 9 specialist agents, sector-based pipelines
+- **vLLM**: High-throughput GPU inference server (Qwen3-4B, OpenAI-compatible API)
 - **Elasticsearch**: Full-text search and document indexing
-- **Redis**: Caching and session storage
+- **Redis**: Caching and session storage (RLM cache, semantic cache, sessions)
 - **Celery**: Distributed task queue for async processing
-- **Camunda**: BPMN workflow orchestration engine (replacing Temporal.io)
 
 #### Frontend Technologies
 - **Next.js 15**: React framework with App Router
@@ -461,81 +511,95 @@ If you encounter module resolution errors like "Export default doesn't exist":
 5. Write tests in `tests/test_api/`
 
 ### Adding New Microservice Feature
-1. Identify appropriate microservice (Weaviate Service, Storage Service, Elasticsearch Service)
+1. Identify appropriate microservice (Emma Agent Service, Weaviate Service, Elasticsearch Service)
 2. Implement endpoint in microservice's `api/` directory
 3. Update main API to call microservice
 4. Add necessary environment variables
 5. Update docker-compose configuration
 
-### Working with Anthropic Skill Custom
-The Weaviate Service includes a complete Anthropic Skill Custom + vLLM integration for high-throughput GPU inference:
+### Working with Emma Agent Service (LangGraph)
+The Emma Agent Service is a standalone microservice (port 8009) that orchestrates multi-agent RAG using LangGraph StateGraph:
 
 **Architecture:**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Emma Service                            │
-│          (PlanningFlow + RAG Pipeline Orchestration)        │
+│               Emma Agent Service (port 8009)                │
+│       LangGraph StateGraph + Multi-Pipeline RAG             │
 └────────────────────────┬────────────────────────────────────┘
                          │
-         ┌───────────────┼───────────────┐
-         │               │               │
-   ┌─────▼─────┐   ┌────▼──────┐  ┌────▼────────┐
-   │ Sequential│   │PlanningFlow│  │ RAG Pipeline │
-   │ Workflow  │   │(Graph-based)│  │  (Fallback)  │
-   └─────┬─────┘   └────┬──────┘  └──────────────┘
-         └───────┬──────┘
-                 │
-    ┌────────────▼────────────────────────────────┐
-    │        Agent Framework Layer                 │
-    │  • ChatAgent (stateless per invocation)      │
-    │  • AgentThread (state management)            │
-    │  • @ai_function decorators (tools)           │
-    │  • Middleware (logging, auth)                │
-    └────────────┬────────────────────────────────┘
-                 │
-    ┌────────────▼────────────────────────────────┐
-    │        LLM Provider Factory                  │
-    │  • vLLM (primary) → Qwen3-4B-Thinking        │
-    │  • OpenAI (fallback) → GPT-4o-mini           │
-    │  • Anthropic (fallback) → Claude 3.5        │
-    └────────────┬────────────────────────────────┘
-                 │
-    ┌────────────▼────────────────────────────────┐
-    │           vLLM Server (Docker)               │
-    │  • GPU: NVIDIA CUDA 12.2 (RTX 4090)          │
-    │  • API: OpenAI-compatible (:8000)            │
-    │  • Model: Qwen/Qwen3-4B-Thinking-2507        │
-    │  • Context: 256K native (32K recommended)    │
-    │  • Thinking: Automatic <think> blocks        │
-    └─────────────────────────────────────────────┘
+    ┌────────────────────▼────────────────────────────────────┐
+    │                 LangGraph Flow                           │
+    │                                                          │
+    │  START → coordinator → context_tree → retrieve           │
+    │            → graph_expand → [rlm_plan/plan]              │
+    │            → [rlm_map/agents] → [rlm_reduce/synthesize]  │
+    │            → END                                         │
+    └────────────────────┬────────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────────┐
+    │          9 Specialist Agents                             │
+    │  general, legal, labor, fiscal, contract,                │
+    │  compliance, privacy, realestate, education              │
+    └────────────────────┬────────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────────┐
+    │        LLM Client (Multi-Provider)                      │
+    │  • vLLM (primary) → Qwen3-4B                            │
+    │  • OpenAI / Anthropic / Google (fallback)               │
+    └────────────────────┬────────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────────┐
+    │  External Dependencies                                   │
+    │  • Weaviate Service → vector search                     │
+    │  • Knowledge Tree Service → Apache AGE graphs           │
+    │  • Redis → caching (RLM, semantic)                      │
+    │  • vLLM → GPU inference                                 │
+    └─────────────────────────────────────────────────────────┘
 ```
 
 **Structure:**
 ```
-weaviate-service/app/agents/
-├── config.py          # Agent configuration (providers, timeouts)
-├── model_client.py    # Multi-provider LLM client factory (vLLM primary)
-├── orchestrator.py    # Main entry point
-├── agents/            # Specialized agents (Search, Analyst, Contract, Compliance, Summarizer)
-├── tools/             # RAG pipeline wrappers as @ai_function tools
-└── workflows/         # Orchestration patterns (Sequential, PlanningFlow)
+emma-agent-service/app/
+├── agents/langgraph/
+│   ├── graph.py              # StateGraph definition (9 agents + RLM)
+│   ├── state.py              # RAGState TypedDict (46+ fields)
+│   ├── api.py                # LangGraph API entry point
+│   ├── sectors/              # Multi-Pipeline sector configuration
+│   │   ├── config.py         # SectorConfig dataclass + Sector enum
+│   │   ├── registry.py       # Sector registry singleton
+│   │   ├── entity_extractor.py  # Regex-based entity extraction per sector
+│   │   └── graph_expander.py    # Apache AGE graph expansion per sector
+│   └── nodes/
+│       ├── coordinator.py    # Entry: intent detection + context setup
+│       ├── context_tree.py   # Structural context building
+│       ├── retrieve.py       # Vector search (sector-tuned alpha/top_k)
+│       ├── graph_expand.py   # AGE graph expansion node
+│       ├── intent_router.py  # Hybrid semantic/LLM intent classification
+│       ├── rlm_processor.py  # 3-node recursive language model pipeline
+│       ├── plan.py           # Domain routing + agent selection
+│       ├── synthesize.py     # Final answer generation
+│       └── specialists/      # 9 domain agents (general, legal, labor, etc.)
+├── services/
+│   ├── verified_generation/  # Claim-by-claim verification with SSE
+│   ├── web_search.py         # Web search integration
+│   ├── pdf_renderer.py       # PDF rendering service
+│   └── upload_context_service.py  # Document upload context
+├── api/
+│   ├── emma.py               # /emma endpoints (query, stream)
+│   └── verified_generation.py # /verified endpoints
+└── config/
+    ├── prompts/emma_prompts.yaml  # All agent + RLM prompts
+    └── graphs/*.cypher            # AGE graph schemas per sector
 ```
 
-**Usage:**
-```python
-from app.agents import get_orchestrator, WorkflowType
-
-orchestrator = get_orchestrator()
-result = await orchestrator.execute(
-    query="Analyze the contract for compliance issues",
-    tenant_id="tenant-123",
-    workflow_type=WorkflowType.AUTO  # or SEQUENTIAL, PLANNING_FLOW
-)
-```
+**Key Features:**
+- **Intent Router**: Hybrid classification — FastEmbed semantic (~3ms) → LLM fallback (~200ms) → default document_query
+- **RLM Processor**: Recursive pipeline for large documents (>16K tokens) — chunk → map parallel → reduce recursive (max depth 3, Redis cached)
+- **Verified Generation**: Claim-by-claim verification with SSE streaming to frontend
+- **Sector-Aware**: All retrieval/agents/graph expansion tuned by active sector
 
 **Supported LLM Providers:**
 - `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-4B)
-- `LLM_PROVIDER=ollama` - Legacy local models (llama3.2, qwen2.5, mistral)
 - `LLM_PROVIDER=openai` - Fallback to GPT-4o, GPT-4o-mini
 - `LLM_PROVIDER=anthropic` - Fallback to Claude 3.5 Sonnet, Claude 3 Opus
 - `LLM_PROVIDER=google` - Fallback to Gemini 1.5 Flash, Gemini 1.5 Pro

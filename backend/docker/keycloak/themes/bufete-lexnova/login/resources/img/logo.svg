@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 60" fill="none">
+  <!-- Scale of Justice icon -->
+  <g transform="translate(0, 5)">
+    <!-- Pillar -->
+    <rect x="23" y="18" width="4" height="28" rx="1" fill="#C9A84C"/>
+    <!-- Base -->
+    <rect x="13" y="44" width="24" height="3" rx="1.5" fill="#C9A84C"/>
+    <!-- Top bar -->
+    <rect x="5" y="15" width="40" height="3" rx="1.5" fill="#C9A84C"/>
+    <!-- Left plate -->
+    <path d="M5 18 L1 30 Q1 34 8 34 Q15 34 15 30 L11 18" fill="none" stroke="#C9A84C" stroke-width="1.8" stroke-linecap="round"/>
+    <!-- Right plate -->
+    <path d="M35 18 L31 30 Q31 34 38 34 Q45 34 45 30 L41 18" fill="none" stroke="#C9A84C" stroke-width="1.8" stroke-linecap="round"/>
+    <!-- Chains -->
+    <line x1="8" y1="15" x2="8" y2="18" stroke="#C9A84C" stroke-width="1.2"/>
+    <line x1="38" y1="15" x2="38" y2="18" stroke="#C9A84C" stroke-width="1.2"/>
+  </g>
+  <!-- Text -->
+  <text x="58" y="28" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-weight="bold" fill="#1B2A4A" letter-spacing="1.5">LEX NOVA</text>
+  <text x="58" y="46" font-family="Georgia, 'Times New Roman', serif" font-size="10.5" fill="#6B7B8D" letter-spacing="3">ABOGADOS &amp; ASOCIADOS</text>
+  <!-- Decorative line -->
+  <line x1="58" y1="32" x2="248" y2="32" stroke="#C9A84C" stroke-width="0.7" opacity="0.6"/>
+</svg>

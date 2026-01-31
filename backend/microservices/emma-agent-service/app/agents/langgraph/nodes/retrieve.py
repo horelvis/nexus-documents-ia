@@ -25,6 +25,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..state import RAGState, DocumentResult
+from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
         State updates: retrieved_docs, doc_scores, metadata
     """
     start_time = time.time()
+    tracker = ReasoningTracker()
+    tracker.set_source("retrieve")
+
     query = state.get("query", "")
     tenant_id = state.get("tenant_id", "")
     user_id = state.get("user_id")
@@ -53,6 +57,12 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
     is_admin = state.get("is_admin", False)
 
     logger.info(f"🔍 RETRIEVE: query='{query[:50]}...', tenant={tenant_id}")
+
+    tracker.add_step(
+        StepType.SEARCH,
+        "Buscando documentos relevantes...",
+        confidence=1.0,
+    )
 
     # Check if user attached specific documents
     metadata = state.get("metadata", {})
@@ -65,10 +75,16 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
     )
     if not target_doc_id and not target_doc_ids and has_uploaded_content:
         logger.info("⏭️ Skipping retrieval (uploaded content already in context)")
+        tracker.add_step(
+            StepType.OBSERVATION,
+            "Usando contenido subido directamente (sin búsqueda vectorial)",
+            confidence=1.0,
+        )
         return {
             "retrieved_docs": [],
             "doc_scores": [],
             "retrieval_skipped": True,
+            "reasoning_steps": tracker.get_steps(),
             "metadata": {
                 **metadata,
                 "retrieval_skipped_reason": "uploaded_content",
@@ -139,10 +155,17 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
         latency_ms = (time.time() - start_time) * 1000
         logger.info(f"✅ RETRIEVE: Found {len(retrieved_docs)} docs in {latency_ms:.1f}ms")
 
+        tracker.add_step(
+            StepType.OBSERVATION,
+            f"{len(retrieved_docs)} documentos encontrados ({latency_ms:.0f}ms)",
+            confidence=1.0,
+        )
+
         return {
             "retrieved_docs": retrieved_docs,
             "doc_scores": doc_scores,
             "retrieval_skipped": False,
+            "reasoning_steps": tracker.get_steps(),
             "metadata": {
                 **state.get("metadata", {}),
                 "retrieval_latency_ms": latency_ms,

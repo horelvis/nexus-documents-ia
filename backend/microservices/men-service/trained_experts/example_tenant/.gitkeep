@@ -1,3 +1,0 @@
-# This directory contains experts trained for a specific tenant.
-# Replace 'example_tenant' with actual tenant ID.
-# Each subdirectory should contain a trained LoRA adapter.

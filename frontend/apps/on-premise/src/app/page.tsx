@@ -59,6 +59,13 @@ export default function EmmaPage() {
     }
   }, [activeConversationId, handleNewConversation])
 
+  // Handle bulk deletion of conversations
+  const handleDeleteMultiple = useCallback((ids: string[]) => {
+    if (activeConversationId && ids.includes(activeConversationId)) {
+      handleNewConversation()
+    }
+  }, [activeConversationId, handleNewConversation])
+
   // Ref to track active conversation without causing callback recreation
   const activeConversationIdRef = useRef(activeConversationId)
   activeConversationIdRef.current = activeConversationId
@@ -156,6 +163,7 @@ export default function EmmaPage() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
+        onDeleteMultiple={handleDeleteMultiple}
       />
     </SidebarProvider>
   )

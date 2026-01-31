@@ -49,8 +49,11 @@ class UploadContextService:
         )
 
         text = extraction.get("text", "") if isinstance(extraction, dict) else ""
-        if text and len(text) > self._max_chars_per_doc:
+        if text and not settings.rlm_enabled and len(text) > self._max_chars_per_doc:
             text = text[: self._max_chars_per_doc]
+            logger.info(f"Upload truncated to {self._max_chars_per_doc} chars (RLM disabled)")
+        elif text and settings.rlm_enabled:
+            logger.info(f"Upload full text preserved: {len(text)} chars (RLM enabled)")
 
         payload = {
             "id": upload_id,
@@ -93,7 +96,7 @@ class UploadContextService:
 
     def get_texts(self, upload_ids: List[str]) -> List[Dict[str, Any]]:
         texts: List[Dict[str, Any]] = []
-        remaining = self._max_total_chars
+        remaining = float('inf') if settings.rlm_enabled else self._max_total_chars
 
         for upload_id in upload_ids:
             payload = self.get_upload(upload_id)

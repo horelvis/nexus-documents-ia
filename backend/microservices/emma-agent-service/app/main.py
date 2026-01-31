@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router
+from app.api import emma_router, learning_router, uploads_router, verified_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -158,6 +158,7 @@ async def log_requests(request: Request, call_next):
 app.include_router(emma_router, prefix="/emma", tags=["emma"])
 app.include_router(learning_router, prefix="/learning", tags=["learning"])
 app.include_router(uploads_router, prefix="/emma", tags=["uploads"])
+app.include_router(verified_router, tags=["verified-generation"])
 
 
 # Health check

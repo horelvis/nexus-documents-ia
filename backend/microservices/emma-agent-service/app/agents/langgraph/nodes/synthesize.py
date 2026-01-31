@@ -21,11 +21,12 @@ Design Decisions:
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage
 
 from ..state import RAGState, AgentResult
+from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,15 @@ async def synthesize_node(state: RAGState) -> Dict[str, Any]:
         State updates: final_answer, sources, success
     """
     start_time = time.time()
+    tracker = ReasoningTracker()
+    tracker.set_source("synthesize")
+
+    tracker.add_step(
+        StepType.TRANSFORMATION,
+        "Generando respuesta final...",
+        confidence=1.0,
+    )
+
     query = state.get("query", "")
     agent_results = state.get("agent_results", {})
     agent_errors = state.get("agent_errors", {})
@@ -85,25 +95,6 @@ async def synthesize_node(state: RAGState) -> Dict[str, Any]:
             "sources": [],
             "success": True,
             "total_latency_ms": (time.time() - start_time) * 1000,
-        }
-
-    # Try MEN service for sector-specialized generation
-    men_answer = await _try_men_synthesis(query, agent_results, retrieved_docs, state)
-    if men_answer:
-        sources = _extract_sources(agent_results, retrieved_docs)
-        latency_ms = (time.time() - start_time) * 1000
-        logger.info(f"✅ SYNTHESIZE (MEN): Completed in {latency_ms:.1f}ms")
-        return {
-            "final_answer": men_answer,
-            "sources": sources,
-            "success": True,
-            "total_latency_ms": latency_ms,
-            "messages": [AIMessage(content=men_answer)],
-            "metadata": {
-                **state.get("metadata", {}),
-                "synthesis_method": "men_service",
-                "synthesis_latency_ms": latency_ms,
-            },
         }
 
     # Handle complete failure - always generate a fallback response
@@ -149,12 +140,19 @@ async def synthesize_node(state: RAGState) -> Dict[str, Any]:
         latency_ms = (time.time() - start_time) * 1000
         logger.info(f"✅ SYNTHESIZE: Completed in {latency_ms:.1f}ms")
 
+        tracker.add_step(
+            StepType.RESPONSE,
+            f"Respuesta generada en {latency_ms:.0f}ms",
+            confidence=1.0,
+        )
+
         return {
             "final_answer": final_answer,
             "sources": sources,
             "success": True,
             "total_latency_ms": state.get("metadata", {}).get("retrieval_latency_ms", 0) + latency_ms,
             "messages": [AIMessage(content=final_answer)],
+            "reasoning_steps": tracker.get_steps(),
             "metadata": {
                 **state.get("metadata", {}),
                 "synthesis_latency_ms": latency_ms,
@@ -347,71 +345,3 @@ Sugerencias:
     return response
 
 
-async def _try_men_synthesis(
-    query: str,
-    agent_results: Dict[str, AgentResult],
-    retrieved_docs: List[Dict],
-    state: Dict[str, Any],
-) -> Optional[str]:
-    """
-    Try to use MEN (Mixture of Experts Network) service for synthesis.
-
-    Only used when ACTIVE_SECTOR and MEN_ENABLED are both configured.
-    The MEN service skips domain classification because the sector
-    already defines the domain.
-
-    Returns:
-        Synthesized answer string, or None if MEN is unavailable/disabled.
-    """
-    sector_config = state.get("sector_config")
-    if not sector_config:
-        return None
-
-    try:
-        from app.core.config import settings
-
-        if not settings.men_enabled:
-            return None
-
-        import httpx
-
-        # Build context from agent results
-        context_parts = []
-        for agent_name, result in agent_results.items():
-            output = result.get("output", "") if isinstance(result, dict) else result.output
-            if output:
-                context_parts.append(output)
-
-        # Add retrieved doc context
-        for doc in retrieved_docs[:5]:
-            content = doc.get("content", "")
-            if content:
-                context_parts.append(content[:500])
-
-        context = "\n\n".join(context_parts)
-
-        men_domain = sector_config.get("men_domain", "general")
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{settings.men_service_url}/men/query",
-                json={
-                    "query": query,
-                    "context": context,
-                    "domain": men_domain,
-                    "tenant_id": state.get("tenant_id", ""),
-                },
-                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                answer = data.get("answer", "")
-                if answer:
-                    logger.info(f"🧠 MEN synthesis successful (domain={men_domain})")
-                    return answer
-
-    except Exception as e:
-        logger.warning(f"MEN synthesis failed, falling back to standard: {e}")
-
-    return None

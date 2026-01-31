@@ -262,6 +262,18 @@ export const conversationService = {
   },
 
   /**
+   * Delete multiple conversations by IDs
+   */
+  deleteMultiple(ids: string[]): number {
+    const conversations = getAllConversations()
+    const idsSet = new Set(ids)
+    const filtered = conversations.filter((c) => !idsSet.has(c.id))
+    const deletedCount = conversations.length - filtered.length
+    saveAllConversations(filtered)
+    return deletedCount
+  },
+
+  /**
    * Clear all conversations
    */
   clearAll(): void {

@@ -102,8 +102,14 @@ def _is_structural_query(query: str) -> Tuple[bool, str]:
     return False, ""
 
 
-def _get_conversational_response(query: str) -> str:
-    """Return a conversational response using emma_prompts.yaml when available."""
+def _get_conversational_response(query: str, intent: str = "") -> str:
+    """Return a conversational response using emma_prompts.yaml when available.
+
+    Args:
+        query: User's query text.
+        intent: Coordinator intent (conversational, identity) used for
+                inline fallback when YAML matching fails.
+    """
     query_lower = query.lower().strip()
 
     config = _load_conversational_config()
@@ -123,7 +129,32 @@ def _get_conversational_response(query: str) -> str:
                     if pattern_lower in query_lower:
                         return response.strip()
 
-    # Fallback if config missing or no match
+        logger.debug(
+            f"No YAML pattern matched for '{query[:40]}' (intent={intent}), "
+            f"categories={list(config.keys())}"
+        )
+    else:
+        logger.warning("Conversational config not loaded, using inline fallback")
+
+    # ── Inline fallbacks by intent (no YAML dependency) ──
+    if intent == "identity":
+        return (
+            "Soy **Emma**, tu asistente de gestión documental en **NouxCubeIA** (EDMS).\n\n"
+            "Puedo ayudarte con:\n"
+            "- 📄 **Búsqueda semántica** de documentos\n"
+            "- ⚖️ **Análisis de contratos** y riesgos legales\n"
+            "- 🔒 **Verificación normativa** (RGPD, laboral, fiscal)\n"
+            "- 📊 **Comparación** entre versiones y documentos\n"
+            "- 📋 **Extracción** de datos estructurados\n\n"
+            "¿En qué puedo ayudarte?"
+        )
+
+    if intent == "conversational":
+        return (
+            "¡Hola! Soy **Emma**, tu asistente de gestión documental.\n\n"
+            "¿En qué puedo ayudarte hoy?"
+        )
+
     return "¿En qué puedo ayudarte con tus documentos?"
 
 
@@ -179,16 +210,25 @@ def _load_conversational_config() -> Optional[Dict[str, Any]]:
     if _CONVERSATIONAL_CONFIG is not None:
         return _CONVERSATIONAL_CONFIG
 
-    config_path = (
-        Path(__file__).parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml"
-    )
+    # Try multiple paths: Docker (/app/config/...) and local development
+    candidates = [
+        Path("/app/config/prompts/emma_prompts.yaml"),
+        # nodes/ → langgraph/ → agents/ → app/ → emma-agent-service/
+        Path(__file__).parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
+    ]
     try:
-        if config_path.exists():
-            import yaml
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f) or {}
-                _CONVERSATIONAL_CONFIG = config.get("conversational", {})
-                return _CONVERSATIONAL_CONFIG
+        import yaml
+        for config_path in candidates:
+            if config_path.exists():
+                logger.debug(f"Loading conversational config from {config_path}")
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                    _CONVERSATIONAL_CONFIG = config.get("conversational", {})
+                    logger.info(
+                        f"Loaded conversational config: {list(_CONVERSATIONAL_CONFIG.keys())}"
+                    )
+                    return _CONVERSATIONAL_CONFIG
+        logger.warning(f"emma_prompts.yaml not found in: {[str(p) for p in candidates]}")
     except Exception as e:
         logger.warning(f"Failed to load conversational config: {e}")
 
@@ -347,34 +387,43 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
                 },
             }
 
-    # Short-circuit conversational queries (retrieval was skipped)
-    # Note: "uploaded_content" skip reason is NOT conversational — the user attached a file
+    # Short-circuit conversational/identity queries.
+    # Two entry paths:
+    #   a) retrieve node set retrieval_skipped_reason = "conversational_query"
+    #   b) coordinator routed directly to plan with coordinator_intent in {conversational, identity}
+    coordinator_intent = state.get("metadata", {}).get("coordinator_intent")
     skip_reason = state.get("metadata", {}).get("retrieval_skipped_reason")
-    if state.get("retrieval_skipped") and skip_reason == "conversational_query":
-        response = _get_conversational_response(query)
-        latency_ms = (time.time() - start_time) * 1000
 
+    is_conversational = (
+        (state.get("retrieval_skipped") and skip_reason == "conversational_query")
+        or coordinator_intent in {"conversational", "identity"}
+    )
+
+    if is_conversational:
+        label = coordinator_intent or "conversational"
+        response = _get_conversational_response(query, intent=label)
+        latency_ms = (time.time() - start_time) * 1000
         tracker.add_step(
             StepType.ROUTING,
-            "Consulta conversacional detectada, omitiendo agentes",
+            f"Consulta {label} detectada, omitiendo agentes",
             confidence=0.95,
-            metadata={"route": "CONVERSATIONAL"}
+            metadata={"route": label.upper()}
         )
         tracker.add_step(
             StepType.RESPONSE,
-            f"Respuesta conversacional generada ({latency_ms:.0f}ms)",
+            f"Respuesta {label} generada ({latency_ms:.0f}ms)",
             confidence=0.95
         )
 
         logger.info(
-            f"💬 PLAN: Conversational query | "
+            f"💬 PLAN: {label.capitalize()} query | "
             f"latency={latency_ms:.1f}ms"
         )
 
         return {
-            "detected_domains": ["conversational"],
+            "detected_domains": [label],
             "execution_plan": [],
-            "plan_reasoning": "Consulta conversacional: respuesta directa sin agentes",
+            "plan_reasoning": f"Consulta {label}: respuesta directa sin agentes",
             "reasoning_steps": tracker.get_steps(),
             "fast_path_used": True,
             "fast_path_answer": response,
@@ -383,8 +432,8 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             "metadata": {
                 **state.get("metadata", {}),
                 "planning_latency_ms": latency_ms,
-                "is_conversational_query": True,
-                "decision_path": ["plan", "conversational"],
+                f"is_{label}_query": True,
+                "decision_path": ["plan", label],
             },
         }
 

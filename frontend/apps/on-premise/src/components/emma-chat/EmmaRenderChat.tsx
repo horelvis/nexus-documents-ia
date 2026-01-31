@@ -12,6 +12,7 @@ import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, SLMPlan, Reas
 import { EmmaMarkdown } from './EmmaMarkdown'
 import { DocumentDisplay } from './DocumentDisplay'
 import { ReasoningCollapsible } from './ReasoningCollapsible'
+import { VerifiedDocumentResult } from './VerifiedDocumentResult'
 
 interface EmmaRenderChatProps {
   messages: EmmaMessage[]
@@ -115,6 +116,16 @@ function MessageBubble({
   const isProgress = message.type === 'progress'
   const isError = message.type === 'error'
 
+  // Verified generation progress — now shown in dialog, skip inline rendering
+  if (message.type === 'verified_progress') {
+    return null
+  }
+
+  // Verified generation result
+  if (message.type === 'verified_result' && message.verified) {
+    return <VerifiedDocumentResult content={message.content} verified={message.verified} />
+  }
+
   // Progress message with workflow steps
   if (isProgress) {
     return <ProgressBubble message={message} />
@@ -136,7 +147,7 @@ function MessageBubble({
         {isUser ? (
           // USER_QUERY label
           <div className="space-y-2">
-            <span className="text-xs font-mono text-primary uppercase tracking-wide">
+            <span className="text-xs font-mono text-emerald-500 uppercase tracking-wide">
               USER_QUERY:
             </span>
 
@@ -185,7 +196,7 @@ function MessageBubble({
           <>
             {/* EMMA label - always shown */}
             <div className="flex items-center gap-2">
-              <IconBrain className="h-5 w-5 text-primary" />
+              <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
               <span className="text-xs font-mono text-primary uppercase tracking-wide">
                 EMMA:
               </span>
@@ -440,7 +451,7 @@ function SLMThinkingDisplay({
     <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
       {/* EMMA DECIDE header */}
       <div className="flex items-center gap-2">
-        <IconBrain className="h-5 w-5 text-primary" />
+        <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
         <span className="text-xs font-mono text-primary uppercase tracking-wide">
           EMMA DECIDE:
         </span>
@@ -499,7 +510,7 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
       <Card className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
         {/* EMMA label - always shown (same as final response) */}
         <div className="flex items-center gap-2">
-          <IconBrain className="h-5 w-5 text-primary" />
+          <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
           <span className="text-xs font-mono text-primary uppercase tracking-wide">
             EMMA:
           </span>
@@ -509,12 +520,15 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
           )}
         </div>
 
-        {/* SLM Thinking Display - visible chain-of-thought */}
+        {/* SLM Thinking Display - collapsible chain-of-thought */}
         {hasSLMThinking && (
-          <SLMThinkingDisplay
-            steps={slmThinkingSteps}
-            isThinking={slmIsThinking}
-            plan={slmPlan}
+          <ReasoningCollapsible
+            steps={slmThinkingSteps.map((s: SLMThinkingStep) => ({
+              type: s.type as ReasoningStep['type'],
+              content: s.content,
+              entities: s.entities,
+              confidence: s.confidence,
+            }))}
           />
         )}
 
@@ -620,7 +634,7 @@ function LoadingBubble() {
       <Card className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
         {/* EMMA label */}
         <div className="flex items-center gap-2">
-          <IconBrain className="h-5 w-5 text-primary" />
+          <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
           <span className="text-xs font-mono text-primary uppercase tracking-wide">
             EMMA:
           </span>

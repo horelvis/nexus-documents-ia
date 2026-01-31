@@ -5,10 +5,12 @@ import { flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { useEmmaService, classifyError, EmmaStreamEvent } from '@/lib/services/emma.service'
+import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent } from '@/lib/services/verified-generation.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { PDFPreviewModal } from './PDFPreviewModal'
-import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep } from '@/lib/types/emma'
+import { VerifiedGenerationDialog } from './VerifiedGenerationDialog'
+import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata } from '@/lib/types/emma'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
@@ -119,6 +121,11 @@ export function EmmaChat({
   // PDF Preview modal state
   const [previewDoc, setPreviewDoc] = useState<DocumentInfo | null>(null)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
+
+  // Verified generation queue state (supports multiple concurrent jobs)
+  const [verifiedDialogOpen, setVerifiedDialogOpen] = useState(false)
+  const [verifiedJobs, setVerifiedJobs] = useState<Record<string, VerifiedGenerationMetadata>>({})
+  const verifiedJobsRef = useRef<Record<string, VerifiedGenerationMetadata>>({})
 
   // Retain uploaded file IDs across follow-up queries in the same session
   const sessionUploadIdsRef = useRef<string[]>([])
@@ -705,6 +712,213 @@ export function EmmaChat({
     [user, tenantId, queryEmmaStream, uploadTempDocument, sessionId, login, updateMessages, deepReasoning]
   )
 
+  // Handle verified document generation (non-blocking dialog)
+  const handleVerifiedGeneration = useCallback(
+    async (topic: string, attachments?: Attachment[]) => {
+      if (!user?.id || !tenantId) return
+
+      if (!hasValidToken()) {
+        setError('Tu sesión ha expirado. Por favor inicia sesión nuevamente.')
+        setTimeout(() => login(), 1500)
+        return
+      }
+
+      try {
+
+      const userMessage: EmmaMessage = {
+        id: Date.now().toString(),
+        type: 'user',
+        content: `/verificar ${topic}`,
+        timestamp: new Date(),
+        metadata: attachments && attachments.length > 0 ? {
+          documents: attachments.map((a) => ({
+            name: a.name,
+            id: a.type === 'indexed' ? a.documentId : a.id,
+            fileType: a.fileType,
+          })),
+        } : undefined,
+      }
+
+      // Placeholder message — will become verified_result on completion
+      const verifiedMessageId = (Date.now() + 1).toString()
+      const initialVerified: VerifiedGenerationMetadata = {
+        session_id: sessionId,
+        tenant_id: tenantId || undefined,
+        topic,
+        claims: [],
+        current_phase: 'generating',
+        verified_count: 0,
+        rejected_count: 0,
+        total_claims: 0,
+      }
+
+      // Add user message only; progress shown in widget
+      updateMessages((prev) => [...prev, userMessage])
+      setError(null)
+
+      // Helper to update this job in the queue
+      const jobId = verifiedMessageId
+      const updateJob = (updater: (prev: VerifiedGenerationMetadata) => VerifiedGenerationMetadata) => {
+        setVerifiedJobs((prev) => {
+          const current = prev[jobId]
+          if (!current) return prev
+          const next = updater(current)
+          const updated = { ...prev, [jobId]: next }
+          verifiedJobsRef.current = updated
+          return updated
+        })
+      }
+      const removeJob = () => {
+        setVerifiedJobs((prev) => {
+          const { [jobId]: _, ...rest } = prev
+          verifiedJobsRef.current = rest
+          return rest
+        })
+      }
+
+      // Add job to queue and open widget
+      setVerifiedJobs((prev) => {
+        const updated = { ...prev, [jobId]: initialVerified }
+        verifiedJobsRef.current = updated
+        return updated
+      })
+      setVerifiedDialogOpen(true)
+
+      // Upload non-indexed files (same process as normal query)
+      const uploadedDocs = attachments?.filter((a) => a.type === 'upload') || []
+      let uploadedFileIds: string[] = []
+      if (uploadedDocs.length > 0) {
+        try {
+          const uploadResults = await Promise.all(
+            uploadedDocs.map(async (doc) => {
+              const result = await uploadTempDocument(doc.file)
+              return result.upload_id
+            })
+          )
+          uploadedFileIds = uploadResults
+          sessionUploadIdsRef.current = [...new Set([...sessionUploadIdsRef.current, ...uploadedFileIds])]
+        } catch (err) {
+          console.error('Failed to upload documents for verification:', err)
+        }
+      }
+
+      // Re-attach previous uploads for follow-up
+      if (uploadedFileIds.length === 0 && sessionUploadIdsRef.current.length > 0) {
+        uploadedFileIds = sessionUploadIdsRef.current
+      }
+
+      const contextDocIds = attachments
+        ?.filter((a) => a.type === 'indexed')
+        .map((a) => a.documentId) || []
+
+      try {
+        for await (const event of queryVerifiedStream({
+          query: topic,
+          tenant_id: tenantId,
+          session_id: sessionId,
+          context_document_ids: contextDocIds.length > 0 ? contextDocIds : undefined,
+          uploaded_file_ids: uploadedFileIds.length > 0 ? uploadedFileIds : undefined,
+        })) {
+          console.log('[VerifiedGen] SSE event:', event.event_type, event.claim_id, event.data)
+          const claimUpdate = mapEventToClaim(event)
+          console.log('[VerifiedGen] claimUpdate:', claimUpdate)
+
+          if (event.event_type === 'document_complete') {
+            // Capture accumulated claims from ref before removing job
+            const jobClaims = verifiedJobsRef.current[jobId]?.claims || []
+            removeJob()
+
+            const finalVerified: VerifiedGenerationMetadata = {
+              ...initialVerified,
+              claims: jobClaims,
+              current_phase: 'complete',
+              document_text: event.data.document_text,
+              verified_count: event.data.claims_verified ?? 0,
+              rejected_count: event.data.claims_rejected ?? 0,
+              total_claims: event.data.total_claims_generated ?? 0,
+              execution_time_ms: event.data.execution_time_ms,
+              average_confidence: event.data.average_confidence,
+            }
+
+            updateMessages((prev) => [...prev, {
+              id: verifiedMessageId,
+              type: 'verified_result' as const,
+              content: event.data.document_text || '',
+              timestamp: new Date(),
+              verified: finalVerified,
+            }])
+            return
+          }
+
+          if (event.event_type === 'error') {
+            removeJob()
+            updateMessages((prev) => [...prev, {
+              id: verifiedMessageId,
+              type: 'error' as const,
+              content: event.data.error || 'Error en generación verificada',
+              timestamp: new Date(),
+            }])
+            return
+          }
+
+          if (claimUpdate) {
+            updateJob((prev) => {
+              const existingIdx = prev.claims.findIndex((c) => c.claim_id === claimUpdate.claim_id)
+              let newClaims: VerifiedClaimInfo[]
+              if (existingIdx >= 0) {
+                newClaims = prev.claims.map((c, i) =>
+                  i === existingIdx ? { ...c, ...claimUpdate } : c
+                )
+              } else {
+                newClaims = [...prev.claims, {
+                  claim_id: claimUpdate.claim_id,
+                  claim_number: claimUpdate.claim_number || prev.claims.length + 1,
+                  total_expected: claimUpdate.total_expected || 0,
+                  claim_text: claimUpdate.claim_text || '',
+                  status: claimUpdate.status || 'generating',
+                  confidence: claimUpdate.confidence,
+                  evidence_count: claimUpdate.evidence_count,
+                }]
+              }
+
+              const verifiedCount = newClaims.filter(c => c.status === 'verified' || c.status === 'corrected').length
+              const rejectedCount = newClaims.filter(c => c.status === 'rejected').length
+              const totalExpected = claimUpdate.total_expected || prev.total_claims || newClaims.length
+              const hasVerifying = newClaims.some(c => c.status === 'verifying')
+
+              return {
+                ...prev,
+                claims: newClaims,
+                verified_count: verifiedCount,
+                rejected_count: rejectedCount,
+                total_claims: totalExpected,
+                current_phase: hasVerifying ? 'verifying' as const : 'generating' as const,
+              }
+            })
+          }
+        }
+
+        // Stream ended without document_complete
+        removeJob()
+      } catch (err) {
+        console.error('Verified generation failed:', err)
+        const classifiedError = classifyError(err)
+        removeJob()
+        updateMessages((prev) => [...prev, {
+          id: verifiedMessageId,
+          type: 'error' as const,
+          content: classifiedError.message,
+          timestamp: new Date(),
+        }])
+      }
+
+      } catch (outerErr) {
+        console.error('[VerifiedGeneration] Unexpected error:', outerErr)
+      }
+    },
+    [user, tenantId, sessionId, login, updateMessages, uploadTempDocument]
+  )
+
   // Handle feedback
   const handleFeedback = useCallback(
     (messageId: string, feedback: 'positive' | 'negative') => {
@@ -782,9 +996,11 @@ export function EmmaChat({
       {!hasMessages && (
         <div className="flex-1 flex flex-col items-center justify-center p-8">
           <div className="text-center space-y-4 max-w-md">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
-              <IconBrain className="h-8 w-8 text-primary-foreground" />
-            </div>
+            <img
+              src="/emma-welcome.png"
+              alt="Emma"
+              className="w-24 h-24 mx-auto rounded-full object-cover object-top shadow-lg"
+            />
             <h2 className="text-2xl font-semibold">Hola, soy Emma</h2>
             <p className="text-muted-foreground">
               Tu asistente de inteligencia empresarial. Puedo ayudarte a buscar,
@@ -872,6 +1088,7 @@ export function EmmaChat({
 
         <EmmaQueryInput
           onSendQuery={handleSendQuery}
+          onVerifiedGeneration={handleVerifiedGeneration}
           isLoading={isLoading}
           disabled={!user?.id}
           placeholder="Pregúntame sobre tus documentos..."
@@ -884,6 +1101,13 @@ export function EmmaChat({
         document={previewDoc}
         open={showPreviewModal}
         onOpenChange={setShowPreviewModal}
+      />
+
+      {/* Verified Generation Dialog */}
+      <VerifiedGenerationDialog
+        open={verifiedDialogOpen}
+        onOpenChange={setVerifiedDialogOpen}
+        jobs={verifiedJobs}
       />
     </div>
   )

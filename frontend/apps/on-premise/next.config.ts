@@ -1,7 +1,7 @@
 import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@nexus/shared"],
+  transpilePackages: ["@nexus/shared", "framer-motion"],
 
   // Enable standalone output for Docker deployments
   output: "standalone",

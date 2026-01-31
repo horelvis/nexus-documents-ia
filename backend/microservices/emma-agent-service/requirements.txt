@@ -66,3 +66,10 @@ loguru>=0.7.0
 # Development
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
+
+# Web Search (DuckDuckGo - no API key required)
+duckduckgo-search>=7.0.0
+
+# PDF report generation
+weasyprint>=62.0
+markdown>=3.5.0

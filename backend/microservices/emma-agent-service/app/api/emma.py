@@ -401,6 +401,7 @@ async def _generate_langgraph_sse(
 
     try:
         step_counter = 0
+        first_token_sent = False
         conversation_history = None
         try:
             persistence = get_emma_persistence_service()
@@ -484,6 +485,10 @@ async def _generate_langgraph_sse(
                 # Stream tokens for real-time text display
                 token_text = data.get("text", data.get("token", ""))
                 if token_text:
+                    # Emit first_token on the very first token to switch frontend to streaming mode
+                    if not first_token_sent:
+                        first_token_sent = True
+                        yield f"event: first_token\ndata: {json.dumps({'text': token_text})}\n\n"
                     yield f"event: token\ndata: {json.dumps({'text': token_text, 'token': token_text})}\n\n"
 
             elif event_type == "complete":

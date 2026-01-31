@@ -2,14 +2,7 @@
 # Minimal services required for RAG functionality with Emma AI
 #
 # Usage:
-#   # Default mode (vLLM for GPU inference):
 #   docker compose -f docker-compose.onpremise.yml up -d
-#
-#   # MEN mode (Mixture of Experts Network, replaces vLLM):
-#   docker compose -f docker-compose.onpremise.yml --profile men up -d
-#
-#   NOTE: vLLM and MEN are mutually exclusive — both require the GPU.
-#   To use MEN, set VLLM_ENABLED=false in .env and use --profile men.
 #
 # Services:
 #   - db: PostgreSQL with Apache AGE for knowledge graph
@@ -17,8 +10,8 @@
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
 #   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
-#   - vllm: GPU inference for LLM (Qwen3-4B) — default profile
-#   - men-service: Mixture of Experts Network (4-bit quantized) — "men" profile
+#   - vllm: GPU inference for LLM (Qwen3-4B)
+#   - background-worker: Async task processing (Celery) for verification
 #   - api: Main backend API (optional, for UI integration)
 
 services:
@@ -134,73 +127,6 @@ services:
       start_period: 180s
     restart: unless-stopped
 
-
-  # =============================================================================
-  # MEN Service - Mixture of Experts Network (alternative to vLLM)
-  # =============================================================================
-  # Activated with: docker compose --profile men up -d
-  # Requires VLLM_ENABLED=false in .env (vLLM and MEN share the GPU)
-  #
-  # Architecture: 3 quantized models (4-bit) totaling ~4.5 GB VRAM
-  #   - Orchestrator (1.5B): Domain classification
-  #   - Expert (0.5B + LoRA): Specialized knowledge per tenant/domain
-  #   - Modeler (3B): Response synthesis with conversational memory
-  # =============================================================================
-  men-service:
-    profiles:
-      - men
-    build:
-      context: ../microservices/men-service
-      dockerfile: Dockerfile
-    ports:
-      - "8010:8010"
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # Feature flags
-      - MEN_ENABLED=${MEN_ENABLED:-true}
-      - MEN_MODELER_ENABLED=${MEN_MODELER_ENABLED:-true}
-      - MEN_EXPERTS_ENABLED=${MEN_EXPERTS_ENABLED:-true}
-      # Model selection (4-bit quantized)
-      - MEN_ORCHESTRATOR_MODEL=${MEN_ORCHESTRATOR_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
-      - MEN_MODELER_MODEL=${MEN_MODELER_MODEL:-Qwen/Qwen2.5-3B-Instruct}
-      - MEN_EXPERT_BASE_MODEL=${MEN_EXPERT_BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
-      # Modeler settings
-      - MEN_MODELER_MAX_TOKENS=${MEN_MODELER_MAX_TOKENS:-500}
-      - MEN_MODELER_TEMPERATURE=${MEN_MODELER_TEMPERATURE:-0.7}
-      - MEN_MODELER_HISTORY_TURNS=${MEN_MODELER_HISTORY_TURNS:-5}
-      # Expert settings
-      - MEN_EXPERT_MAX_TOKENS=${MEN_EXPERT_MAX_TOKENS:-300}
-      - MEN_UNLOAD_EXPERTS=${MEN_UNLOAD_EXPERTS:-true}
-      # HuggingFace
-      - HF_TOKEN=${HF_TOKEN}
-      - HF_HOME=/app/.cache/huggingface
-      - TRANSFORMERS_CACHE=/app/.cache/huggingface
-      - HF_HUB_ENABLE_HF_TRANSFER=0
-      - HF_HUB_DISABLE_XET=1
-    volumes:
-      - ../microservices/men-service/app:/app/app:ro
-      - men_experts_data:/app/trained_experts
-      - men_model_cache:/app/.cache/huggingface
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010", "--reload", "--reload-dir", "/app/app"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
-      interval: 60s
-      timeout: 30s
-      retries: 3
-      start_period: 180s
-    restart: unless-stopped
 
   # =============================================================================
   # Apache Tika - Document Text Extraction
@@ -338,10 +264,12 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - AGE_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
-      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-knowledge_graph}
+      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
+      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../microservices/knowledge-tree-service/app:/app/app:ro
+      - ../microservices/emma-agent-service/config/graphs:/app/config/graphs:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
@@ -388,6 +316,8 @@ services:
       # Knowledge Tree Service (structural context)
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
+      # Multi-Pipeline RAG Sector
+      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       # vLLM Configuration
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
@@ -407,11 +337,24 @@ services:
       # Single-tenant mode for on-premise
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
-      # MEN Service (alternative to vLLM, activated with --profile men)
-      - MEN_ENABLED=${MEN_ENABLED:-false}
-      - MEN_SERVICE_URL=${MEN_SERVICE_URL:-http://men-service:8010}
       # Langfuse disabled (removed from stack)
       - LANGFUSE_ENABLED=false
+      # Background Worker (for Celery verification tasks)
+      - BACKGROUND_WORKER_URL=http://background-worker:8100
+      # Upload limits (temp file processing)
+      - EMMA_UPLOAD_MAX_CHARS_PER_DOC=${EMMA_UPLOAD_MAX_CHARS_PER_DOC:-15000}
+      - EMMA_UPLOAD_MAX_TOTAL_CHARS=${EMMA_UPLOAD_MAX_TOTAL_CHARS:-40000}
+      # RLM (Recursive Language Models) Configuration
+      - RLM_ENABLED=${RLM_ENABLED:-false}
+      - RLM_TOKEN_THRESHOLD=${RLM_TOKEN_THRESHOLD:-16000}
+      - RLM_CHUNK_SIZE=${RLM_CHUNK_SIZE:-6000}
+      - RLM_CHUNK_OVERLAP=${RLM_CHUNK_OVERLAP:-500}
+      - RLM_MAX_DEPTH=${RLM_MAX_DEPTH:-3}
+      - RLM_MAX_CHUNKS=${RLM_MAX_CHUNKS:-20}
+      # Web Search (DuckDuckGo)
+      - WEB_SEARCH_ENABLED=${WEB_SEARCH_ENABLED:-true}
+      - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-5}
+      - WEB_SEARCH_REGION=${WEB_SEARCH_REGION:-es-es}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
     volumes:
@@ -426,6 +369,51 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+
+  # =============================================================================
+  # Background Worker - Async task processing (Celery)
+  # =============================================================================
+  # Handles: claim verification, preview generation, indexing retries
+  background-worker:
+    build:
+      context: ..
+      dockerfile: microservices/background-worker/Dockerfile
+    command: ["/app/backend/microservices/background-worker/start.sh"]
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Web Search (DuckDuckGo)
+      - WEB_SEARCH_ENABLED=${WEB_SEARCH_ENABLED:-true}
+      - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-3}
+      - WEB_SEARCH_REGION=${WEB_SEARCH_REGION:-es-es}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    volumes:
+      - ../:/app/backend
+      - ../../credentials:/app/credentials:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health').status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   # =============================================================================
@@ -556,6 +544,9 @@ services:
       - KC_PROXY_HEADERS=xforwarded
       - KC_HEALTH_ENABLED=true
       - KC_METRICS_ENABLED=true
+      - KC_SPI_THEME_DEFAULT=bufete-lexnova
+    volumes:
+      - ./keycloak/themes/bufete-lexnova:/opt/keycloak/themes/bufete-lexnova:ro
     depends_on:
       keycloak-db:
         condition: service_healthy
@@ -676,5 +667,3 @@ volumes:
   keycloak_data:
   local_storage_data:
   easyocr_models:
-  men_experts_data:
-  men_model_cache:

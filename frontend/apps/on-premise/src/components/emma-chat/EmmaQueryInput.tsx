@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder } from '@tabler/icons-react'
+import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -17,6 +17,7 @@ import { AttachmentPreviewStrip } from './AttachmentPreviewStrip'
 
 interface EmmaQueryInputProps {
   onSendQuery: (query: string, attachments?: Attachment[]) => Promise<void>
+  onVerifiedGeneration?: (topic: string, attachments?: Attachment[]) => void
   isLoading?: boolean
   disabled?: boolean
   placeholder?: string
@@ -26,6 +27,7 @@ interface EmmaQueryInputProps {
 
 export function EmmaQueryInput({
   onSendQuery,
+  onVerifiedGeneration,
   isLoading = false,
   disabled = false,
   placeholder = 'Pregúntame sobre tus documentos...',
@@ -52,6 +54,8 @@ export function EmmaQueryInput({
     }
   }, [disabled, isLoading])
 
+  const isVerificarCommand = query.trimStart().startsWith('/verificar ')
+
   const handleSubmit = async () => {
     if ((!query.trim() && attachments.length === 0) || isLoading || disabled) return
 
@@ -65,7 +69,33 @@ export function EmmaQueryInput({
       textareaRef.current.style.height = 'auto'
     }
 
+    // Detect /verificar command
+    if (queryToSend.startsWith('/verificar ') && onVerifiedGeneration) {
+      const topic = queryToSend.slice('/verificar '.length).trim()
+      if (topic) {
+        Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+          console.error('[EmmaQueryInput] Verified generation error:', err)
+        })
+        return
+      }
+    }
+
     await onSendQuery(queryToSend, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)
+  }
+
+  const handleVerifiedClick = () => {
+    if (isLoading || disabled || !onVerifiedGeneration) return
+    const topic = query.trim() || 'Genera un documento verificado basado en los documentos adjuntos'
+    const attachmentsToSend = [...attachments]
+    setQuery('')
+    setAttachments([])
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+    // Call as void but catch any promise rejection to prevent unhandled errors
+    Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+      console.error('[EmmaQueryInput] Verified generation error:', err)
+    })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -234,8 +264,24 @@ export function EmmaQueryInput({
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Verified generation button - shown when attachments present */}
+        {attachments.length > 0 && onVerifiedGeneration && (
+          <Button
+            type="button"
+            onClick={handleVerifiedClick}
+            disabled={disabled || isLoading}
+            size="icon"
+            variant="outline"
+            title="Generar documento verificado"
+            className="absolute right-12 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg border-emerald-500/50 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
+          >
+            <IconFileCheck className="h-4 w-4" />
+          </Button>
+        )}
+
         {/* Send button - INSIDE INPUT RIGHT */}
         <Button
+          type="button"
           onClick={handleSubmit}
           disabled={!hasContent || disabled || isLoading}
           size="icon"
@@ -255,7 +301,11 @@ export function EmmaQueryInput({
           {query.length > 0 && attachments.length > 0 && ' • '}
           {attachments.length > 0 && `${attachments.length} adjunto${attachments.length > 1 ? 's' : ''}`}
         </span>
-        <span>Enter para enviar • Shift+Enter para nueva línea</span>
+        <span>
+          {isVerificarCommand
+            ? '/verificar activo — se generará documento verificado'
+            : 'Enter para enviar • Shift+Enter para nueva línea'}
+        </span>
       </div>
 
       {/* Indexed Documents Picker Dialog */}

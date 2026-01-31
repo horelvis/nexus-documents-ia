@@ -286,16 +286,6 @@ class Settings(BaseSettings):
     mcp_filesystem_enabled: bool = os.getenv("MCP_FILESYSTEM_ENABLED", "false").lower() == "true"
     mcp_filesystem_command: str = os.getenv("MCP_FILESYSTEM_COMMAND", "")
 
-    # ==========================================================================
-    # MEN Service (Mixture of Experts Network) Configuration
-    # ==========================================================================
-    # MEN provides intelligent query routing using specialized small models:
-    # - Orchestrator (1.5B): Domain classification
-    # - Experts (0.5B + LoRA): Tenant-specific knowledge
-    # - LLM Modeler (3B): Response synthesis with conversational memory
-    men_enabled: bool = os.getenv("MEN_ENABLED", "false").lower() == "true"
-    men_service_url: str = os.getenv("MEN_SERVICE_URL", "http://men-service:8010")
-
     # Main API URL
     api_url: str = os.getenv("API_URL", "http://api:8000")
 

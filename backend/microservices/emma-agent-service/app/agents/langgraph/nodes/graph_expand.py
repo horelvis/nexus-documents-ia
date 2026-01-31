@@ -15,6 +15,7 @@ import time
 from typing import Any, Dict
 
 from ..state import RAGState
+from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,20 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
         State updates with graph expansion metadata.
         Empty dict if no sector is active (no-op).
     """
+    tracker = ReasoningTracker()
+    tracker.set_source("graph_expand")
+
     sector_config = state.get("sector_config")
     if not sector_config:
         return {}
 
     start_time = time.time()
+
+    tracker.add_step(
+        StepType.SEARCH,
+        f"Expandiendo contexto con grafo de conocimiento ({sector_config.get('sector')})...",
+        confidence=1.0,
+    )
     query = state.get("query", "")
     tenant_id = state.get("tenant_id", "")
 
@@ -60,7 +70,13 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
         if not entities:
             latency_ms = (time.time() - start_time) * 1000
             logger.info(f"🌐 GRAPH_EXPAND: No entities found ({latency_ms:.1f}ms)")
+            tracker.add_step(
+                StepType.OBSERVATION,
+                "Sin entidades detectadas para expansión de grafo",
+                confidence=1.0,
+            )
             return {
+                "reasoning_steps": tracker.get_steps(),
                 "metadata": {
                     **state.get("metadata", {}),
                     "graph_expansion": {
@@ -81,13 +97,24 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
 
         latency_ms = (time.time() - start_time) * 1000
 
+        entity_count = sum(len(v) for v in entities.values())
+        related_count = len(expansion.get("related_entities", []))
+
         logger.info(
-            f"✅ GRAPH_EXPAND: {sum(len(v) for v in entities.values())} entities → "
-            f"{len(expansion.get('related_entities', []))} related nodes | "
+            f"✅ GRAPH_EXPAND: {entity_count} entities → "
+            f"{related_count} related nodes | "
             f"{latency_ms:.1f}ms"
         )
 
+        tracker.add_step(
+            StepType.OBSERVATION,
+            f"Entidades extraídas: {entity_count} → {related_count} nodos relacionados ({latency_ms:.0f}ms)",
+            confidence=1.0,
+            entities=[e for vals in entities.values() for e in vals[:5]],
+        )
+
         return {
+            "reasoning_steps": tracker.get_steps(),
             "metadata": {
                 **state.get("metadata", {}),
                 "graph_expansion": {

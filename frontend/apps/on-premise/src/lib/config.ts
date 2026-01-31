@@ -64,6 +64,9 @@ export const API_CONFIG = {
     EMMA_TOOLS: '/emma/tools',
     EMMA_HEALTH: '/emma/health',
     EMMA_UPLOAD_TEMP: '/emma/uploads/temp',
+    EMMA_VERIFIED_STREAM: '/emma/verified/generate/stream',
+    EMMA_VERIFIED_CLAIMS: '/emma/verified/session',
+    EMMA_VERIFIED_SESSION_PDF: (sessionId: string) => `/emma/verified/session/${sessionId}/pdf`,
 
     // Connectors
     CONNECTORS: '/connectors',

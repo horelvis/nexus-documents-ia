@@ -194,7 +194,7 @@ function MessageDisplay({
   const getMessageColor = () => {
     switch (message.type) {
       case "user":
-        return "bg-background border" // Same style as Emma's messages
+        return "bg-secondary border border-secondary"
       case "clarification":
         return "bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
       case "error":

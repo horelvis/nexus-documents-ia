@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting Knowledge Tree Service...")
     logger.info(f"Service Port: {settings.service_port}")
+
+    # Bootstrap sector graph on startup
+    from app.services.graph_bootstrap import bootstrap_sector_graph
+    graph_name = await bootstrap_sector_graph()
+    if graph_name:
+        logger.info(f"Graph ready: {graph_name} (sector={settings.active_sector})")
+
     yield
     logger.info("Shutting down Knowledge Tree Service...")
 

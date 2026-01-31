@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     # Changing sector requires clearing Weaviate collections + AGE graph.
     active_sector: str = os.getenv("ACTIVE_SECTOR", "")
 
-    # MEN Service (Mixture of Experts Network) integration
-    men_enabled: bool = os.getenv("MEN_ENABLED", "false").lower() == "true"
-    men_service_url: str = os.getenv("MEN_SERVICE_URL", "http://men-service:8010")
     MICROSERVICES_API_KEY: str = Field(
         validation_alias=AliasChoices("MICROSERVICES_API_KEY")
     )
@@ -140,6 +137,34 @@ class Settings(BaseSettings):
     postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
     postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
+
+    # ==========================================================================
+    # RLM (Recursive Language Models) Configuration
+    # ==========================================================================
+    rlm_enabled: bool = os.getenv("RLM_ENABLED", "false").lower() == "true"
+    rlm_token_threshold: int = int(os.getenv("RLM_TOKEN_THRESHOLD", "16000"))
+    rlm_chunk_size: int = int(os.getenv("RLM_CHUNK_SIZE", "6000"))
+    rlm_chunk_overlap: int = int(os.getenv("RLM_CHUNK_OVERLAP", "500"))
+    rlm_max_depth: int = int(os.getenv("RLM_MAX_DEPTH", "3"))
+    rlm_max_chunks: int = int(os.getenv("RLM_MAX_CHUNKS", "20"))
+
+    # ==========================================================================
+    # Background Worker (for Celery verification tasks)
+    # ==========================================================================
+    background_worker_url: str = os.getenv("BACKGROUND_WORKER_URL", "http://background-worker:8100")
+
+    # ==========================================================================
+    # Verified Generation Configuration
+    # ==========================================================================
+    verified_cache_ttl_seconds: int = int(os.getenv("VERIFIED_CACHE_TTL_SECONDS", "3600"))
+    verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.3"))
+
+    # ==========================================================================
+    # Web Search (DuckDuckGo)
+    # ==========================================================================
+    web_search_enabled: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
+    web_search_max_results: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
+    web_search_region: str = os.getenv("WEB_SEARCH_REGION", "es-es")
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

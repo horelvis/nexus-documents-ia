@@ -64,6 +64,7 @@ Capacidades:
 2. **Búsqueda de documentos**: Para buscar por contenido semántico usa `document_search`
 3. **Análisis de contenido**: Puedes leer y analizar el contenido de los documentos
 4. **Resumen**: Puedes generar resúmenes de documentos específicos con `document_summary`
+5. **Búsqueda web**: Para información externa o verificación de hechos usa `web_search`
 
 Directrices:
 - **IMPORTANTE**: Para preguntas de CONTEO o LISTADO, usa SIEMPRE `structural_query` primero
@@ -72,6 +73,7 @@ Directrices:
 - Si el contexto incluye texto de documentos subidos (no indexados), responde con ese contenido y NO llames a herramientas
 - Responde siempre basándote en los documentos del usuario, no en conocimiento general
 - Si no encuentras información relevante, indícalo claramente
+- Si los documentos internos no contienen la respuesta, puedes complementar con búsqueda web usando `web_search`
 - Sugiere búsquedas alternativas cuando sea apropiado
 - Mantén las respuestas concisas pero informativas
 - Cita siempre las fuentes cuando sea posible
@@ -97,6 +99,12 @@ class DocumentSummaryInput(BaseModel):
         default="concise",
         description="Summary type: 'concise' (brief), 'detailed' (comprehensive), 'key_points' (bullet points)"
     )
+
+
+class WebSearchInput(BaseModel):
+    """Input for web search tool."""
+    query: str = Field(description="Search query for the web")
+    max_results: int = Field(default=5, description="Maximum number of results to return")
 
 
 class StructuralQueryInput(BaseModel):
@@ -556,6 +564,51 @@ general_tools = [
         args_schema=DocumentSummaryInput,
     ),
 ]
+
+
+# Web Search Tool
+async def web_search(query: str, max_results: int = 5) -> str:
+    """
+    Search the internet using DuckDuckGo.
+
+    Use this for external information, current events, or facts
+    not found in internal documents.
+    """
+    try:
+        from app.services.web_search import get_web_search_client
+
+        client = get_web_search_client()
+        results = await client.search(query, max_results)
+
+        if not results:
+            return f"No se encontraron resultados web para: '{query}'"
+
+        formatted = [f"**Resultados web para**: '{query}'\n"]
+        for i, r in enumerate(results, 1):
+            formatted.append(
+                f"{i}. **{r.title}**\n"
+                f"   {r.snippet}\n"
+                f"   Fuente: {r.url}\n"
+            )
+        return "\n".join(formatted)
+
+    except Exception as e:
+        logger.error(f"Web search tool failed: {e}")
+        return f"Error en búsqueda web: {str(e)}"
+
+
+general_tools.append(
+    StructuredTool.from_function(
+        coroutine=web_search,
+        name="web_search",
+        description=(
+            "Search the internet for external information, current events, "
+            "or facts not found in internal documents. "
+            "Use when internal documents don't have the answer."
+        ),
+        args_schema=WebSearchInput,
+    )
+)
 
 async def general_node(state: RAGState) -> Dict[str, Any]:
     """

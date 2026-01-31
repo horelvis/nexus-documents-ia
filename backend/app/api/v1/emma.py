@@ -173,6 +173,127 @@ async def emma_upload_temp(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/verified/generate/stream")
+async def emma_verified_generate_stream(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Stream verified document generation with real-time claim-by-claim progress.
+
+    Proxies to Emma Agent Service verified generation endpoint with ACL context.
+    Returns SSE events: claim_generated, claim_verified, claim_rejected, document_complete, error.
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+
+        async def stream_sse() -> AsyncGenerator[bytes, None]:
+            import asyncio
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(600.0, connect=10.0),
+                http2=False,
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    f"{EMMA_SERVICE_URL}/verified/generate/stream",
+                    json=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                    },
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"❌ Verified stream error: {response.status_code} - {error_text}")
+                        yield f"data: {{\"event_type\": \"error\", \"data\": {{\"error\": \"Service error: {response.status_code}\"}}}}\n\n".encode()
+                        return
+
+                    async for line in response.aiter_lines():
+                        if line:
+                            yield (line + "\n").encode()
+                        else:
+                            yield b"\n"
+                        await asyncio.sleep(0)
+
+        return StreamingResponse(
+            stream_sse(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Verified stream proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/verified/session/{session_id}/claims")
+async def emma_verified_session_claims(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Get verified claims for a session. Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/verified/session/{session_id}/claims",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Verified claims error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Verified claims proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/verified/session/{session_id}/pdf")
+async def emma_verified_session_pdf(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Export a verified session as PDF. Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/verified/session/{session_id}/pdf",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Verified PDF error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            from fastapi.responses import Response
+            return Response(
+                content=response.content,
+                media_type="application/pdf",
+                headers=dict(response.headers),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Verified PDF proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def emma_health():
     """Check Emma AI service health"""

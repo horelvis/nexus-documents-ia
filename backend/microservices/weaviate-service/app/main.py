@@ -62,7 +62,6 @@ from app.api import (
     public_knowledge_router,
     knowledge_router,
     learning_router,
-    verified_router,
 )
 from app.api.boe_legislation import router as boe_router
 from app.api.legal_graph import router as legal_graph_router
@@ -176,7 +175,6 @@ app.include_router(public_knowledge_router, tags=["public-knowledge"])
 app.include_router(boe_router, tags=["boe-legislation"])
 app.include_router(knowledge_router, tags=["knowledge"])
 app.include_router(learning_router, tags=["learning"])
-app.include_router(verified_router, tags=["verified-generation"])
 app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])
 app.include_router(cag_router)
 app.include_router(cag_vector_router)
@@ -216,7 +214,7 @@ async def service_info():
             "knowledge": "/knowledge/* (knowledge graph)",
             "learning": "/learning/* (user learning)",
             "legal": "/legal/* (legal knowledge graph)",
-            "verified": "/verified/* (verified generation)",
+            "verified": "Moved to emma-agent-service (port 8009)",
             "cag": "/cag/*",
             "health": "/health",
             "docs": "/docs" if settings.debug else None

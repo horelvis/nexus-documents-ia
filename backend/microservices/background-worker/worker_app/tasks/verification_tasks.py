@@ -34,6 +34,9 @@ VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
 VLLM_MODEL = os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B")
 MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY", "")
 
+# Web Search for supplementary evidence
+WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
+
 # Verification parameters
 EVIDENCE_SEARCH_LIMIT = 5  # Max documents to search
 SIMILARITY_THRESHOLD = 0.65  # Min similarity for evidence consideration
@@ -148,11 +151,15 @@ async def _evaluate_claim_with_llm(
             "correction": None,
         }
 
-    # Build evidence context
-    evidence_text = "\n\n".join([
-        f"[Document: {e.get('document_title', 'Unknown')}]\n{e['text_excerpt']}"
-        for e in evidence
-    ])
+    # Build evidence context (distinguish internal vs web sources)
+    evidence_parts = []
+    for e in evidence:
+        if e.get("source") == "web":
+            label = f"[Web Source: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+        else:
+            label = f"[Internal Document: {e.get('document_title', 'Unknown')}]"
+        evidence_parts.append(f"{label}\n{e['text_excerpt']}")
+    evidence_text = "\n\n".join(evidence_parts)
 
     # Evaluation prompt
     system_prompt = """You are a fact-checking assistant. Your task is to evaluate if a claim is supported by the given evidence.
@@ -170,6 +177,7 @@ Rules:
 - confidence reflects how strongly evidence supports/refutes
 - correction should preserve meaning but fix factual errors
 - If claim is completely unsupported, correction=null
+- Prioritize evidence from internal documents. Web evidence is supplementary.
 - NEVER use <think> tags or reasoning blocks in your response
 - Output the JSON directly, nothing else"""
 
@@ -294,13 +302,25 @@ async def _verify_claim(
     start_time = time.time()
 
     try:
-        # Step 1: Search for evidence
+        # Step 1a: Search Weaviate for evidence
         evidence = await _search_weaviate_evidence(
             claim_text=claim_text,
             tenant_id=tenant_id,
             context_document_ids=context_document_ids,
             collections=collections,
         )
+
+        # Step 1b: Search web for supplementary evidence
+        if WEB_SEARCH_ENABLED:
+            try:
+                from worker_app.services.web_search import search_web_evidence
+
+                web_evidence = await search_web_evidence(claim_text, max_results=3)
+                if web_evidence:
+                    evidence = evidence + web_evidence
+                    logger.info(f"🌐 Added {len(web_evidence)} web evidence items")
+            except Exception as e:
+                logger.warning(f"Web evidence search failed (non-fatal): {e}")
 
         # Step 2: Evaluate claim with LLM
         evaluation = await _evaluate_claim_with_llm(

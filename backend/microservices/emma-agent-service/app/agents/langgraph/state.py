@@ -198,6 +198,30 @@ class RAGState(TypedDict, total=False):
     sector_config: Optional[Dict[str, Any]]
 
     # =========================================================================
+    # RLM (Recursive Language Models) State
+    # =========================================================================
+    # Whether RLM was activated for this query
+    rlm_activated: bool
+
+    # Total estimated tokens in retrieved content
+    rlm_total_tokens: int
+
+    # Sub-results from recursive chunk processing
+    rlm_sub_results: List[Dict[str, Any]]
+
+    # Current recursion depth
+    rlm_depth: int
+
+    # RLM intermediate chunks (text chunks for map phase)
+    rlm_chunks: List[str]
+
+    # Cache key computed by rlm_plan for use by rlm_reduce
+    rlm_cache_key: str
+
+    # Count of relevant chunks after map filtering
+    rlm_relevant_count: int
+
+    # =========================================================================
     # Metadata
     # =========================================================================
     # Additional metadata for tracing/debugging
@@ -321,6 +345,15 @@ def create_initial_state(
         # Sector
         sector=sector_name,
         sector_config=sector_config_dict,
+
+        # RLM
+        rlm_activated=False,
+        rlm_total_tokens=0,
+        rlm_sub_results=[],
+        rlm_depth=0,
+        rlm_chunks=[],
+        rlm_cache_key="",
+        rlm_relevant_count=0,
 
         # Metadata
         metadata={

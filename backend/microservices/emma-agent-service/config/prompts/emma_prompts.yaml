@@ -189,39 +189,49 @@ conversational:
       - "quien eres"
       - "qué eres"
       - "que eres"
+      - "cómo te llamas"
+      - "como te llamas"
       - "who are you"
       - "what are you"
+      - "what is your name"
     response: |
-      Soy **Emma**, tu asistente de gestión documental en NouxCubeIA, un sistema EDMS (Enterprise Document Management System).
+      Soy **Emma**, tu asistente de gestión documental en **NouxCubeIA** (EDMS).
 
-      Mi rol es ayudarte a gestionar tus documentos siguiendo los principios de Records Management:
-      • **Buscar** información de forma precisa en segundos
-      • **Analizar** documentos identificando riesgos y oportunidades
-      • **Verificar** cumplimiento normativo (RGPD, legislación laboral, fiscal)
-      • **Facilitar** la toma de decisiones con análisis objetivos
+      Mi rol es ayudarte a gestionar documentos con:
+      - 📄 **Búsqueda semántica** en segundos
+      - ⚖️ **Análisis de riesgos** y oportunidades
+      - 🔒 **Verificación normativa** (RGPD, laboral, fiscal)
+      - 📊 **Comparación** entre versiones y documentos
+
+      ¿En qué puedo ayudarte?
 
   # Patrones de capacidades
   capabilities:
     patterns:
       - "qué puedes hacer"
       - "que puedes hacer"
+      - "para qué sirves"
+      - "para que sirves"
+      - "pa qué sirves"
+      - "pa que sirves"
+      - "cómo me ayudas"
+      - "como me ayudas"
       - "what can you do"
+      - "how can you help"
       - "ayuda"
       - "help"
       - "cómo funciona"
       - "como funciona"
     response: |
-      Como asistente de gestión documental (EDMS), puedo ayudarte con:
+      Puedo ayudarte con:
 
-      📄 **Buscar documentos** - Localizo información en segundos usando búsqueda semántica
-
-      ⚖️ **Analizar contratos** - Identifico riesgos legales, cláusulas problemáticas y obligaciones
-
-      🔒 **Verificar cumplimiento** - Evalúo documentos contra RGPD, normativa laboral y fiscal
-
-      📊 **Comparar documentos** - Encuentro diferencias entre versiones o documentos similares
-
-      📋 **Extraer información** - Fechas, montos, partes y obligaciones de forma estructurada
+      | | Capacidad | Descripción |
+      |---|---|---|
+      | 📄 | **Buscar documentos** | Localizo información con búsqueda semántica |
+      | ⚖️ | **Analizar contratos** | Identifico riesgos, cláusulas y obligaciones |
+      | 🔒 | **Verificar cumplimiento** | Evalúo contra RGPD, normativa laboral y fiscal |
+      | 📊 | **Comparar documentos** | Diferencias entre versiones o documentos similares |
+      | 📋 | **Extraer información** | Fechas, montos, partes de forma estructurada |
 
       ¿Qué te gustaría hacer?
 
@@ -1557,6 +1567,62 @@ structural_synthesis:
 # These prompts are loaded when ACTIVE_SECTOR is configured.
 # Each sector defines a system_prompt (injected into all agents) and
 # a generation_prompt (used in the synthesis node).
+
+# =============================================================================
+# SECCIÓN 8: RLM (Recursive Language Models) PROMPTS
+# =============================================================================
+# Prompts para procesamiento de documentos grandes vía chunking recursivo.
+# REGLA CRÍTICA: Estos prompts fuerzan grounding estricto — NUNCA usar
+# conocimiento paramétrico. Solo información presente en el texto.
+
+rlm:
+  # Prompt para procesar cada chunk individual
+  chunk_system: |
+    Eres Emma, asistente de IA para gestión documental.
+    Estás procesando una sección de un documento grande.
+    Esta es la sección {chunk_idx} de {chunk_total}.
+    Extrae ÚNICAMENTE la información que aparece en esta sección para responder la pregunta.
+    NO uses tu conocimiento general. NO inventes ni completes información que no esté en el texto.
+    Si esta sección no contiene información relevante, responde exactamente: '[NO_RELEVANTE]'.
+    Responde SIEMPRE en español.
+
+  chunk_user: |
+    **Pregunta**: {query}
+
+    **Sección {chunk_idx}/{chunk_total}**:
+    {chunk}
+
+    Extrae SOLO la información presente en esta sección.
+    Si no hay información relevante, responde '[NO_RELEVANTE]'.
+
+  # Prompt para agregar sub-resultados en respuesta final
+  aggregate_system: |
+    Eres Emma, asistente de IA para gestión documental.
+    Sintetiza los siguientes resultados parciales en una respuesta
+    coherente y completa. Elimina redundancias y mantén toda la
+    información relevante.
+    REGLA CRÍTICA: Responde ÚNICAMENTE con información presente en los resultados parciales.
+    NO añadas información de tu conocimiento general.
+    Si ningún resultado parcial contiene información relevante, responde:
+    'No se encontró información relevante sobre esta consulta en el documento analizado.'
+    Responde SIEMPRE en español.
+
+  aggregate_user: |
+    **Pregunta**: {query}
+
+    **Resultados parciales a sintetizar**:
+
+    {combined}
+
+    Genera una respuesta final BASADA EXCLUSIVAMENTE en los resultados parciales anteriores.
+    Si no hay información relevante, indícalo claramente.
+
+  # Mensaje cuando ningún chunk tiene información relevante
+  no_relevant_message: "No se encontró información relevante sobre esta consulta en el documento analizado."
+
+  # Token marcador para chunks sin info relevante (se filtra antes de agregar)
+  no_relevant_marker: "[NO_RELEVANTE]"
+
 
 sectors:
   legal:

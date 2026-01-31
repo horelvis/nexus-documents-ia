@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page {
+      size: A4;
+      margin: 2cm;
+    }
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 11pt;
+      color: #1e293b;
+      line-height: 1.6;
+    }
+    .header {
+      border-bottom: 3px solid #2563eb;
+      padding-bottom: 0.8em;
+      margin-bottom: 1.5em;
+    }
+    .header h1 {
+      font-size: 20pt;
+      color: #1e293b;
+      margin: 0 0 0.3em 0;
+    }
+    .header-meta {
+      font-size: 9pt;
+      color: #64748b;
+    }
+    .header-meta span {
+      margin-right: 2em;
+    }
+    .stats-grid {
+      display: flex;
+      gap: 1em;
+      margin: 1.5em 0;
+    }
+    .stat-card {
+      flex: 1;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.8em;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 18pt;
+      font-weight: 700;
+      display: block;
+    }
+    .stat-card .stat-label {
+      font-size: 8pt;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .stat-verified .stat-value { color: #16a34a; }
+    .stat-corrected .stat-value { color: #d97706; }
+    .stat-rejected .stat-value { color: #dc2626; }
+    .stat-confidence .stat-value { color: #2563eb; }
+
+    h2 {
+      font-size: 14pt;
+      color: #1e293b;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 0.3em;
+      margin-top: 1.5em;
+    }
+    .document-body {
+      background: #fafafa;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 1em 1.2em;
+      margin: 1em 0;
+    }
+    .document-body p { margin: 0.5em 0; }
+    .document-body h1, .document-body h2, .document-body h3 {
+      border: none;
+      margin-top: 1em;
+    }
+    .document-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5em 0;
+    }
+    .document-body th, .document-body td {
+      border: 1px solid #e2e8f0;
+      padding: 0.4em 0.6em;
+      font-size: 10pt;
+    }
+    .document-body th { background: #f1f5f9; }
+
+    .claim-row {
+      border-left: 4px solid #cbd5e1;
+      padding: 0.4em 0.8em;
+      margin: 0.4em 0;
+      font-size: 10pt;
+      page-break-inside: avoid;
+    }
+    .claim-verified { border-left-color: #22c55e; background: #f0fdf4; }
+    .claim-corrected { border-left-color: #f59e0b; background: #fffbeb; }
+    .claim-rejected { border-left-color: #ef4444; background: #fef2f2; }
+    .claim-number {
+      font-weight: 700;
+      color: #475569;
+    }
+    .claim-status {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 8pt;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .status-verified { background: #dcfce7; color: #166534; }
+    .status-corrected { background: #fef3c7; color: #92400e; }
+    .status-rejected { background: #fee2e2; color: #991b1b; }
+    .confidence-badge {
+      font-size: 8pt;
+      color: #64748b;
+      margin-left: 0.5em;
+    }
+
+    .claim-sources {
+      font-size: 8pt;
+      color: #64748b;
+      margin-top: 0.2em;
+    }
+    .claim-sources span {
+      background: #f1f5f9;
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-right: 0.3em;
+      font-family: monospace;
+      font-size: 7pt;
+    }
+    .footer {
+      margin-top: 2em;
+      padding-top: 0.8em;
+      border-top: 1px solid #e2e8f0;
+      font-size: 8pt;
+      color: #94a3b8;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Informe de Verificación</h1>
+    <div class="header-meta">
+      <span><strong>Tema:</strong> {{ query }}</span>
+      <span><strong>Fecha:</strong> {{ created_at }}</span>
+      <span><strong>Sesión:</strong> {{ session_id[:16] }}…</span>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card stat-verified">
+      <span class="stat-value">{{ claims_verified }}</span>
+      <span class="stat-label">Verificados</span>
+    </div>
+    <div class="stat-card stat-corrected">
+      <span class="stat-value">{{ claims_corrected }}</span>
+      <span class="stat-label">Corregidos</span>
+    </div>
+    <div class="stat-card stat-rejected">
+      <span class="stat-value">{{ claims_rejected }}</span>
+      <span class="stat-label">Rechazados</span>
+    </div>
+    <div class="stat-card stat-confidence">
+      <span class="stat-value">{{ "%.0f"|format(average_confidence * 100) }}%</span>
+      <span class="stat-label">Confianza</span>
+    </div>
+  </div>
+
+  <h2>Documento Verificado</h2>
+  <div class="document-body">{{ document_html | safe }}</div>
+
+  <h2>Detalle de Claims ({{ claims | length }})</h2>
+  {% for claim in claims %}
+  <div class="claim-row claim-{{ claim.status }}">
+    <span class="claim-number">#{{ loop.index }}</span>
+    {{ claim.text }}
+    <span class="confidence-badge">{{ "%.0f"|format(claim.confidence * 100) }}%</span>
+    <span class="claim-status status-{{ claim.status }}">{{ claim.status }}</span>
+    {% if claim.evidence_document_ids %}
+    <div class="claim-sources">
+      Fuentes: {% for doc_id in claim.evidence_document_ids %}<span>{{ doc_id[:12] }}…</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if sources %}
+  <h2>Fuentes Consultadas ({{ sources | length }})</h2>
+  <table style="width:100%; border-collapse:collapse; font-size:9pt;">
+    <thead>
+      <tr style="background:#f1f5f9;">
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left;">Tipo</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left;">Título / ID</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left;">URL</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for src in sources %}
+      <tr>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          {% if src.source == 'web' %}🌐 Web{% elif src.source == 'uploaded' %}📎 Cargado{% else %}📄 Interno{% endif %}
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">{{ src.title or src.id }}</td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; word-break:break-all;">{{ src.url or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="footer">
+    Generado por NouxCubeIA &mdash; Tiempo de ejecución: {{ execution_time_ms }}ms
+  </div>
+</body>
+</html>

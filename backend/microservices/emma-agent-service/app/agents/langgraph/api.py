@@ -329,6 +329,7 @@ async def stream_langgraph_query(
     emitted_events = {
         "retrieve_complete": False,
         "plan_complete": False,
+        "rlm_complete": False,  # Track RLM completion
         "agents_started": set(),  # Track which agents we've sent started events for
         "agents_completed": set(),  # Track which agents we've sent completed events for
         "reasoning_steps_emitted": set(),  # Track emitted step hashes
@@ -386,21 +387,7 @@ async def stream_langgraph_query(
             if not emitted_events["plan_complete"] and "execution_plan" in event and event.get("execution_plan"):
                 emitted_events["plan_complete"] = True
 
-                # Emit all reasoning steps from the plan node (deduplicated)
-                reasoning_steps = event.get("reasoning_steps", [])
-                for step in reasoning_steps:
-                    step_hash = hash((step.get("type", ""), step.get("content", "")))
-                    if step_hash not in emitted_events["reasoning_steps_emitted"]:
-                        emitted_events["reasoning_steps_emitted"].add(step_hash)
-                        yield {
-                            "type": "structural_step",
-                            "data": {
-                                "step_type": step.get("type", "reasoning"),
-                                "content": step.get("content", ""),
-                                "confidence": step.get("confidence", 1.0),
-                                "entities": step.get("entities", []),
-                            }
-                        }
+                # Reasoning steps already emitted by the generic handler above
 
                 metadata = event.get("metadata", {})
                 yield {
@@ -412,6 +399,48 @@ async def stream_langgraph_query(
                         "is_structural": metadata.get("is_structural_query", False),
                     }
                 }
+
+            # Emit all reasoning_steps incrementally (covers retrieve, graph_expand, rlm_plan/map/reduce, synthesize)
+            reasoning_steps = event.get("reasoning_steps", [])
+            for step in reasoning_steps:
+                step_hash = hash((step.get("type", ""), step.get("content", "")))
+                if step_hash not in emitted_events["reasoning_steps_emitted"]:
+                    emitted_events["reasoning_steps_emitted"].add(step_hash)
+                    yield {
+                        "type": "structural_step",
+                        "data": {
+                            "step_type": step.get("type", "reasoning"),
+                            "content": step.get("content", ""),
+                            "confidence": step.get("confidence", 1.0),
+                            "entities": step.get("entities", []),
+                        }
+                    }
+
+            # Emit RLM agent_started when rlm_activated first appears
+            if not emitted_events["rlm_complete"] and event.get("rlm_activated"):
+                if "rlm_agent" not in emitted_events["agents_started"]:
+                    emitted_events["agents_started"].add("rlm_agent")
+                    yield {
+                        "type": "agent_started",
+                        "data": {
+                            "agent": "rlm_agent",
+                        }
+                    }
+
+                # Emit rlm_agent complete when rlm_reduce populates agent_results
+                if event.get("agent_results", {}).get("rlm_agent") and "rlm_agent" not in emitted_events["agents_completed"]:
+                    emitted_events["rlm_complete"] = True
+                    emitted_events["agents_completed"].add("rlm_agent")
+                    rlm_meta = event.get("metadata", {})
+                    yield {
+                        "type": "agent_complete",
+                        "data": {
+                            "agent": "rlm_agent",
+                            "tools_used": ["rlm_recursive_processing"],
+                            "chunks": rlm_meta.get("rlm_chunks", 0),
+                            "total_tokens": event.get("rlm_total_tokens", 0),
+                        }
+                    }
 
             # Emit agent_started only once per agent
             if "current_agent" in event and event.get("current_agent"):

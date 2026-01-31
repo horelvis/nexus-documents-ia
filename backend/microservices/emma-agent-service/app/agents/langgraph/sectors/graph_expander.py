@@ -53,40 +53,30 @@ async def expand_with_sector_graph(
     paths: List[str] = []
 
     try:
-        from app.core.config import settings
-        import httpx
+        from app.clients.knowledge_tree_client import get_knowledge_tree_client
 
-        base_url = settings.knowledge_tree_service_url
-        timeout = settings.knowledge_tree_service_timeout
+        client = get_knowledge_tree_client()
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            for entity_type, values in entities.items():
-                for value in values[:5]:  # Limit per type
-                    cypher = _build_cypher_query(graph_name, entity_type, value)
-                    if not cypher:
-                        continue
+        for entity_type, values in entities.items():
+            for value in values[:5]:  # Limit per type
+                cypher = _build_cypher_query(graph_name, entity_type, value)
+                if not cypher:
+                    continue
 
-                    cypher_queries.append(cypher)
+                cypher_queries.append(cypher)
 
-                    try:
-                        resp = await client.post(
-                            f"{base_url}/graph/query",
-                            json={
-                                "cypher": cypher,
-                                "graph_name": graph_name,
-                                "tenant_id": tenant_id,
-                            },
-                            headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
-                        )
-
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            for row in data.get("results", []):
-                                related_entities.append(row)
-                            for path in data.get("paths", []):
-                                paths.append(str(path))
-                    except Exception as e:
-                        logger.warning(f"Graph query failed for {entity_type}={value}: {e}")
+                try:
+                    data = await client.graph_query(
+                        cypher=cypher,
+                        graph_name=graph_name,
+                        tenant_id=tenant_id,
+                    )
+                    for row in data.get("results", []):
+                        related_entities.append(row)
+                    for path in data.get("paths", []):
+                        paths.append(str(path))
+                except Exception as e:
+                    logger.warning(f"Graph query failed for {entity_type}={value}: {e}")
 
     except Exception as e:
         logger.warning(f"Graph expansion failed: {e}")

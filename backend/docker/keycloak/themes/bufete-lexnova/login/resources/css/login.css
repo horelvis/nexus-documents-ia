@@ -1,0 +1,392 @@
+/* ============================================================
+   LEX NOVA — Abogados & Asociados
+   Keycloak Login Theme
+   ============================================================ */
+
+/* ---------- CSS Variables ---------- */
+:root {
+  --ln-navy: #1B2A4A;
+  --ln-navy-deep: #0F1B33;
+  --ln-gold: #C9A84C;
+  --ln-gold-light: #D4B965;
+  --ln-gold-muted: rgba(201, 168, 76, 0.15);
+  --ln-cream: #FAF8F2;
+  --ln-gray: #6B7B8D;
+  --ln-gray-light: #E8EBF0;
+  --ln-white: #FFFFFF;
+  --ln-text: #2C3E50;
+  --ln-error: #C0392B;
+  --ln-radius: 6px;
+  --ln-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --ln-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.10);
+}
+
+/* ---------- Page Background with document pattern ---------- */
+.login-pf body,
+body.login-pf {
+  background-color: var(--ln-cream) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='600' viewBox='0 0 600 600'%3E%3Cg opacity='0.06' fill='%231B2A4A'%3E%3C!-- Doc 1 --%3E%3Crect x='50' y='40' width='70' height='90' rx='4' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='60' y1='60' x2='110' y2='60' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='60' y1='72' x2='100' y2='72' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='60' y1='84' x2='105' y2='84' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='60' y1='96' x2='90' y2='96' stroke='%231B2A4A' stroke-width='1.5'/%3E%3C!-- Doc 2 (tilted) --%3E%3Cg transform='translate(220,80) rotate(-8)'%3E%3Crect width='65' height='85' rx='3' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='10' y1='20' x2='55' y2='20' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='32' x2='50' y2='32' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='44' x2='45' y2='44' stroke='%231B2A4A' stroke-width='1.5'/%3E%3C/g%3E%3C!-- Folder --%3E%3Cpath d='M400,60 h25 l8,-12 h30 v70 h-63 z' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3C!-- Scales of justice --%3E%3Cg transform='translate(500,200)'%3E%3Cline x1='0' y1='-30' x2='0' y2='20' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='-25' y1='-25' x2='25' y2='-25' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cpath d='M-25,-25 L-32,-8 h14 z' stroke='%231B2A4A' stroke-width='1' fill='none'/%3E%3Cpath d='M25,-25 L18,-8 h14 z' stroke='%231B2A4A' stroke-width='1' fill='none'/%3E%3Cline x1='-8' y1='20' x2='8' y2='20' stroke='%231B2A4A' stroke-width='2'/%3E%3C/g%3E%3C!-- Clipboard --%3E%3Cg transform='translate(80,250)'%3E%3Crect x='0' y='8' width='55' height='70' rx='4' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Crect x='15' y='0' width='25' height='14' rx='3' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='10' y1='30' x2='45' y2='30' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='42' x2='40' y2='42' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='54' x2='35' y2='54' stroke='%231B2A4A' stroke-width='1.5'/%3E%3C/g%3E%3C!-- Stack of papers --%3E%3Cg transform='translate(300,280)'%3E%3Crect x='4' y='4' width='60' height='80' rx='3' stroke='%231B2A4A' stroke-width='1' fill='none'/%3E%3Crect x='0' y='0' width='60' height='80' rx='3' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='10' y1='18' x2='50' y2='18' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='30' x2='45' y2='30' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='42' x2='48' y2='42' stroke='%231B2A4A' stroke-width='1.5'/%3E%3C/g%3E%3C!-- Magnifying glass --%3E%3Cg transform='translate(480,400)'%3E%3Ccircle cx='0' cy='0' r='18' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='13' y1='13' x2='28' y2='28' stroke='%231B2A4A' stroke-width='2'/%3E%3C/g%3E%3C!-- Gavel --%3E%3Cg transform='translate(150,450)'%3E%3Crect x='-20' y='-8' width='40' height='16' rx='4' stroke='%231B2A4A' stroke-width='1.5' fill='none' transform='rotate(-45)'/%3E%3Cline x1='10' y1='10' x2='35' y2='35' stroke='%231B2A4A' stroke-width='2'/%3E%3Cellipse cx='42' cy='42' rx='12' ry='4' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3C/g%3E%3C!-- Certificate/seal --%3E%3Cg transform='translate(370,470)'%3E%3Crect width='65' height='80' rx='3' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Ccircle cx='32' cy='55' r='12' stroke='%231B2A4A' stroke-width='1.5' fill='none'/%3E%3Cline x1='10' y1='15' x2='55' y2='15' stroke='%231B2A4A' stroke-width='1.5'/%3E%3Cline x1='10' y1='27' x2='50' y2='27' stroke='%231B2A4A' stroke-width='1.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E") !important;
+  background-repeat: repeat !important;
+  font-family: Georgia, 'Times New Roman', 'Palatino Linotype', serif !important;
+  min-height: 100vh;
+}
+
+/* Remove any pseudo-element overlays */
+.login-pf body::before,
+body.login-pf::before {
+  display: none !important;
+}
+
+/* ---------- Main Container — center vertically & horizontally ---------- */
+.login-pf-page {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100vh !important;
+  padding: 20px !important;
+}
+
+#kc-container-wrapper,
+.login-pf .container-fluid,
+.login-pf .container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100vh !important;
+  padding: 20px !important;
+}
+
+/* ---------- Header / Logo ---------- */
+#kc-header {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: none !important;
+  border: none !important;
+}
+
+#kc-header-wrapper {
+  text-align: center;
+  padding: 0 0 28px !important;
+  position: relative;
+  z-index: 1;
+  background: none !important;
+}
+
+/* Logo via pseudo-element */
+#kc-header-wrapper::before {
+  content: '';
+  display: block;
+  width: 260px;
+  height: 60px;
+  margin: 0 auto 12px;
+  background: url('../img/logo.svg') center/contain no-repeat;
+}
+
+/* Hide default header text */
+#kc-header-wrapper {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+}
+
+/* ---------- Single Login Card ---------- */
+/* Reset all nested containers to transparent */
+#kc-content,
+#kc-content-wrapper,
+#kc-form-wrapper,
+#kc-form,
+.card-pf,
+.login-pf .card-pf,
+#kc-login-content {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+}
+
+.login-pf-page {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  max-width: none !important;
+}
+
+/* The ONE card: #kc-form-login is the actual form */
+#kc-form-login {
+  background: var(--ln-white) !important;
+  border: 1px solid var(--ln-gray-light) !important;
+  border-top: 4px solid var(--ln-gold) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ln-shadow-lg) !important;
+  padding: 36px 40px 32px !important;
+  width: 100% !important;
+  max-width: 400px !important;
+  margin: 0 auto !important;
+  box-sizing: border-box !important;
+}
+
+/* Remove ::before gold accent from old card targets */
+.card-pf::before,
+#kc-content-wrapper::before {
+  display: none !important;
+}
+
+/* ---------- Page Title ---------- */
+#kc-page-title,
+h1#kc-page-title {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 1.3rem !important;
+  font-weight: 600 !important;
+  color: var(--ln-navy) !important;
+  text-align: center !important;
+  margin: 0 0 24px 0 !important;
+  padding: 0 !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* ---------- Form Groups ---------- */
+.form-group {
+  margin-bottom: 18px !important;
+}
+
+.form-group label,
+.control-label {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  color: var(--ln-navy) !important;
+  letter-spacing: 0.8px !important;
+  text-transform: uppercase !important;
+  margin-bottom: 5px !important;
+  display: block !important;
+}
+
+/* ---------- Inputs ---------- */
+.form-control,
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.95rem !important;
+  color: var(--ln-text) !important;
+  background: var(--ln-cream) !important;
+  border: 1.5px solid var(--ln-gray-light) !important;
+  border-radius: var(--ln-radius) !important;
+  padding: 11px 14px !important;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.form-control:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus {
+  border-color: var(--ln-gold) !important;
+  box-shadow: 0 0 0 3px var(--ln-gold-muted) !important;
+  background: var(--ln-white) !important;
+  outline: none !important;
+}
+
+.form-control::placeholder {
+  color: var(--ln-gray) !important;
+  font-style: italic !important;
+  opacity: 0.7 !important;
+}
+
+/* ---------- Primary Button (Login) ---------- */
+#kc-login,
+input[type="submit"],
+.btn-primary {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.88rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  color: var(--ln-white) !important;
+  background: var(--ln-navy) !important;
+  border: 2px solid var(--ln-gold) !important;
+  border-radius: var(--ln-radius) !important;
+  padding: 12px 24px !important;
+  width: 100% !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  margin-top: 8px !important;
+}
+
+#kc-login:hover,
+input[type="submit"]:hover,
+.btn-primary:hover {
+  background: var(--ln-gold) !important;
+  color: var(--ln-navy-deep) !important;
+  border-color: var(--ln-gold-light) !important;
+  box-shadow: 0 4px 16px rgba(201, 168, 76, 0.30) !important;
+  transform: translateY(-1px) !important;
+}
+
+#kc-login:active,
+input[type="submit"]:active,
+.btn-primary:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 8px rgba(201, 168, 76, 0.20) !important;
+}
+
+/* ---------- Secondary Links ---------- */
+#kc-registration,
+#kc-form-options,
+.kc-form-options {
+  text-align: center !important;
+  padding: 12px 0 0 !important;
+  max-width: 400px !important;
+  margin: 0 auto !important;
+}
+
+a,
+#kc-registration a,
+.kc-form-options a {
+  color: var(--ln-gold) !important;
+  text-decoration: none !important;
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.84rem !important;
+  transition: color 0.2s ease !important;
+}
+
+a:hover,
+#kc-registration a:hover {
+  color: var(--ln-gold-light) !important;
+  text-decoration: underline !important;
+}
+
+/* ---------- "Remember me" checkbox ---------- */
+.checkbox label,
+.checkbox-inline {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.84rem !important;
+  color: var(--ln-gray) !important;
+}
+
+/* ---------- Alerts / Errors ---------- */
+.alert {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  border-radius: var(--ln-radius) !important;
+  font-size: 0.84rem !important;
+  max-width: 400px !important;
+  margin: 0 auto 16px !important;
+  padding: 10px 16px !important;
+}
+
+.alert-error,
+.alert-danger {
+  background: #FFF5F5 !important;
+  border: 1px solid rgba(192, 57, 43, 0.3) !important;
+  color: var(--ln-error) !important;
+}
+
+.alert-warning {
+  background: #FFFCF0 !important;
+  border: 1px solid rgba(201, 168, 76, 0.4) !important;
+  color: #8B6914 !important;
+}
+
+.alert-info,
+.alert-success {
+  background: #F0F7FF !important;
+  border: 1px solid rgba(27, 42, 74, 0.2) !important;
+  color: var(--ln-navy) !important;
+}
+
+/* ---------- Social Buttons (if any) ---------- */
+#kc-social-providers {
+  padding: 12px 0 0 !important;
+  max-width: 400px !important;
+  margin: 0 auto !important;
+}
+
+#kc-social-providers ul {
+  padding: 0 !important;
+}
+
+.zocial {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  border-radius: var(--ln-radius) !important;
+  border: 1.5px solid var(--ln-gray-light) !important;
+  background: var(--ln-cream) !important;
+  color: var(--ln-text) !important;
+  transition: all 0.2s ease !important;
+}
+
+.zocial:hover {
+  border-color: var(--ln-gold) !important;
+  box-shadow: 0 2px 8px rgba(201, 168, 76, 0.15) !important;
+}
+
+/* ---------- Footer ---------- */
+#kc-info,
+#kc-info-wrapper {
+  text-align: center !important;
+  padding: 20px 0 !important;
+}
+
+#kc-info-wrapper {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-size: 0.75rem !important;
+  color: var(--ln-gray) !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* Footer text under the form */
+#kc-form-login::after {
+  content: 'Acceso seguro · Lex Nova EDMS';
+  display: block;
+  text-align: center;
+  padding-top: 20px;
+  margin-top: 20px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.70rem;
+  color: var(--ln-gray);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-top: 1px solid var(--ln-gray-light);
+}
+
+/* Remove old card footer */
+#kc-content-wrapper::after {
+  display: none !important;
+}
+
+/* ---------- Locale Dropdown ---------- */
+#kc-locale ul {
+  background: var(--ln-white) !important;
+  border: 1px solid var(--ln-gray-light) !important;
+  border-radius: var(--ln-radius) !important;
+  box-shadow: var(--ln-shadow) !important;
+}
+
+#kc-locale a {
+  font-size: 0.82rem !important;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 480px) {
+  #kc-form-login {
+    padding: 28px 24px 24px !important;
+    max-width: calc(100% - 32px) !important;
+    margin: 0 16px !important;
+  }
+
+  #kc-header-wrapper::before {
+    width: 200px;
+    height: 50px;
+  }
+}
+
+/* ---------- Hide Keycloak branding ---------- */
+#kc-logo-wrapper,
+.kc-logo-text {
+  display: none !important;
+}

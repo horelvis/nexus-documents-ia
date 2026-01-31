@@ -63,6 +63,19 @@ class KnowledgeTreeClient(BaseHTTPClient):
             }
 
 
+    async def graph_query(self, cypher: str, graph_name: str, tenant_id: str) -> Dict[str, Any]:
+        payload = {
+            "cypher": cypher,
+            "graph_name": graph_name,
+            "tenant_id": tenant_id,
+        }
+        try:
+            return await self.post_json("/tree/graph/query", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Knowledge tree graph query failed: {e}")
+            return {"results": [], "paths": []}
+
+
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 
 

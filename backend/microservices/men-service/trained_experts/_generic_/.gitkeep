@@ -1,5 +1,0 @@
-# This directory contains generic experts available to all tenants.
-# Each subdirectory should contain a trained LoRA adapter with:
-#   - adapter_config.json
-#   - adapter_model.bin or adapter_model.safetensors
-#   - expert_metadata.json (optional)

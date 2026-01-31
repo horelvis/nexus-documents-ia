@@ -241,7 +241,7 @@ export function WorkflowProgress({
   planId,
   className
 }: WorkflowProgressProps) {
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isExpanded, setIsExpanded] = useState(false)
   const hasSteps = steps.length > 0
 
   // Show thinking indicator until plan is created (has steps)
@@ -272,13 +272,13 @@ export function WorkflowProgress({
             >
               <Sparkles className="h-5 w-5" />
             </motion.div>
-            <div>
+            <div className="min-w-0 flex-1">
               <h4 className="text-sm font-semibold text-foreground">
-                Emma procesando
+                Plan de ejecución
               </h4>
-              <p className="text-xs text-muted-foreground">
-                {currentStep && totalSteps
-                  ? `Paso ${currentStep} de ${totalSteps}`
+              <p className="text-xs text-muted-foreground truncate">
+                {steps.length > 0
+                  ? steps[steps.length - 1].description
                   : "Iniciando análisis..."}
               </p>
             </div>

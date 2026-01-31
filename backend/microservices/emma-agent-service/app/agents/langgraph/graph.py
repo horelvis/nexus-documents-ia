@@ -46,6 +46,7 @@ from .nodes.coordinator import coordinator_node
 from .nodes.plan import plan_node
 from .nodes.synthesize import synthesize_node
 from .nodes.graph_expand import graph_expand_node
+from .nodes.rlm_processor import rlm_plan_node, rlm_map_node, rlm_reduce_node
 from .nodes.router import (
     route_to_agents,
     check_remaining_agents,
@@ -97,6 +98,9 @@ def create_rag_graph(
     workflow.add_node("context_tree", context_tree_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("graph_expand", graph_expand_node)
+    workflow.add_node("rlm_plan", rlm_plan_node)
+    workflow.add_node("rlm_map", rlm_map_node)
+    workflow.add_node("rlm_reduce", rlm_reduce_node)
     workflow.add_node("plan", plan_node)
     workflow.add_node("synthesize", synthesize_node)
 
@@ -137,9 +141,24 @@ def create_rag_graph(
     # context_tree → retrieve
     workflow.add_edge("context_tree", "retrieve")
 
-    # retrieve → graph_expand → plan
+    # retrieve → graph_expand → rlm_plan → (rlm_map | plan | synthesize)
     workflow.add_edge("retrieve", "graph_expand")
-    workflow.add_edge("graph_expand", "plan")
+    workflow.add_edge("graph_expand", "rlm_plan")
+
+    # RLM conditional routing from plan node
+    workflow.add_conditional_edges(
+        "rlm_plan",
+        _route_from_rlm_plan,
+        {
+            "rlm_map": "rlm_map",
+            "plan": "plan",
+            "synthesize": "synthesize",
+        },
+    )
+
+    # RLM map → reduce → synthesize
+    workflow.add_edge("rlm_map", "rlm_reduce")
+    workflow.add_edge("rlm_reduce", "synthesize")
 
     # plan → route_to_agents (conditional)
     workflow.add_conditional_edges(
@@ -203,6 +222,23 @@ def create_rag_graph(
         logger.info("✅ Graph compiled without checkpointing")
 
     return compiled
+
+
+def _route_from_rlm_plan(state: RAGState) -> str:
+    """
+    Route from RLM plan node:
+    - Not activated → plan (normal flow)
+    - Activated + cache hit (agent_results has rlm_agent) → synthesize
+    - Activated + needs processing → rlm_map
+    """
+    if not state.get("rlm_activated"):
+        return "plan"
+    # Cache hit: rlm_plan already populated agent_results
+    if state.get("agent_results", {}).get("rlm_agent"):
+        logger.info("🔄 RLM Plan: Cache hit → skipping to synthesize")
+        return "synthesize"
+    logger.info("🔄 RLM Plan: Activated → proceeding to rlm_map")
+    return "rlm_map"
 
 
 def _route_from_plan(state: RAGState) -> str:

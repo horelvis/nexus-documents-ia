@@ -206,6 +206,45 @@ async def index_structural(request: StructuralIndexRequest, _: bool = Depends(ve
     return StructuralIndexResponse(**result)
 
 
+class GraphQueryRequest(BaseModel):
+    cypher: str = Field(..., description="Cypher query wrapped in AGE SQL syntax")
+    graph_name: str = Field(..., description="Apache AGE graph name")
+    tenant_id: str = Field(..., description="Tenant identifier")
+
+
+class GraphQueryResponse(BaseModel):
+    results: list[Dict[str, Any]] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+
+
+@tree_router.post("/graph/query", response_model=GraphQueryResponse)
+async def graph_query(request: GraphQueryRequest, _: bool = Depends(verify_api_key)):
+    """Execute a Cypher query against Apache AGE for sector-aware entity expansion."""
+    from app.services.age_client import age_client
+
+    await age_client.initialize()
+
+    results: list[Dict[str, Any]] = []
+    paths: list[str] = []
+
+    try:
+        rows = await age_client.execute_cypher(request.cypher)
+        for row in rows:
+            parsed: Dict[str, Any] = {}
+            for key, val in row.items():
+                parsed[key] = str(val).strip('"') if val is not None else None
+            results.append(parsed)
+
+            # Build path string from node-rel-node triples
+            if "n" in parsed and "rel" in parsed and "m" in parsed:
+                paths.append(f"{parsed['n']} --[{parsed['rel']}]--> {parsed['m']}")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Graph query execution failed: {e}")
+
+    return GraphQueryResponse(results=results, paths=paths)
+
+
 @tree_router.get("/graph/document-ids", response_model=DocumentIdsResponse)
 async def graph_document_ids(
     tenant_id: str = Query(..., description="Tenant identifier"),

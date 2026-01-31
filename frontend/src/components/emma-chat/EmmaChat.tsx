@@ -356,8 +356,55 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
             ))
           }
 
+          // Handle slm_thinking events — collect as workflow_steps for reasoning panel
+          if (event.event === 'slm_thinking') {
+            const stepType = data.type || data.slmThinkingStep?.type || 'structural'
+            const stepContent = data.content || data.message || 'Procesando...'
+
+            // Map step type to agent name for icon/color
+            const typeToAgent: Record<string, string> = {
+              'retrieval': 'search',
+              'search': 'search',
+              'observation': 'analysis',
+              'domain_detection': 'reasoning',
+              'agent_selection': 'reasoning',
+              'agent_execution': 'synthesis',
+              'transformation': 'synthesis',
+              'response': 'synthesis',
+              'structural': 'reasoning',
+              'route': 'reasoning',
+            }
+
+            const newStep: WorkflowStep = {
+              index: workflowSteps.length + 1,
+              description: stepContent,
+              agent: typeToAgent[stepType] || 'reasoning',
+              status: 'completed' as const,
+            }
+            workflowSteps = [...workflowSteps, newStep]
+
+            setStreamProgress({
+              message: stepContent,
+              progress: data.progress || 0
+            })
+
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    content: stepContent,
+                    metadata: {
+                      ...msg.metadata,
+                      progress: data.progress,
+                      workflow_steps: [...workflowSteps]
+                    }
+                  }
+                : msg
+            ))
+          }
+
           // Handle other progress events (planning, consolidating, etc.) - fallback
-          if (!['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'delegation', 'token', 'first_token'].includes(event.event) && !data.stage) {
+          if (!['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'delegation', 'token', 'first_token', 'slm_thinking'].includes(event.event) && !data.stage) {
             setStreamProgress({
               message: data.message || `Procesando...`,
               progress: data.progress || 0

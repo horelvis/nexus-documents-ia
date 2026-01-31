@@ -332,7 +332,7 @@ export interface ClarificationOption {
 
 // SSE Event types from backend
 export interface EmmaStreamEvent {
-  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'progress' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available'
+  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'progress' | 'slm_thinking' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available'
   data: {
     message?: string
     progress?: number
@@ -361,6 +361,11 @@ export interface EmmaStreamEvent {
     elapsed_ms?: number
     // Progress stage tracking
     stage?: 'init' | 'loading_document' | 'analyzing' | 'context_preparation' | 'thinking' | 'searching' | 'generating'
+    // slm_thinking event fields
+    content?: string
+    type?: string
+    slmIsThinking?: boolean
+    slmThinkingStep?: { step: number; type: string; content: string; entities?: string[]; confidence?: number }
     // Token streaming fields
     text?: string
     token?: string

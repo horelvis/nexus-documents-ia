@@ -316,11 +316,10 @@ class LLMClient:
             body["tool_choice"] = kwargs.get("tool_choice", "auto")
 
         # Add thinking mode for vLLM with Qwen3 (override per request if provided)
-        if self.config.provider == LLMProvider.VLLM and enable_thinking:
-            body["extra_body"] = {
-                "chat_template_kwargs": {
-                    "enable_thinking": True,
-                }
+        # NOTE: chat_template_kwargs must be at top level, NOT inside extra_body
+        if self.config.provider == LLMProvider.VLLM:
+            body["chat_template_kwargs"] = {
+                "enable_thinking": enable_thinking,
             }
 
         return body
