@@ -34,6 +34,7 @@ AGENT_YAML_MAP = {
     "compliance_agent": "ComplianceAgent",
     "realestate_agent": "RealEstateAgent",
     "education_agent": "EducationAgent",
+    "docgen_agent": "DocGenAgent",
 }
 
 # Domain filter for BOE search (None = no BOE tool, cross-domain agent)
@@ -44,6 +45,7 @@ AGENT_BOE_DOMAIN = {
     "contract_agent": None,
     "compliance_agent": None,
     "education_agent": None,
+    "docgen_agent": None,  # Cross-domain: agent decides BOE domain based on document type
 }
 
 
@@ -53,32 +55,51 @@ def _load_yaml_config() -> Dict[str, Any]:
     if _YAML_CONFIG is not None:
         return _YAML_CONFIG
 
-    config_path = (
-        Path(__file__).parent.parent.parent.parent.parent
-        / "config" / "prompts" / "emma_prompts.yaml"
-    )
+    # Try Docker path first, then local dev path
+    # specialists/ → nodes/ → langgraph/ → agents/ → app/ → emma-agent-service/
+    candidates = [
+        Path("/app/config/prompts/emma_prompts.yaml"),
+        Path(__file__).parent.parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
+    ]
     try:
         import yaml
-        with open(config_path, "r", encoding="utf-8") as f:
-            _YAML_CONFIG = yaml.safe_load(f) or {}
+        for config_path in candidates:
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    _YAML_CONFIG = yaml.safe_load(f) or {}
+                logger.info(f"Loaded emma_prompts.yaml from {config_path}")
+                return _YAML_CONFIG
+        logger.error(f"emma_prompts.yaml not found in: {[str(p) for p in candidates]}")
     except Exception as e:
         logger.error(f"Failed to load emma_prompts.yaml: {e}")
-        _YAML_CONFIG = {}
+    _YAML_CONFIG = {}
     return _YAML_CONFIG
 
 
 def _get_yaml_prompt(agent_name: str) -> str:
-    """Load system_message from autogen_agents[YamlName] in emma_prompts.yaml."""
+    """Load system_message from emma_prompts.yaml.
+
+    Searches in multiple YAML sections since agents may be defined under
+    autogen_agents or planning_agents (e.g., DocGenAgent lives in planning_agents).
+    """
     yaml_key = AGENT_YAML_MAP.get(agent_name)
     if not yaml_key:
         return ""
 
     config = _load_yaml_config()
-    agents = config.get("autogen_agents", {})
-    agent_config = agents.get(yaml_key, {})
-    prompt = agent_config.get("system_message", "")
-    # Truncate to ~2000 chars (consistent with DynamicPromptLoader)
-    return prompt[:2000] if prompt else ""
+
+    # Search in multiple sections where agents may be defined
+    for section in ("autogen_agents", "planning_agents", "agent_config"):
+        agents = config.get(section, {})
+        agent_config = agents.get(yaml_key, {})
+        prompt = agent_config.get("system_message", "")
+        if prompt:
+            logger.debug(f"Found prompt for {agent_name} in YAML section '{section}'")
+            # Truncate to ~2000 chars (consistent with DynamicPromptLoader)
+            return prompt[:2000]
+
+    logger.warning(f"No prompt found for {yaml_key} in any YAML section")
+    return ""
 
 
 # BOE search tool schema (reused from legal.py pattern)
@@ -165,3 +186,4 @@ contract_node = _create_domain_node("contract_agent")
 compliance_node = _create_domain_node("compliance_agent")
 realestate_node = _create_domain_node("realestate_agent")
 education_node = _create_domain_node("education_agent")
+docgen_node = _create_domain_node("docgen_agent")

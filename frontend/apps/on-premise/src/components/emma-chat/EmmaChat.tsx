@@ -6,11 +6,14 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { useEmmaService, classifyError, EmmaStreamEvent } from '@/lib/services/emma.service'
 import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent } from '@/lib/services/verified-generation.service'
+import { queryPredictiveStream, PredictiveStreamEvent } from '@/lib/services/predictive-analysis.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { PDFPreviewModal } from './PDFPreviewModal'
 import { VerifiedGenerationDialog } from './VerifiedGenerationDialog'
-import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata } from '@/lib/types/emma'
+import { PredictiveAnalysisDialog } from './PredictiveAnalysisDialog'
+import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata } from '@/lib/types/emma'
+import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
@@ -126,6 +129,11 @@ export function EmmaChat({
   const [verifiedDialogOpen, setVerifiedDialogOpen] = useState(false)
   const [verifiedJobs, setVerifiedJobs] = useState<Record<string, VerifiedGenerationMetadata>>({})
   const verifiedJobsRef = useRef<Record<string, VerifiedGenerationMetadata>>({})
+
+  // Predictive analysis queue state
+  const [predictiveDialogOpen, setPredictiveDialogOpen] = useState(false)
+  const [predictiveJobs, setPredictiveJobs] = useState<Record<string, PredictiveAnalysisMetadata>>({})
+  const predictiveJobsRef = useRef<Record<string, PredictiveAnalysisMetadata>>({})
 
   // Retain uploaded file IDs across follow-up queries in the same session
   const sessionUploadIdsRef = useRef<string[]>([])
@@ -606,6 +614,38 @@ export function EmmaChat({
                     ? backendSuggestions
                     : getContextualSuggestions(query, finalContent, (data.final_result as any)?.tools_used)
 
+                  // Detect document generation results (logic in docgen-detector.ts)
+                  if (isDocGenResult({
+                    query,
+                    content: finalContent,
+                    toolsUsed: (data.final_result as any)?.tools_used,
+                    domains: (data as any).domains,
+                  })) {
+                    return {
+                      ...msg,
+                      type: 'docgen_result' as const,
+                      content: finalContent,
+                      docgen: extractDocGenMetadata(query, finalContent, data.execution_time_ms),
+                      metadata: {
+                        confidence_score:
+                          (data.final_result as any)?.confidence_score || 0.7,
+                        processing_time: data.execution_time_ms,
+                        execution_time_ms: data.execution_time_ms,
+                        decision_path:
+                          (data.final_result as any)?.decision_path || [],
+                        tools_used: (data.final_result as any)?.tools_used || [],
+                        agent_flow: workflowSteps.map((s) => s.agent),
+                        workflow_steps: workflowSteps.length > 0 ? [...workflowSteps] : msg.metadata?.workflow_steps,
+                        suggestions: finalSuggestions,
+                        isStreaming: false,
+                        documents: documentSources.length > 0 ? documentSources : undefined,
+                        slmThinkingSteps: finalSlmSteps.length > 0 ? finalSlmSteps : undefined,
+                        slmIsThinking: false,
+                      },
+                      suggestions: finalSuggestions,
+                    }
+                  }
+
                   return {
                     ...msg,
                     type: 'result' as const,
@@ -838,6 +878,7 @@ export function EmmaChat({
               total_claims: event.data.total_claims_generated ?? 0,
               execution_time_ms: event.data.execution_time_ms,
               average_confidence: event.data.average_confidence,
+              sources: event.data.sources,
             }
 
             updateMessages((prev) => [...prev, {
@@ -878,6 +919,7 @@ export function EmmaChat({
                   status: claimUpdate.status || 'generating',
                   confidence: claimUpdate.confidence,
                   evidence_count: claimUpdate.evidence_count,
+                  original_text: claimUpdate.original_text,
                 }]
               }
 
@@ -914,6 +956,243 @@ export function EmmaChat({
 
       } catch (outerErr) {
         console.error('[VerifiedGeneration] Unexpected error:', outerErr)
+      }
+    },
+    [user, tenantId, sessionId, login, updateMessages, uploadTempDocument]
+  )
+
+  // Handle predictive analysis (non-blocking dialog)
+  const handlePredictiveAnalysis = useCallback(
+    async (caseDescription: string, attachments?: Attachment[]) => {
+      if (!user?.id || !tenantId) return
+
+      if (!hasValidToken()) {
+        setError('Tu sesión ha expirado. Por favor inicia sesión nuevamente.')
+        setTimeout(() => login(), 1500)
+        return
+      }
+
+      try {
+        const userMessage: EmmaMessage = {
+          id: Date.now().toString(),
+          type: 'user',
+          content: `/predecir ${caseDescription}`,
+          timestamp: new Date(),
+          metadata: attachments && attachments.length > 0 ? {
+            documents: attachments.map((a) => ({
+              name: a.name,
+              id: a.type === 'indexed' ? a.documentId : a.id,
+              fileType: a.fileType,
+            })),
+          } : undefined,
+        }
+
+        const predictiveMessageId = (Date.now() + 1).toString()
+        const initialPredictive: PredictiveAnalysisMetadata = {
+          session_id: sessionId,
+          tenant_id: tenantId || undefined,
+          case_description: caseDescription,
+          factors: [],
+          current_phase: 'extracting',
+          weighted_count: 0,
+          rejected_count: 0,
+          total_factors: 0,
+        }
+
+        updateMessages((prev) => [...prev, userMessage])
+        setError(null)
+
+        const jobId = predictiveMessageId
+        const updateJob = (updater: (prev: PredictiveAnalysisMetadata) => PredictiveAnalysisMetadata) => {
+          setPredictiveJobs((prev) => {
+            const current = prev[jobId]
+            if (!current) return prev
+            const next = updater(current)
+            const updated = { ...prev, [jobId]: next }
+            predictiveJobsRef.current = updated
+            return updated
+          })
+        }
+        const removeJob = () => {
+          setPredictiveJobs((prev) => {
+            const { [jobId]: _, ...rest } = prev
+            predictiveJobsRef.current = rest
+            return rest
+          })
+        }
+
+        setPredictiveJobs((prev) => {
+          const updated = { ...prev, [jobId]: initialPredictive }
+          predictiveJobsRef.current = updated
+          return updated
+        })
+        setPredictiveDialogOpen(true)
+
+        // Upload files
+        const uploadedDocs = attachments?.filter((a) => a.type === 'upload') || []
+        let uploadedFileIds: string[] = []
+        if (uploadedDocs.length > 0) {
+          try {
+            const uploadResults = await Promise.all(
+              uploadedDocs.map(async (doc) => {
+                const result = await uploadTempDocument(doc.file)
+                return result.upload_id
+              })
+            )
+            uploadedFileIds = uploadResults
+            sessionUploadIdsRef.current = [...new Set([...sessionUploadIdsRef.current, ...uploadedFileIds])]
+          } catch (err) {
+            console.error('Failed to upload documents for prediction:', err)
+          }
+        }
+
+        if (uploadedFileIds.length === 0 && sessionUploadIdsRef.current.length > 0) {
+          uploadedFileIds = sessionUploadIdsRef.current
+        }
+
+        const contextDocIds = attachments
+          ?.filter((a) => a.type === 'indexed')
+          .map((a) => a.documentId) || []
+
+        try {
+          for await (const event of queryPredictiveStream({
+            case_description: caseDescription,
+            tenant_id: tenantId,
+            session_id: sessionId,
+            context_document_ids: contextDocIds.length > 0 ? contextDocIds : undefined,
+            uploaded_file_ids: uploadedFileIds.length > 0 ? uploadedFileIds : undefined,
+          })) {
+            console.log('[Predictive] SSE event:', event.event_type, event.factor_id)
+
+            if (event.event_type === 'prediction_complete') {
+              const jobFactors = predictiveJobsRef.current[jobId]?.factors || []
+              removeJob()
+
+              const finalPredictive: PredictiveAnalysisMetadata = {
+                ...initialPredictive,
+                factors: jobFactors,
+                current_phase: 'complete',
+                weighted_count: event.data.factors_weighted ?? 0,
+                rejected_count: event.data.factors_rejected ?? 0,
+                total_factors: event.data.total_factors ?? jobFactors.length,
+                probability: event.data.probability,
+                primary_outcome: event.data.primary_outcome,
+                outcome_probabilities: event.data.outcome_probabilities
+                  ? Object.fromEntries(
+                      Object.entries(event.data.outcome_probabilities).map(
+                        ([k, v]: [string, any]) => [k, typeof v === 'object' && v !== null ? v.probability : v]
+                      )
+                    )
+                  : undefined,
+                recommendation: event.data.recommendation,
+                disclaimer: event.data.disclaimer,
+                execution_time_ms: event.data.execution_time_ms,
+              }
+
+              updateMessages((prev) => [...prev, {
+                id: predictiveMessageId,
+                type: 'predictive_result' as const,
+                content: event.data.recommendation || '',
+                timestamp: new Date(),
+                predictive: finalPredictive,
+              }])
+              return
+            }
+
+            if (event.event_type === 'error') {
+              removeJob()
+              updateMessages((prev) => [...prev, {
+                id: predictiveMessageId,
+                type: 'error' as const,
+                content: event.data.error || 'Error en análisis predictivo',
+                timestamp: new Date(),
+              }])
+              return
+            }
+
+            // Update factors in the job
+            if (event.factor_id) {
+              updateJob((prev) => {
+                const existingIdx = prev.factors.findIndex((f) => f.factor_id === event.factor_id)
+                let newFactors: PredictiveFactorInfo[]
+
+                const factorUpdate: Partial<PredictiveFactorInfo> = {
+                  factor_id: event.factor_id!,
+                }
+
+                if (event.event_type === 'factor_extracted') {
+                  factorUpdate.factor_number = event.data.factor_number || prev.factors.length + 1
+                  factorUpdate.total_expected = event.data.total_expected || 0
+                  factorUpdate.factor_type = event.data.factor_type || ''
+                  factorUpdate.description = event.data.description || ''
+                  factorUpdate.status = 'extracting'
+                } else if (event.event_type === 'factor_verification_started') {
+                  factorUpdate.status = 'verifying'
+                } else if (event.event_type === 'factor_weighted') {
+                  factorUpdate.status = 'weighted'
+                  factorUpdate.weight = event.data.weight
+                  factorUpdate.confidence = event.data.confidence
+                  factorUpdate.outcome = event.data.outcome
+                  factorUpdate.evidence_count = event.data.evidence_count
+                } else if (event.event_type === 'factor_rejected') {
+                  factorUpdate.status = 'rejected'
+                }
+
+                if (existingIdx >= 0) {
+                  newFactors = prev.factors.map((f, i) =>
+                    i === existingIdx ? { ...f, ...factorUpdate } : f
+                  )
+                } else {
+                  newFactors = [...prev.factors, {
+                    factor_id: factorUpdate.factor_id!,
+                    factor_number: factorUpdate.factor_number || prev.factors.length + 1,
+                    total_expected: factorUpdate.total_expected || 0,
+                    factor_type: factorUpdate.factor_type || '',
+                    description: factorUpdate.description || '',
+                    status: factorUpdate.status || 'extracting',
+                    weight: factorUpdate.weight,
+                    confidence: factorUpdate.confidence,
+                    outcome: factorUpdate.outcome,
+                    evidence_count: factorUpdate.evidence_count,
+                  }]
+                }
+
+                const weightedCount = newFactors.filter(f => f.status === 'weighted').length
+                const rejectedCount = newFactors.filter(f => f.status === 'rejected').length
+                const totalExpected = factorUpdate.total_expected || prev.total_factors || newFactors.length
+                const hasVerifying = newFactors.some(f => f.status === 'verifying')
+
+                return {
+                  ...prev,
+                  factors: newFactors,
+                  weighted_count: weightedCount,
+                  rejected_count: rejectedCount,
+                  total_factors: totalExpected,
+                  current_phase: hasVerifying ? 'verifying' as const : 'extracting' as const,
+                }
+              })
+            }
+
+            if (event.event_type === 'synthesis_started') {
+              updateJob((prev) => ({ ...prev, current_phase: 'synthesizing' as const }))
+            }
+          }
+
+          // Stream ended without prediction_complete
+          removeJob()
+        } catch (err) {
+          console.error('Predictive analysis failed:', err)
+          const classifiedError = classifyError(err)
+          removeJob()
+          updateMessages((prev) => [...prev, {
+            id: predictiveMessageId,
+            type: 'error' as const,
+            content: classifiedError.message,
+            timestamp: new Date(),
+          }])
+        }
+      } catch (outerErr) {
+        console.error('[PredictiveAnalysis] Unexpected error:', outerErr)
       }
     },
     [user, tenantId, sessionId, login, updateMessages, uploadTempDocument]
@@ -1089,6 +1368,7 @@ export function EmmaChat({
         <EmmaQueryInput
           onSendQuery={handleSendQuery}
           onVerifiedGeneration={handleVerifiedGeneration}
+          onPredictiveAnalysis={handlePredictiveAnalysis}
           isLoading={isLoading}
           disabled={!user?.id}
           placeholder="Pregúntame sobre tus documentos..."
@@ -1108,6 +1388,13 @@ export function EmmaChat({
         open={verifiedDialogOpen}
         onOpenChange={setVerifiedDialogOpen}
         jobs={verifiedJobs}
+      />
+
+      {/* Predictive Analysis Dialog */}
+      <PredictiveAnalysisDialog
+        open={predictiveDialogOpen}
+        onOpenChange={setPredictiveDialogOpen}
+        jobs={predictiveJobs}
       />
     </div>
   )

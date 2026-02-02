@@ -13,6 +13,8 @@ import { EmmaMarkdown } from './EmmaMarkdown'
 import { DocumentDisplay } from './DocumentDisplay'
 import { ReasoningCollapsible } from './ReasoningCollapsible'
 import { VerifiedDocumentResult } from './VerifiedDocumentResult'
+import { PredictionResult } from './PredictionResult'
+import { DocGenResult } from './DocGenResult'
 
 interface EmmaRenderChatProps {
   messages: EmmaMessage[]
@@ -124,6 +126,100 @@ function MessageBubble({
   // Verified generation result
   if (message.type === 'verified_result' && message.verified) {
     return <VerifiedDocumentResult content={message.content} verified={message.verified} />
+  }
+
+  // Predictive analysis result
+  if (message.type === 'predictive_result' && message.predictive) {
+    return <PredictionResult metadata={message.predictive} />
+  }
+
+  // Document generation result — wrapped with EMMA label + reasoning steps
+  if (message.type === 'docgen_result' && message.docgen) {
+    const docgenSlmSteps = message.metadata?.slmThinkingSteps || []
+    return (
+      <div className="w-full">
+        <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+          {/* EMMA label */}
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">
+              EMMA:
+            </span>
+          </div>
+
+          {/* Reasoning steps (if any) */}
+          {docgenSlmSteps.length > 0 && (
+            <ReasoningCollapsible
+              steps={docgenSlmSteps.map((s: SLMThinkingStep) => ({
+                type: s.type as ReasoningStep['type'],
+                content: s.content,
+                entities: s.entities,
+                confidence: s.confidence,
+              }))}
+            />
+          )}
+
+          {/* Document generation card */}
+          <DocGenResult metadata={message.docgen} />
+
+          {/* Suggestions */}
+          {message.suggestions && message.suggestions.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-3 border-t border-border/50">
+              {message.suggestions.map((suggestion, idx) => (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSuggestionClick?.(suggestion)}
+                  className="text-xs h-7 font-mono"
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Footer */}
+          {onFeedback && (
+            <div className="flex items-center justify-between pt-2 border-t border-primary/10">
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {message.timestamp.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {message.metadata?.execution_time_ms && (
+                  <span className="ml-2 text-emerald-500">
+                    {message.metadata.execution_time_ms < 1000
+                      ? `${Math.round(message.metadata.execution_time_ms)}ms`
+                      : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`}
+                  </span>
+                )}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-emerald-500"
+                  onClick={() => onFeedback(message.id, 'positive')}
+                  title="Respuesta útil"
+                >
+                  <IconThumbUp className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-destructive"
+                  onClick={() => onFeedback(message.id, 'negative')}
+                  title="Respuesta no útil"
+                >
+                  <IconThumbDown className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   // Progress message with workflow steps

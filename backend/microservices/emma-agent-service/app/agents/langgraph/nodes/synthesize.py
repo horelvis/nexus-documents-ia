@@ -21,7 +21,8 @@ Design Decisions:
 import json
 import logging
 import time
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage
 
@@ -30,17 +31,61 @@ from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
 
-# Synthesis System Prompt
-SYNTHESIS_PROMPT = """Eres Emma, asistente de IA para gestión documental.
+# ─── Sector generation prompt loader (cached) ────────────────────────────────
+_SECTOR_PROMPTS_CACHE: Optional[Dict] = None
+
+
+def _load_sector_prompts() -> Dict:
+    """Load sector prompts from emma_prompts.yaml (cached)."""
+    global _SECTOR_PROMPTS_CACHE
+    if _SECTOR_PROMPTS_CACHE is not None:
+        return _SECTOR_PROMPTS_CACHE
+
+    candidates = [
+        Path("/app/config/prompts/emma_prompts.yaml"),
+        Path(__file__).parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                import yaml
+                with open(p, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                _SECTOR_PROMPTS_CACHE = data.get("sectors", {})
+                return _SECTOR_PROMPTS_CACHE
+            except Exception as e:
+                logger.warning(f"Failed to load sector prompts: {e}")
+
+    _SECTOR_PROMPTS_CACHE = {}
+    return _SECTOR_PROMPTS_CACHE
+
+
+def _get_sector_generation_prompt(state: RAGState) -> str:
+    """Get the sector generation_prompt from state's sector_config."""
+    sector_config = state.get("sector_config")
+    if not sector_config:
+        return ""
+
+    prompt_key = sector_config.get("system_prompt_key", "")
+    if not prompt_key:
+        return ""
+
+    sector_key = prompt_key.replace("sectors.", "")
+    prompts = _load_sector_prompts()
+    return prompts.get(sector_key, {}).get("generation_prompt", "")
+
+# Synthesis System Prompt — fallback when YAML system_prompts.synthesis is absent
+_SYNTHESIS_PROMPT_FALLBACK = """Eres Emma, asistente de IA especializada en gestión documental y derecho español.
 
 Tu tarea es sintetizar las respuestas de múltiples agentes especializados en una respuesta coherente y completa.
 
 Directrices de síntesis:
-1. **Coherencia**: Combina la información de forma lógica y fluida
-2. **Completitud**: Incluye todos los puntos relevantes de cada agente
-3. **Citas**: Mantén las referencias legales y citas de documentos
-4. **Conflictos**: Si hay información contradictoria, señálalo
-5. **Claridad**: Usa un lenguaje claro y accesible
+1. **Conocimiento propio + documentos**: Utiliza los documentos recuperados como APOYO y VERIFICACIÓN, no como fuente exclusiva. Si tu conocimiento jurídico es más completo o preciso que los fragmentos recuperados, prioriza tu conocimiento e indica las fuentes legislativas correspondientes. Los documentos recuperados pueden ser parciales o tangencialmente relacionados.
+2. **Coherencia**: Combina la información de forma lógica y fluida
+3. **Completitud**: Incluye todos los puntos relevantes de cada agente
+4. **Citas legales**: Cita siempre la legislación aplicable (ley, artículo, real decreto) aunque no aparezca literalmente en los documentos recuperados
+5. **Conflictos**: Si hay información contradictoria entre documentos y tu conocimiento, prioriza la legislación vigente y señala la discrepancia
+6. **Claridad**: Usa un lenguaje claro y accesible
 
 Formato de respuesta:
 - Respuesta principal (sin encabezados para respuestas cortas)
@@ -48,6 +93,17 @@ Formato de respuesta:
 - Lista de fuentes al final si hay citas específicas
 
 Responde SIEMPRE en español."""
+
+
+def _get_synthesis_prompt(state: Optional[RAGState] = None) -> str:
+    """Load synthesis prompt from YAML via PromptEngine, with fallback."""
+    if state:
+        from ..prompt_engine import get_prompt_engine
+        engine = get_prompt_engine()
+        prompt = engine.render_system_prompt("synthesis", state)
+        if prompt:
+            return prompt
+    return _SYNTHESIS_PROMPT_FALLBACK
 
 
 async def synthesize_node(state: RAGState) -> Dict[str, Any]:
@@ -125,14 +181,32 @@ async def synthesize_node(state: RAGState) -> Dict[str, Any]:
 
     # Synthesize results
     try:
-        if len(agent_results) == 1:
-            # Single agent - use directly with minor formatting
-            final_answer = _format_single_result(agent_results, retrieved_docs)
-        else:
-            # Multiple agents - use LLM synthesis
-            final_answer = await _llm_synthesis(
-                query, agent_results, retrieved_docs
+        # Document generation: passthrough docgen_agent output without re-synthesis.
+        # Re-processing a generated legal document through the synthesis LLM would
+        # summarize/compress it, losing clauses, formatting, and legal references.
+        if "docgen_agent" in agent_results:
+            docgen_result = agent_results["docgen_agent"]
+            docgen_output = (
+                docgen_result.get("output", "")
+                if isinstance(docgen_result, dict)
+                else docgen_result.output
             )
+            if docgen_output and len(docgen_output.strip()) > 100:
+                logger.info("📄 SYNTHESIZE: Passthrough docgen_agent output (no re-synthesis)")
+                final_answer = docgen_output
+            else:
+                # Docgen produced empty/short output — fall through to normal synthesis
+                final_answer = None
+        else:
+            final_answer = None
+
+        if final_answer is None:
+            if len(agent_results) == 1:
+                # Single agent - use directly with minor formatting
+                final_answer = _format_single_result(agent_results, retrieved_docs)
+            else:
+                # Multiple agents - concatenate with headers (no LLM re-synthesis)
+                final_answer = _concatenate_with_headers(agent_results, retrieved_docs)
 
         # Extract sources
         sources = _extract_sources(agent_results, retrieved_docs)
@@ -188,12 +262,20 @@ def _format_single_result(
 
     output = result.get("output", "") if isinstance(result, dict) else result.output
 
-    # Add sources if available
+    # Add sources if available (deduplicated by title)
     sources = result.get("sources", []) if isinstance(result, dict) else result.sources
     if sources:
-        output += "\n\n**Fuentes**:\n"
-        for source in sources[:5]:
-            output += f"- {source}\n"
+        seen = set()
+        unique_sources = []
+        for source in sources:
+            title = source if isinstance(source, str) else source.get("title", str(source))
+            if title not in seen:
+                seen.add(title)
+                unique_sources.append(title)
+        if unique_sources:
+            output += "\n\n**Fuentes**:\n"
+            for source in unique_sources[:5]:
+                output += f"- {source}\n"
 
     return output
 
@@ -212,10 +294,47 @@ def _concatenate_results(agent_results: Dict[str, AgentResult]) -> str:
     return "\n\n".join(parts)
 
 
+def _concatenate_with_headers(
+    agent_results: Dict[str, AgentResult],
+    retrieved_docs: List[Dict],
+) -> str:
+    """Concatenate multi-agent results with headers and sources (no LLM call).
+
+    This replaces LLM-based synthesis for multi-agent results, avoiding
+    the latency and potential summarisation/compression of specialist outputs.
+    """
+    parts = []
+
+    for agent_name, result in agent_results.items():
+        output = result.get("output", "") if isinstance(result, dict) else result.output
+        if not output:
+            continue
+        display_name = agent_name.replace("_agent", "").replace("_", " ").title()
+        parts.append(f"## {display_name}\n\n{output}")
+
+    combined = "\n\n---\n\n".join(parts)
+
+    # Append deduplicated sources
+    seen_titles: set[str] = set()
+    source_lines: list[str] = []
+    for result in agent_results.values():
+        sources = result.get("sources", []) if isinstance(result, dict) else result.sources
+        for src in sources:
+            title = src if isinstance(src, str) else src.get("title", str(src))
+            if title not in seen_titles:
+                seen_titles.add(title)
+                source_lines.append(f"- {title}")
+    if source_lines:
+        combined += "\n\n**Fuentes**:\n" + "\n".join(source_lines[:8])
+
+    return combined
+
+
 async def _llm_synthesis(
     query: str,
     agent_results: Dict[str, AgentResult],
     retrieved_docs: List[Dict],
+    state: Optional[RAGState] = None,
 ) -> str:
     """
     Use LLM to synthesize multiple agent results.
@@ -225,7 +344,9 @@ async def _llm_synthesis(
     """
     try:
         from app.agents.llm_client import get_llm_client
+        from app.core.config import Settings
 
+        settings = Settings()
         llm_client = await get_llm_client()
 
         # Build synthesis prompt
@@ -257,15 +378,23 @@ async def _llm_synthesis(
 
 Por favor, sintetiza esta información en una respuesta coherente y completa."""
 
+        # Inject sector-specific generation prompt if available
+        synthesis_prompt = _get_synthesis_prompt(state)
+        if state:
+            gen_prompt = _get_sector_generation_prompt(state)
+            if gen_prompt:
+                synthesis_prompt += f"\n\nDirectrices específicas del sector:\n{gen_prompt.strip()}"
+                logger.info("🏷️ SYNTHESIZE: Injected sector generation prompt")
+
         messages = [
-            {"role": "system", "content": SYNTHESIS_PROMPT},
+            {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": user_message},
         ]
 
         response = await llm_client.chat(
             messages=messages,
-            temperature=0.3,
-            max_tokens=2048,
+            temperature=settings.agent_temperature,
+            max_tokens=settings.agent_max_tokens,
         )
 
         if response and response.content:
@@ -300,17 +429,24 @@ def _extract_sources(
                     sources.append(source)
                     seen_ids.add(source_id)
 
-    # From retrieved docs (if not already cited)
-    for doc in retrieved_docs[:5]:
+    # From retrieved docs (deduplicated by title to avoid showing
+    # multiple chunks of the same document as separate sources)
+    seen_titles = set()
+    for doc in retrieved_docs:
+        title = doc.get("title", "Documento")
         doc_id = doc.get("id", "")
-        if doc_id and doc_id not in seen_ids:
-            sources.append({
-                "id": doc_id,
-                "title": doc.get("title", "Documento"),
-                "type": "retrieved",
-                "score": doc.get("score", 0.0),
-            })
-            seen_ids.add(doc_id)
+        if title in seen_titles:
+            continue
+        if doc_id in seen_ids:
+            continue
+        sources.append({
+            "id": doc_id,
+            "title": title,
+            "type": "retrieved",
+            "score": doc.get("score", 0.0),
+        })
+        seen_ids.add(doc_id)
+        seen_titles.add(title)
 
     return sources
 

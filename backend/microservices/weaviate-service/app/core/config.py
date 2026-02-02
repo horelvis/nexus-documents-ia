@@ -38,14 +38,13 @@ class Settings(BaseSettings):
     # NOTE: Using vllm-qwen3vl image (vLLM + transformers 4.57+) for Qwen3 support
     llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
 
-    # vLLM configuration (PRIMARY - high-throughput GPU inference)
-    # Model: Qwen3-4B-Thinking-2507 - Extended reasoning with automatic thinking mode
-    # Features: Automatic <think>...</think> blocks, 256K native context (32K recommended)
-    # VRAM: ~10GB (coexists with Qwen3-VL-Embedding-2B at ~5GB = ~15GB total)
-    # Docs: https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507
+    # vLLM configuration (PRIMARY - legal domain GPU inference)
+    # Model: horelvis/boe-legal-qwen-7b - Fine-tuned for Spanish legal domain (BOE)
+    # Features: Superior legal reasoning, legislation cross-references
+    # VRAM: ~4GB INT4 bitsandbytes (coexists with BGE-M3 at ~2GB = ~6GB total)
     vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507")
+    vllm_model: str = os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b")
     vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "4096"))
     vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))  # Recommended for thinking mode
     # Thinking mode settings

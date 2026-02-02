@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck } from '@tabler/icons-react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck, IconChartBar } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -15,9 +15,15 @@ import { Attachment, UploadedAttachment, ATTACHMENT_LIMITS } from '@/lib/types/e
 import { IndexedDocsPicker } from './IndexedDocsPicker'
 import { AttachmentPreviewStrip } from './AttachmentPreviewStrip'
 
+const SLASH_COMMANDS = [
+  { command: '/verificar ', label: 'Verificar documento', description: 'Verifica cada afirmación contra tus documentos', icon: IconFileCheck, color: 'emerald' as const },
+  { command: '/predecir ', label: 'Análisis predictivo', description: 'Analiza un documento y predice posibles resultados', icon: IconChartBar, color: 'blue' as const },
+]
+
 interface EmmaQueryInputProps {
   onSendQuery: (query: string, attachments?: Attachment[]) => Promise<void>
   onVerifiedGeneration?: (topic: string, attachments?: Attachment[]) => void
+  onPredictiveAnalysis?: (caseDescription: string, attachments?: Attachment[]) => void
   isLoading?: boolean
   disabled?: boolean
   placeholder?: string
@@ -28,6 +34,7 @@ interface EmmaQueryInputProps {
 export function EmmaQueryInput({
   onSendQuery,
   onVerifiedGeneration,
+  onPredictiveAnalysis,
   isLoading = false,
   disabled = false,
   placeholder = 'Pregúntame sobre tus documentos...',
@@ -39,22 +46,26 @@ export function EmmaQueryInput({
   const [isIndexedPickerOpen, setIsIndexedPickerOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Filtered slash commands based on current input
+  const filteredCommands = useMemo(() => {
+    if (!query.startsWith('/')) return []
+    return SLASH_COMMANDS.filter(c => c.command.startsWith(query))
+  }, [query])
 
   // Focus textarea when loading completes
   useEffect(() => {
     if (textareaRef.current && !disabled && !isLoading) {
-      // Small delay to ensure DOM is ready after state updates
       const timer = setTimeout(() => {
         textareaRef.current?.focus()
-        console.log('[EmmaQueryInput] Focus restored after loading')
       }, 50)
       return () => clearTimeout(timer)
     }
   }, [disabled, isLoading])
-
-  const isVerificarCommand = query.trimStart().startsWith('/verificar ')
 
   const handleSubmit = async () => {
     if ((!query.trim() && attachments.length === 0) || isLoading || disabled) return
@@ -64,6 +75,7 @@ export function EmmaQueryInput({
 
     setQuery('')
     setAttachments([])
+    setSlashMenuOpen(false)
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -75,6 +87,17 @@ export function EmmaQueryInput({
       if (topic) {
         Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
           console.error('[EmmaQueryInput] Verified generation error:', err)
+        })
+        return
+      }
+    }
+
+    // Detect /predecir command
+    if (queryToSend.startsWith('/predecir ') && onPredictiveAnalysis) {
+      const caseDesc = queryToSend.slice('/predecir '.length).trim()
+      if (caseDesc) {
+        Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+          console.error('[EmmaQueryInput] Predictive analysis error:', err)
         })
         return
       }
@@ -92,13 +115,56 @@ export function EmmaQueryInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-    // Call as void but catch any promise rejection to prevent unhandled errors
     Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
       console.error('[EmmaQueryInput] Verified generation error:', err)
     })
   }
 
+  const handlePredictiveClick = () => {
+    if (isLoading || disabled || !onPredictiveAnalysis) return
+    const caseDesc = query.trim() || 'Analiza los documentos adjuntos y genera una predicción'
+    const attachmentsToSend = [...attachments]
+    setQuery('')
+    setAttachments([])
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+    Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+      console.error('[EmmaQueryInput] Predictive analysis error:', err)
+    })
+  }
+
+  const selectSlashCommand = (cmd: typeof SLASH_COMMANDS[0]) => {
+    setQuery(cmd.command)
+    setSlashMenuOpen(false)
+    textareaRef.current?.focus()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Slash menu navigation
+    if (slashMenuOpen && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashMenuIndex(i => Math.min(i + 1, filteredCommands.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashMenuIndex(i => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        selectSlashCommand(filteredCommands[slashMenuIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashMenuOpen(false)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
@@ -106,7 +172,18 @@ export function EmmaQueryInput({
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setQuery(e.target.value)
+    const text = e.target.value
+    setQuery(text)
+
+    // Slash menu logic
+    if (text.startsWith('/') && text.length <= 12) {
+      const filtered = SLASH_COMMANDS.filter(c => c.command.startsWith(text))
+      setSlashMenuOpen(filtered.length > 0)
+      setSlashMenuIndex(0)
+    } else {
+      setSlashMenuOpen(false)
+    }
+
     const textarea = e.target
     textarea.style.height = 'auto'
     const newHeight = Math.min(Math.max(textarea.scrollHeight, 52), 200)
@@ -114,7 +191,6 @@ export function EmmaQueryInput({
   }
 
   const handleLocalUpload = () => {
-    // Close dropdown first, then trigger file input
     setIsDropdownOpen(false)
     setTimeout(() => {
       fileInputRef.current?.click()
@@ -122,7 +198,6 @@ export function EmmaQueryInput({
   }
 
   const handleOpenIndexedPicker = () => {
-    // Close dropdown first, then open dialog
     setIsDropdownOpen(false)
     setTimeout(() => {
       setIsIndexedPickerOpen(true)
@@ -170,7 +245,6 @@ export function EmmaQueryInput({
     }
 
     e.target.value = ''
-    // Restore focus to textarea after file selection
     setTimeout(() => {
       textareaRef.current?.focus()
     }, 100)
@@ -183,7 +257,6 @@ export function EmmaQueryInput({
       return [...prev, ...unique].slice(0, maxAttachments)
     })
     setIsIndexedPickerOpen(false)
-    // Restore focus to textarea after dialog closes
     setTimeout(() => {
       textareaRef.current?.focus()
     }, 100)
@@ -197,9 +270,10 @@ export function EmmaQueryInput({
   const existingAttachmentIds = attachments.map((a) => a.id)
   const hasContent = query.trim().length > 0 || attachments.length > 0
   const canAddMore = attachments.length < maxAttachments
+  const actionsDisabled = isLoading || disabled
 
   return (
-    <div className={cn('space-y-3', className)}>
+    <div className={cn('space-y-2', className)}>
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -227,6 +301,37 @@ export function EmmaQueryInput({
 
       {/* Input container */}
       <div className="relative">
+        {/* Slash command menu */}
+        {slashMenuOpen && filteredCommands.length > 0 && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 z-50 rounded-lg border border-border bg-popover shadow-md overflow-hidden">
+            {filteredCommands.map((cmd, idx) => {
+              const Icon = cmd.icon
+              return (
+                <button
+                  key={cmd.command}
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-3 w-full px-3 py-2 text-sm text-left transition-colors',
+                    idx === slashMenuIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                  )}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    selectSlashCommand(cmd)
+                  }}
+                  onMouseEnter={() => setSlashMenuIndex(idx)}
+                >
+                  <Icon className={cn(
+                    'h-4 w-4 shrink-0',
+                    cmd.color === 'emerald' ? 'text-emerald-500' : 'text-blue-500'
+                  )} />
+                  <span className="font-mono font-medium">{cmd.command.trim()}</span>
+                  <span className="text-muted-foreground">{cmd.description}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         <Textarea
           ref={textareaRef}
           value={query}
@@ -234,7 +339,7 @@ export function EmmaQueryInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled || isLoading}
-          className="pl-10 pr-14 py-3.5 min-h-[52px] max-h-[200px] resize-none rounded-xl border border-border/50 bg-background focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/50"
+          className="pl-10 pr-12 py-3.5 min-h-[52px] max-h-[200px] resize-none rounded-xl border border-border/50 bg-background focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/50"
           rows={1}
         />
 
@@ -264,21 +369,6 @@ export function EmmaQueryInput({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Verified generation button - shown when attachments present */}
-        {attachments.length > 0 && onVerifiedGeneration && (
-          <Button
-            type="button"
-            onClick={handleVerifiedClick}
-            disabled={disabled || isLoading}
-            size="icon"
-            variant="outline"
-            title="Generar documento verificado"
-            className="absolute right-12 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg border-emerald-500/50 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
-          >
-            <IconFileCheck className="h-4 w-4" />
-          </Button>
-        )}
-
         {/* Send button - INSIDE INPUT RIGHT */}
         <Button
           type="button"
@@ -295,16 +385,44 @@ export function EmmaQueryInput({
         </Button>
       </div>
 
-      <div className="flex justify-between text-xs text-muted-foreground px-1">
-        <span>
-          {query.length > 0 && `${query.length} caracteres`}
-          {query.length > 0 && attachments.length > 0 && ' • '}
-          {attachments.length > 0 && `${attachments.length} adjunto${attachments.length > 1 ? 's' : ''}`}
-        </span>
-        <span>
-          {isVerificarCommand
-            ? '/verificar activo — se generará documento verificado'
-            : 'Enter para enviar • Shift+Enter para nueva línea'}
+      {/* Action toolbar */}
+      <div className="flex items-center justify-between px-1">
+        <div className="flex items-center gap-1.5">
+          {onPredictiveAnalysis && (
+            <button
+              type="button"
+              onClick={handlePredictiveClick}
+              disabled={actionsDisabled}
+              className={cn(
+                'inline-flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium rounded-full border transition-colors',
+                'border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400',
+                'dark:border-blue-500/40 dark:text-blue-400 dark:hover:bg-blue-950/30',
+                actionsDisabled && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <IconChartBar className="h-3.5 w-3.5" />
+              Predecir
+            </button>
+          )}
+          {onVerifiedGeneration && (
+            <button
+              type="button"
+              onClick={handleVerifiedClick}
+              disabled={actionsDisabled}
+              className={cn(
+                'inline-flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium rounded-full border transition-colors',
+                'border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:border-emerald-400',
+                'dark:border-emerald-500/40 dark:text-emerald-400 dark:hover:bg-emerald-950/30',
+                actionsDisabled && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <IconFileCheck className="h-3.5 w-3.5" />
+              Verificar
+            </button>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          Enter · Shift+Enter
         </span>
       </div>
 
@@ -313,7 +431,6 @@ export function EmmaQueryInput({
         open={isIndexedPickerOpen}
         onOpenChange={(open) => {
           setIsIndexedPickerOpen(open)
-          // Restore focus when dialog closes
           if (!open) {
             setTimeout(() => {
               textareaRef.current?.focus()

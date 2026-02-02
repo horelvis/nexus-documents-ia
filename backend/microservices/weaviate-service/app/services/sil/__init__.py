@@ -1,8 +1,21 @@
 """
-SIL (Structural Intelligence Layer) - REMOVED
+SIL (Structural Intelligence Layer)
 
-This module has been completely removed as it was based on static rules.
-All query understanding is now handled by LLM-based reasoning in emma-agent-service.
+Legal graph service for public knowledge graph (Apache AGE).
 """
 
-__all__ = []
+from .legal_graph_service import (
+    legal_graph,
+    LegalGraphService,
+    LegalLaw,
+    LegalDomain,
+    LawStatus,
+)
+
+__all__ = [
+    "legal_graph",
+    "LegalGraphService",
+    "LegalLaw",
+    "LegalDomain",
+    "LawStatus",
+]

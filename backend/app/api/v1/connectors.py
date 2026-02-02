@@ -16,8 +16,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
-# MCP Alfresco URL for sync/indexing task dispatch
+# MCP service URLs for sync/indexing task dispatch
 MCP_ALFRESCO_URL = getattr(settings, 'MCP_ALFRESCO_URL', 'http://mcp-alfresco:8000')
+MCP_GOOGLE_DRIVE_URL = getattr(settings, 'MCP_GOOGLE_DRIVE_URL', 'http://mcp-google-drive:8000')
+
+# Map connector_type → MCP service URL
+_MCP_URL_BY_TYPE = {
+    "alfresco": MCP_ALFRESCO_URL,
+    "google_drive": MCP_GOOGLE_DRIVE_URL,
+}
+
+
+def _get_mcp_url(connector_type: str) -> str:
+    """Get the MCP service URL for a given connector type."""
+    url = _MCP_URL_BY_TYPE.get(connector_type)
+    if not url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sync not supported for connector type: {connector_type}",
+        )
+    return url
 
 from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
 from app.db.async_database import get_async_db
@@ -282,10 +300,10 @@ async def update_connector(
     update_data = connector_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         if field == "config" and value:
-            # Merge config instead of replacing
-            current_config = connector.config or {}
+            # Merge config — copy dict so SQLAlchemy detects the JSONB change
+            current_config = dict(connector.config or {})
             current_config.update(value)
-            setattr(connector, field, current_config)
+            connector.config = current_config
         else:
             setattr(connector, field, value)
 
@@ -1070,11 +1088,13 @@ async def trigger_connector_sync(
                 f"for connector {connector_id}"
             )
 
-    # Dispatch task via background-worker HTTP API
+    # Dispatch task to the appropriate MCP service based on connector type
+    mcp_url = _get_mcp_url(connector.connector_type)
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{MCP_ALFRESCO_URL}/sync",
+                f"{mcp_url}/sync",
                 json={
                     "connector_id": str(connector_id),
                     "full_sync": full_sync,
@@ -1203,11 +1223,13 @@ async def trigger_index_pending(
             "message": "No pending documents to index",
         }
 
-    # Dispatch task via background-worker HTTP API
+    # Dispatch task to the appropriate MCP service based on connector type
+    mcp_url = _get_mcp_url(connector.connector_type)
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{MCP_ALFRESCO_URL}/index-pending",
+                f"{mcp_url}/index-pending",
                 json={
                     "connector_id": str(connector_id),
                     "batch_size": batch_size,
@@ -1404,3 +1426,249 @@ async def get_all_indexed_documents(
         "total": len(documents),
         "tenant_id": tenant_id,
     }
+
+
+# =============================================================================
+# Google Drive OAuth Proxy Endpoints
+# =============================================================================
+
+@router.get("/{connector_id}/oauth/authorize")
+async def oauth_authorize(
+    connector_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    Initiate Google OAuth2 flow for a Google Drive connector (admin only).
+
+    Proxies the request to the mcp-google-drive-server which handles the
+    OAuth flow with Google and redirects the user to the consent screen.
+    """
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "google_drive":
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth authorize is only available for Google Drive connectors",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{MCP_GOOGLE_DRIVE_URL}/oauth/authorize",
+                params={
+                    "connector_id": str(connector_id),
+                    "tenant_id": tenant_id,
+                },
+                follow_redirects=False,
+            )
+
+        if response.status_code in (301, 302, 307, 308):
+            # Return the OAuth URL as JSON so frontend can open it in a popup
+            # (window.open cannot send Authorization headers, so we return
+            # the URL instead of doing a server-side redirect)
+            return {"auth_url": response.headers["location"]}
+
+        return response.json()
+    except Exception as e:
+        logger.error(f"OAuth authorize proxy failed: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth authorize failed: {e}")
+
+
+@router.get("/oauth/callback")
+async def oauth_callback_proxy(
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None),
+):
+    """
+    Proxy Google OAuth callback to mcp-google-drive-server.
+
+    Google redirects the browser here after authorization. This endpoint
+    forwards the callback to the MCP server (which is not exposed to the host)
+    and returns the MCP's HTML response (success/error page that auto-closes the popup).
+    """
+    try:
+        params = {}
+        if code:
+            params["code"] = code
+        if state:
+            params["state"] = state
+        if error:
+            params["error"] = error
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{MCP_GOOGLE_DRIVE_URL}/oauth/callback",
+                params=params,
+                follow_redirects=False,
+            )
+
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(
+            content=response.text,
+            status_code=response.status_code,
+        )
+    except Exception as e:
+        logger.error(f"OAuth callback proxy failed: {e}")
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(
+            content=f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Error</title>
+<style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}}
+.card{{background:#fff;border-radius:12px;padding:2rem;box-shadow:0 2px 8px rgba(0,0,0,.1);text-align:center;max-width:400px}}
+button{{background:#18181b;color:#fff;border:none;padding:.5rem 1.5rem;border-radius:6px;cursor:pointer;font-size:.9rem}}
+button:hover{{background:#27272a}}</style></head>
+<body><div class="card"><div style="color:#dc2626;font-size:1.2rem;margin-bottom:1rem">✕ Error de conexión</div>
+<p style="color:#666;margin-bottom:1.5rem">{str(e)}</p>
+<button onclick="window.close()">Cerrar</button></div></body></html>""",
+            status_code=500,
+        )
+
+
+@router.get("/{connector_id}/oauth/status")
+async def oauth_status(
+    connector_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """Check OAuth status for a Google Drive connector."""
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "google_drive":
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth status is only available for Google Drive connectors",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{MCP_GOOGLE_DRIVE_URL}/oauth/status",
+                params={
+                    "connector_id": str(connector_id),
+                    "tenant_id": tenant_id,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"OAuth status proxy failed: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth status check failed: {e}")
+
+
+@router.get("/{connector_id}/folders")
+async def list_drive_folders(
+    connector_id: UUID,
+    parent_id: str = Query("root", description="Parent folder ID"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """
+    List Google Drive folders for a connector (admin only).
+
+    Proxies the request to the mcp-google-drive-server /folders endpoint.
+    """
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "google_drive":
+        raise HTTPException(
+            status_code=400,
+            detail="Folder listing is only available for Google Drive connectors",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{MCP_GOOGLE_DRIVE_URL}/folders",
+                params={
+                    "connector_id": str(connector_id),
+                    "tenant_id": tenant_id,
+                    "parent_id": parent_id,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        detail = e.response.text
+        raise HTTPException(status_code=status, detail=detail)
+    except Exception as e:
+        logger.error(f"Folder listing proxy failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Folder listing failed: {e}")
+
+
+@router.post("/{connector_id}/oauth/revoke")
+async def oauth_revoke(
+    connector_id: UUID,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """Revoke OAuth tokens for a Google Drive connector (admin only)."""
+    await _check_admin_permission(current_user, tenant_id)
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.id == connector_id)
+        .where(Connector.tenant_id == UUID(tenant_id))
+    )
+    connector = result.scalar_one_or_none()
+
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    if connector.connector_type != "google_drive":
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth revoke is only available for Google Drive connectors",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{MCP_GOOGLE_DRIVE_URL}/oauth/revoke",
+                json={
+                    "connector_id": str(connector_id),
+                    "tenant_id": tenant_id,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"OAuth revoke proxy failed: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth revoke failed: {e}")

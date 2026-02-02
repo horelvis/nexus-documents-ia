@@ -14,6 +14,7 @@ import uuid
 import httpx
 
 from app.core.config import settings
+from app.services.rag.semantic_chunker import SemanticChunker, DocumentChunk, DocumentType
 from app.schemas.public_knowledge import (
     PublicDocumentCreate,
     PublicDocumentResponse,
@@ -30,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 # Collection name for public knowledge base
 PUBLIC_KNOWLEDGE_COLLECTION = "PublicKnowledge"
+
+# Chunking configuration for large public documents
+PUBLIC_KNOWLEDGE_CHUNK_THRESHOLD = 3000   # chars — docs smaller stay as single object
+PUBLIC_KNOWLEDGE_CHUNK_SIZE = 1500        # chars per chunk (legal_sections)
+PUBLIC_KNOWLEDGE_CHUNK_OVERLAP = 200      # chars overlap between chunks
 
 
 class PublicKnowledgeService:
@@ -181,7 +187,59 @@ class PublicKnowledgeService:
                         name="updated_at",
                         data_type=wc.DataType.DATE,
                         description="Update timestamp"
-                    )
+                    ),
+                    # Chunk properties
+                    wc.Property(
+                        name="chunk_index",
+                        data_type=wc.DataType.INT,
+                        description="Chunk position within parent document (0-based)"
+                    ),
+                    wc.Property(
+                        name="total_chunks",
+                        data_type=wc.DataType.INT,
+                        description="Total chunks for this document"
+                    ),
+                    wc.Property(
+                        name="parent_document_id",
+                        data_type=wc.DataType.TEXT,
+                        description="UUID of parent document (for chunks)"
+                    ),
+                    wc.Property(
+                        name="section_title",
+                        data_type=wc.DataType.TEXT,
+                        description="Section/article title detected by chunker"
+                    ),
+                    # Versioning & legal status
+                    wc.Property(
+                        name="version_number",
+                        data_type=wc.DataType.INT,
+                        description="Version number (1, 2, 3...)"
+                    ),
+                    wc.Property(
+                        name="is_current_version",
+                        data_type=wc.DataType.BOOL,
+                        description="Whether this is the current version"
+                    ),
+                    wc.Property(
+                        name="modification_type",
+                        data_type=wc.DataType.TEXT,
+                        description="Type of modification (original, modificacion, correccion)"
+                    ),
+                    wc.Property(
+                        name="legal_status",
+                        data_type=wc.DataType.TEXT,
+                        description="Legal status (vigente, derogada, parcialmente_derogada)"
+                    ),
+                    wc.Property(
+                        name="boe_id",
+                        data_type=wc.DataType.TEXT,
+                        description="BOE identifier (e.g. BOE-A-2015-11430)"
+                    ),
+                    wc.Property(
+                        name="eli_uri",
+                        data_type=wc.DataType.TEXT,
+                        description="European Legislation Identifier URI"
+                    ),
                 ]
             )
 
@@ -219,6 +277,18 @@ class PublicKnowledgeService:
             "version": (wc.DataType.TEXT, "Document version"),
             "created_at": (wc.DataType.DATE, "Creation timestamp"),
             "updated_at": (wc.DataType.DATE, "Update timestamp"),
+            # Chunk properties
+            "chunk_index": (wc.DataType.INT, "Chunk position within parent document (0-based)"),
+            "total_chunks": (wc.DataType.INT, "Total chunks for this document"),
+            "parent_document_id": (wc.DataType.TEXT, "UUID of parent document (for chunks)"),
+            "section_title": (wc.DataType.TEXT, "Section/article title detected by chunker"),
+            # Versioning & legal status
+            "version_number": (wc.DataType.INT, "Version number (1, 2, 3...)"),
+            "is_current_version": (wc.DataType.BOOL, "Whether this is the current version"),
+            "modification_type": (wc.DataType.TEXT, "Type of modification (original, modificacion, correccion)"),
+            "legal_status": (wc.DataType.TEXT, "Legal status (vigente, derogada, parcialmente_derogada)"),
+            "boe_id": (wc.DataType.TEXT, "BOE identifier (e.g. BOE-A-2015-11430)"),
+            "eli_uri": (wc.DataType.TEXT, "European Legislation Identifier URI"),
         }
 
         try:
@@ -261,79 +331,212 @@ class PublicKnowledgeService:
             logger.warning(f"Failed to generate embedding: {e}")
         return None
 
+    async def _find_existing_by_boe_id(self, boe_id: str) -> List[Dict[str, Any]]:
+        """Find all objects with a given boe_id. Returns list of {uuid, parent_document_id, version_number}."""
+        if not boe_id:
+            return []
+        try:
+            collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+            response = collection.query.fetch_objects(
+                filters=wq.Filter.by_property("boe_id").equal(boe_id),
+                limit=5000,
+            )
+            return [
+                {
+                    "uuid": str(obj.uuid),
+                    "parent_document_id": obj.properties.get("parent_document_id"),
+                    "version_number": obj.properties.get("version_number", 1),
+                }
+                for obj in response.objects
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to find existing docs for boe_id={boe_id}: {e}")
+            return []
+
+    async def _delete_objects_by_ids(self, uuids: List[str]) -> int:
+        """Delete multiple Weaviate objects by UUID. Returns count deleted."""
+        if not uuids:
+            return 0
+        collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+        deleted = 0
+        for uid in uuids:
+            try:
+                collection.data.delete_by_id(uid)
+                deleted += 1
+            except Exception:
+                pass
+        return deleted
+
+    async def _dedup_same_version(self, boe_id: str, version_number: int) -> int:
+        """Remove duplicate objects for the same boe_id + version_number.
+
+        When the same law/version was ingested multiple times, there are
+        multiple parent documents (and their chunks) for the same version.
+        This keeps only one set (the first parent found) and deletes the rest.
+        Does NOT touch objects from different version_numbers.
+        """
+        existing = await self._find_existing_by_boe_id(boe_id)
+        if not existing:
+            return 0
+
+        # Separate parents (no parent_document_id) from chunks for this version
+        parents = [
+            o for o in existing
+            if not o["parent_document_id"] and o["version_number"] == version_number
+        ]
+
+        if len(parents) <= 1:
+            return 0  # No duplicates
+
+        # Keep the first parent, delete the rest and their chunks
+        keep_parent = parents[0]["uuid"]
+        delete_parents = {p["uuid"] for p in parents[1:]}
+
+        # Find chunks belonging to duplicate parents
+        chunks_to_delete = [
+            o["uuid"] for o in existing
+            if o["parent_document_id"] in delete_parents
+        ]
+
+        all_to_delete = list(delete_parents) + chunks_to_delete
+        deleted = await self._delete_objects_by_ids(all_to_delete)
+        logger.info(
+            f"Dedup: removed {deleted} duplicate objects for boe_id={boe_id} "
+            f"v{version_number} (kept parent {keep_parent})"
+        )
+        return deleted
+
+    def _build_base_properties(self, document: PublicDocumentCreate, now: datetime) -> Dict[str, Any]:
+        """Build the shared property dict from a PublicDocumentCreate."""
+        properties = {
+            "title": document.title,
+            "summary": document.summary or "",
+            "category": document.category.value if isinstance(document.category, PublicDocumentCategory) else document.category,
+            "subcategory": document.subcategory or "",
+            "jurisdiction": document.jurisdiction.value if isinstance(document.jurisdiction, Jurisdiction) else document.jurisdiction,
+            "legal_reference": document.legal_reference or "",
+            "keywords": document.keywords,
+            "topics": document.topics,
+            "related_documents": document.related_documents,
+            "source_url": document.source_url or "",
+            "source_name": document.source_name or "",
+            "verified": document.verified,
+            "version": document.version,
+            "version_number": document.version_number,
+            "is_current_version": document.is_current_version,
+            "modification_type": document.modification_type,
+            "legal_status": document.legal_status,
+            "boe_id": document.boe_id or "",
+            "eli_uri": document.eli_uri or "",
+            "created_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+            "updated_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+        }
+        if document.publication_date:
+            properties["publication_date"] = document.publication_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        if document.effective_date:
+            properties["effective_date"] = document.effective_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        if document.expiration_date:
+            properties["expiration_date"] = document.expiration_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        return properties
+
     async def add_document(self, document: PublicDocumentCreate) -> PublicDocumentResponse:
-        """Add a document to the public knowledge base"""
+        """Add a document to the public knowledge base.
+
+        Large documents (> CHUNK_THRESHOLD chars) are automatically split into
+        chunks using SemanticChunker with legal_sections strategy. Each chunk
+        is stored as a separate Weaviate object with its own content-based
+        embedding, linked to a parent document via parent_document_id.
+        """
         await self.initialize()
 
         try:
+            # --- Dedup: remove duplicate objects for same boe_id + version ---
+            if document.boe_id:
+                await self._dedup_same_version(document.boe_id, document.version_number)
+
             doc_id = document.id or str(uuid.uuid4())
             now = datetime.now()
-
-            # Prepare properties
-            properties = {
-                "title": document.title,
-                "content": document.content,
-                "summary": document.summary or "",
-                "category": document.category.value if isinstance(document.category, PublicDocumentCategory) else document.category,
-                "subcategory": document.subcategory or "",
-                "jurisdiction": document.jurisdiction.value if isinstance(document.jurisdiction, Jurisdiction) else document.jurisdiction,
-                "legal_reference": document.legal_reference or "",
-                "keywords": document.keywords,
-                "topics": document.topics,
-                "related_documents": document.related_documents,
-                "source_url": document.source_url or "",
-                "source_name": document.source_name or "",
-                "verified": document.verified,
-                "version": document.version,
-                # Versioning metadata
-                "version_number": document.version_number,
-                "is_current_version": document.is_current_version,
-                "modification_type": document.modification_type,
-                "legal_status": document.legal_status,
-                # Identifiers
-                "boe_id": document.boe_id or "",
-                "eli_uri": document.eli_uri or "",
-                # Timestamps
-                "created_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                "updated_at": now.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            }
-
-            # Add dates if provided
-            if document.publication_date:
-                properties["publication_date"] = document.publication_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            if document.effective_date:
-                properties["effective_date"] = document.effective_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            if document.expiration_date:
-                properties["expiration_date"] = document.expiration_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
-            # Generate embedding for semantic search
-            embedding_text = f"{document.title} {document.summary or ''} {' '.join(document.keywords)}"
-            embedding = await self._generate_embedding(embedding_text)
-
             collection = self.client.collections.get(PUBLIC_KNOWLEDGE_COLLECTION)
+            base_props = self._build_base_properties(document, now)
 
-            if embedding:
-                collection.data.insert(
-                    properties=properties,
-                    uuid=doc_id,
-                    vector=embedding
+            content = document.content or ""
+
+            # --- Chunked path for large documents ---
+            if len(content) > PUBLIC_KNOWLEDGE_CHUNK_THRESHOLD:
+                chunker = SemanticChunker(
+                    chunk_size=PUBLIC_KNOWLEDGE_CHUNK_SIZE,
+                    max_chunk_size=PUBLIC_KNOWLEDGE_CHUNK_SIZE * 2,
+                    overlap=PUBLIC_KNOWLEDGE_CHUNK_OVERLAP,
                 )
+                chunks: List[DocumentChunk] = chunker.chunk_document(
+                    text=content,
+                    metadata={},
+                    document_type=DocumentType.LEGAL_CONTRACT,
+                )
+
+                if not chunks:
+                    # Fallback: treat as single doc if chunker returns nothing
+                    chunks = [DocumentChunk(
+                        content=content,
+                        section_title=None,
+                        chunk_index=0,
+                        total_chunks=1,
+                    )]
+
+                total = len(chunks)
+
+                # 1) Insert parent document (metadata-only, no heavy content)
+                parent_props = {**base_props, "content": document.summary or document.title, "total_chunks": total}
+                parent_embedding_text = f"{document.title} {document.summary or ''} {' '.join(document.keywords)}"
+                parent_embedding = await self._generate_embedding(parent_embedding_text)
+                if parent_embedding:
+                    collection.data.insert(properties=parent_props, uuid=doc_id, vector=parent_embedding)
+                else:
+                    collection.data.insert(properties=parent_props, uuid=doc_id)
+
+                # 2) Insert each chunk as its own Weaviate object
+                for i, chunk in enumerate(chunks):
+                    chunk_id = str(uuid.uuid4())
+                    section = chunk.section_title or ""
+                    chunk_props = {
+                        **base_props,
+                        "content": chunk.content,
+                        "parent_document_id": doc_id,
+                        "chunk_index": i,
+                        "total_chunks": total,
+                        "section_title": section,
+                    }
+                    # Embedding from real content: "título — sección: contenido"
+                    section_prefix = f" — {section}" if section else ""
+                    embedding_text = f"{document.title}{section_prefix}: {chunk.content}"
+                    embedding = await self._generate_embedding(embedding_text)
+                    if embedding:
+                        collection.data.insert(properties=chunk_props, uuid=chunk_id, vector=embedding)
+                    else:
+                        collection.data.insert(properties=chunk_props, uuid=chunk_id)
+
+                logger.info(f"Added public document {doc_id}: {document.title} ({total} chunks)")
+
             else:
-                collection.data.insert(
-                    properties=properties,
-                    uuid=doc_id
-                )
+                # --- Single-object path (small documents) ---
+                properties = {**base_props, "content": content}
+                embedding_text = f"{document.title} {document.summary or ''} {' '.join(document.keywords)}"
+                embedding = await self._generate_embedding(embedding_text)
+                if embedding:
+                    collection.data.insert(properties=properties, uuid=doc_id, vector=embedding)
+                else:
+                    collection.data.insert(properties=properties, uuid=doc_id)
 
-            logger.info(f"Added public document {doc_id}: {document.title}")
+                logger.info(f"Added public document {doc_id}: {document.title}")
 
             return PublicDocumentResponse(
                 id=doc_id,
                 title=document.title,
                 content=document.content,
                 summary=document.summary,
-                category=properties["category"],
+                category=base_props["category"],
                 subcategory=document.subcategory,
-                jurisdiction=properties["jurisdiction"],
+                jurisdiction=base_props["jurisdiction"],
                 legal_reference=document.legal_reference,
                 publication_date=document.publication_date,
                 effective_date=document.effective_date,
@@ -346,7 +549,7 @@ class PublicKnowledgeService:
                 verified=document.verified,
                 version=document.version,
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             )
 
         except Exception as e:
@@ -542,6 +745,11 @@ class PublicKnowledgeService:
                     # Identifiers
                     boe_id=props.get("boe_id"),
                     eli_uri=props.get("eli_uri"),
+                    # Chunk metadata
+                    chunk_index=props.get("chunk_index"),
+                    total_chunks=props.get("total_chunks"),
+                    parent_document_id=props.get("parent_document_id"),
+                    section_title=props.get("section_title"),
                     # Timestamps
                     created_at=created,
                     updated_at=updated,

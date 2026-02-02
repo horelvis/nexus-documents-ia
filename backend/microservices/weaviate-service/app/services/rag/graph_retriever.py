@@ -70,12 +70,17 @@ class GraphEnhancedRetriever:
     2. Find related entities via graph traversal
     3. Add related entity values as query expansions
 
+    Supports two graph backends:
+    - Tenant graph (knowledge_graph): for tenant document entities
+    - Public graph (knowledge_graph_public): for legal law references
+
     This improves recall for queries about specific entities by including
     their related concepts in the search.
     """
 
     def __init__(self):
         self._graph_service = None
+        self._legal_graph_service = None
         self._initialized = False
         self._max_expansion_terms = 5  # Max terms to add from graph
         self._min_entity_length = 3    # Min chars for entity detection
@@ -102,6 +107,16 @@ class GraphEnhancedRetriever:
                 logger.info("📊 Using NetworkX+Redis backend for knowledge graph")
 
             await self._graph_service.initialize()
+
+            # Initialize public legal graph service for PublicKnowledge queries
+            try:
+                from ..sil.legal_graph_service import legal_graph
+                await legal_graph.initialize()
+                self._legal_graph_service = legal_graph
+                logger.info("📊 Public legal graph available for query expansion")
+            except Exception as e:
+                logger.debug(f"Public legal graph not available: {e}")
+
             self._initialized = True
             logger.info("✅ GraphEnhancedRetriever initialized")
 
@@ -113,6 +128,7 @@ class GraphEnhancedRetriever:
         self,
         query_analysis: QueryAnalysis,
         tenant_id: str,
+        source_type: str = "tenant",
     ) -> QueryAnalysis:
         """
         Expand query using knowledge graph traversal.
@@ -123,10 +139,15 @@ class GraphEnhancedRetriever:
         Args:
             query_analysis: Analyzed query from Layer 1
             tenant_id: Tenant identifier
+            source_type: "tenant" for tenant graph, "public" for public legal graph
 
         Returns:
             Modified QueryAnalysis with graph expansions added
         """
+        # For public source, use legal graph for expansion
+        if source_type == "public" and self._legal_graph_service:
+            return await self._expand_with_legal_graph(query_analysis)
+
         if not settings.rag_knowledge_graph_enabled or not self._graph_service:
             return query_analysis
 
@@ -215,6 +236,87 @@ class GraphEnhancedRetriever:
         except Exception as e:
             logger.warning(f"⚠️ Graph expansion failed: {e}")
             return query_analysis
+
+    async def _expand_with_legal_graph(
+        self,
+        query_analysis: QueryAnalysis,
+    ) -> QueryAnalysis:
+        """
+        Expand query using the public legal knowledge graph.
+
+        Detects BOE IDs and law short names in the query, then finds
+        related laws via the legal graph for query expansion.
+        """
+        import re
+
+        try:
+            query_text = query_analysis.original_query
+
+            # Detect BOE IDs in the query
+            boe_pattern = re.compile(r'BOE-[A-Z]-\d{4}-\d+')
+            boe_ids = boe_pattern.findall(query_text)
+
+            # Also check for law short names (ET, LPRL, etc.)
+            from ..sil.legal_graph_service import legal_graph
+            # Try to find laws mentioned by short name
+            # This is a simple approach — check known abbreviations
+            from app.api.boe_legislation import LAW_SHORT_NAMES
+            short_to_boe = {v: k for k, v in LAW_SHORT_NAMES.items()}
+
+            # Find short names in query (case-sensitive, word boundary)
+            for short_name, law_boe_id in short_to_boe.items():
+                if re.search(rf'\b{re.escape(short_name)}\b', query_text):
+                    boe_ids.append(law_boe_id)
+
+            if not boe_ids:
+                return query_analysis
+
+            # Get neighbors from legal graph
+            all_neighbors = []
+            seen = set(boe_ids)
+
+            for bid in boe_ids:
+                neighbors = await legal_graph.get_law_neighbors(bid, max_depth=1)
+                for n in neighbors:
+                    n_id = n.get("boe_id", "")
+                    if n_id and n_id not in seen:
+                        seen.add(n_id)
+                        all_neighbors.append(n)
+
+            if not all_neighbors:
+                return query_analysis
+
+            # Add short names of related laws as expansion terms
+            expansion_terms = [
+                n.get("short_name", "")
+                for n in all_neighbors[:self._max_expansion_terms]
+                if n.get("short_name")
+            ]
+
+            if expansion_terms:
+                expansion_text = " ".join(expansion_terms)
+                expanded_variation = f"{query_text} {expansion_text}"
+
+                if expanded_variation not in query_analysis.query_variations:
+                    query_analysis.query_variations.append(expanded_variation)
+
+                if not hasattr(query_analysis, 'graph_expansion') or query_analysis.graph_expansion is None:
+                    query_analysis.graph_expansion = {
+                        "applied": True,
+                        "source": "public_legal_graph",
+                        "detected_boe_ids": boe_ids,
+                        "expanded_terms": expansion_terms,
+                    }
+
+                logger.info(
+                    f"📊 Legal graph expansion: added {len(expansion_terms)} related laws "
+                    f"from {len(boe_ids)} detected laws"
+                )
+
+        except Exception as e:
+            logger.warning(f"⚠️ Legal graph expansion failed: {e}")
+
+        return query_analysis
 
     async def get_expansion_details(
         self,

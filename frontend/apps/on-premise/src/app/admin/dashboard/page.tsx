@@ -39,6 +39,9 @@ import {
   IconUsers,
   IconBuilding,
   IconHeart,
+  IconCpu,
+  IconRobot,
+  IconCheck,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -164,6 +167,41 @@ interface KnowledgeExtractionResult {
   details: { document_id: string; title?: string; entities_count: number }[]
 }
 
+interface TrainingSectorStatus {
+  sector: string
+  has_trained_model: boolean
+  model_path: string | null
+  qa_concepts_count: number
+  qa_questions_count: number
+}
+
+interface TrainingStatus {
+  active_sector: string
+  sectors: TrainingSectorStatus[]
+  training_in_progress: string | null
+  training_progress: {
+    stage: string
+    message: string
+    total_examples?: number
+    epochs?: number
+    elapsed_seconds?: number
+  } | null
+}
+
+interface TrainingProgress {
+  in_progress: string | null
+  progress: {
+    stage: string
+    message: string
+    total_examples?: number
+    epoch?: number
+    total_epochs?: number
+    elapsed_seconds?: number
+    model_path?: string
+  }
+  last_error: string | null
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -212,6 +250,16 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
   // Knowledge extraction
   const [knowledgeExtractionResult, setKnowledgeExtractionResult] = useState<KnowledgeExtractionResult | null>(null)
 
+  // Training
+  const [trainingStatus, setTrainingStatus] = useState<TrainingStatus | null>(null)
+  const [isLoadingTraining, setIsLoadingTraining] = useState(false)
+  const [isStartingTraining, setIsStartingTraining] = useState(false)
+  const [trainingProgress, setTrainingProgress] = useState<TrainingProgress | null>(null)
+  const [selectedTrainingSector, setSelectedTrainingSector] = useState<string>("")
+  const [trainingHfDataset, setTrainingHfDataset] = useState<string>("")
+  const [trainingEpochs, setTrainingEpochs] = useState<number>(3)
+  const [showTrainingDialog, setShowTrainingDialog] = useState(false)
+
   // Results
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResult | null>(null)
 
@@ -253,8 +301,9 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
         loadSystemStats(),
         loadWeaviateHealth(),
         loadKnowledgeStats(),
-loadBoePresets(),
+        loadBoePresets(),
         loadPublicKnowledgeStats(),
+        loadTrainingStatus(),
       ])
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error al cargar estadísticas'
@@ -323,6 +372,31 @@ const loadBoePresets = async () => {
       }
     } catch (error) {
       console.error('Failed to load public knowledge stats:', error)
+    }
+  }
+
+  const loadTrainingStatus = async () => {
+    try {
+      const response = await apiClient.get<TrainingStatus>('/emma/training/status')
+      if (!response.error && response.data) {
+        setTrainingStatus(response.data)
+        if (!selectedTrainingSector && response.data.active_sector) {
+          setSelectedTrainingSector(response.data.active_sector)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load training status:', error)
+    }
+  }
+
+  const loadTrainingProgress = async () => {
+    try {
+      const response = await apiClient.get<TrainingProgress>('/emma/training/progress')
+      if (!response.error && response.data) {
+        setTrainingProgress(response.data)
+      }
+    } catch (error) {
+      console.error('Failed to load training progress:', error)
     }
   }
 
@@ -508,6 +582,52 @@ const loadBoePresets = async () => {
   }
 
   // ============================================================================
+  // Training Actions
+  // ============================================================================
+
+  const handleStartTraining = async () => {
+    setShowTrainingDialog(false)
+    setIsStartingTraining(true)
+    setError(null)
+
+    try {
+      const response = await apiClient.post<{ status: string; message: string }>('/emma/training/start', {
+        sector: selectedTrainingSector,
+        hf_dataset: trainingHfDataset || undefined,
+        epochs: trainingEpochs,
+        batch_size: 16,
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setSuccessMessage(response.data?.message || 'Entrenamiento iniciado')
+
+      // Poll progress every 3 seconds
+      const pollInterval = setInterval(async () => {
+        await loadTrainingProgress()
+        await loadTrainingStatus()
+        const progressRes = await apiClient.get<TrainingProgress>('/emma/training/progress')
+        if (progressRes.data && !progressRes.data.in_progress) {
+          clearInterval(pollInterval)
+          if (progressRes.data.progress?.stage === 'completed') {
+            setSuccessMessage(progressRes.data.progress.message || 'Entrenamiento completado')
+          } else if (progressRes.data.last_error) {
+            setError(`Error en entrenamiento: ${progressRes.data.last_error}`)
+          }
+        }
+      }, 3000)
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al iniciar entrenamiento'
+      setError(errorMessage)
+    } finally {
+      setIsStartingTraining(false)
+    }
+  }
+
+  // ============================================================================
   // Render Helpers
   // ============================================================================
 
@@ -577,7 +697,7 @@ const loadBoePresets = async () => {
           </Link>
           <div className="h-4 w-px bg-border" />
           <IconDashboard className="h-4 w-4 text-muted-foreground" />
-          <span className="text-muted-foreground">Dashboard Admin</span>
+          <span className="text-muted-foreground">Administración</span>
         </header>
 
         {/* Main Content */}
@@ -699,7 +819,7 @@ const loadBoePresets = async () => {
 
             {/* Tabs for different admin sections */}
             <Tabs defaultValue="system" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="system">
                   <IconServer className="h-4 w-4 mr-2" />
                   Sistema
@@ -715,6 +835,10 @@ const loadBoePresets = async () => {
                 <TabsTrigger value="boe">
                   <IconDatabase className="h-4 w-4 mr-2" />
                   BOE
+                </TabsTrigger>
+                <TabsTrigger value="training">
+                  <IconCpu className="h-4 w-4 mr-2" />
+                  IA Training
                 </TabsTrigger>
                 <TabsTrigger value="maintenance">
                   <IconActivity className="h-4 w-4 mr-2" />
@@ -1200,6 +1324,247 @@ const loadBoePresets = async () => {
                 </Card>
               </TabsContent>
 
+              {/* Training Tab */}
+              <TabsContent value="training" className="space-y-4">
+                {/* Training Info Banner */}
+                <Alert>
+                  <IconCpu className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Entrenamiento de Embeddings por Sector</strong> — Fine-tune del modelo de embeddings
+                    para mejorar la comprensión semántica de consultas del sector activo. El modelo base
+                    (all-MiniLM-L6-v2) funciona sin entrenamiento; el fine-tuning mejora la precisión.
+                  </AlertDescription>
+                </Alert>
+
+                {/* Sector Status Cards */}
+                <div className="grid gap-4 md:grid-cols-3">
+                  {(trainingStatus?.sectors || []).map((sector) => (
+                    <Card
+                      key={sector.sector}
+                      className={`cursor-pointer transition-colors ${
+                        selectedTrainingSector === sector.sector
+                          ? 'border-2 border-primary'
+                          : 'hover:border-muted-foreground/30'
+                      } ${trainingStatus?.active_sector === sector.sector ? 'bg-primary/5' : ''}`}
+                      onClick={() => setSelectedTrainingSector(sector.sector)}
+                    >
+                      <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center justify-between text-base">
+                          <span className="capitalize">{sector.sector}</span>
+                          <div className="flex items-center gap-2">
+                            {trainingStatus?.active_sector === sector.sector && (
+                              <Badge variant="default" className="text-xs">Activo</Badge>
+                            )}
+                            {sector.has_trained_model ? (
+                              <Badge variant="default" className="bg-green-500 text-xs">
+                                <IconCheck className="h-3 w-3 mr-1" />
+                                Entrenado
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs">Base</Badge>
+                            )}
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Conceptos QA</span>
+                          <span className="font-medium">{sector.qa_concepts_count}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Preguntas</span>
+                          <span className="font-medium">{sector.qa_questions_count}</span>
+                        </div>
+                        {sector.has_trained_model && (
+                          <div className="text-xs text-muted-foreground pt-1 truncate">
+                            {sector.model_path}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Training Configuration */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Training Options */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconRobot className="h-5 w-5" />
+                        Configuración de Entrenamiento
+                      </CardTitle>
+                      <CardDescription>
+                        Fine-tune del modelo de embeddings para el sector seleccionado
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium">Sector seleccionado</Label>
+                        <div className="mt-1 p-3 bg-muted rounded-lg">
+                          <span className="capitalize font-medium text-primary">
+                            {selectedTrainingSector || 'Ninguno seleccionado'}
+                          </span>
+                          {selectedTrainingSector && trainingStatus?.sectors && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {trainingStatus.sectors.find(s => s.sector === selectedTrainingSector)?.qa_concepts_count || 0} conceptos,{' '}
+                              {trainingStatus.sectors.find(s => s.sector === selectedTrainingSector)?.qa_questions_count || 0} preguntas
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="training-epochs" className="text-sm font-medium">Epochs</Label>
+                        <p className="text-xs text-muted-foreground mb-1">
+                          Más epochs = mayor precisión pero más tiempo
+                        </p>
+                        <div className="flex gap-2">
+                          {[1, 3, 5, 10].map((n) => (
+                            <Button
+                              key={n}
+                              variant={trainingEpochs === n ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setTrainingEpochs(n)}
+                            >
+                              {n}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="hf-dataset" className="text-sm font-medium">
+                          Dataset HuggingFace (opcional)
+                        </Label>
+                        <p className="text-xs text-muted-foreground mb-1">
+                          Dataset adicional para ampliar el entrenamiento
+                        </p>
+                        <input
+                          id="hf-dataset"
+                          type="text"
+                          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          placeholder="ej: dariolopez/justicio-rag-embedding-qa-tmp"
+                          value={trainingHfDataset}
+                          onChange={(e) => setTrainingHfDataset(e.target.value)}
+                        />
+                      </div>
+                    </CardContent>
+                    <CardFooter>
+                      <Button
+                        onClick={() => setShowTrainingDialog(true)}
+                        disabled={!selectedTrainingSector || isStartingTraining || !!trainingStatus?.training_in_progress}
+                        className="w-full"
+                      >
+                        {isStartingTraining ? (
+                          <>
+                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Iniciando...
+                          </>
+                        ) : trainingStatus?.training_in_progress ? (
+                          <>
+                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Entrenamiento en curso ({trainingStatus.training_in_progress})...
+                          </>
+                        ) : (
+                          <>
+                            <IconPlayerPlay className="mr-2 h-4 w-4" />
+                            Iniciar Entrenamiento
+                          </>
+                        )}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+
+                  {/* Training Progress / Info */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconActivity className="h-5 w-5" />
+                        Estado del Entrenamiento
+                      </CardTitle>
+                      <CardDescription>
+                        Progreso y resultados del último entrenamiento
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {trainingStatus?.training_in_progress ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <IconLoader2 className="h-5 w-5 animate-spin text-primary" />
+                            <span className="font-medium">
+                              Entrenando: <span className="capitalize">{trainingStatus.training_in_progress}</span>
+                            </span>
+                          </div>
+                          {trainingStatus.training_progress && (
+                            <div className="rounded-lg bg-muted p-4 space-y-2">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">Fase</span>
+                                <Badge variant="outline">{trainingStatus.training_progress.stage}</Badge>
+                              </div>
+                              <p className="text-sm">{trainingStatus.training_progress.message}</p>
+                              {trainingStatus.training_progress.total_examples && (
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-muted-foreground">Ejemplos</span>
+                                  <span>{trainingStatus.training_progress.total_examples}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) : trainingProgress?.progress?.stage === 'completed' ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-green-600">
+                            <IconCircleCheck className="h-5 w-5" />
+                            <span className="font-medium">Entrenamiento completado</span>
+                          </div>
+                          <div className="rounded-lg bg-muted p-4 space-y-2">
+                            <p className="text-sm">{trainingProgress.progress.message}</p>
+                            {trainingProgress.progress.total_examples && (
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">Ejemplos totales</span>
+                                <span>{trainingProgress.progress.total_examples}</span>
+                              </div>
+                            )}
+                            {trainingProgress.progress.elapsed_seconds && (
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">Duración</span>
+                                <span>{trainingProgress.progress.elapsed_seconds.toFixed(1)}s</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : trainingProgress?.last_error ? (
+                        <Alert variant="destructive">
+                          <IconAlertCircle className="h-4 w-4" />
+                          <AlertDescription>{trainingProgress.last_error}</AlertDescription>
+                        </Alert>
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <IconCpu className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                          <p className="text-sm">No hay entrenamientos recientes</p>
+                          <p className="text-xs mt-1">
+                            Selecciona un sector y haz clic en "Iniciar Entrenamiento"
+                          </p>
+                        </div>
+                      )}
+
+                      {/* How it works */}
+                      <div className="rounded-lg border p-4 space-y-2">
+                        <h4 className="text-sm font-medium">¿Cómo funciona?</h4>
+                        <ul className="text-xs text-muted-foreground space-y-1">
+                          <li>• Se carga el modelo base (all-MiniLM-L6-v2)</li>
+                          <li>• Se entrena con los pares QA del sector + dataset opcional</li>
+                          <li>• El modelo entrenado se guarda en disco</li>
+                          <li>• Al reiniciar, Emma usa el modelo entrenado automáticamente</li>
+                          <li>• Sin modelo entrenado, Emma usa el modelo base (funciona igualmente)</li>
+                        </ul>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
               {/* Maintenance Tab */}
               <TabsContent value="maintenance" className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
@@ -1497,6 +1862,40 @@ const loadBoePresets = async () => {
             <AlertDialogAction onClick={handleBoeSyncAll}>
               <IconRefresh className="mr-2 h-4 w-4" />
               Sincronizar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Training Confirmation Dialog */}
+      <AlertDialog open={showTrainingDialog} onOpenChange={setShowTrainingDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Iniciar entrenamiento de embeddings?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>Se entrenará un modelo de embeddings personalizado para el sector:</p>
+                <div className="mt-2 p-3 bg-muted rounded-lg space-y-1">
+                  <p className="font-medium capitalize">{selectedTrainingSector}</p>
+                  <p className="text-sm">
+                    {trainingStatus?.sectors?.find(s => s.sector === selectedTrainingSector)?.qa_concepts_count || 0} conceptos,{' '}
+                    {trainingEpochs} epochs
+                  </p>
+                  {trainingHfDataset && (
+                    <p className="text-sm">Dataset: {trainingHfDataset}</p>
+                  )}
+                </div>
+                <p className="mt-2 text-sm text-amber-600">
+                  ⚠️ El entrenamiento se ejecuta en segundo plano. El servicio seguirá funcionando normalmente.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleStartTraining}>
+              <IconPlayerPlay className="mr-2 h-4 w-4" />
+              Iniciar Entrenamiento
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

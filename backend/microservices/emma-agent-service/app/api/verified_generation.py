@@ -272,6 +272,75 @@ async def export_session_pdf(
 
 
 @router.get(
+    "/session/{session_id}/docx",
+    summary="Export existing session as DOCX",
+    description="Export a previously generated verification session as a downloadable Word document.",
+)
+async def export_session_docx(
+    session_id: str,
+    tenant_id: str,
+    _: None = Depends(verify_api_key),
+) -> Response:
+    """Export an existing verification session as DOCX without re-generating."""
+    logger.info(f"📄 DOCX export request: session={session_id[:16]}...")
+
+    try:
+        cache = get_verified_cache()
+        await cache.connect()
+
+        claims = await cache.get_verified_claims(tenant_id, session_id)
+        stats = await cache.get_session_stats(tenant_id, session_id)
+        meta = await cache.get_session_metadata(tenant_id, session_id)
+
+        if not claims:
+            raise HTTPException(status_code=404, detail="Session not found or expired")
+
+        # Build document text from accepted claims
+        document_text = "\n\n".join(
+            c.text for c in claims
+            if c.status.value in ("verified", "corrected")
+        )
+
+        from app.services.docx_renderer import get_docx_renderer
+        renderer = get_docx_renderer()
+        docx_bytes = renderer.render_verified_report({
+            "query": meta.get("query", "N/A"),
+            "session_id": session_id,
+            "created_at": meta.get("created_at", "N/A"),
+            "document_text": document_text,
+            "claims": [
+                {
+                    "text": c.text,
+                    "confidence": c.confidence,
+                    "status": c.status.value,
+                    "evidence_document_ids": c.evidence_document_ids,
+                }
+                for c in claims
+            ],
+            "claims_verified": stats.get("verified_count", 0),
+            "claims_corrected": stats.get("corrected_count", 0),
+            "claims_rejected": stats.get("rejected_count", 0),
+            "average_confidence": stats.get("average_confidence", 0.0),
+            "execution_time_ms": meta.get("execution_time_ms", 0),
+            "sources": meta.get("sources", []),
+        })
+
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="informe_verificado_{session_id[:8]}.docx"'
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ DOCX export failed: {e}")
+        raise HTTPException(status_code=500, detail=f"DOCX export failed: {str(e)}")
+
+
+@router.get(
     "/session/{session_id}/claims",
     response_model=SessionClaimsResponse,
     summary="Get verified claims for a session",

@@ -127,7 +127,7 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
             search_limit = sector_config.get("top_k", 10)
             search_alpha = sector_config.get("hybrid_alpha", 0.7)
 
-        # Perform hybrid search with ACL filtering via HTTP
+        # Perform hybrid search with ACL filtering via HTTP (tenant docs)
         results = await weaviate_client.hybrid_search(
             tenant_id=tenant_id,
             query=query,
@@ -135,6 +135,30 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
             alpha=search_alpha,
             filters=search_filters,
         )
+
+        # Check QA index for public knowledge search
+        from ..sectors.qa_index import get_sector_qa_index
+
+        sector_name = (sector_config or {}).get("sector", "")
+        qa_index = get_sector_qa_index(sector_name) if sector_name else None
+        qa_matches = qa_index.search(query, top_k=1, threshold=0.65) if qa_index else []
+
+        # If QA matched concepts with related_laws → also search public knowledge
+        public_results = []
+        if qa_matches and qa_matches[0].related_laws:
+            try:
+                public_results = await weaviate_client.search_public_knowledge(
+                    query=query,
+                    limit=5,
+                    domain=qa_matches[0].domain,
+                )
+                if public_results:
+                    logger.info(
+                        f"📚 RETRIEVE: {len(public_results)} public knowledge docs "
+                        f"(concept={qa_matches[0].id}, score={qa_matches[0].score:.2f})"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ Public knowledge search failed: {e}")
 
         # Convert to DocumentResult format
         retrieved_docs: List[DocumentResult] = []
@@ -152,12 +176,30 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
             retrieved_docs.append(doc)
             doc_scores.append(result.score)
 
+        # Merge public knowledge results (all chunks — dedup is presentation-only)
+        for result in public_results:
+            doc = DocumentResult(
+                id=result.document_id,
+                title=result.metadata.get("title", ""),
+                content=result.content,
+                score=result.score,
+                metadata={**result.metadata, "source": "public_knowledge"},
+                collection="",
+            )
+            retrieved_docs.append(doc)
+            doc_scores.append(result.score)
+
         latency_ms = (time.time() - start_time) * 1000
-        logger.info(f"✅ RETRIEVE: Found {len(retrieved_docs)} docs in {latency_ms:.1f}ms")
+        tenant_count = len(results)
+        public_count = len(public_results)
+        logger.info(
+            f"✅ RETRIEVE: {tenant_count} tenant + {public_count} public docs "
+            f"in {latency_ms:.1f}ms"
+        )
 
         tracker.add_step(
             StepType.OBSERVATION,
-            f"{len(retrieved_docs)} documentos encontrados ({latency_ms:.0f}ms)",
+            f"{tenant_count} documentos tenant + {public_count} conocimiento público ({latency_ms:.0f}ms)",
             confidence=1.0,
         )
 
@@ -170,6 +212,9 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
                 **state.get("metadata", {}),
                 "retrieval_latency_ms": latency_ms,
                 "retrieval_count": len(retrieved_docs),
+                "retrieval_tenant_count": tenant_count,
+                "retrieval_public_count": public_count,
+                "qa_concept": qa_matches[0].id if qa_matches else None,
             },
         }
 

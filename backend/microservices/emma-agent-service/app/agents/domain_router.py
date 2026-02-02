@@ -49,6 +49,7 @@ class DomainType(str, Enum):
     COMPLIANCE = "compliance"
     EDUCATION = "education"
     LEGAL = "legal"
+    DOCGEN = "docgen"
     GENERAL = "general"
 
 
@@ -187,6 +188,19 @@ DOMAIN_KEYWORDS: Dict[DomainType, List[str]] = {
         "tribunal", "juzgado", "audiencia",
         "demanda", "recurso", "apelación",
         "abogado", "letrado", "procurador",
+    ],
+    DomainType.DOCGEN: [
+        # Document generation verbs
+        "genera un", "genera una", "generar un", "generar una",
+        "redacta un", "redacta una", "redactar un", "redactar una",
+        "elabora un", "elabora una", "elaborar un", "elaborar una",
+        "crea un contrato", "crea una demanda", "crea un escrito",
+        "escribe un", "escribe una", "escribir un", "escribir una",
+        "prepara un documento", "prepara un contrato", "prepara un escrito",
+        "modelo de contrato", "modelo de demanda", "modelo de escrito",
+        "plantilla de contrato", "plantilla de demanda", "plantilla de escrito",
+        "borrador de contrato", "borrador de demanda", "borrador de escrito",
+        "redacción de contrato", "redacción de demanda",
     ],
 }
 

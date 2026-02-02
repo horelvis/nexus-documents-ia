@@ -1,6 +1,6 @@
 'use client'
 
-import { IconCircleCheck, IconCircleX, IconLoader2, IconEdit, IconBrain } from '@tabler/icons-react'
+import { IconCircleCheck, IconCircleX, IconLoader2, IconAlertTriangle, IconBrain } from '@tabler/icons-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -82,7 +82,7 @@ function ClaimItem({ claim }: { claim: VerifiedClaimInfo }) {
       case 'verified':
         return <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500" />
       case 'corrected':
-        return <IconEdit className="h-3.5 w-3.5 text-amber-500" />
+        return <IconAlertTriangle className="h-3.5 w-3.5 text-amber-500" />
       case 'rejected':
         return <IconCircleX className="h-3.5 w-3.5 text-destructive" />
       case 'verifying':

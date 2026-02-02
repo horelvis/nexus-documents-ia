@@ -1,0 +1,259 @@
+# Medical Sector QA Concepts
+# Maps natural language medical queries to domains, related regulations,
+# and graph keywords for knowledge expansion.
+
+concepts:
+  - id: consentimiento_informado
+    domain: general
+    description: "Consentimiento informado del paciente antes de procedimientos médicos"
+    questions:
+      - "modelo consentimiento informado"
+      - "requisitos consentimiento informado"
+      - "cuándo es obligatorio el consentimiento informado"
+      - "consentimiento informado cirugía"
+      - "revocación consentimiento informado"
+    related_laws:
+      - "Ley 41/2002 autonomía del paciente Art. 8-10"
+    graph_keywords:
+      - consentimiento informado
+      - autonomía paciente
+      - procedimiento
+
+  - id: historia_clinica
+    domain: general
+    description: "Historia clínica: contenido, acceso, conservación y protección de datos"
+    questions:
+      - "contenido historia clínica"
+      - "acceso historia clínica paciente"
+      - "conservación historia clínica"
+      - "protección datos historia clínica"
+      - "quién puede acceder a la historia clínica"
+    related_laws:
+      - "Ley 41/2002 autonomía del paciente Art. 14-19"
+      - "RGPD Art. 9"
+    graph_keywords:
+      - historia clínica
+      - datos salud
+      - acceso
+
+  - id: responsabilidad_medica
+    domain: general
+    description: "Responsabilidad médica: negligencia, mala praxis y reclamaciones"
+    questions:
+      - "negligencia médica"
+      - "mala praxis médica"
+      - "reclamación negligencia médica"
+      - "indemnización error médico"
+      - "responsabilidad patrimonial sanitaria"
+    related_laws:
+      - "Ley 41/2002"
+      - "Ley 40/2015 Régimen Jurídico Sector Público"
+    graph_keywords:
+      - negligencia médica
+      - mala praxis
+      - responsabilidad sanitaria
+
+  - id: receta_electronica
+    domain: general
+    description: "Receta electrónica y prescripción de medicamentos"
+    questions:
+      - "receta electrónica funcionamiento"
+      - "prescripción medicamentos"
+      - "receta médica requisitos"
+      - "medicamentos con receta"
+      - "validez receta médica"
+    related_laws:
+      - "Real Decreto 1718/2010"
+      - "Ley 29/2006 garantías uso racional medicamentos"
+    graph_keywords:
+      - receta electrónica
+      - prescripción
+      - medicamento
+
+  - id: incapacidad_laboral_medica
+    domain: general
+    description: "Valoración médica de incapacidad laboral: temporal y permanente"
+    questions:
+      - "incapacidad permanente grados"
+      - "tribunal médico incapacidad"
+      - "incapacidad permanente total"
+      - "incapacidad permanente absoluta"
+      - "gran invalidez requisitos"
+      - "revisión grado incapacidad"
+    related_laws:
+      - "Ley General de la Seguridad Social Art. 193-200"
+    graph_keywords:
+      - incapacidad permanente
+      - valoración médica
+      - tribunal médico
+
+  - id: proteccion_datos_salud
+    domain: general
+    description: "Protección de datos de salud bajo el RGPD: categorías especiales"
+    questions:
+      - "datos de salud RGPD"
+      - "tratamiento datos sanitarios"
+      - "base legal datos salud"
+      - "anonimización datos médicos"
+      - "investigación médica datos personales"
+    related_laws:
+      - "RGPD Art. 9"
+      - "LOPDGDD Art. 9"
+    graph_keywords:
+      - datos salud
+      - categoría especial
+      - anonimización
+
+  - id: ensayo_clinico
+    domain: general
+    description: "Ensayos clínicos: regulación, comité ético y consentimiento"
+    questions:
+      - "regulación ensayos clínicos"
+      - "comité ético investigación"
+      - "consentimiento ensayo clínico"
+      - "fases ensayo clínico"
+      - "autorización AEMPS ensayo"
+    related_laws:
+      - "Real Decreto 1090/2015"
+      - "Reglamento UE 536/2014"
+    graph_keywords:
+      - ensayo clínico
+      - comité ético
+      - AEMPS
+      - investigación
+
+  - id: farmacologia
+    domain: general
+    description: "Farmacología: interacciones, contraindicaciones y farmacovigilancia"
+    questions:
+      - "interacciones medicamentosas"
+      - "contraindicaciones medicamento"
+      - "efectos adversos notificación"
+      - "farmacovigilancia"
+      - "reacciones adversas medicamentos"
+    related_laws:
+      - "Real Decreto 577/2013 farmacovigilancia"
+    graph_keywords:
+      - interacción medicamentosa
+      - farmacovigilancia
+      - reacción adversa
+
+  - id: telemedicina
+    domain: general
+    description: "Telemedicina: regulación, requisitos y protección de datos en consultas remotas"
+    questions:
+      - "telemedicina regulación España"
+      - "consulta médica online requisitos"
+      - "teleconsulta médica"
+      - "protección datos telemedicina"
+      - "receta electrónica telemedicina"
+    related_laws:
+      - "Ley 41/2002"
+      - "RGPD"
+    graph_keywords:
+      - telemedicina
+      - teleconsulta
+      - consulta remota
+
+  - id: urgencias_triaje
+    domain: general
+    description: "Urgencias médicas: triaje, protocolos y derechos del paciente"
+    questions:
+      - "sistema triaje urgencias"
+      - "protocolos urgencias"
+      - "derechos paciente urgencias"
+      - "tiempo espera urgencias"
+      - "derivación urgencias"
+    related_laws:
+      - "Ley 41/2002"
+      - "Ley 16/2003 cohesión y calidad SNS"
+    graph_keywords:
+      - urgencias
+      - triaje
+      - protocolo
+
+  - id: documentacion_clinica
+    domain: general
+    description: "Documentación clínica: informes, altas, partes y certificados médicos"
+    questions:
+      - "informe de alta hospitalaria"
+      - "parte de lesiones"
+      - "certificado médico"
+      - "informe médico requisitos"
+      - "alta voluntaria"
+    related_laws:
+      - "Ley 41/2002 Art. 20-21"
+    graph_keywords:
+      - informe médico
+      - alta hospitalaria
+      - certificado
+      - parte lesiones
+
+  - id: derechos_paciente
+    domain: general
+    description: "Derechos del paciente: información, intimidad, segunda opinión"
+    questions:
+      - "derechos del paciente"
+      - "derecho segunda opinión médica"
+      - "derecho a la intimidad paciente"
+      - "derecho información asistencial"
+      - "voluntades anticipadas"
+      - "testamento vital"
+    related_laws:
+      - "Ley 41/2002 Art. 4-7"
+    graph_keywords:
+      - derechos paciente
+      - segunda opinión
+      - voluntades anticipadas
+
+  - id: salud_laboral
+    domain: general
+    description: "Salud laboral: vigilancia de la salud, reconocimientos médicos y enfermedades profesionales"
+    questions:
+      - "reconocimiento médico empresa obligatorio"
+      - "vigilancia de la salud trabajadores"
+      - "enfermedad profesional listado"
+      - "aptitud laboral"
+      - "servicio prevención ajeno"
+    related_laws:
+      - "Ley 31/1995 Prevención Riesgos Laborales Art. 22"
+      - "Real Decreto 39/1997"
+    graph_keywords:
+      - salud laboral
+      - vigilancia salud
+      - enfermedad profesional
+      - reconocimiento médico
+
+  - id: sanidad_publica
+    domain: general
+    description: "Sistema Nacional de Salud: prestaciones, cartera de servicios y financiación"
+    questions:
+      - "prestaciones Sistema Nacional Salud"
+      - "cartera de servicios SNS"
+      - "tarjeta sanitaria"
+      - "asistencia sanitaria extranjeros"
+      - "copago farmacéutico"
+    related_laws:
+      - "Ley 16/2003 cohesión y calidad SNS"
+      - "Real Decreto-ley 16/2012"
+    graph_keywords:
+      - SNS
+      - prestaciones sanitarias
+      - cartera servicios
+      - tarjeta sanitaria
+
+  - id: productos_sanitarios
+    domain: general
+    description: "Regulación de productos sanitarios y dispositivos médicos"
+    questions:
+      - "regulación productos sanitarios"
+      - "marcado CE dispositivos médicos"
+      - "notificación incidentes productos sanitarios"
+      - "clasificación dispositivos médicos"
+    related_laws:
+      - "Reglamento UE 2017/745"
+      - "Real Decreto 192/2023"
+    graph_keywords:
+      - producto sanitario
+      - dispositivo médico
+      - marcado CE

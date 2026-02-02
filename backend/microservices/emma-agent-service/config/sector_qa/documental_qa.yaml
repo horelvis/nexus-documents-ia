@@ -1,0 +1,267 @@
+# Documental Sector QA Concepts
+# Maps natural language document management queries to domains,
+# related standards, and graph keywords.
+
+concepts:
+  - id: gestion_documental
+    domain: general
+    description: "Gestión documental: organización, clasificación y ciclo de vida de documentos"
+    questions:
+      - "cómo organizar documentos empresa"
+      - "sistema gestión documental"
+      - "clasificación documental"
+      - "ciclo de vida documento"
+      - "cuadro clasificación documentos"
+      - "política gestión documental"
+    related_laws:
+      - "ISO 15489 Gestión de documentos"
+      - "Ley 39/2015 Procedimiento Administrativo"
+    graph_keywords:
+      - gestión documental
+      - clasificación
+      - ciclo de vida
+
+  - id: archivo_conservacion
+    domain: general
+    description: "Archivo y conservación de documentos: plazos, digitalización y destrucción"
+    questions:
+      - "plazos conservación documentos"
+      - "cuánto tiempo guardar facturas"
+      - "digitalización certificada"
+      - "destrucción segura documentos"
+      - "archivo electrónico"
+    related_laws:
+      - "Ley 10/2010 Art. 25 (blanqueo)"
+      - "Código de Comercio Art. 30"
+      - "Ley 58/2003 General Tributaria"
+    graph_keywords:
+      - archivo
+      - conservación
+      - digitalización
+      - destrucción
+
+  - id: firma_electronica
+    domain: general
+    description: "Firma electrónica: tipos, validez legal y certificados digitales"
+    questions:
+      - "tipos firma electrónica"
+      - "firma electrónica avanzada"
+      - "firma electrónica cualificada"
+      - "certificado digital"
+      - "validez firma electrónica"
+      - "firma electrónica contrato"
+    related_laws:
+      - "Reglamento eIDAS UE 910/2014"
+      - "Ley 6/2020 regulación servicios electrónicos confianza"
+    graph_keywords:
+      - firma electrónica
+      - certificado digital
+      - eIDAS
+
+  - id: factura_electronica
+    domain: general
+    description: "Factura electrónica: formato, obligaciones y conservación"
+    questions:
+      - "factura electrónica obligatoria"
+      - "formato factura electrónica"
+      - "Facturae formato"
+      - "conservación facturas electrónicas"
+      - "factura electrónica B2B"
+    related_laws:
+      - "Ley 25/2013 factura electrónica sector público"
+      - "Ley 18/2022 Crea y Crece"
+    graph_keywords:
+      - factura electrónica
+      - Facturae
+      - facturación
+
+  - id: contratos_gestion
+    domain: general
+    description: "Gestión de contratos: redacción, revisión, versionado y archivo"
+    questions:
+      - "gestión contratos empresa"
+      - "versionado contratos"
+      - "cláusulas contrato tipo"
+      - "revisión contratos"
+      - "archivo contratos"
+      - "renovación contratos automática"
+    related_laws:
+      - "Código Civil Art. 1254"
+    graph_keywords:
+      - contrato
+      - cláusula
+      - versionado
+      - gestión contractual
+
+  - id: metadatos_documentales
+    domain: general
+    description: "Metadatos documentales: esquemas, estándares y catalogación"
+    questions:
+      - "metadatos documentos"
+      - "esquema metadatos Dublin Core"
+      - "catalogación documentos"
+      - "etiquetado documentos"
+      - "taxonomía documental"
+    related_laws:
+      - "ISO 23081 Metadatos para gestión documental"
+      - "Dublin Core Metadata"
+    graph_keywords:
+      - metadatos
+      - Dublin Core
+      - catalogación
+      - taxonomía
+
+  - id: normativa_educativa
+    domain: education
+    description: "Normativa educativa: títulos, convalidaciones y regulación académica"
+    questions:
+      - "convalidación títulos extranjeros"
+      - "homologación título universitario"
+      - "normativa títulos oficiales"
+      - "expediente académico"
+      - "certificado académico"
+    related_laws:
+      - "Ley Orgánica 2/2006 de Educación (LOE)"
+      - "Real Decreto 889/2022"
+    graph_keywords:
+      - título académico
+      - convalidación
+      - homologación
+
+  - id: registro_propiedad
+    domain: realestate
+    description: "Registro de la Propiedad: inscripciones, notas simples y certificaciones"
+    questions:
+      - "nota simple registro propiedad"
+      - "inscripción registro propiedad"
+      - "certificación registral"
+      - "cargas de un inmueble"
+      - "cómo consultar registro propiedad"
+    related_laws:
+      - "Ley Hipotecaria"
+      - "Reglamento Hipotecario"
+    graph_keywords:
+      - registro propiedad
+      - nota simple
+      - inscripción
+      - carga
+
+  - id: escrituras_notariales
+    domain: realestate
+    description: "Escrituras notariales: compraventa, poderes y actas notariales"
+    questions:
+      - "escritura compraventa inmueble"
+      - "poder notarial tipos"
+      - "acta notarial"
+      - "copia autorizada escritura"
+      - "gastos notaría compraventa"
+    related_laws:
+      - "Ley del Notariado"
+      - "Reglamento Notarial"
+    graph_keywords:
+      - escritura
+      - notaría
+      - compraventa
+      - poder notarial
+
+  - id: catastro
+    domain: realestate
+    description: "Catastro inmobiliario: referencia catastral, valoración y certificados"
+    questions:
+      - "referencia catastral"
+      - "valor catastral inmueble"
+      - "certificado catastral"
+      - "consulta catastro"
+      - "discrepancia catastro registro"
+    related_laws:
+      - "Real Decreto Legislativo 1/2004 Ley Catastro"
+    graph_keywords:
+      - catastro
+      - referencia catastral
+      - valor catastral
+
+  - id: licencias_urbanisticas
+    domain: realestate
+    description: "Licencias urbanísticas: obras, actividad y primera ocupación"
+    questions:
+      - "licencia de obras"
+      - "licencia de actividad"
+      - "licencia primera ocupación"
+      - "declaración responsable obras"
+      - "comunicación previa actividad"
+    related_laws:
+      - "Ley de Suelo y Rehabilitación Urbana"
+      - "Normativa urbanística municipal"
+    graph_keywords:
+      - licencia urbanística
+      - licencia obras
+      - declaración responsable
+
+  - id: proteccion_datos_documental
+    domain: general
+    description: "Protección de datos en gestión documental: anonimización y políticas de acceso"
+    questions:
+      - "protección datos documentos"
+      - "anonimización documentos"
+      - "política acceso documentos"
+      - "datos personales en documentos"
+      - "borrado seguro documentos digitales"
+    related_laws:
+      - "RGPD"
+      - "LOPDGDD"
+    graph_keywords:
+      - protección datos
+      - anonimización
+      - acceso documental
+
+  - id: administracion_electronica
+    domain: general
+    description: "Administración electrónica: sede electrónica, certificado digital y trámites online"
+    questions:
+      - "sede electrónica"
+      - "certificado digital administración"
+      - "trámites online administración pública"
+      - "cl@ve PIN"
+      - "notificaciones electrónicas"
+    related_laws:
+      - "Ley 39/2015 Procedimiento Administrativo"
+      - "Ley 40/2015 Régimen Jurídico Sector Público"
+    graph_keywords:
+      - administración electrónica
+      - sede electrónica
+      - certificado digital
+
+  - id: compliance_documental
+    domain: general
+    description: "Cumplimiento normativo documental: auditoría, trazabilidad y cadena de custodia"
+    questions:
+      - "auditoría documental"
+      - "trazabilidad documentos"
+      - "cadena de custodia documentos"
+      - "evidencia electrónica"
+      - "sello de tiempo"
+    related_laws:
+      - "ISO 27001"
+      - "Reglamento eIDAS"
+    graph_keywords:
+      - auditoría documental
+      - trazabilidad
+      - cadena custodia
+      - sello tiempo
+
+  - id: accesibilidad_documental
+    domain: general
+    description: "Accesibilidad documental: documentos accesibles para personas con discapacidad"
+    questions:
+      - "documentos accesibles PDF"
+      - "accesibilidad documentos web"
+      - "WCAG documentos"
+      - "PDF accesible"
+      - "documento en lectura fácil"
+    related_laws:
+      - "Real Decreto 1112/2018 accesibilidad"
+      - "Directiva UE 2016/2102"
+    graph_keywords:
+      - accesibilidad
+      - PDF accesible
+      - WCAG

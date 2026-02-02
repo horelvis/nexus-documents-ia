@@ -34,9 +34,56 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
+from pathlib import Path
+
 from ...state import RAGState, AgentResult
 
 logger = logging.getLogger(__name__)
+
+# ─── Sector prompt loader (cached) ───────────────────────────────────────────
+_SECTOR_PROMPTS_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_sector_prompts() -> Dict[str, Any]:
+    """Load sector prompts from emma_prompts.yaml (cached)."""
+    global _SECTOR_PROMPTS_CACHE
+    if _SECTOR_PROMPTS_CACHE is not None:
+        return _SECTOR_PROMPTS_CACHE
+
+    # specialists/ → nodes/ → langgraph/ → agents/ → app/ → emma-agent-service/
+    candidates = [
+        Path("/app/config/prompts/emma_prompts.yaml"),
+        Path(__file__).parent.parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                import yaml
+                with open(p, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                _SECTOR_PROMPTS_CACHE = data.get("sectors", {})
+                return _SECTOR_PROMPTS_CACHE
+            except Exception as e:
+                logger.warning(f"Failed to load sector prompts: {e}")
+
+    _SECTOR_PROMPTS_CACHE = {}
+    return _SECTOR_PROMPTS_CACHE
+
+
+def _get_sector_system_prompt(state: RAGState) -> str:
+    """Get the sector system prompt from state's sector_config, if available."""
+    sector_config = state.get("sector_config")
+    if not sector_config:
+        return ""
+
+    # system_prompt_key is like "sectors.legal" → extract "legal"
+    prompt_key = sector_config.get("system_prompt_key", "")
+    if not prompt_key:
+        return ""
+
+    sector_key = prompt_key.replace("sectors.", "")
+    prompts = _load_sector_prompts()
+    return prompts.get(sector_key, {}).get("system_prompt", "")
 
 # Explicit thinking tag patterns (Qwen3, DeepSeek R1, etc.)
 # These are the most reliable - models output thinking in these tags
@@ -45,6 +92,73 @@ THINKING_TAG_PATTERNS = [
     re.compile(r"<thinking>(.*?)</thinking>", re.IGNORECASE | re.DOTALL),
     re.compile(r"<pensamiento>(.*?)</pensamiento>", re.IGNORECASE | re.DOTALL),
 ]
+
+# Raw tool_call tags emitted by small/custom models as plain text (not structured).
+_RAW_TOOL_CALL_WITH_CLOSING = re.compile(
+    r"<tool_call>.*?</tool_call>", re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_raw_tool_calls(content: str) -> str:
+    """Remove raw <tool_call> tags that small/custom models emit as plain text.
+
+    Some models output tool calls as ``<tool_call>{"name":...}`` inside the
+    content field instead of using the structured tool_calls mechanism.
+    These must be stripped so they don't leak into the final answer.
+
+    Strategy:
+    1. Strip ``<tool_call>...</tool_call>`` pairs (with closing tag).
+    2. Strip ``<tool_call>`` followed by a JSON block (balanced braces) without closing tag.
+    3. Remove any leftover bare ``<tool_call>`` or ``</tool_call>`` tags.
+    """
+    if not content or "tool_call" not in content.lower():
+        return content
+
+    cleaned = content
+
+    # Pass 1: with closing tags
+    cleaned = _RAW_TOOL_CALL_WITH_CLOSING.sub("", cleaned)
+
+    # Pass 2: without closing tag — find <tool_call> and consume until matching }
+    while True:
+        idx = cleaned.lower().find("<tool_call>")
+        if idx == -1:
+            break
+        # Find the start of JSON after the tag
+        tag_end = idx + len("<tool_call>")
+        rest = cleaned[tag_end:]
+        json_start = rest.find("{")
+        if json_start == -1:
+            # No JSON — just remove the bare tag
+            cleaned = cleaned[:idx] + rest
+            continue
+        # Walk through and find the balanced closing brace
+        depth = 0
+        end_pos = -1
+        for i, ch in enumerate(rest[json_start:]):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end_pos = json_start + i + 1
+                    break
+        if end_pos == -1:
+            # Unbalanced — consume to end of line
+            nl = rest.find("\n", json_start)
+            end_pos = nl if nl != -1 else len(rest)
+        cleaned = cleaned[:idx] + rest[end_pos:]
+
+    # Pass 3: leftover bare tags
+    cleaned = re.sub(r"</?tool_call>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip()
+
+    if cleaned != content.strip():
+        logger.warning(
+            f"🧹 Stripped raw <tool_call> tags from output "
+            f"({len(content)} → {len(cleaned)} chars)"
+        )
+    return cleaned
 
 
 def _extract_thinking(content: str) -> Tuple[str, str]:
@@ -173,6 +287,11 @@ async def create_specialist_node(
     retrieved_docs = state.get("retrieved_docs", [])
     current_index = state.get("current_agent_index", 0)
 
+    # Render dynamic prompt via Jinja2 engine (handles sector injection + templates)
+    from ...prompt_engine import get_prompt_engine
+    engine = get_prompt_engine()
+    system_prompt = engine.render_agent_prompt(agent_name, system_prompt, state)
+
     logger.info(f"🤖 {agent_name}: Starting execution")
 
     # Initialize dynamic reasoning tracker for this agent execution
@@ -214,15 +333,38 @@ async def create_specialist_node(
                 + context
             )
 
-        # Build messages
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"""Query: {query}
+        # Build messages — docgen agents get a different context framing
+        is_docgen = agent_name == "docgen_agent"
+
+        if is_docgen:
+            # For docgen, build a template-focused context:
+            # Give more space to the best-matching document so the model
+            # can see its full structure, not just scattered chunks.
+            docgen_context = _build_docgen_context(retrieved_docs)
+
+            user_content = f"""Query: {query}
+
+{docgen_context}
+
+INSTRUCCIONES CRÍTICAS PARA GENERACIÓN:
+1. Si hay un DOCUMENTO PLANTILLA arriba, COPIA su formato exacto: mismos encabezados, misma numeración de cláusulas, mismo estilo de redacción, misma estructura de firmas.
+2. ADAPTA el contenido de la plantilla al tipo de documento solicitado, manteniendo el estilo del cliente.
+3. Si hay documentos de referencia adicionales, úsalos para cláusulas complementarias.
+4. Si NO hay plantilla del mismo tipo, genera con formato jurídico estándar español.
+5. Marca datos no proporcionados como: [NOMBRE COMPLETO], [NIF], [DOMICILIO], [FECHA], [IMPORTE], etc.
+6. Fundamenta cada cláusula con legislación vigente (artículos, leyes, BOE).
+7. Al final incluye sección CAMPOS PENDIENTES DE COMPLETAR."""
+        else:
+            user_content = f"""Query: {query}
 
 Context from retrieved documents (use as support and verification, not as exclusive source):
 {context}
 
-Analyze and respond using your specialized legal knowledge. The retrieved documents may be partial or tangentially related — complement them with your own knowledge of applicable legislation, citing specific laws and articles even if they don't appear in the documents above."""},
+Analyze and respond using your specialized legal knowledge. The retrieved documents may be partial or tangentially related — complement them with your own knowledge of applicable legislation, citing specific laws and articles even if they don't appear in the documents above."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ]
 
         # Get LLM client and config
@@ -232,8 +374,15 @@ Analyze and respond using your specialized legal knowledge. The retrieved docume
         settings = Settings()
         llm_client = await get_llm_client()
 
-        # Convert tools to OpenAI format
-        tool_schemas = [_tool_to_openai_schema(tool) for tool in tools] if tools else None
+        # Convert tools to OpenAI format.
+        # Disable tools for generate actions — the model should produce the
+        # document directly using the retrieved docs as context, not call tools.
+        action_intent = state.get("metadata", {}).get("action_intent", "")
+        if action_intent == "generate":
+            tool_schemas = None
+            logger.info(f"🔇 {agent_name}: Tools disabled for action=generate")
+        else:
+            tool_schemas = [_tool_to_openai_schema(tool) for tool in tools] if tools else None
 
         # Execute with tools using dynamic reasoning tracker and interleaved thinking
         tools_used = []
@@ -248,11 +397,18 @@ Analyze and respond using your specialized legal knowledge. The retrieved docume
             for iteration in range(max_iterations):
                 iteration_start = time.time()
 
+                # Docgen needs more output tokens for full documents
+                effective_max_tokens = (
+                    min(settings.agent_max_tokens * 3, 6144)
+                    if is_docgen
+                    else settings.agent_max_tokens
+                )
+
                 response = await llm_client.chat(
                     messages=messages,
                     tools=tool_schemas,
                     temperature=settings.agent_temperature,
-                    max_tokens=settings.agent_max_tokens,
+                    max_tokens=effective_max_tokens,
                 )
 
                 # =========================================================
@@ -353,9 +509,10 @@ Analyze and respond using your specialized legal knowledge. The retrieved docume
         latency_ms = (time.time() - start_time) * 1000
 
         # Build result dict with reasoning steps
-        # Truncate repetitive content from small LLM generation loops
+        # Clean raw <tool_call> tags and truncate repetitive content
         final_output = response.content if response else ""
         if final_output:
+            final_output = _strip_raw_tool_calls(final_output)
             final_output = _truncate_repetitions(final_output)
 
         # Note: AgentResult is a TypedDict, access as dict not object
@@ -410,6 +567,58 @@ Analyze and respond using your specialized legal knowledge. The retrieved docume
 
 
 MIN_RELEVANCE_SCORE = 0.45
+
+
+def _build_docgen_context(docs: List[Dict], max_chars: int = 6000) -> str:
+    """Build template-focused context for document generation.
+
+    Budget: ~6000 chars (~2000 tokens) to leave room for output (~6144 tokens)
+    within the 16K model window.
+
+    Strategy: give the highest-scoring document up to 4000 chars (so the model
+    sees its full structure), then append 1-2 secondary docs with the rest.
+    """
+    if not docs:
+        return "No hay documentos de referencia del cliente."
+
+    # Filter and sort by relevance
+    filtered = [d for d in docs if d.get("score", 0.0) >= MIN_RELEVANCE_SCORE]
+    if not filtered:
+        return "No se encontraron documentos relevantes del cliente."
+
+    filtered.sort(key=lambda d: d.get("score", 0.0), reverse=True)
+
+    # Primary template: best match gets generous space
+    primary = filtered[0]
+    primary_budget = min(max_chars * 2 // 3, 8000)  # ~66% of budget for primary
+    primary_content = primary.get("content", "")[:primary_budget]
+    primary_title = primary.get("title", "Documento")
+    primary_score = primary.get("score", 0.0)
+
+    parts = [
+        f"═══ DOCUMENTO PLANTILLA (mejor coincidencia, relevancia: {primary_score:.0%}) ═══",
+        f"Título: {primary_title}",
+        f"Contenido completo:",
+        primary_content,
+    ]
+
+    # Secondary references: remaining docs with leftover budget
+    remaining_budget = max_chars - len(primary_content) - 200
+    if remaining_budget > 500 and len(filtered) > 1:
+        parts.append("\n═══ DOCUMENTOS DE REFERENCIA ADICIONALES ═══")
+        total_used = 0
+        for doc in filtered[1:6]:  # max 5 secondary docs
+            available = remaining_budget - total_used
+            if available <= 200:
+                break
+            content = doc.get("content", "")[:available]
+            title = doc.get("title", "Documento")
+            score = doc.get("score", 0.0)
+            parts.append(f"\n--- {title} (relevancia: {score:.0%}) ---")
+            parts.append(content)
+            total_used += len(content) + 100
+
+    return "\n".join(parts)
 
 
 def _build_context(docs: List[Dict], max_chars: int = 8000) -> str:

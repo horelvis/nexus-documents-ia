@@ -264,11 +264,7 @@ export const connectorConfigs: Record<ConnectorType, { fields: ConfigField[] }> 
     ],
   },
   google_drive: {
-    fields: [
-      { name: 'service_account_json', label: 'Service Account JSON', type: 'textarea', required: true, description: 'Contenido completo del archivo JSON de cuenta de servicio' },
-      { name: 'domain', label: 'Dominio', type: 'text', required: true, placeholder: 'empresa.com', description: 'Dominio de Google Workspace' },
-      { name: 'admin_email', label: 'Email del Admin', type: 'text', required: true, placeholder: 'admin@empresa.com', description: 'Email con permisos de admin para delegación de dominio' },
-    ],
+    fields: [],
   },
   google_workspace: {
     fields: [
@@ -649,6 +645,75 @@ class ConnectorService {
     }
     return { data: response.data, error: null }
   }
+
+  // ==========================================================================
+  // Google Drive OAuth & Folder methods
+  // ==========================================================================
+
+  /**
+   * Get the OAuth authorize URL from the backend (authenticated request)
+   */
+  async getOAuthAuthorizeUrl(connectorId: string): Promise<{ data: { auth_url: string } | null; error: string | null }> {
+    const response = await apiClient.get<{ auth_url: string }>(`/connectors/${connectorId}/oauth/authorize`)
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Check OAuth status for a Google Drive connector
+   */
+  async getOAuthStatus(connectorId: string): Promise<{ data: OAuthStatus | null; error: string | null }> {
+    const response = await apiClient.get<OAuthStatus>(`/connectors/${connectorId}/oauth/status`)
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Revoke OAuth authorization for a Google Drive connector
+   */
+  async revokeOAuth(connectorId: string): Promise<{ error: string | null }> {
+    const response = await apiClient.post(`/connectors/${connectorId}/oauth/revoke`)
+    if (response.error) {
+      return { error: response.error }
+    }
+    return { error: null }
+  }
+
+  /**
+   * List Google Drive folders
+   */
+  async listFolders(connectorId: string, parentId = 'root'): Promise<{ data: DriveFolder[] | null; error: string | null }> {
+    const response = await apiClient.get<DriveFolder[]>(
+      `/connectors/${connectorId}/folders?parent_id=${encodeURIComponent(parentId)}`
+    )
+    if (response.error) {
+      return { data: null, error: response.error }
+    }
+    return { data: response.data, error: null }
+  }
+
+  /**
+   * Update connector config (e.g., to set folder_id)
+   */
+  async updateConnectorConfig(connectorId: string, config: Record<string, any>): Promise<{ data: Connector | null; error: string | null }> {
+    return this.updateConnector(connectorId, { config })
+  }
+}
+
+// Google Drive OAuth types
+export interface OAuthStatus {
+  connected: boolean
+  google_email?: string
+  folder_id?: string
+}
+
+export interface DriveFolder {
+  id: string
+  name: string
 }
 
 // Health check response type

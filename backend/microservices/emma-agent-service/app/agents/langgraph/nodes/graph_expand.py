@@ -62,10 +62,32 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
     try:
         from ..sectors.entity_extractor import extract_entities
         from ..sectors.graph_expander import expand_with_sector_graph
+        from ..sectors.qa_index import get_sector_qa_index
 
-        # Step 1: Extract entities
-        entity_patterns = sector_config.get("entity_patterns", {})
-        entities = extract_entities(query, entity_patterns)
+        # Step 1: Try semantic concept matching via QA index (primary)
+        sector_name = sector_config.get("sector", "")
+        qa_index = get_sector_qa_index(sector_name) if sector_name else None
+        concept_matches = qa_index.search(query, top_k=3, threshold=0.65) if qa_index else []
+
+        if concept_matches:
+            # Build keywords from matched concepts for Cypher expansion
+            all_keywords = []
+            for match in concept_matches:
+                all_keywords.extend(match.graph_keywords)
+
+            tracker.add_step(
+                StepType.OBSERVATION,
+                f"QA embedding: {len(concept_matches)} conceptos "
+                f"({concept_matches[0].id}, score={concept_matches[0].score:.2f})",
+                confidence=concept_matches[0].score,
+            )
+
+            # Build pseudo-entities from keywords for graph expansion
+            entities = {"qa_concept": all_keywords}
+        else:
+            # Fallback: regex entity extraction (for formal citations like "Art. 54 ET")
+            entity_patterns = sector_config.get("entity_patterns", {})
+            entities = extract_entities(query, entity_patterns)
 
         if not entities:
             latency_ms = (time.time() - start_time) * 1000
@@ -83,6 +105,10 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
                         "entities_found": 0,
                         "graph_context": "",
                         "latency_ms": latency_ms,
+                        "qa_matches": [
+                            {"id": m.id, "score": m.score}
+                            for m in concept_matches
+                        ] if concept_matches else [],
                     },
                 },
             }
@@ -123,6 +149,10 @@ async def graph_expand_node(state: RAGState) -> Dict[str, Any]:
                     "related_entities_count": len(expansion.get("related_entities", [])),
                     "paths_count": len(expansion.get("paths", [])),
                     "cypher_queries": expansion.get("cypher_queries", []),
+                    "qa_matches": [
+                        {"id": m.id, "score": m.score, "domain": m.domain}
+                        for m in concept_matches
+                    ] if concept_matches else [],
                     "latency_ms": latency_ms,
                 },
             },

@@ -205,6 +205,7 @@ class Settings(BaseSettings):
     LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
     MCP_ALFRESCO_URL: str = os.getenv("MCP_ALFRESCO_URL", "http://mcp-alfresco:8000")
+    MCP_GOOGLE_DRIVE_URL: str = os.getenv("MCP_GOOGLE_DRIVE_URL", "http://mcp-google-drive:8000")
 
     # Identity Document Processing (GDPR-compliant)
     IDENTITY_DOC_ENABLED: bool = os.getenv("IDENTITY_DOC_ENABLED", "true").lower() == "true"
@@ -219,7 +220,7 @@ class Settings(BaseSettings):
     # NOTE: Ollama was removed; vLLM is the default local provider.
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "vllm").lower()
     VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1").rstrip("/")
-    VLLM_MODEL: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-14B-FP8")
+    VLLM_MODEL: str = os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
@@ -279,7 +280,7 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
     GOOGLE_OAUTH_REDIRECT_URI: str = os.getenv(
         "GOOGLE_OAUTH_REDIRECT_URI",
-        "http://localhost:8000/api/v1/google-drive/oauth/callback"
+        "http://localhost:8000/api/v1/connectors/oauth/callback"
     )
     GOOGLE_OAUTH_SCOPES: str = os.getenv(
         "GOOGLE_OAUTH_SCOPES",

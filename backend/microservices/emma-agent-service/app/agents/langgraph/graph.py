@@ -57,6 +57,7 @@ from .nodes.specialists import (
     privacy_node, legal_node, general_node,
     labor_node, fiscal_node, contract_node,
     compliance_node, realestate_node, education_node,
+    docgen_node,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ def create_rag_graph(
     workflow.add_node("compliance_agent", compliance_node)
     workflow.add_node("realestate_agent", realestate_node)
     workflow.add_node("education_agent", education_node)
+    workflow.add_node("docgen_agent", docgen_node)
 
     # Router node for sequential agent execution
     workflow.add_node("agent_router", _agent_router_node)
@@ -174,6 +176,7 @@ def create_rag_graph(
             "realestate_agent": "realestate_agent",
             "education_agent": "education_agent",
             "legal_agent": "legal_agent",
+            "docgen_agent": "docgen_agent",
             "synthesize": "synthesize",
             "end": END,
         },
@@ -183,7 +186,7 @@ def create_rag_graph(
     for agent in [
         "privacy_agent", "general_agent", "labor_agent", "fiscal_agent",
         "contract_agent", "compliance_agent", "realestate_agent",
-        "education_agent", "legal_agent",
+        "education_agent", "legal_agent", "docgen_agent",
     ]:
         workflow.add_edge(agent, "agent_router")
 
@@ -201,6 +204,7 @@ def create_rag_graph(
             "realestate_agent": "realestate_agent",
             "education_agent": "education_agent",
             "legal_agent": "legal_agent",
+            "docgen_agent": "docgen_agent",
             "synthesize": "synthesize",
         },
     )
@@ -266,7 +270,7 @@ def _route_from_plan(state: RAGState) -> str:
     valid_agents = [
         "privacy_agent", "general_agent", "labor_agent", "fiscal_agent",
         "contract_agent", "compliance_agent", "realestate_agent",
-        "education_agent", "legal_agent",
+        "education_agent", "legal_agent", "docgen_agent",
     ]
 
     if first_agent not in valid_agents:
@@ -311,7 +315,7 @@ def _route_after_agent(state: RAGState) -> str:
         valid_agents = [
             "privacy_agent", "general_agent", "labor_agent", "fiscal_agent",
             "contract_agent", "compliance_agent", "realestate_agent",
-            "education_agent", "legal_agent",
+            "education_agent", "legal_agent", "docgen_agent",
         ]
 
         if next_agent in valid_agents:

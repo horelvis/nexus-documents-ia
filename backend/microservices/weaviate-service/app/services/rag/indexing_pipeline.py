@@ -534,6 +534,8 @@ class IndexingPipeline:
         text: str,
         metadata: Dict[str, Any],
         tenant_id: str,
+        collection_name: Optional[str] = None,
+        indexing_strategy: Optional[Dict[str, Any]] = None,
     ) -> IndexingResult:
         """
         Process already-extracted text through the pipeline.
@@ -545,11 +547,20 @@ class IndexingPipeline:
             text: Already-extracted document text
             metadata: Document metadata
             tenant_id: Tenant identifier
+            collection_name: Optional Weaviate collection override (e.g., "PublicKnowledge"
+                for BOE legislation). If None, uses tenant default collection.
+            indexing_strategy: Optional strategy for chunking:
+                - chunking_type: semantic, legal_sections, markdown_headers, paragraph
+                - chunking_config: {target_chunk_size, overlap, ...}
 
         Returns:
             IndexingResult with chunks ready for embedding
         """
         start_time = time.time()
+
+        # Store collection_name in metadata for downstream stages
+        if collection_name:
+            metadata["_collection_name"] = collection_name
 
         result = await self._process_text_internal(
             document_id=document_id,
@@ -558,6 +569,7 @@ class IndexingPipeline:
             tenant_id=tenant_id,
             errors=[],
             warnings=[],
+            indexing_strategy=indexing_strategy,
         )
 
         result.extracted_text = text

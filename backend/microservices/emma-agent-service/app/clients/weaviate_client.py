@@ -226,6 +226,71 @@ class WeaviateClient(BaseHTTPClient):
             return []
 
     # =========================================================================
+    # Public Knowledge Search
+    # =========================================================================
+
+    async def search_public_knowledge(
+        self,
+        query: str,
+        limit: int = 5,
+        domain: str = "",
+    ) -> list[SearchResult]:
+        """
+        Search public knowledge base (BOE, legislation).
+
+        Uses the public-knowledge service endpoint which supports
+        hybrid search over indexed legislation with filtering by
+        topics, categories, jurisdictions, and legal status.
+
+        Args:
+            query: Search query text
+            limit: Maximum results to return
+            domain: Optional domain/topic filter (e.g., "labor", "fiscal")
+
+        Returns:
+            List of SearchResult from public knowledge
+        """
+        payload: dict[str, Any] = {
+            "query": query,
+            "limit": limit,
+            "search_type": "hybrid",
+            "current_version_only": True,
+        }
+        if domain:
+            payload["topics"] = [domain]
+
+        try:
+            response = await self.post_json(
+                "/public-knowledge/search",
+                json=payload,
+                headers=self._headers(),
+            )
+
+            results = []
+            for item in response.get("results", []):
+                results.append(SearchResult(
+                    document_id=item.get("id", ""),
+                    chunk_id=None,
+                    content=item.get("content", ""),
+                    score=item.get("similarity_score") or 0.0,
+                    metadata={
+                        "title": item.get("title", ""),
+                        "source": "public_knowledge",
+                        "category": item.get("category", ""),
+                        "legal_reference": item.get("legal_reference", ""),
+                        "legal_status": item.get("legal_status", ""),
+                        "jurisdiction": item.get("jurisdiction", ""),
+                        "boe_id": item.get("boe_id", ""),
+                        "topics": item.get("topics", []),
+                    },
+                ))
+            return results
+
+        except Exception as e:
+            logger.warning(f"Public knowledge search failed: {e}")
+            return []
+
+    # =========================================================================
     # RAG Pipeline
     # =========================================================================
 

@@ -84,10 +84,10 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # vLLM - GPU Inference Server (Qwen3-4B)
+  # vLLM - GPU Inference Server (Qwen2.5-7B-Instruct-AWQ)
   # =============================================================================
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.8.5.post1
     ports:
       - "8001:8000"
     networks:
@@ -101,13 +101,19 @@ services:
       - CUDA_VISIBLE_DEVICES=0
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+      - "--served-model-name"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+      - "--quantization"
+      - "awq"
+      - "--dtype"
+      - "float16"
       - "--max-model-len"
       - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
-      - "0.80"
+      - "0.65"
+      - "--enforce-eager"
       - "--trust-remote-code"
-      - "--enforce-eager"  # Skip CUDA graph compilation for faster startup
       # Enable tool calling for Emma v2 (native async client)
       - "--enable-auto-tool-choice"
       - "--tool-call-parser"
@@ -204,10 +210,10 @@ services:
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
       # OCR: disabled during bulk indexing (Tika handles text extraction)
       - ENHANCED_OCR_ENABLED=false
-      # vLLM Configuration
+      # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Embedding Configuration (BGE-M3 local)
@@ -318,10 +324,10 @@ services:
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
       # Multi-Pipeline RAG Sector
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
-      # vLLM Configuration
+      # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Redis for sessions
@@ -386,7 +392,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -450,6 +456,43 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # MCP Google Drive Server - Google Drive sync, indexing & MCP tools
+  # =============================================================================
+  mcp-google-drive:
+    build:
+      context: ../microservices/mcp-google-drive-server
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:8000/api/v1/connectors/oauth/callback}
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
+    volumes:
+      - ../microservices/mcp-google-drive-server/app:/app/app:ro
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
   # Main API - Backend for UI integration
   # =============================================================================
   api:
@@ -475,6 +518,8 @@ services:
         condition: service_healthy
       mcp-alfresco:
         condition: service_healthy
+      mcp-google-drive:
+        condition: service_healthy
       presentation-service:
         condition: service_started
       keycloak:
@@ -494,13 +539,14 @@ services:
       - PRESENTATION_SERVICE_URL=${PRESENTATION_SERVICE_URL:-http://presentation-service:8000}
       - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
+      - MCP_GOOGLE_DRIVE_URL=${MCP_GOOGLE_DRIVE_URL:-http://mcp-google-drive:8000}
       - MCP_ENABLED=${MCP_ENABLED:-true}
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
       - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}
       - DEPLOYMENT_MODE=on_premise
       # OIDC/KeyCloak Configuration
-      - OIDC_ISSUER=${OIDC_ISSUER:-http://nouxcube.local:8085/realms/nouxcube}
+      - OIDC_ISSUER=${OIDC_ISSUER:-http://nouxcube.local.es:8085/realms/nouxcube}
       - OIDC_INTERNAL_ISSUER=${OIDC_INTERNAL_ISSUER:-http://keycloak:8080/realms/nouxcube}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-nouxcube-backend}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-nouxcube-backend-secret-change-in-production}
@@ -539,7 +585,7 @@ services:
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
       # Keycloak 26 hostname configuration
       # KC_HOSTNAME sets the public hostname that will be used in all URLs (including tokens)
-      - KC_HOSTNAME=http://nouxcube.local:8085
+      - KC_HOSTNAME=http://nouxcube.local.es:8085
       - KC_HTTP_ENABLED=true
       - KC_PROXY_HEADERS=xforwarded
       - KC_HEALTH_ENABLED=true
@@ -632,10 +678,10 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
       - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-http://nouxcube.local:8000}
+      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-http://nouxcube.local.es:8000}
       - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
       - DEFAULT_LANGUAGE=${PRESENTATION_DEFAULT_LANGUAGE:-es-ES}
       - DEFAULT_TEMPLATE=${PRESENTATION_DEFAULT_TEMPLATE:-corporate}

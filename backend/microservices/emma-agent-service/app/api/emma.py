@@ -467,6 +467,10 @@ async def _generate_langgraph_sse(
                     "labor_agent": "Agente Laboral",
                     "fiscal_agent": "Agente Fiscal",
                     "contract_agent": "Agente de Contratos",
+                    "compliance_agent": "Agente de Compliance",
+                    "realestate_agent": "Agente Inmobiliario",
+                    "education_agent": "Agente de Educación",
+                    "docgen_agent": "Agente de Generación Documental",
                 }.get(agent_name, agent_name)
 
                 step_counter += 1

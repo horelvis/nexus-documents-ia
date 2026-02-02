@@ -8,9 +8,14 @@ A sector is set once via ACTIVE_SECTOR env var before data ingestion.
 Changing sectors requires clearing all data (Weaviate + AGE graph).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .predictive_config import PredictiveConfig
 
 
 class Sector(str, Enum):
@@ -62,3 +67,4 @@ class SectorConfig:
     system_prompt_key: str
     collection_suffix: Optional[str] = None
     men_domain: str = "general"
+    predictive_config: Optional[PredictiveConfig] = None

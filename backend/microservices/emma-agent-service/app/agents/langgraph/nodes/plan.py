@@ -245,11 +245,12 @@ DOMAIN_TO_AGENT = {
     "compliance": "compliance_agent",
     "education": "education_agent",
     "legal": "legal_agent",
+    "docgen": "docgen_agent",
     "general": "general_agent",
 }
 
-# System prompt for Emma's planning
-PLANNING_PROMPT = """You are Emma, an AI assistant specialized in Spanish legal documents.
+# Planning prompt — fallback when YAML system_prompts.planning is absent
+_PLANNING_PROMPT_FALLBACK = """You are Emma, an AI assistant specialized in Spanish legal documents.
 
 Analyze the user's query and the retrieved documents to determine which specialist agents should handle this request.
 
@@ -258,6 +259,7 @@ Available Specialist Agents:
 - fiscal_agent: Tax law (IVA, IRPF, facturas, declaraciones)
 - privacy_agent: Data protection (RGPD, LOPD, protección de datos)
 - contract_agent: General contracts (cláusulas, obligaciones, partes)
+- docgen_agent: Document generation (contracts, legal briefs, corporate documents) with placeholder fields
 - general_agent: General document queries and fallback
 
 For each query, determine:
@@ -278,6 +280,14 @@ If the query is simple and only needs general document search, use:
     "agents": ["general_agent"],
     "reasoning": "General document search request"
 }"""
+
+
+def _get_planning_prompt(state: RAGState) -> str:
+    """Load planning prompt from YAML via PromptEngine, with fallback."""
+    from ..prompt_engine import get_prompt_engine
+    engine = get_prompt_engine()
+    prompt = engine.render_system_prompt("planning", state)
+    return prompt if prompt else _PLANNING_PROMPT_FALLBACK
 
 
 async def plan_node(state: RAGState) -> Dict[str, Any]:
@@ -485,66 +495,119 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             },
         }
 
-    # Step 3: Use DomainRouter for keyword-based detection
-    tracker.add_step(
-        StepType.ROUTING,
-        "No es consulta estructural, analizando dominio semántico...",
-        confidence=0.5
-    )
+    # Step 2.5: Check for action intent (generate, analyze, verify, etc.)
+    # This separates ACTION classification from DOMAIN classification,
+    # fixing the docgen routing problem where "genera un contrato laboral"
+    # would tie on labor/contract/docgen and never reach docgen_agent.
+    from ..intent_action import get_action_classifier
 
-    domains, domain_confidence = await _detect_domains(query, retrieved_docs)
+    action_clf = get_action_classifier()
+    action_intent = action_clf.classify(query)
 
-    # Step 4: Map domains to agents
-    if domain_confidence >= 0.5 or len(domains) == 1:
-        # High confidence or single domain - use direct mapping
-        execution_plan = [DOMAIN_TO_AGENT.get(d, "general_agent") for d in domains]
-        plan_reasoning = f"Dominio detectado: {', '.join(domains)} (confianza: {domain_confidence:.0%})"
-        decision_method = "keyword_domain"
+    if action_intent and action_intent.priority_agent:
+        # Action intent with priority agent detected (e.g., generate → docgen_agent)
+        tracker.add_step(
+            StepType.ROUTING,
+            f"Intención detectada: {action_intent.action} → {action_intent.priority_agent}",
+            confidence=action_intent.confidence,
+            metadata={"route": "ACTION_INTENT", "action": action_intent.action}
+        )
+
+        # Still detect domains for secondary agents (context enrichment)
+        domains, domain_confidence = await _detect_domains(query, retrieved_docs)
+        secondary_agents = [
+            DOMAIN_TO_AGENT.get(d, "general_agent") for d in domains
+            if DOMAIN_TO_AGENT.get(d) != action_intent.priority_agent
+        ]
+
+        # Priority agent first, then up to 1 secondary domain agent
+        execution_plan = [action_intent.priority_agent] + secondary_agents[:1]
+        domains = [action_intent.action] + domains
+        plan_reasoning = (
+            f"Intención '{action_intent.action}' detectada "
+            f"(confianza: {action_intent.confidence:.0%}) → "
+            f"{action_intent.priority_agent} + dominios: {', '.join(domains[1:])}"
+        )
+        decision_method = "action_intent"
 
         tracker.add_step(
             StepType.ROUTING,
-            f"Detectado: dominio {', '.join(domains)}",
-            confidence=domain_confidence
+            f"Plan: {' → '.join(execution_plan)}",
+            confidence=action_intent.confidence,
+            metadata={"route": "ACTION_INTENT", "domains": domains}
         )
+    elif action_intent:
+        # Action detected but no priority agent — log it and continue to normal routing
         tracker.add_step(
             StepType.ROUTING,
-            f"Decisión: búsqueda semántica en Weaviate (vectores)",
-            confidence=domain_confidence,
-            metadata={"route": "VECTOR", "domains": domains}
+            f"Intención '{action_intent.action}' detectada (sin agente prioritario), "
+            "usando enrutamiento por dominio",
+            confidence=action_intent.confidence,
         )
-    else:
-        # Low confidence or complex query - use LLM planning
+        # Fall through to normal domain routing below
+        action_intent = None  # Clear so the block below executes
+
+    if not (action_intent and action_intent.priority_agent):
+        # Step 3: Use DomainRouter for keyword-based detection
         tracker.add_step(
-            StepType.QUERY_ANALYSIS,
-            "Consulta compleja, usando LLM para planificación...",
-            confidence=domain_confidence
+            StepType.ROUTING,
+            "No es consulta estructural, analizando dominio semántico...",
+            confidence=0.5
         )
 
-        llm_plan = await _llm_planning(query, retrieved_docs, state)
-        if llm_plan:
-            execution_plan = llm_plan["agents"]
-            domains = llm_plan["domains"]
-            plan_reasoning = llm_plan["reasoning"]
-            decision_method = "llm_planning"
+        domains, domain_confidence = await _detect_domains(query, retrieved_docs)
+
+        # Step 4: Map domains to agents
+        if domain_confidence >= 0.5 or len(domains) == 1:
+            # High confidence or single domain - use direct mapping
+            execution_plan = [DOMAIN_TO_AGENT.get(d, "general_agent") for d in domains]
+            plan_reasoning = f"Dominio detectado: {', '.join(domains)} (confianza: {domain_confidence:.0%})"
+            decision_method = "keyword_domain"
 
             tracker.add_step(
                 StepType.ROUTING,
-                f"LLM decidió: {', '.join(domains)} → {', '.join(execution_plan)}",
-                confidence=0.8
+                f"Detectado: dominio {', '.join(domains)}",
+                confidence=domain_confidence
+            )
+            tracker.add_step(
+                StepType.ROUTING,
+                f"Decisión: búsqueda semántica en Weaviate (vectores)",
+                confidence=domain_confidence,
+                metadata={"route": "VECTOR", "domains": domains}
             )
         else:
-            # Fallback to general agent
-            execution_plan = ["general_agent"]
-            domains = ["general"]
-            plan_reasoning = "Usando agente general (fallback)"
-            decision_method = "fallback"
-
+            # Low confidence or complex query - use LLM planning
             tracker.add_step(
-                StepType.ROUTING,
-                "Fallback: usando agente general con búsqueda híbrida",
-                confidence=0.5,
-                metadata={"route": "HYBRID"}
+                StepType.QUERY_ANALYSIS,
+                "Consulta compleja, usando LLM para planificación...",
+                confidence=domain_confidence
             )
+
+            llm_plan = await _llm_planning(query, retrieved_docs, state)
+            if llm_plan:
+                execution_plan = llm_plan["agents"]
+                domains = llm_plan["domains"]
+                plan_reasoning = llm_plan["reasoning"]
+                decision_method = "llm_planning"
+
+                tracker.add_step(
+                    StepType.ROUTING,
+                    f"LLM decidió: {', '.join(domains)} → {', '.join(execution_plan)}",
+                    confidence=0.8
+                )
+            else:
+                # Fallback to general agent
+                execution_plan = ["general_agent"]
+                domains = ["general"]
+                plan_reasoning = "Usando agente general (fallback)"
+                decision_method = "fallback"
+
+                tracker.add_step(
+                    StepType.ROUTING,
+                    "Fallback: usando agente general con búsqueda híbrida",
+                    confidence=0.5,
+                    metadata={"route": "HYBRID"}
+                )
 
     # Remove duplicates while preserving order
     seen = set()
@@ -574,9 +637,15 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
         confidence=domain_confidence
     )
 
+    # Confidence for logging: use action_intent confidence or domain_confidence
+    log_confidence = (
+        action_intent.confidence if (action_intent and action_intent.priority_agent)
+        else domain_confidence
+    )
+
     logger.info(
         f"✅ PLAN: domains={domains} | agents={execution_plan} | "
-        f"method={decision_method} | confidence={domain_confidence:.2f} | "
+        f"method={decision_method} | confidence={log_confidence:.2f} | "
         f"latency={latency_ms:.1f}ms"
     )
 
@@ -592,9 +661,10 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             **state.get("metadata", {}),
             "planning_latency_ms": latency_ms,
             "is_structural_query": False,
-            "domain_confidence": domain_confidence,
+            "domain_confidence": log_confidence,
             "decision_method": decision_method,
             "decision_path": ["plan", decision_method] + execution_plan,
+            **({"action_intent": action_intent.action} if (action_intent and action_intent.priority_agent) else {}),
         },
     }
 
@@ -706,8 +776,9 @@ Retrieved Documents:
 
 Please analyze and provide the execution plan."""
 
+        planning_prompt = _get_planning_prompt(state)
         messages = [
-            {"role": "system", "content": PLANNING_PROMPT},
+            {"role": "system", "content": planning_prompt},
             {"role": "user", "content": user_message},
         ]
 

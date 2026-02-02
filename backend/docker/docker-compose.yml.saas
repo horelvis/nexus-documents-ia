@@ -142,6 +142,56 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # =============================================================================
+  # MCP Google Drive Server - Google Drive Integration (OAuth2)
+  # =============================================================================
+  # Model Context Protocol server for Google Drive document management
+  # Provides: list, search, download, upload, move, delete, folder tree
+  # Transport: HTTP/SSE for MCP protocol
+  # Auth: OAuth2 with encrypted token storage in connectors.config JSONB
+  mcp-google-drive:
+    profiles: ["google-drive"]  # Enable with: docker compose --profile google-drive up
+    build:
+      context: ../microservices/mcp-google-drive-server
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      # Database connection (reads connector config from backend DB)
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      # Google OAuth2 credentials
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:8002/oauth/callback}
+      # Token encryption (shared with main backend)
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY}
+      # Weaviate for document indexing
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # Cache settings
+      - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
+    volumes:
+      # Mount source code for development
+      - ../microservices/mcp-google-drive-server/app:/app/app:ro
+    ports:
+      - "8002:8000"
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Storage Service - LEGACY (will be deprecated)
   # TODO: Remove after migrating all code to MCP
   storage-service:
@@ -273,12 +323,12 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
-      # vLLM Configuration (PRIMARY - high-throughput GPU inference)
-      # Model: Qwen3-4B - Stable text-only model for RAG
-      # ~8GB VRAM (BF16 with 16K context), coexists with embedding service (~2GB)
+      # vLLM Configuration (PRIMARY - legal domain GPU inference)
+      # Model: horelvis/boe-legal-qwen-7b - Fine-tuned for Spanish legal RAG
+      # ~4GB VRAM (INT4 bitsandbytes), coexists with embedding service (~2GB)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-horelvis/boe-legal-qwen-7b-awq}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       # LLM Configuration
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
@@ -421,10 +471,10 @@ services:
       - REDIS_PORT=6379
       # Database for persistence
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
-      # vLLM Configuration (PRIMARY - high-throughput GPU inference)
+      # vLLM Configuration (PRIMARY - legal domain GPU inference)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-4B}
+      - VLLM_MODEL=${VLLM_MODEL:-horelvis/boe-legal-qwen-7b-awq}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS:-4096}
       - VLLM_TEMPERATURE=${VLLM_TEMPERATURE:-0.6}
@@ -624,26 +674,25 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Qwen3-4B - PRIMARY LLM SERVER (Text Generation)
+  # BOE Legal Qwen 7B AWQ - PRIMARY LLM SERVER (Legal Text Generation)
   # =============================================================================
-  # Model: Qwen/Qwen3-4B
-  # Optimized for on-premise with 24GB VRAM (RTX 4090)
+  # Model: horelvis/boe-legal-qwen-7b-awq (4-bit AWQ quantization)
+  # Fine-tuned for Spanish legal domain (BOE legislation)
   # Capabilities:
-  #   - High-quality text generation for RAG and document analysis
-  #   - 32K context window (configurable via VLLM_MAX_MODEL_LEN)
-  #   - Text-only model - efficient and stable
-  # VRAM: ~8GB (BF16 with 16K context)
-  # Context: 32K native, 16K recommended for efficient coexistence with embedding
+  #   - Superior legal reasoning and legislation analysis
+  #   - Cross-reference detection between laws
+  #   - BOE-specific terminology understanding
+  # VRAM: ~4GB weights + ~4GB KV cache (INT4 bitsandbytes with 32K context)
+  # Context: 32K (enough for multiple legal chunks + long RAG context)
   # API: OpenAI-compatible /v1/chat/completions
-  # Docs: https://huggingface.co/Qwen/Qwen3-4B
   #
-  # RECOMMENDED CONFIGURATION (Text-only RAG):
-  #   LLM: Qwen3-4B (~8GB) - Stable text generation for document analysis
+  # RECOMMENDED CONFIGURATION (Legal RAG):
+  #   LLM: horelvis/boe-legal-qwen-7b-awq (~5GB AWQ 4-bit) - Fine-tuned for Spanish legal domain
   #   Embedding: BGE-M3 (~2GB) - Multilingual text embeddings
-  #   Total: ~10GB of 24GB VRAM
-  #   Benefits: More VRAM headroom for batching, stable inference
+  #   Total: ~7GB of 24GB VRAM (with 16K context KV cache)
+  #   Benefits: Superior legal reasoning + 16K context for long legal documents + lower VRAM
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.8.5.post1
     networks:
       - backend-network
     volumes:
@@ -653,21 +702,32 @@ services:
       - VLLM_LOGGING_LEVEL=INFO
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
-    # Qwen3-4B configuration:
-    # - Text-only model, stable and efficient
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    # horelvis/boe-legal-qwen-7b-awq configuration:
+    # - Fine-tuned on Spanish BOE legislation for legal RAG
+    # - AWQ 4-bit quantization: ~60% less VRAM than FP16, minimal quality loss
     # - Tool calling enabled for Emma v2 (native async client)
     # VRAM Budget (RTX 4090 24GB):
-    #   - LLM weights: ~8GB
-    #   - KV cache (16K context): ~2GB
+    #   - LLM weights: ~4GB (INT4 7B)
+    #   - KV cache (32K context): ~4GB
     #   - Embedding model: ~2GB (BGE-M3)
-    #   - Total: ~12GB, leaves ~12GB buffer for batching
+    #   - Total: ~10GB, leaves ~14GB buffer for batching
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
+      - "${VLLM_MODEL:-horelvis/boe-legal-qwen-7b}"
+      - "--served-model-name"
+      - "${VLLM_MODEL:-horelvis/boe-legal-qwen-7b}"
+      - "--quantization"
+      - "bitsandbytes"
+      - "--load-format"
+      - "bitsandbytes"
+      - "--dtype"
+      - "float16"
       - "--max-model-len"
       - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
-      - "0.50"
+      - "0.65"
+      - "--enforce-eager"
       - "--trust-remote-code"
       # Enable tool calling for Emma v2 (native async client)
       - "--enable-auto-tool-choice"

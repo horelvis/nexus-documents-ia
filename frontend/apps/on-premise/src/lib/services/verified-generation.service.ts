@@ -180,6 +180,7 @@ export function mapEventToClaim(event: VerifiedStreamEvent): Partial<VerifiedCla
         claim_text: data.corrected_text || data.correction || data.claim_text || data.text,
         confidence: data.confidence,
         evidence_count: data.evidence?.length || data.evidence_count || 0,
+        original_text: data.original_text,
       }
     case 'claim_rejected':
       return {

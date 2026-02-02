@@ -1,0 +1,1127 @@
+# Legal Sector QA Concepts
+# Each concept maps natural language questions to legal domains,
+# related laws, and graph keywords for expansion.
+#
+# Fields:
+#   id: Unique concept identifier
+#   domain: Agent routing hint (labor, fiscal, civil, contract, compliance, privacy)
+#   description: Concept summary (used as training target for fine-tuning)
+#   questions: Natural language queries that map to this concept
+#   related_laws: Laws/articles for public knowledge search (BOE)
+#   graph_keywords: Keywords for Apache AGE Cypher expansion
+
+concepts:
+  # =========================================================================
+  # LABORAL — Despido
+  # =========================================================================
+  - id: despido_disciplinario
+    domain: labor
+    description: "Despido disciplinario por incumplimiento grave del trabajador según el Estatuto de los Trabajadores"
+    questions:
+      - "redactar carta de despido disciplinario"
+      - "despido disciplinario por ausencias injustificadas"
+      - "carta de despido por faltas de asistencia"
+      - "modelo carta despido disciplinario"
+      - "cómo despedir a un empleado por faltas graves"
+      - "despido por incumplimiento contractual"
+      - "despido por indisciplina o desobediencia"
+      - "causas de despido disciplinario"
+      # Terminología profesional — variaciones de consulta jurídica
+      - "extinción contractual por ausencias reiteradas sin justificación"
+      - "procedimiento disciplinario por absentismo laboral"
+      - "carta de despido por transgresión de la buena fe contractual"
+      - "calificación jurídica de las faltas de asistencia reiteradas"
+      - "requisitos formales del despido disciplinario ex art. 54 ET"
+      - "plazo de caducidad para impugnar despido disciplinario"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 54"
+      - "Estatuto de los Trabajadores Art. 55"
+      - "Real Decreto Legislativo 2/2015"
+    graph_keywords:
+      - despido
+      - disciplinario
+      - ausencia injustificada
+      - incumplimiento grave
+      - falta de asistencia
+
+  - id: despido_objetivo
+    domain: labor
+    description: "Despido objetivo por causas económicas, técnicas, organizativas o de producción"
+    questions:
+      - "despido objetivo por causas económicas"
+      - "carta de despido objetivo"
+      - "despido por causas organizativas"
+      - "despido por causas técnicas"
+      - "despido por causas de producción"
+      - "indemnización despido objetivo"
+      - "preaviso despido objetivo"
+      # Terminología profesional
+      - "concurrencia de causas ETOP para la extinción objetiva"
+      - "insuficiencia de la carta de despido objetivo por defectos formales"
+      - "puesta a disposición simultánea de la indemnización legal"
+      - "amortización de puesto de trabajo por causas organizativas"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 52"
+      - "Estatuto de los Trabajadores Art. 53"
+    graph_keywords:
+      - despido objetivo
+      - causas económicas
+      - causas organizativas
+      - indemnización
+
+  - id: despido_colectivo
+    domain: labor
+    description: "Despido colectivo (ERE) que afecta a múltiples trabajadores por causas económicas o productivas"
+    questions:
+      - "procedimiento despido colectivo"
+      - "ERE expediente regulación empleo"
+      - "despido colectivo requisitos"
+      - "negociación periodo de consultas ERE"
+      - "cómo hacer un ERE"
+      # Terminología profesional
+      - "constitución de la comisión negociadora en despido colectivo"
+      - "umbrales numéricos para la calificación de despido colectivo"
+      - "documentación económica preceptiva en el periodo de consultas"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 51"
+      - "Real Decreto 1483/2012"
+    graph_keywords:
+      - despido colectivo
+      - ERE
+      - expediente regulación
+      - periodo de consultas
+
+  - id: despido_improcedente
+    domain: labor
+    description: "Despido improcedente y sus consecuencias: readmisión o indemnización"
+    questions:
+      - "despido improcedente indemnización"
+      - "qué pasa si el despido es improcedente"
+      - "calcular indemnización despido improcedente"
+      - "readmisión o indemnización despido"
+      - "consecuencias despido improcedente"
+      # Terminología profesional
+      - "opción entre readmisión e indemnización ex art. 56 ET"
+      - "cálculo de salarios de tramitación en despido improcedente"
+      - "incidente de no readmisión o readmisión irregular"
+      - "impugnación judicial de la calificación del despido"
+      - "declaración de improcedencia del despido por el juzgado de lo social"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 56"
+    graph_keywords:
+      - despido improcedente
+      - indemnización
+      - readmisión
+      - salarios de tramitación
+
+  # =========================================================================
+  # LABORAL — Contratos
+  # =========================================================================
+  - id: contrato_temporal
+    domain: labor
+    description: "Contratos temporales: obra y servicio, eventual, interinidad y sus requisitos legales"
+    questions:
+      - "tipos de contratos temporales"
+      - "contrato temporal requisitos"
+      - "contrato de obra y servicio"
+      - "contrato eventual por circunstancias de la producción"
+      - "contrato de interinidad"
+      - "duración máxima contrato temporal"
+      - "conversión contrato temporal a indefinido"
+      # Terminología profesional
+      - "formalización de contrato por circunstancias de la producción"
+      - "límites temporales de la contratación eventual"
+      - "concatenación de contratos temporales y conversión a indefinido"
+      - "contrato de sustitución de persona trabajadora"
+      - "fraude de ley en la contratación temporal sucesiva"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 15"
+      - "Real Decreto-ley 32/2021"
+    graph_keywords:
+      - contrato temporal
+      - obra y servicio
+      - eventual
+      - interinidad
+
+  - id: contrato_indefinido
+    domain: labor
+    description: "Contrato indefinido ordinario y fijo-discontinuo"
+    questions:
+      - "contrato indefinido requisitos"
+      - "contrato fijo discontinuo"
+      - "modelo contrato indefinido"
+      - "bonificaciones contratación indefinida"
+      - "diferencia fijo discontinuo y temporal"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 15"
+      - "Estatuto de los Trabajadores Art. 16"
+    graph_keywords:
+      - contrato indefinido
+      - fijo discontinuo
+      - contratación
+
+  - id: periodo_prueba
+    domain: labor
+    description: "Periodo de prueba en contratos laborales: duración, derechos y extinción"
+    questions:
+      - "duración periodo de prueba"
+      - "periodo de prueba contrato indefinido"
+      - "derechos durante periodo de prueba"
+      - "despido en periodo de prueba"
+      - "nulidad periodo de prueba"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 14"
+    graph_keywords:
+      - periodo de prueba
+      - extinción
+      - desistimiento
+
+  # =========================================================================
+  # LABORAL — Jornada y Permisos
+  # =========================================================================
+  - id: jornada_laboral
+    domain: labor
+    description: "Regulación de la jornada laboral, horas extra y descansos"
+    questions:
+      - "jornada máxima legal"
+      - "horas extraordinarias regulación"
+      - "descanso entre jornadas"
+      - "descanso semanal obligatorio"
+      - "registro de jornada obligatorio"
+      - "jornada laboral máxima semanal"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 34"
+      - "Estatuto de los Trabajadores Art. 35"
+      - "Estatuto de los Trabajadores Art. 37"
+    graph_keywords:
+      - jornada laboral
+      - horas extra
+      - descanso
+      - registro jornada
+
+  - id: vacaciones
+    domain: labor
+    description: "Derecho a vacaciones anuales retribuidas"
+    questions:
+      - "días de vacaciones por ley"
+      - "vacaciones no disfrutadas"
+      - "cálculo vacaciones proporcionales"
+      - "puede la empresa obligar fechas de vacaciones"
+      - "vacaciones durante baja médica"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 38"
+    graph_keywords:
+      - vacaciones
+      - periodo vacacional
+      - retribución
+
+  - id: permisos_retribuidos
+    domain: labor
+    description: "Permisos retribuidos: matrimonio, nacimiento, fallecimiento, mudanza, etc."
+    questions:
+      - "permisos retribuidos por ley"
+      - "días libres por matrimonio"
+      - "permiso por nacimiento de hijo"
+      - "permiso por fallecimiento familiar"
+      - "permiso por mudanza"
+      - "permiso por examen"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 37.3"
+    graph_keywords:
+      - permiso retribuido
+      - licencia
+      - ausencia justificada
+
+  - id: excedencia
+    domain: labor
+    description: "Excedencia voluntaria, forzosa y por cuidado de familiares"
+    questions:
+      - "excedencia voluntaria requisitos"
+      - "excedencia por cuidado de hijos"
+      - "excedencia por cuidado de familiares"
+      - "reserva de puesto en excedencia"
+      - "reincorporación tras excedencia"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 46"
+    graph_keywords:
+      - excedencia
+      - reserva puesto
+      - cuidado familiar
+
+  # =========================================================================
+  # LABORAL — Salario y Nómina
+  # =========================================================================
+  - id: salario_minimo
+    domain: labor
+    description: "Salario Mínimo Interprofesional (SMI) y su regulación"
+    questions:
+      - "salario mínimo interprofesional actual"
+      - "cuánto es el SMI"
+      - "salario mínimo por convenio"
+      - "complementos salariales obligatorios"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 27"
+      - "Real Decreto SMI vigente"
+    graph_keywords:
+      - salario mínimo
+      - SMI
+      - retribución
+
+  - id: nomina_estructura
+    domain: labor
+    description: "Estructura de la nómina: devengos, deducciones, bases de cotización"
+    questions:
+      - "estructura de una nómina"
+      - "cómo leer una nómina"
+      - "deducciones nómina"
+      - "base de cotización"
+      - "retenciones IRPF nómina"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 29"
+      - "Ley General de la Seguridad Social"
+    graph_keywords:
+      - nómina
+      - devengos
+      - deducciones
+      - cotización
+
+  - id: finiquito
+    domain: labor
+    description: "Finiquito: liquidación de haberes pendientes al finalizar la relación laboral"
+    questions:
+      - "cómo calcular el finiquito"
+      - "qué incluye el finiquito"
+      - "plazo para pagar finiquito"
+      - "firmar finiquito sin estar de acuerdo"
+      - "modelo de finiquito"
+      # Terminología profesional
+      - "liquidación de haberes pendientes a la extinción del contrato"
+      - "propuesta de finiquito y saldo acreedor del trabajador"
+      - "cálculo del finiquito con vacaciones devengadas no disfrutadas"
+      - "impugnación del finiquito por discrepancia en la liquidación"
+      - "obligación empresarial de poner a disposición el finiquito"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 49.2"
+    graph_keywords:
+      - finiquito
+      - liquidación
+      - haberes pendientes
+
+  # =========================================================================
+  # LABORAL — Seguridad Social
+  # =========================================================================
+  - id: incapacidad_temporal
+    domain: labor
+    description: "Incapacidad temporal (baja médica): prestaciones, duración y obligaciones"
+    questions:
+      - "baja médica requisitos"
+      - "duración máxima incapacidad temporal"
+      - "prestación por baja médica"
+      - "quién paga la baja médica"
+      - "baja por enfermedad común"
+      - "baja por accidente laboral"
+    related_laws:
+      - "Ley General de la Seguridad Social Art. 169-176"
+    graph_keywords:
+      - incapacidad temporal
+      - baja médica
+      - prestación
+      - contingencia
+
+  - id: prestacion_desempleo
+    domain: labor
+    description: "Prestación por desempleo: requisitos, duración y cuantía"
+    questions:
+      - "requisitos para cobrar el paro"
+      - "duración prestación desempleo"
+      - "cuánto se cobra de desempleo"
+      - "subsidio por desempleo"
+      - "solicitar prestación por desempleo"
+    related_laws:
+      - "Ley General de la Seguridad Social"
+      - "Real Decreto Legislativo 8/2015 Art. 266-273"
+    graph_keywords:
+      - desempleo
+      - prestación
+      - paro
+      - subsidio
+
+  - id: jubilacion
+    domain: labor
+    description: "Jubilación: edad, periodos de cotización y modalidades"
+    questions:
+      - "edad de jubilación"
+      - "jubilación anticipada requisitos"
+      - "jubilación parcial"
+      - "años cotizados para jubilación"
+      - "cálculo pensión jubilación"
+    related_laws:
+      - "Ley General de la Seguridad Social Art. 205-215"
+    graph_keywords:
+      - jubilación
+      - pensión
+      - cotización
+      - edad
+
+  # =========================================================================
+  # LABORAL — Negociación Colectiva
+  # =========================================================================
+  - id: convenio_colectivo
+    domain: labor
+    description: "Convenios colectivos: negociación, aplicación y ultraactividad"
+    questions:
+      - "qué convenio colectivo me aplica"
+      - "convenio colectivo empresa"
+      - "ultraactividad convenio colectivo"
+      - "negociación convenio colectivo"
+      - "prioridad aplicativa convenio empresa"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 82-92"
+    graph_keywords:
+      - convenio colectivo
+      - negociación colectiva
+      - ultraactividad
+
+  - id: representacion_trabajadores
+    domain: labor
+    description: "Representación de trabajadores: comité de empresa, delegados sindicales"
+    questions:
+      - "elecciones comité de empresa"
+      - "delegados de personal"
+      - "derechos representantes trabajadores"
+      - "horas sindicales"
+      - "garantías representantes legales"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 62-68"
+      - "Ley Orgánica de Libertad Sindical"
+    graph_keywords:
+      - comité empresa
+      - delegado sindical
+      - representación
+
+  # =========================================================================
+  # LABORAL — Acoso y Prevención
+  # =========================================================================
+  - id: acoso_laboral
+    domain: labor
+    description: "Acoso laboral (mobbing): definición, prevención y actuación"
+    questions:
+      - "qué es acoso laboral"
+      - "protocolo acoso laboral"
+      - "denuncia por acoso laboral"
+      - "mobbing en el trabajo"
+      - "prevención acoso laboral empresa"
+      # Terminología profesional
+      - "activación del protocolo contra el acoso moral en el trabajo"
+      - "instrucción del expediente por hostigamiento laboral"
+      - "tutela de derechos fundamentales por acoso en el ámbito laboral"
+      - "extinción indemnizada ex art. 50 ET por acoso del empresario"
+      - "vulneración del derecho a la integridad moral en el trabajo"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 4.2.e"
+      - "Ley de Prevención de Riesgos Laborales"
+    graph_keywords:
+      - acoso laboral
+      - mobbing
+      - protocolo acoso
+      - prevención
+
+  - id: prevencion_riesgos
+    domain: labor
+    description: "Prevención de riesgos laborales: obligaciones empresariales y derechos"
+    questions:
+      - "obligaciones prevención riesgos laborales"
+      - "plan de prevención empresa"
+      - "evaluación de riesgos laborales"
+      - "formación prevención riesgos"
+      - "accidente de trabajo qué hacer"
+    related_laws:
+      - "Ley 31/1995 de Prevención de Riesgos Laborales"
+      - "Real Decreto 39/1997"
+    graph_keywords:
+      - prevención riesgos
+      - seguridad laboral
+      - evaluación riesgos
+
+  # =========================================================================
+  # FISCAL
+  # =========================================================================
+  - id: irpf
+    domain: fiscal
+    description: "Impuesto sobre la Renta de las Personas Físicas (IRPF): tramos, deducciones y declaración"
+    questions:
+      - "tramos IRPF"
+      - "declaración de la renta"
+      - "deducciones IRPF"
+      - "cómo hacer la declaración de la renta"
+      - "retenciones IRPF"
+      - "obligación declarar renta"
+    related_laws:
+      - "Ley 35/2006 del IRPF"
+      - "Real Decreto 439/2007 Reglamento IRPF"
+    graph_keywords:
+      - IRPF
+      - renta
+      - declaración
+      - retención
+
+  - id: impuesto_sociedades
+    domain: fiscal
+    description: "Impuesto de Sociedades: tipo impositivo, deducciones y obligaciones"
+    questions:
+      - "tipo impositivo impuesto sociedades"
+      - "declaración impuesto sociedades"
+      - "deducciones impuesto sociedades"
+      - "base imponible sociedades"
+      - "obligaciones fiscales empresa"
+      # Terminología profesional
+      - "liquidación del Impuesto sobre Sociedades ejercicio fiscal"
+      - "ajustes extracontables en la base imponible del IS"
+      - "compensación de bases imponibles negativas de ejercicios anteriores"
+      - "tipo de gravamen reducido para entidades de nueva creación"
+      - "obligación de autoliquidación modelo 200 del IS"
+    related_laws:
+      - "Ley 27/2014 del Impuesto de Sociedades"
+    graph_keywords:
+      - impuesto sociedades
+      - tipo impositivo
+      - base imponible
+
+  - id: iva
+    domain: fiscal
+    description: "Impuesto sobre el Valor Añadido (IVA): tipos, exenciones y declaración"
+    questions:
+      - "tipos de IVA"
+      - "IVA reducido"
+      - "IVA superreducido"
+      - "exenciones IVA"
+      - "declaración trimestral IVA"
+      - "modelo 303 IVA"
+      # Terminología profesional
+      - "tipo impositivo aplicable a prestaciones de servicios profesionales"
+      - "supuestos de exención del IVA en operaciones intracomunitarias"
+      - "régimen de inversión del sujeto pasivo en el IVA"
+      - "devengo y repercusión del IVA en entregas de bienes"
+      - "deducibilidad de cuotas de IVA soportado"
+    related_laws:
+      - "Ley 37/1992 del IVA"
+    graph_keywords:
+      - IVA
+      - impuesto valor añadido
+      - tipo impositivo
+
+  - id: facturacion
+    domain: fiscal
+    description: "Obligaciones de facturación: requisitos, plazos y factura electrónica"
+    questions:
+      - "requisitos factura"
+      - "factura electrónica obligatoria"
+      - "plazo emisión factura"
+      - "factura rectificativa"
+      - "conservación facturas"
+    related_laws:
+      - "Real Decreto 1619/2012 Reglamento Facturación"
+      - "Ley 18/2022 Crea y Crece"
+    graph_keywords:
+      - factura
+      - facturación
+      - factura electrónica
+
+  # =========================================================================
+  # CIVIL — Contratos y Obligaciones
+  # =========================================================================
+  - id: contrato_civil
+    domain: civil
+    description: "Contratos civiles: elementos esenciales, formación y vicios del consentimiento"
+    questions:
+      - "elementos contrato civil"
+      - "vicios del consentimiento"
+      - "nulidad contrato"
+      - "anulabilidad contrato"
+      - "requisitos validez contrato"
+    related_laws:
+      - "Código Civil Art. 1254-1314"
+    graph_keywords:
+      - contrato
+      - consentimiento
+      - nulidad
+      - obligaciones
+
+  - id: arrendamiento
+    domain: civil
+    description: "Arrendamientos urbanos: vivienda y local de negocio"
+    questions:
+      - "contrato alquiler vivienda"
+      - "duración contrato alquiler"
+      - "fianza alquiler"
+      - "subida alquiler permitida"
+      - "desahucio por impago"
+      - "derechos inquilino"
+      - "obligaciones arrendador"
+      # Terminología profesional
+      - "actualización de renta conforme al índice de referencia LAU"
+      - "procedimiento de desahucio por falta de pago de rentas"
+      - "prórroga obligatoria y tácita del contrato de arrendamiento"
+      - "devolución de fianza y plazo legal del arrendador"
+      - "resolución del contrato de arrendamiento por incumplimiento"
+      - "régimen jurídico del arrendamiento de vivienda habitual"
+    related_laws:
+      - "Ley 29/1994 de Arrendamientos Urbanos"
+      - "Ley 12/2023 derecho a la vivienda"
+    graph_keywords:
+      - arrendamiento
+      - alquiler
+      - vivienda
+      - fianza
+      - desahucio
+
+  - id: herencia_sucesiones
+    domain: civil
+    description: "Derecho de sucesiones: testamento, herencia legítima y aceptación"
+    questions:
+      - "cómo hacer testamento"
+      - "herencia legítima"
+      - "aceptación herencia"
+      - "renuncia herencia"
+      - "impuesto sucesiones"
+      - "herederos forzosos"
+    related_laws:
+      - "Código Civil Art. 657-1087"
+      - "Ley del Impuesto sobre Sucesiones y Donaciones"
+    graph_keywords:
+      - herencia
+      - testamento
+      - sucesión
+      - legítima
+
+  - id: responsabilidad_civil
+    domain: civil
+    description: "Responsabilidad civil contractual y extracontractual"
+    questions:
+      - "reclamación daños y perjuicios"
+      - "responsabilidad civil extracontractual"
+      - "indemnización por daños"
+      - "prescripción responsabilidad civil"
+      - "negligencia profesional"
+    related_laws:
+      - "Código Civil Art. 1902-1910"
+      - "Código Civil Art. 1101"
+    graph_keywords:
+      - responsabilidad civil
+      - daños
+      - indemnización
+      - negligencia
+
+  # =========================================================================
+  # CIVIL — Familia
+  # =========================================================================
+  - id: divorcio
+    domain: civil
+    description: "Divorcio y separación: procedimiento, efectos y medidas"
+    questions:
+      - "procedimiento de divorcio"
+      - "divorcio de mutuo acuerdo"
+      - "divorcio contencioso"
+      - "pensión compensatoria divorcio"
+      - "custodia hijos divorcio"
+      - "liquidación régimen económico"
+    related_laws:
+      - "Código Civil Art. 81-89"
+      - "Ley de Enjuiciamiento Civil"
+    graph_keywords:
+      - divorcio
+      - separación
+      - custodia
+      - pensión compensatoria
+
+  - id: pension_alimentos
+    domain: civil
+    description: "Pensión de alimentos a favor de hijos menores o dependientes"
+    questions:
+      - "pensión de alimentos hijos"
+      - "cuánto es la pensión de alimentos"
+      - "modificación pensión alimentos"
+      - "impago pensión alimentos"
+      - "gastos extraordinarios hijos"
+    related_laws:
+      - "Código Civil Art. 142-153"
+    graph_keywords:
+      - pensión alimentos
+      - manutención
+      - gastos extraordinarios
+
+  # =========================================================================
+  # COMPLIANCE
+  # =========================================================================
+  - id: compliance_penal
+    domain: compliance
+    description: "Compliance penal corporativo: programa de cumplimiento y responsabilidad penal de personas jurídicas"
+    questions:
+      - "programa compliance penal"
+      - "responsabilidad penal persona jurídica"
+      - "canal de denuncias empresa"
+      - "oficial de cumplimiento"
+      - "compliance officer funciones"
+      - "modelo prevención delitos"
+    related_laws:
+      - "Código Penal Art. 31 bis"
+      - "Circular FGE 1/2016"
+    graph_keywords:
+      - compliance
+      - cumplimiento normativo
+      - prevención delitos
+      - canal denuncias
+
+  - id: blanqueo_capitales
+    domain: compliance
+    description: "Prevención del blanqueo de capitales y financiación del terrorismo"
+    questions:
+      - "obligaciones prevención blanqueo"
+      - "sujetos obligados blanqueo capitales"
+      - "diligencia debida clientes"
+      - "declaración operaciones sospechosas"
+      - "KYC conoce a tu cliente"
+    related_laws:
+      - "Ley 10/2010 prevención blanqueo de capitales"
+      - "Real Decreto 304/2014"
+    graph_keywords:
+      - blanqueo capitales
+      - prevención
+      - diligencia debida
+      - KYC
+
+  # =========================================================================
+  # PRIVACY — Protección de Datos
+  # =========================================================================
+  - id: rgpd_general
+    domain: privacy
+    description: "Reglamento General de Protección de Datos (RGPD): principios y obligaciones"
+    questions:
+      - "obligaciones RGPD empresa"
+      - "principios protección datos"
+      - "base legal tratamiento datos"
+      - "registro actividades tratamiento"
+      - "evaluación impacto protección datos"
+      # Terminología profesional
+      - "sanciones e infracciones por incumplimiento del RGPD"
+      - "responsabilidad del responsable del tratamiento ante la AEPD"
+      - "régimen sancionador de la LOPDGDD"
+    related_laws:
+      - "Reglamento UE 2016/679 (RGPD)"
+      - "Ley Orgánica 3/2018 (LOPDGDD)"
+    graph_keywords:
+      - RGPD
+      - protección datos
+      - tratamiento
+      - privacidad
+
+  - id: derechos_interesados
+    domain: privacy
+    description: "Derechos de los interesados: acceso, rectificación, supresión, portabilidad"
+    questions:
+      - "derecho de acceso datos personales"
+      - "derecho al olvido"
+      - "derecho de supresión"
+      - "derecho de rectificación"
+      - "derecho de portabilidad"
+      - "cómo ejercer derechos ARCO"
+      # Terminología profesional
+      - "atención de solicitud de supresión de datos del interesado"
+      - "plazo y procedimiento para satisfacer el derecho de acceso"
+      - "ejercicio del derecho de portabilidad de datos entre responsables"
+      - "denegación motivada del derecho de supresión por obligación legal"
+      - "tramitación de solicitudes ARCO-POL en el marco del RGPD"
+      - "oposición al tratamiento de datos basado en interés legítimo"
+      - "limitación del tratamiento como medida cautelar del interesado"
+    related_laws:
+      - "RGPD Art. 15-22"
+      - "LOPDGDD Art. 12-18"
+    graph_keywords:
+      - derechos ARCO
+      - acceso
+      - rectificación
+      - supresión
+      - portabilidad
+
+  - id: delegado_proteccion_datos
+    domain: privacy
+    description: "Delegado de Protección de Datos (DPO): designación, funciones y obligaciones"
+    questions:
+      - "cuándo es obligatorio DPO"
+      - "funciones delegado protección datos"
+      - "designación DPO"
+      - "requisitos DPO"
+    related_laws:
+      - "RGPD Art. 37-39"
+      - "LOPDGDD Art. 34-37"
+    graph_keywords:
+      - DPO
+      - delegado protección datos
+      - designación
+
+  - id: brechas_seguridad
+    domain: privacy
+    description: "Notificación de brechas de seguridad de datos personales"
+    questions:
+      - "brecha de seguridad datos"
+      - "notificación brecha AEPD"
+      - "plazo notificación brecha seguridad"
+      - "qué hacer ante una brecha de datos"
+      - "comunicación brecha interesados"
+      # Terminología profesional
+      - "notificación de violación de seguridad a la autoridad de control"
+      - "evaluación del riesgo para los derechos de los afectados por brecha"
+      - "comunicación de brecha de datos a los interesados afectados"
+      - "documentación interna de la brecha y medidas correctivas adoptadas"
+      - "plazo de 72 horas para la notificación de brecha ex art. 33 RGPD"
+    related_laws:
+      - "RGPD Art. 33-34"
+      - "LOPDGDD"
+    graph_keywords:
+      - brecha seguridad
+      - notificación
+      - AEPD
+      - violación datos
+
+  # =========================================================================
+  # MERCANTIL
+  # =========================================================================
+  - id: constitucion_sociedad
+    domain: civil
+    description: "Constitución de sociedades mercantiles: SL, SA, requisitos y trámites"
+    questions:
+      - "cómo crear una sociedad limitada"
+      - "requisitos constituir SL"
+      - "capital mínimo sociedad limitada"
+      - "constitución sociedad anónima"
+      - "trámites crear empresa"
+    related_laws:
+      - "Ley de Sociedades de Capital"
+      - "Real Decreto Legislativo 1/2010"
+    graph_keywords:
+      - sociedad limitada
+      - sociedad anónima
+      - constitución
+      - capital social
+
+  - id: concurso_acreedores
+    domain: civil
+    description: "Concurso de acreedores: presupuestos, fases y efectos"
+    questions:
+      - "concurso de acreedores requisitos"
+      - "solicitar concurso voluntario"
+      - "efectos concurso acreedores"
+      - "fase de convenio concursal"
+      - "liquidación concursal"
+      - "segunda oportunidad persona física"
+    related_laws:
+      - "Texto Refundido Ley Concursal"
+      - "Real Decreto Legislativo 1/2020"
+    graph_keywords:
+      - concurso acreedores
+      - insolvencia
+      - convenio
+      - liquidación
+
+  # =========================================================================
+  # PROCESAL
+  # =========================================================================
+  - id: plazos_procesales
+    domain: civil
+    description: "Plazos procesales: cómputo, preclusión e interrupción"
+    questions:
+      - "plazos procesales civiles"
+      - "cómputo de plazos"
+      - "días hábiles e inhábiles"
+      - "preclusión procesal"
+      - "plazo para recurrir"
+    related_laws:
+      - "Ley de Enjuiciamiento Civil Art. 130-136"
+      - "Ley Orgánica del Poder Judicial"
+    graph_keywords:
+      - plazo procesal
+      - preclusión
+      - cómputo
+      - recurso
+
+  - id: recurso_apelacion
+    domain: civil
+    description: "Recurso de apelación: interposición, tramitación y resolución"
+    questions:
+      - "recurso de apelación civil"
+      - "plazo recurso apelación"
+      - "cómo apelar sentencia"
+      - "recurso apelación laboral"
+      - "efectos recurso apelación"
+    related_laws:
+      - "Ley de Enjuiciamiento Civil Art. 455-467"
+    graph_keywords:
+      - apelación
+      - recurso
+      - sentencia
+      - segunda instancia
+
+  # =========================================================================
+  # LABORAL — ERTE / Modificaciones
+  # =========================================================================
+  - id: erte
+    domain: labor
+    description: "ERTE: Expediente de Regulación Temporal de Empleo por causas económicas o fuerza mayor"
+    questions:
+      - "qué es un ERTE"
+      - "ERTE por fuerza mayor"
+      - "ERTE por causas económicas"
+      - "derechos trabajador en ERTE"
+      - "prestación durante ERTE"
+      - "diferencia ERTE y ERE"
+      # Terminología profesional
+      - "suspensión temporal de contratos por causas ETOP"
+      - "regulación temporal de empleo por fuerza mayor"
+      - "procedimiento de ERTE y periodo de consultas"
+      - "exoneración de cuotas a la Seguridad Social durante el ERTE"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 47"
+      - "Real Decreto-ley 32/2021"
+    graph_keywords:
+      - ERTE
+      - regulación temporal
+      - suspensión contrato
+      - reducción jornada
+
+  - id: modificacion_sustancial
+    domain: labor
+    description: "Modificación sustancial de condiciones de trabajo"
+    questions:
+      - "modificación sustancial condiciones trabajo"
+      - "cambio horario por empresa"
+      - "cambio de funciones trabajador"
+      - "movilidad geográfica"
+      - "impugnación modificación sustancial"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 41"
+      - "Estatuto de los Trabajadores Art. 40"
+    graph_keywords:
+      - modificación sustancial
+      - movilidad geográfica
+      - cambio condiciones
+
+  - id: subrogacion_laboral
+    domain: labor
+    description: "Subrogación empresarial: sucesión de empresa y derechos de los trabajadores"
+    questions:
+      - "subrogación empresarial"
+      - "sucesión de empresa"
+      - "derechos trabajador subrogación"
+      - "cambio de empresa manteniendo antigüedad"
+      - "transmisión empresa trabajadores"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 44"
+    graph_keywords:
+      - subrogación
+      - sucesión empresa
+      - transmisión
+
+  # =========================================================================
+  # LABORAL — Igualdad
+  # =========================================================================
+  - id: plan_igualdad
+    domain: labor
+    description: "Plan de igualdad en empresas: obligaciones, contenido y registro"
+    questions:
+      - "plan de igualdad empresa obligatorio"
+      - "contenido plan de igualdad"
+      - "registro retributivo"
+      - "auditoría retributiva"
+      - "brecha salarial"
+    related_laws:
+      - "Ley Orgánica 3/2007 de Igualdad"
+      - "Real Decreto 901/2020"
+      - "Real Decreto 902/2020"
+    graph_keywords:
+      - plan igualdad
+      - igualdad retributiva
+      - brecha salarial
+      - registro retributivo
+
+  - id: conciliacion_familiar
+    domain: labor
+    description: "Conciliación de la vida laboral y familiar: permisos, reducciones y adaptaciones"
+    questions:
+      - "reducción de jornada por cuidado de hijos"
+      - "permiso de lactancia"
+      - "adaptación de jornada conciliación"
+      - "permiso paternidad duración"
+      - "permiso maternidad"
+      # Terminología profesional
+      - "solicitud de reducción de jornada por guarda legal ex art. 37.6 ET"
+      - "adaptación de jornada por conciliación familiar art. 34.8 ET"
+      - "suspensión del contrato por nacimiento y cuidado de menor"
+      - "permiso de lactancia acumulado en jornadas completas"
+      - "nulidad del despido durante la suspensión por nacimiento"
+      - "corresponsabilidad parental y permisos intransferibles"
+    related_laws:
+      - "Estatuto de los Trabajadores Art. 34.8"
+      - "Estatuto de los Trabajadores Art. 37"
+      - "Real Decreto-ley 6/2019"
+    graph_keywords:
+      - conciliación
+      - reducción jornada
+      - lactancia
+      - paternidad
+      - maternidad
+
+  # =========================================================================
+  # ADMINISTRATIVO
+  # =========================================================================
+  - id: procedimiento_administrativo
+    domain: compliance
+    description: "Procedimiento administrativo común: plazos, recursos y silencio administrativo"
+    questions:
+      - "plazo resolución procedimiento administrativo"
+      - "silencio administrativo positivo negativo"
+      - "recurso de alzada"
+      - "recurso de reposición"
+      - "recurso contencioso administrativo"
+    related_laws:
+      - "Ley 39/2015 Procedimiento Administrativo Común"
+      - "Ley 29/1998 Jurisdicción Contencioso-Administrativa"
+    graph_keywords:
+      - procedimiento administrativo
+      - silencio administrativo
+      - recurso alzada
+      - recurso reposición
+
+  - id: contratacion_publica
+    domain: compliance
+    description: "Contratación pública: tipos de contratos, procedimientos y recursos"
+    questions:
+      - "tipos contratos sector público"
+      - "licitación pública requisitos"
+      - "procedimiento abierto contratación"
+      - "recurso especial contratación"
+      - "mesa de contratación"
+    related_laws:
+      - "Ley 9/2017 Contratos del Sector Público"
+    graph_keywords:
+      - contratación pública
+      - licitación
+      - procedimiento abierto
+
+  # =========================================================================
+  # PENAL
+  # =========================================================================
+  - id: delitos_economicos
+    domain: compliance
+    description: "Delitos económicos: estafa, apropiación indebida, administración desleal"
+    questions:
+      - "delito de estafa"
+      - "apropiación indebida"
+      - "administración desleal"
+      - "delito societario"
+      - "alzamiento de bienes"
+    related_laws:
+      - "Código Penal Art. 248-258"
+      - "Código Penal Art. 252-253"
+      - "Código Penal Art. 290-297"
+    graph_keywords:
+      - estafa
+      - apropiación indebida
+      - delito económico
+      - administración desleal
+
+  - id: delitos_informaticos
+    domain: compliance
+    description: "Delitos informáticos: acceso ilícito, daños informáticos, revelación de secretos"
+    questions:
+      - "delito informático tipos"
+      - "acceso ilícito sistemas"
+      - "daños informáticos"
+      - "revelación de secretos"
+      - "suplantación identidad digital"
+    related_laws:
+      - "Código Penal Art. 197-197 quinquies"
+      - "Código Penal Art. 264-264 quater"
+    graph_keywords:
+      - delito informático
+      - ciberdelito
+      - acceso ilícito
+      - daños informáticos
+
+  # =========================================================================
+  # PROPIEDAD INTELECTUAL
+  # =========================================================================
+  - id: propiedad_intelectual
+    domain: civil
+    description: "Propiedad intelectual: derechos de autor, obras protegidas y licencias"
+    questions:
+      - "derechos de autor"
+      - "protección propiedad intelectual"
+      - "plagio obra"
+      - "licencias creative commons"
+      - "registro propiedad intelectual"
+    related_laws:
+      - "Real Decreto Legislativo 1/1996 Ley Propiedad Intelectual"
+    graph_keywords:
+      - propiedad intelectual
+      - derechos autor
+      - copyright
+      - licencia
+
+  - id: propiedad_industrial
+    domain: civil
+    description: "Propiedad industrial: marcas, patentes y diseños industriales"
+    questions:
+      - "registro de marca España"
+      - "solicitud de patente"
+      - "protección marca comercial"
+      - "infracción de patente"
+      - "diseño industrial registro"
+    related_laws:
+      - "Ley 17/2001 de Marcas"
+      - "Ley 24/2015 de Patentes"
+    graph_keywords:
+      - marca
+      - patente
+      - propiedad industrial
+      - registro
+
+  # =========================================================================
+  # EXTRANJERÍA
+  # =========================================================================
+  - id: autorizacion_residencia
+    domain: compliance
+    description: "Autorizaciones de residencia y trabajo para extranjeros en España"
+    questions:
+      - "permiso de residencia España"
+      - "autorización residencia y trabajo"
+      - "arraigo social requisitos"
+      - "renovación permiso residencia"
+      - "tarjeta residencia familiar UE"
+    related_laws:
+      - "Ley Orgánica 4/2000 de Extranjería"
+      - "Real Decreto 557/2011"
+    graph_keywords:
+      - residencia
+      - extranjería
+      - arraigo
+      - autorización trabajo
+
+  # =========================================================================
+  # CONSUMO
+  # =========================================================================
+  - id: derechos_consumidor
+    domain: civil
+    description: "Derechos del consumidor: garantías, devoluciones y reclamaciones"
+    questions:
+      - "garantía legal producto"
+      - "derecho desistimiento compra online"
+      - "reclamación consumo"
+      - "hoja de reclamaciones"
+      - "producto defectuoso derechos"
+    related_laws:
+      - "Real Decreto Legislativo 1/2007 Ley Consumidores"
+    graph_keywords:
+      - consumidor
+      - garantía
+      - desistimiento
+      - reclamación

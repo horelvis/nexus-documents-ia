@@ -35,6 +35,6 @@ app.prepare().then(() => {
     })
     .listen(port, hostname, () => {
       console.log(`> Ready on https://localhost:${port}`);
-      console.log(`> Also available at https://nouxcube.local:${port}`);
+      console.log(`> Also available at https://nouxcube.local.es:${port}`);
     });
 });

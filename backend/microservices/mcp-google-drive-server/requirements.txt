@@ -1,0 +1,33 @@
+# MCP Google Drive Server
+# Provides Google Drive document management tools via MCP protocol
+
+# MCP SDK
+mcp>=1.8.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP Client for Google Drive API
+httpx>=0.25.0
+
+# Server (for HTTP/SSE mode)
+uvicorn[standard]>=0.24.0
+starlette>=0.27.0
+
+# Database (asyncpg for direct async queries)
+asyncpg>=0.29.0
+
+# Google APIs
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+
+# Encryption (for OAuth tokens)
+cryptography>=41.0.0
+
+# Logging
+structlog>=23.2.0
+loguru>=0.7.0
+
+# Date handling
+python-dateutil>=2.8.0

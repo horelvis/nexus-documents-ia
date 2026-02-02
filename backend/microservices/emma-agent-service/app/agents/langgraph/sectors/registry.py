@@ -11,6 +11,7 @@ import os
 from typing import Dict, Optional
 
 from .config import Sector, SectorConfig
+from .predictive_config import PREDICTIVE_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "contract_agent",
             "compliance_agent",
             "privacy_agent",
+            "docgen_agent",
         ],
         default_agent="legal_agent",
         hybrid_alpha=0.7,
@@ -65,6 +67,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         graph_schema="config/graphs/legal_graph_schema.cypher",
         system_prompt_key="sectors.legal",
         men_domain="legal",
+        predictive_config=PREDICTIVE_CONFIGS.get("legal"),
     ),
 
     # -----------------------------------------------------------------
@@ -103,6 +106,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         graph_schema="config/graphs/medical_graph_schema.cypher",
         system_prompt_key="sectors.medical",
         men_domain="technical",
+        predictive_config=PREDICTIVE_CONFIGS.get("medical"),
     ),
 
     # -----------------------------------------------------------------
@@ -144,6 +148,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         graph_schema="config/graphs/documental_graph_schema.cypher",
         system_prompt_key="sectors.documental",
         men_domain="general",
+        predictive_config=PREDICTIVE_CONFIGS.get("documental"),
     ),
 }
 

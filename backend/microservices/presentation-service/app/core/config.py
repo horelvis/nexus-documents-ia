@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     main_api_url: str = "http://api:8000"
 
     # Public API URL (for generating download URLs)
-    public_api_url: str = "http://nouxcube.local:8000"
+    public_api_url: str = "http://nouxcube.local.es:8000"
 
     class Config:
         env_prefix = "PRESENTATION_"

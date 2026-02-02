@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import logging
+import uuid
 
 from app.core.security import verify_api_key
 
@@ -391,27 +392,68 @@ class BOEDownloaderService:
                 if not content:
                     return BOEDownloadResult(success=False, boe_id=boe_id, title=title, error="No content found")
 
-                # 4. Index to Weaviate
+                # 4. Index to Weaviate via IndexingPipeline (unified pipeline)
                 indexed = False
                 if index:
                     try:
+                        from app.services.rag.indexing_pipeline import indexing_pipeline
                         from app.services.public_knowledge_service import public_knowledge_service
                         from app.schemas.public_knowledge import (
                             PublicDocumentCreate,
                             PublicDocumentCategory,
-                            Jurisdiction
+                            Jurisdiction,
                         )
 
                         await public_knowledge_service.initialize()
 
-                        # Determine category
+                        # Determine category and legal status
                         category = PublicDocumentCategory.LEGISLATION
                         if 'decreto' in rango.lower() and 'legislativo' not in rango.lower():
                             category = PublicDocumentCategory.REGULATION
+                        legal_status = "derogada" if get_text(metadatos, 'estatus_derogacion') == "S" else "vigente"
+
+                        # --- Stage A: Run unified IndexingPipeline (skip text extraction) ---
+                        pipeline_result = await indexing_pipeline.process_text(
+                            document_id=boe_id,
+                            text=content,  # Full text, no truncation — chunker handles it
+                            metadata={
+                                "title": title,
+                                "source": "boe",
+                                "boe_id": boe_id,
+                                "document_type": "legislation",
+                                "rango": rango,
+                                "category": category.value,
+                                "jurisdiction": Jurisdiction.SPAIN.value,
+                                "legal_status": legal_status,
+                                "materias": materias,
+                                "source_url": get_text(metadatos, 'url_html_consolidada') or get_text(metadatos, 'url_eli'),
+                                "eli_uri": get_text(metadatos, 'url_eli'),
+                            },
+                            tenant_id="public_knowledge",
+                            collection_name="PublicKnowledge",
+                            indexing_strategy={
+                                "chunking_type": "legal_sections",
+                                "chunking_config": {
+                                    "target_chunk_size": 1500,
+                                    "overlap": 200,
+                                },
+                            },
+                        )
+
+                        if not pipeline_result.success:
+                            logger.warning(f"Pipeline failed for {boe_id}: {pipeline_result.errors}")
+
+                        # --- Stage B: Store chunks in PublicKnowledge collection ---
+                        # Dedup existing objects for this boe_id
+                        await public_knowledge_service._dedup_same_version(boe_id, 1)
+
+                        doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"boe:{boe_id}"))  # Deterministic UUID from boe_id
+                        now = datetime.now()
 
                         document = PublicDocumentCreate(
+                            id=doc_id,
                             title=title,
-                            content=content[:100000],
+                            content=content[:100000],  # Parent doc summary
                             summary=title[:500],
                             category=category,
                             jurisdiction=Jurisdiction.SPAIN,
@@ -425,7 +467,7 @@ class BOEDownloaderService:
                             version_number=1,
                             is_current_version=True,
                             modification_type="original",
-                            legal_status="derogada" if get_text(metadatos, 'estatus_derogacion') == "S" else "vigente",
+                            legal_status=legal_status,
                             boe_id=boe_id,
                             eli_uri=get_text(metadatos, 'url_eli'),
                         )
@@ -433,26 +475,29 @@ class BOEDownloaderService:
                         result = await public_knowledge_service.add_document(document)
                         indexed = True
                         weaviate_uuid = result.id if result else None
-                        logger.info(f"✅ Indexed {boe_id}: {title[:60]}...")
+                        logger.info(
+                            f"✅ Indexed {boe_id}: {title[:60]}... "
+                            f"({len(pipeline_result.chunks)} pipeline chunks, "
+                            f"domain={pipeline_result.contextual_domain})"
+                        )
 
-                        # Create legal_law node in Apache AGE
+                        # --- Stage C: Legal reference extraction + graph ---
                         try:
                             from app.services.sil.legal_graph_service import (
                                 legal_graph,
                                 LegalLaw,
                                 LawStatus,
                             )
+                            from app.services.knowledge.legal_reference_extractor import (
+                                legal_reference_extractor,
+                            )
 
                             # Detect domain from materias
                             domain = detect_legal_domain(materias, title)
-
-                            # Extract short name
                             short_name = extract_law_short_name(title, boe_id)
-
-                            # Determine status
                             status = LawStatus.DEROGADA if get_text(metadatos, 'estatus_derogacion') == "S" else LawStatus.VIGENTE
 
-                            # Create LegalLaw object
+                            # Create LegalLaw node in public graph
                             law = LegalLaw(
                                 boe_id=boe_id,
                                 title=title,
@@ -466,14 +511,34 @@ class BOEDownloaderService:
                                 keywords=materias[:10],
                                 weaviate_uuid=weaviate_uuid,
                             )
-
-                            # Add to legal graph
                             await legal_graph.add_law(law)
                             logger.info(f"✅ Added legal_law node: {short_name} ({boe_id})")
 
+                            # Extract legal references from full text
+                            legal_refs = await legal_reference_extractor.extract(
+                                text=content, boe_id=boe_id
+                            )
+
+                            # Store references as graph edges
+                            if legal_refs.total_references > 0:
+                                ref_counts = await legal_graph.store_references(boe_id, legal_refs)
+                                logger.info(f"✅ Stored legal refs for {boe_id}: {ref_counts}")
+
+                            # Enrich with BOE /analisis API (posterior references)
+                            try:
+                                boe_analysis = await legal_reference_extractor.enrich_from_boe_api(boe_id)
+                                for ref in boe_analysis.posterior_references:
+                                    ref_boe_id = ref.get("identificador", "")
+                                    if ref_boe_id:
+                                        await legal_graph.add_reference(
+                                            ref_boe_id, boe_id, "MODIFIES",
+                                            context_snippet=ref.get("titulo", "")[:200],
+                                        )
+                            except Exception as api_err:
+                                logger.debug(f"BOE /analisis enrichment skipped: {api_err}")
+
                         except Exception as graph_error:
-                            logger.warning(f"⚠️ Failed to add legal_law node for {boe_id}: {graph_error}")
-                            # Don't fail the whole operation - Weaviate indexing succeeded
+                            logger.warning(f"⚠️ Failed to process legal graph for {boe_id}: {graph_error}")
 
                     except Exception as e:
                         logger.error(f"Failed to index {boe_id}: {e}")

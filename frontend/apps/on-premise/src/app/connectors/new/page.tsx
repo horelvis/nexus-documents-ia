@@ -54,16 +54,17 @@ import {
   ConnectorCategory,
   CreateConnectorData,
 } from '@/lib/services/connector.service'
-import { ConnectorIcon } from '@/components/connectors'
+import { ConnectorIcon, GoogleDriveOAuthStep } from '@/components/connectors'
 
 export default function NewConnectorPage() {
   const { isLoaded, isAuthenticated } = useAuth()
   const router = useRouter()
 
-  const [step, setStep] = useState<'select' | 'configure'>('select')
+  const [step, setStep] = useState<'select' | 'configure' | 'oauth'>('select')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [connectorId, setConnectorId] = useState<string | null>(null)
 
   // Form state
   const [name, setName] = useState('')
@@ -103,7 +104,10 @@ export default function NewConnectorPage() {
   }
 
   const handleBack = () => {
-    if (step === 'configure') {
+    if (step === 'oauth') {
+      // Can't go back from OAuth step (connector already created)
+      router.push('/connectors')
+    } else if (step === 'configure') {
       setStep('select')
       setError(null)
     } else {
@@ -118,12 +122,14 @@ export default function NewConnectorPage() {
     setError(null)
 
     try {
+      const isGoogleDrive = connectorType === 'google_drive'
+
       const data: CreateConnectorData = {
         name,
         description: description || undefined,
         connector_type: connectorType,
-        auth_type: 'service_account', // Always use service account for automatic connection
-        config,
+        auth_type: isGoogleDrive ? 'delegated' : 'service_account',
+        config: isGoogleDrive ? {} : config,
         sync_enabled: syncEnabled,
         sync_interval_hours: syncIntervalHours,
       }
@@ -132,6 +138,9 @@ export default function NewConnectorPage() {
 
       if (result.error) {
         setError(result.error)
+      } else if (isGoogleDrive && result.data) {
+        setConnectorId(result.data.id)
+        setStep('oauth')
       } else {
         router.push('/connectors')
       }
@@ -203,6 +212,18 @@ export default function NewConnectorPage() {
               <span className="font-medium">2</span>
               <span className="hidden sm:inline">Configurar</span>
             </div>
+            {connectorType === 'google_drive' && (
+              <>
+                <IconChevronRight className="h-4 w-4 text-muted-foreground" />
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm",
+                  step === 'oauth' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                )}>
+                  <span className="font-medium">3</span>
+                  <span className="hidden sm:inline">Autorizar</span>
+                </div>
+              </>
+            )}
           </div>
         </header>
 
@@ -352,54 +373,56 @@ export default function NewConnectorPage() {
                   </CardContent>
                 </Card>
 
-                {/* Type-specific Config */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">
-                      Credenciales de {connectorNames[connectorType]}
-                    </CardTitle>
-                    <CardDescription>
-                      Credenciales de cuenta de servicio para conexión automática
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {connectorFields?.map((field) => (
-                      <div key={field.name} className="space-y-2">
-                        <Label htmlFor={field.name}>
-                          {field.label}
-                          {field.required && <span className="text-destructive ml-1">*</span>}
-                        </Label>
-                        {field.type === 'textarea' ? (
-                          <Textarea
-                            id={field.name}
-                            value={config[field.name] || ''}
-                            onChange={(e) => handleConfigChange(field.name, e.target.value)}
-                            placeholder={field.placeholder}
-                            rows={4}
-                          />
-                        ) : (
-                          <Input
-                            id={field.name}
-                            type={field.type === 'password' ? 'password' : field.type}
-                            value={config[field.name] ?? field.defaultValue ?? ''}
-                            onChange={(e) =>
-                              handleConfigChange(
-                                field.name,
-                                field.type === 'number' ? Number(e.target.value) : e.target.value
-                              )
-                            }
-                            placeholder={field.placeholder}
-                            min={field.min}
-                            max={field.max}
-                          />
-                        )}
-                        {field.description && (
-                          <p className="text-xs text-muted-foreground">{field.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
+                {/* Type-specific Config (skip for Google Drive — uses OAuth) */}
+                {connectorFields && connectorFields.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        Credenciales de {connectorNames[connectorType]}
+                      </CardTitle>
+                      <CardDescription>
+                        Credenciales de cuenta de servicio para conexión automática
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {connectorFields.map((field) => (
+                        <div key={field.name} className="space-y-2">
+                          <Label htmlFor={field.name}>
+                            {field.label}
+                            {field.required && <span className="text-destructive ml-1">*</span>}
+                          </Label>
+                          {field.type === 'textarea' ? (
+                            <Textarea
+                              id={field.name}
+                              value={config[field.name] || ''}
+                              onChange={(e) => handleConfigChange(field.name, e.target.value)}
+                              placeholder={field.placeholder}
+                              rows={4}
+                            />
+                          ) : (
+                            <Input
+                              id={field.name}
+                              type={field.type === 'password' ? 'password' : field.type}
+                              value={config[field.name] ?? field.defaultValue ?? ''}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  field.name,
+                                  field.type === 'number' ? Number(e.target.value) : e.target.value
+                                )
+                              }
+                              placeholder={field.placeholder}
+                              min={field.min}
+                              max={field.max}
+                            />
+                          )}
+                          {field.description && (
+                            <p className="text-xs text-muted-foreground">{field.description}</p>
+                          )}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Sync Settings */}
                 <Card>
@@ -476,6 +499,16 @@ export default function NewConnectorPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+          {/* Step 3: Google Drive OAuth & Folder Selection */}
+          {step === 'oauth' && connectorId && (
+            <div className="max-w-2xl mx-auto">
+              <GoogleDriveOAuthStep
+                connectorId={connectorId}
+                connectorName={name}
+                onComplete={() => router.push('/connectors')}
+              />
             </div>
           )}
         </main>

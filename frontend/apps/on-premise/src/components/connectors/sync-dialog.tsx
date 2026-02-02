@@ -192,12 +192,19 @@ export function SyncDialog({
       if (result.error) {
         setError(result.error)
       } else if (result.data) {
-        setSuccessMessage(result.data.message)
+        setSuccessMessage(result.data.message + ' Iniciando indexación...')
+        // Auto-index after sync
+        const indexResult = await connectorService.indexPending(connector.id, 10)
+        if (indexResult.error) {
+          setError(indexResult.error)
+        } else if (indexResult.data) {
+          setSuccessMessage(`Sincronización e indexación iniciadas (${indexResult.data.pending_count} docs en cola)`)
+        }
         setTimeout(() => {
           refreshConnectorData()
           loadPendingDocuments()
           onSyncComplete?.()
-        }, 2000)
+        }, 3000)
       }
     } catch (err: any) {
       setError(err.message || 'Error al sincronizar')

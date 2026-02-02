@@ -31,6 +31,7 @@ from .domain_agents import (
     compliance_node,
     realestate_node,
     education_node,
+    docgen_node,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "compliance_node",
     "realestate_node",
     "education_node",
+    "docgen_node",
 ]

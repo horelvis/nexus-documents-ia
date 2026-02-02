@@ -13,6 +13,8 @@ export type EmmaMessageType =
   | 'clarification'
   | 'verified_progress'
   | 'verified_result'
+  | 'predictive_result'
+  | 'docgen_result'
 
 export interface Citation {
   id?: string
@@ -141,6 +143,14 @@ export interface VerifiedClaimInfo {
   status: VerifiedClaimStatus
   confidence?: number
   evidence_count?: number
+  original_text?: string
+}
+
+export interface VerifiedSource {
+  id: string
+  title?: string
+  source?: string
+  url?: string
 }
 
 export interface VerifiedGenerationMetadata {
@@ -155,6 +165,48 @@ export interface VerifiedGenerationMetadata {
   document_text?: string
   execution_time_ms?: number
   average_confidence?: number
+  sources?: VerifiedSource[]
+}
+
+// Predictive Analysis types
+export type PredictiveFactorStatus = 'extracting' | 'verifying' | 'weighted' | 'rejected'
+
+export interface PredictiveFactorInfo {
+  factor_id: string
+  factor_number: number
+  total_expected: number
+  factor_type: string
+  description: string
+  status: PredictiveFactorStatus
+  weight?: number
+  confidence?: number
+  outcome?: string
+  evidence_count?: number
+}
+
+export interface PredictiveAnalysisMetadata {
+  session_id: string
+  tenant_id?: string
+  case_description: string
+  factors: PredictiveFactorInfo[]
+  current_phase: 'extracting' | 'verifying' | 'synthesizing' | 'complete'
+  weighted_count: number
+  rejected_count: number
+  total_factors: number
+  probability?: number
+  primary_outcome?: string
+  outcome_probabilities?: Record<string, number>
+  recommendation?: string
+  disclaimer?: string
+  execution_time_ms?: number
+}
+
+export interface DocGenMetadata {
+  document_text: string
+  document_type: string
+  pending_fields: string[]
+  sources_used: string[]
+  execution_time_ms?: number
 }
 
 export interface EmmaMessage {
@@ -163,6 +215,8 @@ export interface EmmaMessage {
   content: string
   timestamp: Date
   verified?: VerifiedGenerationMetadata
+  predictive?: PredictiveAnalysisMetadata
+  docgen?: DocGenMetadata
   metadata?: {
     confidence_score?: number
     decision_path?: string[]

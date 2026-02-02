@@ -47,11 +47,11 @@ class Settings(BaseSettings):
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
     llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
 
-    # vLLM configuration (PRIMARY - high-throughput GPU inference)
+    # vLLM configuration (PRIMARY - Qwen2.5-7B-Instruct AWQ 4-bit)
     vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507")
-    vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "4096"))
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+    vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "16384"))
     vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))
     vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "true").lower() == "true"
     vllm_thinking_budget: int = int(os.getenv("VLLM_THINKING_BUDGET", "4096"))
@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Agent Framework Configuration
     # ==========================================================================
+    # Specialist agent generation settings (used by base.py specialist nodes)
+    agent_temperature: float = float(os.getenv("AGENT_TEMPERATURE", "0.3"))
+    agent_max_tokens: int = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
+
     default_workflow: str = os.getenv("DEFAULT_WORKFLOW", "auto")
     agent_max_turns: int = int(os.getenv("AGENT_MAX_TURNS", "15"))
     agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "300"))

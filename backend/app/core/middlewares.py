@@ -197,8 +197,8 @@ def configure_trusted_hosts(app) -> None:
             "nouxcubeia.app",
             "www.nouxcubeia.app",
             "api.nouxcubeia.app",
-            "nouxcube.local",
-            "www.nouxcube.local",
+            "nouxcube.local.es",
+            "www.nouxcube.local.es",
             *[h for h in configured_hosts if h],
         ]
         trusted_hosts = sorted(set(trusted_hosts))

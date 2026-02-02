@@ -49,10 +49,10 @@ PRODUCTION_CORS_ORIGINS = [
     "https://nouxcubeia.app",
     "https://www.nouxcubeia.app",
     "https://api.nouxcubeia.app",
-    "https://nouxcube.local",
-    "https://www.nouxcube.local",
-    "https://nouxcube.local:3000",
-    "https://www.nouxcube.local:3000",
+    "https://nouxcube.local.es",
+    "https://www.nouxcube.local.es",
+    "https://nouxcube.local.es:3000",
+    "https://www.nouxcube.local.es:3000",
 ]
 
 # Development CORS origins (more permissive but still secure)

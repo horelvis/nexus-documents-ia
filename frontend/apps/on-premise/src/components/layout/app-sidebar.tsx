@@ -89,7 +89,7 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
 
   const adminNavItems = [
     {
-      title: 'Dashboard',
+      title: 'Administración',
       href: '/admin/dashboard',
       icon: IconDashboard,
     },

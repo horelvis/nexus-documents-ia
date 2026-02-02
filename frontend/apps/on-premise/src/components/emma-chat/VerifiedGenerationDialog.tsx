@@ -10,7 +10,7 @@ import {
   IconCircleCheck,
   IconCircleX,
   IconLoader2,
-  IconEdit,
+  IconAlertTriangle,
 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -235,7 +235,7 @@ function ClaimJobItem({ claim }: { claim: VerifiedClaimInfo }) {
       case 'verified':
         return <IconCircleCheck className="h-4 w-4 text-emerald-500" />
       case 'corrected':
-        return <IconEdit className="h-4 w-4 text-amber-500" />
+        return <IconAlertTriangle className="h-4 w-4 text-amber-500" />
       case 'rejected':
         return <IconCircleX className="h-4 w-4 text-destructive" />
       case 'verifying':

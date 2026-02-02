@@ -172,6 +172,12 @@ class PublicDocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Chunk metadata (for chunked documents)
+    chunk_index: Optional[int] = None
+    total_chunks: Optional[int] = None
+    parent_document_id: Optional[str] = None
+    section_title: Optional[str] = None
+
     # Search results metadata
     similarity_score: Optional[float] = None
     relevance_explanation: Optional[str] = None

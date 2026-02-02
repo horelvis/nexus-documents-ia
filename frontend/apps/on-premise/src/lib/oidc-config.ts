@@ -8,14 +8,14 @@
 // Runtime config - reads from environment variables
 function getEnvConfig() {
   // Read from environment variables with fallbacks
-  const issuer = process.env.NEXT_PUBLIC_SSO_AUTHORITY || 'http://nouxcube.local:8085/realms/nouxcube'
+  const issuer = process.env.NEXT_PUBLIC_SSO_AUTHORITY || 'http://nouxcube.local.es:8085/realms/nouxcube'
   const clientId = process.env.NEXT_PUBLIC_SSO_CLIENT_ID || 'nouxcube-frontend'
 
   const defaults = {
     issuer,
     clientId,
-    redirectUri: process.env.NEXT_PUBLIC_SSO_REDIRECT_URI || 'http://nouxcube.local:3001/auth/callback',
-    postLogoutRedirectUri: process.env.NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI || 'http://nouxcube.local:3001',
+    redirectUri: process.env.NEXT_PUBLIC_SSO_REDIRECT_URI || 'http://nouxcube.local.es:3001/auth/callback',
+    postLogoutRedirectUri: process.env.NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI || 'http://nouxcube.local.es:3001',
   }
 
   // In browser, use window origin for redirect URIs if not specified

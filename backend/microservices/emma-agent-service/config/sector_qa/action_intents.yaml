@@ -1,0 +1,129 @@
+# Action Intent Definitions
+# Classifies the USER'S ACTION (generate, analyze, search, verify)
+# separately from the DOMAIN (labor, fiscal, contract).
+#
+# This solves the docgen routing problem: "genera un contrato laboral"
+# now triggers action=generate → priority_agent=docgen_agent,
+# while domain detection still picks up labor+contract for secondary context.
+#
+# Fields:
+#   id: Unique intent identifier
+#   action: Action type (generate, analyze, search, verify, compare, explain)
+#   priority_agent: Agent to force as primary (null = use normal domain routing)
+#   description: What this intent means
+#   questions: Example queries for embedding-based matching
+
+intents:
+  # =========================================================================
+  # DOCUMENT GENERATION — Force docgen_agent as primary
+  # =========================================================================
+  - id: document_generation
+    action: generate
+    priority_agent: docgen_agent
+    description: "Generar, redactar o crear un documento legal desde cero"
+    questions:
+      - "genera un contrato laboral indefinido"
+      - "redacta una demanda por despido improcedente"
+      - "crea un escrito de reclamación"
+      - "elabora un poder notarial"
+      - "prepara un borrador de convenio regulador"
+      - "haz un contrato de arrendamiento"
+      - "necesito un modelo de carta de despido"
+      - "escribe un recurso de apelación"
+      - "dame un contrato de confidencialidad"
+      - "quiero un contrato de compraventa"
+      - "genera un acuerdo de no competencia"
+      - "redacta un acta de junta de accionistas"
+      - "crea un contrato de prestación de servicios"
+      - "elabora una carta de reclamación de cantidad"
+      - "prepara un contrato de franquicia"
+      - "haz una demanda por cantidad"
+      - "necesito un contrato de trabajo temporal"
+      - "escribe un certificado de deuda"
+      - "genera un contrato de alquiler de local comercial"
+      - "redacta un burofax de reclamación"
+      - "hazme un contrato mercantil"
+      - "crea un documento de finiquito"
+      - "elabora un estatuto social"
+      - "prepara un pacto de socios"
+      - "draft a labor contract"
+      - "genera un modelo de nómina"
+      - "redacta una escritura de constitución"
+      - "necesito que redactes un contrato"
+      - "dame un modelo de demanda"
+      - "quiero que hagas un escrito judicial"
+
+  # =========================================================================
+  # DOCUMENT ANALYSIS — No priority agent, use normal domain routing
+  # =========================================================================
+  - id: document_analysis
+    action: analyze
+    priority_agent: null
+    description: "Analizar, revisar o examinar un documento existente"
+    questions:
+      - "analiza este contrato"
+      - "revisa las cláusulas del acuerdo"
+      - "examina los riesgos del documento"
+      - "qué problemas tiene este contrato"
+      - "identifica las cláusulas abusivas"
+      - "analiza los riesgos legales"
+      - "revisa si cumple la normativa"
+      - "qué falta en este contrato"
+      - "evalúa este acuerdo"
+      - "dime los puntos débiles del documento"
+      - "analiza las obligaciones de las partes"
+      - "revisa la validez de las cláusulas"
+      - "examina la legalidad del contrato"
+      - "evalúa los riesgos fiscales del documento"
+      - "identifica problemas en el convenio"
+
+  # =========================================================================
+  # DOCUMENT SEARCH — No priority agent, use normal domain routing
+  # =========================================================================
+  - id: document_search
+    action: search
+    priority_agent: null
+    description: "Buscar información en documentos del tenant"
+    questions:
+      - "busca contratos laborales"
+      - "qué dice la normativa sobre despidos"
+      - "encuentra documentos sobre RGPD"
+      - "busca facturas del último trimestre"
+      - "qué documentos tengo sobre protección de datos"
+      - "encuentra los contratos de alquiler"
+      - "busca información sobre el convenio colectivo"
+      - "qué dicen mis documentos sobre vacaciones"
+      - "encuentra las nóminas de enero"
+      - "busca expedientes del cliente Acme"
+
+  # =========================================================================
+  # DOCUMENT VERIFICATION — No priority agent (triggers verified_generation via frontend)
+  # =========================================================================
+  - id: document_verification
+    action: verify
+    priority_agent: null
+    description: "Verificar hechos o generar contenido verificado con fuentes"
+    questions:
+      - "verifica si este contrato cumple la normativa"
+      - "comprueba la legalidad de esta cláusula"
+      - "valida este documento contra el BOE"
+      - "verifica las referencias legales"
+      - "comprueba si cumple el RGPD"
+      - "valida los plazos legales del contrato"
+      - "verifica que las cláusulas sean legales"
+      - "comprueba la conformidad normativa"
+
+  # =========================================================================
+  # DOCUMENT COMPARISON — No priority agent
+  # =========================================================================
+  - id: document_comparison
+    action: compare
+    priority_agent: null
+    description: "Comparar dos o más documentos entre sí"
+    questions:
+      - "compara estos dos contratos"
+      - "qué diferencias hay entre estas versiones"
+      - "compara el contrato actual con el anterior"
+      - "diferencias entre estos documentos"
+      - "compara las cláusulas de ambos acuerdos"
+      - "qué ha cambiado entre versiones"

@@ -22,6 +22,7 @@ import {
   IconTestPipe,
   IconCloudDownload,
   IconEdit,
+  IconPlugConnected,
 } from '@tabler/icons-react'
 import {
   SidebarProvider,
@@ -111,6 +112,7 @@ export default function ConnectorsPage() {
   const [failedDialogOpen, setFailedDialogOpen] = useState(false)
   const [failedConnector, setFailedConnector] = useState<Connector | null>(null)
 
+
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
@@ -180,6 +182,10 @@ export default function ConnectorsPage() {
 
   const handleFailedRetryComplete = () => {
     loadData()
+  }
+
+  const handleReconnect = (connector: Connector) => {
+    router.push(`/connectors/${connector.id}/oauth`)
   }
 
   const handleDeleteConfirm = async () => {
@@ -353,6 +359,23 @@ export default function ConnectorsPage() {
                             </div>
                             <TooltipProvider>
                               <div className="flex gap-2">
+                                {connector.connector_type === 'google_drive' && connector.users_connected === 0 && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleReconnect(connector)}
+                                        className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                                      >
+                                        <IconPlugConnected className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Reconectar OAuth</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Button

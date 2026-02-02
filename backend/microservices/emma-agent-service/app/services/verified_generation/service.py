@@ -65,6 +65,32 @@ from .writer_agent import get_writer_agent, WriterAgent
 logger = logging.getLogger(__name__)
 
 
+def _is_duplicate_claim(
+    new_text: str,
+    existing_claims: list[VerifiedClaim],
+    threshold: float = 0.65,
+) -> bool:
+    """Check if a claim is too similar to any existing verified claim using word overlap."""
+    if not existing_claims:
+        return False
+
+    new_words = set(new_text.lower().split())
+    if len(new_words) < 3:
+        return False
+
+    for claim in existing_claims:
+        existing_words = set(claim.text.lower().split())
+        if not existing_words:
+            continue
+        intersection = new_words & existing_words
+        union = new_words | existing_words
+        similarity = len(intersection) / len(union) if union else 0
+        if similarity >= threshold:
+            return True
+
+    return False
+
+
 # =============================================================================
 # RLM-Powered Evidence Filtering
 # =============================================================================
@@ -280,6 +306,7 @@ class VerifiedDocumentService:
         claims_verified = 0
         claims_corrected = 0
         claims_rejected = 0
+        duplicate_streak = 0
         sources_map: dict[str, dict] = {}  # id -> {title, source, url}
         correction_attempts = {}  # Track correction attempts per claim position
         total_verification_time = 0
@@ -322,6 +349,18 @@ class VerifiedDocumentService:
                     data={"error": f"Claim generation failed: {str(e)}"},
                 )
                 break
+
+            # Deduplicate: skip if too similar to an existing verified claim
+            if _is_duplicate_claim(candidate.text, verified_claims):
+                logger.info(
+                    f"⏭️ Skipping duplicate claim #{claim_position}: {candidate.text[:60]}..."
+                )
+                duplicate_streak += 1
+                if duplicate_streak >= 2:
+                    logger.info("🏁 Stopping generation: consecutive duplicates detected")
+                    break
+                continue
+            duplicate_streak = 0
 
             yield VerificationEvent(
                 event_type=VerificationEventType.CLAIM_GENERATED,
@@ -520,6 +559,7 @@ class VerifiedDocumentService:
                 "execution_time_ms": execution_time_ms,
                 "verification_time_ms": total_verification_time,
                 "evidence_document_ids": list(all_evidence_ids),
+                "sources": list(sources_map.values()),
             },
             progress_percent=100,
         )

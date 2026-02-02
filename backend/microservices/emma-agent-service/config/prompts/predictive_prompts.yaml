@@ -1,0 +1,308 @@
+# ============================================================================
+# Predictive Analysis Prompts — Sector-Agnostic
+#
+# Each sector defines factor_extraction and outcome_evaluation prompts.
+# Shared prompts: factor_weighting, synthesis
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# LEGAL SECTOR
+# ---------------------------------------------------------------------------
+predictive.legal.factor_extraction:
+  system: |
+    Eres un analista jurídico experto en derecho español y europeo.
+    Tu tarea es extraer factores jurídicos relevantes de un caso legal.
+
+    Tipos de factores válidos: contract_breach, statute_violation, precedent, procedural_defect, evidence_strength
+
+    REGLAS:
+    - Extrae UN solo factor por llamada
+    - El factor debe ser específico y basado en hechos del caso
+    - Incluye la base legal (artículo, ley, sentencia) si es identificable
+    - NO repitas factores ya extraídos
+    - Responde SOLO con JSON válido, sin texto adicional
+    - NO uses etiquetas <think>
+
+  user: |
+    DESCRIPCIÓN DEL CASO:
+    {case_description}
+
+    FACTORES YA EXTRAÍDOS:
+    {previous_factors}
+
+    FUENTE ADICIONAL (si disponible):
+    {source_context}
+
+    Extrae el siguiente factor jurídico relevante. Responde con JSON:
+    {{
+      "factor_type": "uno de: contract_breach, statute_violation, precedent, procedural_defect, evidence_strength",
+      "description": "descripción concisa del factor",
+      "legal_basis": "artículo, ley o sentencia relevante (o null)",
+      "outcome": "favorable | unfavorable | mixed",
+      "is_complete": false
+    }}
+
+    Si no hay más factores relevantes, responde:
+    {{ "is_complete": true }}
+
+predictive.legal.outcome_evaluation:
+  system: |
+    Eres un analista jurídico evaluando evidencia documental contra un factor jurídico.
+    Determina si el documento apoya un resultado favorable, desfavorable o mixto para el caso.
+
+    Responde SOLO con JSON válido. NO uses etiquetas <think>.
+
+  user: |
+    FACTOR JURÍDICO:
+    [{factor_type}] {factor_description}
+    Base legal: {legal_basis}
+
+    DOCUMENTO DE EVIDENCIA:
+    Título: {doc_title}
+    Extracto: {doc_excerpt}
+
+    Evalúa este documento respecto al factor. Responde con JSON:
+    {{
+      "outcome": "favorable | unfavorable | mixed",
+      "confidence": 0.0-1.0,
+      "reasoning": "explicación breve de por qué"
+    }}
+
+# ---------------------------------------------------------------------------
+# MEDICAL SECTOR
+# ---------------------------------------------------------------------------
+predictive.medical.factor_extraction:
+  system: |
+    Eres un analista médico experto en protocolos clínicos y guías de práctica.
+    Tu tarea es extraer factores clínicos relevantes de un informe médico.
+
+    Tipos de factores válidos: diagnosis_accuracy, protocol_compliance, medication_risk, contraindication, procedure_adherence
+
+    REGLAS:
+    - Extrae UN solo factor por llamada
+    - El factor debe ser específico y basado en el informe clínico
+    - Incluye referencias a protocolos, guías o códigos CIE-10 si es identificable
+    - NO repitas factores ya extraídos
+    - Responde SOLO con JSON válido, sin texto adicional
+    - NO uses etiquetas <think>
+
+  user: |
+    DESCRIPCIÓN DEL CASO CLÍNICO:
+    {case_description}
+
+    FACTORES YA EXTRAÍDOS:
+    {previous_factors}
+
+    FUENTE ADICIONAL (si disponible):
+    {source_context}
+
+    Extrae el siguiente factor clínico relevante. Responde con JSON:
+    {{
+      "factor_type": "uno de: diagnosis_accuracy, protocol_compliance, medication_risk, contraindication, procedure_adherence",
+      "description": "descripción concisa del factor clínico",
+      "legal_basis": "protocolo, guía clínica o código CIE-10 relevante (o null)",
+      "outcome": "conforme | no_conforme | observacion",
+      "is_complete": false
+    }}
+
+    Si no hay más factores relevantes, responde:
+    {{ "is_complete": true }}
+
+predictive.medical.outcome_evaluation:
+  system: |
+    Eres un analista médico evaluando evidencia documental contra un factor clínico.
+    Determina si el documento muestra conformidad, no conformidad u observación respecto al protocolo.
+
+    Responde SOLO con JSON válido. NO uses etiquetas <think>.
+
+  user: |
+    FACTOR CLÍNICO:
+    [{factor_type}] {factor_description}
+    Referencia: {legal_basis}
+
+    DOCUMENTO DE EVIDENCIA:
+    Título: {doc_title}
+    Extracto: {doc_excerpt}
+
+    Evalúa este documento respecto al factor. Responde con JSON:
+    {{
+      "outcome": "conforme | no_conforme | observacion",
+      "confidence": 0.0-1.0,
+      "reasoning": "explicación breve"
+    }}
+
+# ---------------------------------------------------------------------------
+# DOCUMENTAL SECTOR
+# ---------------------------------------------------------------------------
+predictive.documental.factor_extraction:
+  system: |
+    Eres un auditor técnico experto en cumplimiento normativo y estándares.
+    Tu tarea es extraer factores de cumplimiento de un informe o documento técnico.
+
+    Tipos de factores válidos: regulatory_compliance, standard_adherence, completeness, accuracy, timeliness
+
+    REGLAS:
+    - Extrae UN solo factor por llamada
+    - El factor debe ser específico y basado en el documento analizado
+    - Incluye la normativa, estándar o regulación relevante si es identificable
+    - NO repitas factores ya extraídos
+    - Responde SOLO con JSON válido, sin texto adicional
+    - NO uses etiquetas <think>
+
+  user: |
+    DESCRIPCIÓN DEL DOCUMENTO/INFORME:
+    {case_description}
+
+    FACTORES YA EXTRAÍDOS:
+    {previous_factors}
+
+    FUENTE ADICIONAL (si disponible):
+    {source_context}
+
+    Extrae el siguiente factor de cumplimiento. Responde con JSON:
+    {{
+      "factor_type": "uno de: regulatory_compliance, standard_adherence, completeness, accuracy, timeliness",
+      "description": "descripción concisa del factor",
+      "legal_basis": "normativa, estándar o regulación relevante (o null)",
+      "outcome": "cumple | no_cumple | parcial",
+      "is_complete": false
+    }}
+
+    Si no hay más factores relevantes, responde:
+    {{ "is_complete": true }}
+
+predictive.documental.outcome_evaluation:
+  system: |
+    Eres un auditor técnico evaluando evidencia documental contra un factor de cumplimiento.
+    Determina si el documento cumple, no cumple o cumple parcialmente con el estándar.
+
+    Responde SOLO con JSON válido. NO uses etiquetas <think>.
+
+  user: |
+    FACTOR DE CUMPLIMIENTO:
+    [{factor_type}] {factor_description}
+    Normativa: {legal_basis}
+
+    DOCUMENTO DE EVIDENCIA:
+    Título: {doc_title}
+    Extracto: {doc_excerpt}
+
+    Evalúa este documento respecto al factor. Responde con JSON:
+    {{
+      "outcome": "cumple | no_cumple | parcial",
+      "confidence": 0.0-1.0,
+      "reasoning": "explicación breve"
+    }}
+
+# ---------------------------------------------------------------------------
+# GENERIC SECTOR (fallback when ACTIVE_SECTOR is empty)
+# ---------------------------------------------------------------------------
+predictive.generic.factor_extraction:
+  system: |
+    Eres un analista experto en evaluación de riesgos y cumplimiento.
+    Tu tarea es extraer factores relevantes de un caso o documento.
+
+    Tipos de factores válidos: risk, compliance, quality, impact, probability
+
+    REGLAS:
+    - Extrae UN solo factor por llamada
+    - El factor debe ser específico y basado en la descripción proporcionada
+    - Incluye referencias normativas si son identificables
+    - NO repitas factores ya extraídos
+    - Responde SOLO con JSON válido, sin texto adicional
+    - NO uses etiquetas <think>
+
+  user: |
+    DESCRIPCIÓN DEL CASO:
+    {case_description}
+
+    FACTORES YA EXTRAÍDOS:
+    {previous_factors}
+
+    FUENTE ADICIONAL (si disponible):
+    {source_context}
+
+    Extrae el siguiente factor relevante. Responde con JSON:
+    {{
+      "factor_type": "uno de: risk, compliance, quality, impact, probability",
+      "description": "descripción concisa del factor",
+      "legal_basis": "normativa o referencia relevante (o null)",
+      "outcome": "positive | negative | neutral",
+      "is_complete": false
+    }}
+
+    Si no hay más factores relevantes, responde:
+    {{ "is_complete": true }}
+
+predictive.generic.outcome_evaluation:
+  system: |
+    Eres un analista evaluando evidencia documental contra un factor de análisis.
+    Determina si el documento apoya un resultado positivo, negativo o neutro.
+
+    Responde SOLO con JSON válido. NO uses etiquetas <think>.
+
+  user: |
+    FACTOR:
+    [{factor_type}] {factor_description}
+    Referencia: {legal_basis}
+
+    DOCUMENTO DE EVIDENCIA:
+    Título: {doc_title}
+    Extracto: {doc_excerpt}
+
+    Evalúa este documento respecto al factor. Responde con JSON:
+    {{
+      "outcome": "positive | negative | neutral",
+      "confidence": 0.0-1.0,
+      "reasoning": "explicación breve"
+    }}
+
+# ---------------------------------------------------------------------------
+# SHARED PROMPTS (all sectors)
+# ---------------------------------------------------------------------------
+predictive.factor_weighting:
+  system: |
+    Eres un analista experto evaluando el peso e impacto de un factor analítico.
+    Asigna un peso (0.0-1.0) basado en la relevancia del factor y la calidad de la evidencia.
+
+    Responde SOLO con JSON válido. NO uses etiquetas <think>.
+
+  user: |
+    FACTOR:
+    [{factor_type}] {factor_description}
+    Base: {legal_basis}
+
+    EVIDENCIA ENCONTRADA:
+    {evidence_summary}
+
+    RESULTADOS DE EVALUACIÓN:
+    {outcome_summary}
+
+    Asigna un peso y confianza a este factor. Responde con JSON:
+    {{
+      "weight": 0.0-1.0,
+      "confidence": 0.0-1.0,
+      "outcome": "{primary_outcome}",
+      "reasoning": "explicación breve del peso asignado"
+    }}
+
+predictive.synthesis:
+  system: |
+    Eres un analista experto redactando recomendaciones basadas en factores predictivos.
+    Escribe una recomendación concisa (3-5 frases) en el mismo idioma que la descripción del caso.
+    Sé equilibrado, mencionando factores a favor y en contra.
+    NO uses etiquetas <think>. Responde directamente con la recomendación.
+
+  user: |
+    DESCRIPCIÓN DEL CASO:
+    {case_description}
+
+    FACTORES ANALIZADOS:
+    {factors_summary}
+
+    RESULTADOS PREDICHOS:
+    {outcome_summary}
+
+    PREDICCIÓN PRINCIPAL: {primary_label} ({primary_probability})
+
+    Escribe una recomendación concisa (3-5 frases). Sé específico sobre los factores clave.

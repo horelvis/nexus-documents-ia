@@ -376,13 +376,21 @@ async def rlm_plan_node(state: RAGState) -> Dict[str, Any]:
         logger.debug("RLM: Disabled via config")
         return {"rlm_activated": False}
 
-    # Gather content from retrieved docs AND uploaded texts
+    # Gather content from tenant docs AND uploaded texts.
+    # Exclude public knowledge docs (BOE, legislation) — those are short
+    # retrieval chunks meant for domain agents, not large documents
+    # requiring recursive processing.
     retrieved_docs = state.get("retrieved_docs", [])
     metadata = state.get("metadata", {})
     uploaded_texts = metadata.get("uploaded_texts") or []
 
-    # Build unified document list from both sources
-    all_docs = list(retrieved_docs)
+    # Only consider tenant docs (not public knowledge) for RLM activation
+    tenant_docs = [
+        doc for doc in retrieved_docs
+        if doc.get("metadata", {}).get("source") != "public_knowledge"
+    ]
+
+    all_docs = list(tenant_docs)
     for item in uploaded_texts:
         text = item.get("text", "")
         if text:
@@ -402,7 +410,10 @@ async def rlm_plan_node(state: RAGState) -> Dict[str, Any]:
     )
     total_tokens = _estimate_tokens(total_content)
 
-    source_desc = f"{len(retrieved_docs)} retrieved + {len(uploaded_texts)} uploaded"
+    public_count = len(retrieved_docs) - len(tenant_docs)
+    source_desc = f"{len(tenant_docs)} tenant + {len(uploaded_texts)} uploaded"
+    if public_count:
+        source_desc += f" (excluded {public_count} public knowledge)"
     logger.info(f"🔄 RLM Plan: Estimated {total_tokens} tokens from {source_desc}")
 
     tracker.add_step(

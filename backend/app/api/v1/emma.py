@@ -234,6 +234,100 @@ async def emma_verified_generate_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/predictive/analyze/stream")
+async def emma_predictive_analyze_stream(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Stream predictive analysis with real-time factor extraction progress.
+
+    Proxies to Emma Agent Service predictive analysis endpoint with ACL context.
+    Returns SSE events: factor_extracted, factor_weighted, prediction_complete, error.
+    """
+    try:
+        body = await request.json()
+        body["tenant_id"] = tenant_id
+        body["user_id"] = str(current_user.id)
+
+        async def stream_sse() -> AsyncGenerator[bytes, None]:
+            import asyncio
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(600.0, connect=10.0),
+                http2=False,
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    f"{EMMA_SERVICE_URL}/predictive/analyze/stream",
+                    json=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                    },
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"❌ Predictive stream error: {response.status_code} - {error_text}")
+                        yield f"data: {{\"event_type\": \"error\", \"data\": {{\"error\": \"Service error: {response.status_code}\"}}}}\n\n".encode()
+                        return
+
+                    async for line in response.aiter_lines():
+                        if line:
+                            yield (line + "\n").encode()
+                        else:
+                            yield b"\n"
+                        await asyncio.sleep(0)
+
+        return StreamingResponse(
+            stream_sse(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Predictive stream proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/predictive/analysis/{session_id}/pdf")
+async def emma_predictive_analysis_pdf(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Export a predictive analysis session as PDF. Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/predictive/analysis/{session_id}/pdf",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Predictive PDF error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            from fastapi.responses import Response
+            return Response(
+                content=response.content,
+                media_type="application/pdf",
+                headers=dict(response.headers),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Predictive PDF proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/verified/session/{session_id}/claims")
 async def emma_verified_session_claims(
     session_id: str,
@@ -258,6 +352,39 @@ async def emma_verified_session_claims(
         raise
     except Exception as e:
         logger.error(f"❌ Verified claims proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/verified/session/{session_id}/docx")
+async def emma_verified_session_docx(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Export a verified session as DOCX. Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/verified/session/{session_id}/docx",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Verified DOCX error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            from fastapi.responses import Response
+            return Response(
+                content=response.content,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers=dict(response.headers),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Verified DOCX proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -291,6 +418,81 @@ async def emma_verified_session_pdf(
         raise
     except Exception as e:
         logger.error(f"❌ Verified PDF proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Training Endpoints (proxy to emma-agent-service /training/*)
+# ============================================================================
+
+@router.get("/training/status")
+async def emma_training_status(
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get sector QA embedding training status."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/training/status",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Training status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/training/start")
+async def emma_training_start(
+    request: Request,
+    current_user: User = Depends(get_current_user_async)
+):
+    """Start sector QA embedding training."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden iniciar entrenamiento")
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/training/start",
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Training start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/training/progress")
+async def emma_training_progress(
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get current training progress."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/training/progress",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Training progress error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
